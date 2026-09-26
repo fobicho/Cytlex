@@ -1,0 +1,59 @@
+{
+  "name": "cytlex",
+  "version": "0.1.0",
+  "description": "Cytlex — lector de manga de escritorio (Electron)",
+  "main": "electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "dev:electron": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "eb:dev": "electron .",
+    "dist": "vite build && electron-builder"
+  },
+  "keywords": [
+    "manga",
+    "electron",
+    "reader"
+  ],
+  "author": "fobicho",
+  "license": "MIT",
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.1",
+    "autoprefixer": "^10.6.1",
+    "concurrently": "^10.0.5",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^3.4.17",
+    "vite": "^8.3.1",
+    "wait-on": "^9.1.0"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "framer-motion": "^13.4.4",
+    "lucide-react": "^1.48.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router-dom": "^7.18.4",
+    "tailwind-merge": "^3.7.0",
+    "tailwindcss-animate": "^1.0.7"
+  },
+  "build": {
+    "appId": "com.fobicho.cytlex",
+    "productName": "Cytlex",
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+node_modules
+dist
+out
+*.log
+
+# Artefactos de IA (no subir)
+.commandcode/
+AGENTS.md

@@ -1,0 +1,32 @@
+[
+  {
+    "id": "mangalect",
+    "name": "MangaLect (LeerMangaEsp)",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "main": "ext/mangalect.js",
+    "baseUrl": "https://mangalect.org",
+    "desc": "Manga, manhwa y manhua en español."
+  },
+  {
+    "id": "onfmangas",
+    "name": "ONF Mangas",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "main": "ext/onfmangas.js",
+    "baseUrl": "https://onfmangas.com",
+    "desc": "Manga, manhwa y manhua en español."
+  },
+  {
+    "id": "olympusscanlation",
+    "name": "Olympus Scanlation",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "main": "ext/olympusscanlation.js",
+    "baseUrl": "https://olympusxyz.com",
+    "desc": "Scanlation en español (cómics y manhwas)."
+  }
+]

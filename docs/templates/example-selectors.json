@@ -1,0 +1,45 @@
+{
+  "id": "example-selectors",
+  "name": "Sitio de ejemplo",
+  "lang": "es",
+  "version": "1.0.0",
+  "type": "selector",
+  "baseUrl": "https://example.com",
+  "desc": "Plantilla de extensión basada en selectores CSS.",
+  "selectors": {
+    "catalog": {
+      "searchUrl": "/buscar?q={q}&page={page}",
+      "genreUrl": "/genero/{genre}?page={page}",
+      "popularUrl": "/popular?page={page}",
+      "list": ".manga-item",
+      "url": "a@href",
+      "title": ".title@text",
+      "cover": "img@src",
+      "type": ".type@text",
+      "lastChapter": ".chapter@text",
+      "totalPages": ".pagination li:last-child a@text"
+    },
+    "detail": {
+      "title": "h1@text",
+      "cover": ".cover img@src",
+      "altTitles": ".alt@text",
+      "sinopsis": ".synopsis@text",
+      "genres": ".genres a",
+      "status": ".status@text",
+      "type": ".type@text",
+      "author": ".author@text",
+      "chapterList": ".chapter-item",
+      "chapterUrl": "a@href",
+      "chapterTitle": "a@text",
+      "chapterDate": ".date@text"
+    },
+    "chapter": {
+      "label": "h1@text",
+      "pages": ".reader img@src",
+      "mangaUrl": "a.back@href",
+      "options": ".chapter-list option",
+      "optionsTitle": "@text",
+      "optionsUrl": "@attr:value"
+    }
+  }
+}
