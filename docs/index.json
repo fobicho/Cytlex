@@ -7,6 +7,7 @@
     "type": "module",
     "main": "ext/mangalect.js",
     "baseUrl": "https://mangalect.org",
+    "icon": "https://fobicho.github.io/Cytlex/icons/mangalect.png",
     "desc": "Manga, manhwa y manhua en español."
   },
   {
@@ -17,6 +18,7 @@
     "type": "module",
     "main": "ext/onfmangas.js",
     "baseUrl": "https://onfmangas.com",
+    "icon": "https://fobicho.github.io/Cytlex/icons/onfmangas.png",
     "desc": "Manga, manhwa y manhua en español."
   },
   {
@@ -27,6 +29,7 @@
     "type": "module",
     "main": "ext/olympusscanlation.js",
     "baseUrl": "https://olympusxyz.com",
+    "icon": "https://fobicho.github.io/Cytlex/icons/olympusscanlation.webp",
     "desc": "Scanlation en español (cómics y manhwas)."
   }
 ]
