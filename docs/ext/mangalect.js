@@ -90,5 +90,5 @@ export default function createSource({ fetchText, parse }) {
     };
   }
 
-  return { id: 'mangalect', name: 'MangaLect (LeerMangaEsp)', catalog, detail, chapter };
+  return { id: 'mangalect', name: 'MangaLect', catalog, detail, chapter };
 }
