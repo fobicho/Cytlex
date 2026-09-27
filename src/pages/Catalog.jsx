@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, ChevronLeft, ChevronRight, AlertTriangle, BookOpen, Filter } from 'lucide-react';
+import { Search, BookOpen, Filter, Loader2, Puzzle, ChevronRight } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { extensions } from '../lib/extensions.js';
+import { lastSearch, testCover, scrollMemory } from '../lib/searchState.js';
 import MangaCard from '../components/MangaCard.jsx';
 import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
-import { Card } from '../components/ui/card.jsx';
-import { Button } from '../components/ui/button.jsx';
+import { SourceBadge } from '../components/SourceBadge.jsx';
+import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Input } from '../components/ui/input.jsx';
-import { Skeleton } from '../components/ui/skeleton.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 
@@ -19,59 +20,153 @@ const TABS = [
   { id: 'extensiones', label: 'Extensiones' }
 ];
 
+const GRID_CLS = 'grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-x-5 gap-y-8';
+
+function SourceSection({ r }) {
+  const gridRef = useRef(null);
+  const mainRef = useRef(null);
+  const [cols, setCols] = useState(0);
+
+  useEffect(() => {
+    mainRef.current = document.querySelector('main');
+  }, []);
+
+  useEffect(() => {
+    if (scrollMemory.catalog > 0 && mainRef.current) {
+      mainRef.current.scrollTop = scrollMemory.catalog;
+      scrollMemory.catalog = 0;
+    }
+  }, [r.id]);
+
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    const save = () => { scrollMemory.catalog = main.scrollTop; };
+    main.addEventListener('scroll', save, { passive: true });
+    return () => main.removeEventListener('scroll', save);
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+    const compute = () => setCols(getComputedStyle(el).gridTemplateColumns.split(' ').length);
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [r.items.length]);
+
+  const overflow = cols > 0 && r.items.length > cols;
+  const visible = overflow ? r.items.slice(0, cols) : r.items;
+
+  return (
+    <motion.section
+      className="mb-10"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25, ease: 'easeOut' }}
+    >
+      <div className="flex items-center gap-2.5 mb-4">
+        <SourceBadge m={r.manifest} />
+        <h3 className="text-sm font-semibold">{r.manifest.name}</h3>
+        <span className="text-xs text-muted-foreground">· {r.items.length}</span>
+      </div>
+      <div className="relative">
+        <div ref={gridRef} className={GRID_CLS}>
+          {visible.map((m, i) => (
+            <MangaCard key={i} m={m} sourceId={r.id} from="explorar" />
+          ))}
+        </div>
+        {overflow && (
+          <a
+            className={cn(
+              buttonVariants({ variant: 'ghost', size: 'sm' }),
+              'absolute -top-11 right-0 hover:bg-transparent hover:text-foreground'
+            )}
+            href={`#/resultados?s=${encodeURIComponent(r.id)}`}
+          >
+            Ver todos <ChevronRight className="w-4 h-4 ml-1.5" />
+          </a>
+        )}
+      </div>
+    </motion.section>
+  );
+}
+
 export default function Catalog() {
   const loc = useLocation();
-  const [tab, setTab] = useState('mangas');
+  const [tab, setTab] = useState(() => (new URLSearchParams(loc.search).get('tab') === 'extensiones' ? 'extensiones' : 'mangas'));
   const [sources, setSources] = useState(() => extensions.installed());
-  const [sourceId, setSourceId] = useState('leercapitulo');
-  const [q, setQ] = useState('');
-  const [genre, setGenre] = useState('');
-  const [page, setPage] = useState(1);
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState('');
+  const [q, setQ] = useState(() => lastSearch.q);
+  const [genre, setGenre] = useState(() => lastSearch.genre);
+  const [results, setResults] = useState(() => lastSearch.results);
   const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
     setSources(extensions.installed());
   }, [tab]);
 
-  const runSearch = async (p = 1, query = q, g = genre, src = sourceId) => {
-    setLoading(true);
-    setErr('');
-    try {
-      const r = await api.catalog({ q: query, genre: g, page: p }, src);
-      setData(r);
-      setPage(p);
-    } catch (e) {
-      console.error('[Cytlex] catalog error:', e);
-      setErr(String(e?.message || e));
-    }
-    setLoading(false);
+  const searching = !!results && results.some((r) => r.status === 'loading');
+  const withResults = results ? results.filter((r) => r.items.length > 0) : [];
+  const done = !!results && !searching;
+
+  const updateResults = (fn) => {
+    lastSearch.results = fn(lastSearch.results);
+    setResults(lastSearch.results);
   };
+
+  const runSearch = (query = q, g = genre) => {
+    const list = extensions.installed();
+    if (!list.length) return;
+    lastSearch.q = query;
+    lastSearch.genre = g;
+    lastSearch.results = list.map((s) => ({ id: s.manifest.id, manifest: s.manifest, status: 'loading', items: [] }));
+    setResults(lastSearch.results);
+
+    list.forEach((s) => {
+      api
+        .catalog({ q: query, genre: g, page: 1 }, s.manifest.id)
+        .then(async (r) => {
+          const items = r.items || [];
+          const okFlags = await Promise.all(items.map((m) => testCover(m.cover)));
+          const anyOk = okFlags.some(Boolean);
+          const good = anyOk ? items.filter((_, i) => okFlags[i]) : items;
+          updateResults((prev) =>
+            prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'done', items: good } : x)) : prev
+          );
+        })
+        .catch((e) => {
+          console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);
+          updateResults((prev) => (prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'error' } : x)) : prev));
+        });
+    });
+  };
+
+  useEffect(() => {
+    if (lastSearch.results && lastSearch.results.some((r) => r.status === 'loading')) {
+      runSearch(lastSearch.q, lastSearch.genre);
+    }
+    // eslint-disable-next-line
+  }, []);
+
+  useEffect(() => {
+    const t = new URLSearchParams(loc.search).get('tab');
+    if (t === 'mangas' || t === 'extensiones') setTab(t);
+  }, [loc.search]);
 
   useEffect(() => {
     const nq = new URLSearchParams(loc.search).get('q') || '';
     if (nq) {
       setQ(nq);
-      runSearch(1, nq, '');
+      runSearch(nq, '');
     }
     // eslint-disable-next-line
   }, [loc.search]);
 
-  const changeSource = (id) => {
-    setSourceId(id);
-    setData(null);
-    setErr('');
-  };
-
-  const selectClass =
-    'h-10 rounded-lg border border-border bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
-
   return (
     <div className="min-h-full flex flex-col">
       <div className="flex flex-wrap items-start gap-6 mb-6">
-        <div className="flex h-10 items-center gap-6">
+        <div className="flex items-center gap-6">
           {TABS.map((t) => {
             const active = tab === t.id;
             return (
@@ -92,38 +187,20 @@ export default function Catalog() {
           })}
         </div>
 
-        {tab === 'mangas' && (
+        {tab === 'mangas' && sources.length > 0 && (
           <div className="flex flex-1 flex-col sm:flex-row sm:items-center gap-3 sm:justify-end">
-            {sources.length > 1 && (
-              <select
-                className={cn(selectClass, 'sm:w-56 shrink-0')}
-                value={sourceId}
-                onChange={(e) => changeSource(e.target.value)}
-                aria-label="Fuente"
-              >
-                {sources.map((s) => (
-                  <option key={s.manifest.id} value={s.manifest.id}>
-                    {s.manifest.name}
-                  </option>
-                ))}
-              </select>
-            )}
             <div className="relative flex-1 sm:max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
                 className="pl-9 bg-muted/50 border-none"
-                placeholder="Título, autor…"
+                placeholder="Buscar en todas las extensiones..."
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && runSearch(1)}
+                onChange={(e) => { setQ(e.target.value); lastSearch.q = e.target.value; }}
+                onKeyDown={(e) => e.key === 'Enter' && runSearch()}
               />
             </div>
-            <Button onClick={() => runSearch(1)}>Buscar</Button>
-            <Button
-              variant="outline"
-              onClick={() => setShowFilters((v) => !v)}
-              aria-expanded={showFilters}
-            >
+            <Button onClick={() => runSearch()}>Buscar</Button>
+            <Button variant="outline" onClick={() => setShowFilters((v) => !v)} aria-expanded={showFilters}>
               <Filter className="w-4 h-4 mr-2" /> Filtros
             </Button>
           </div>
@@ -131,99 +208,71 @@ export default function Catalog() {
       </div>
 
       {tab === 'mangas' ? (
-        <>
-          {showFilters && (
-            <div className="flex gap-2 overflow-x-auto no-scrollbar mb-6" role="tablist" aria-label="Géneros">
-              <Button
-                size="sm"
-                variant={genre === '' ? 'default' : 'outline'}
-                className="shrink-0 rounded-xl"
-                onClick={() => { setGenre(''); runSearch(1, q, ''); }}
-              >
-                Todos
-              </Button>
-              {GENRES.map((g) => (
+        sources.length === 0 ? (
+          <div className="flex-1 grid place-items-center">
+            <EmptyState icon={Puzzle} title="No hay extensiones instaladas" />
+          </div>
+        ) : (
+          <>
+            {showFilters && (
+              <div className="flex gap-2 overflow-x-auto no-scrollbar mb-6" role="tablist" aria-label="Géneros">
                 <Button
-                  key={g}
                   size="sm"
-                  variant={genre === g ? 'default' : 'outline'}
+                  variant={genre === '' ? 'default' : 'outline'}
                   className="shrink-0 rounded-xl"
-                  onClick={() => { setGenre(g); runSearch(1, q, g); }}
+                  onClick={() => { setGenre(''); runSearch(q, ''); }}
                 >
-                  {g}
+                  Todos
                 </Button>
-              ))}
-            </div>
-          )}
-
-          {err && (
-            <Card className="mb-8 border-destructive/40 hover:shadow-sm">
-              <div className="p-5">
-                <div className="flex items-center gap-2 font-semibold">
-                  <AlertTriangle className="w-4 h-4 text-destructive" />
-                  No se pudo buscar
-                </div>
-                <p className="text-sm text-muted-foreground mt-1">{err}</p>
-                {!api.isBridgeOk() && (
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Abre con <b className="text-foreground">npm run dev:electron</b> (no solo npm run dev).
-                  </p>
-                )}
-                <Button variant="secondary" size="sm" className="mt-3" onClick={() => runSearch(page)}>
-                  Reintentar
-                </Button>
-              </div>
-            </Card>
-          )}
-
-          {loading && (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-x-5 gap-y-8">
-              {Array.from({ length: 12 }).map((_, i) => (
-                <div key={i}>
-                  <Skeleton className="w-full aspect-[5/7] rounded-xl" />
-                  <Skeleton className="h-4 w-3/4 mt-2 rounded" />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {!loading && !err && !data && (
-            <div className="flex-1 grid place-items-center text-center text-muted-foreground">
-              <div>
-                <Search className="w-8 h-8 mx-auto mb-3 opacity-50" />
-                <p className="text-sm">Busca un manga para empezar.</p>
-              </div>
-            </div>
-          )}
-
-          {!loading && !err && data && (
-            data.items.length === 0 ? (
-              <div className="flex-1 grid place-items-center">
-                <EmptyState icon={BookOpen} title="Sin resultados" description="Prueba con otro título o género." />
-              </div>
-            ) : (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-x-5 gap-y-8">
-                {data.items.map((m, i) => (
-                  <MangaCard key={i} m={m} sourceId={sourceId} />
+                {GENRES.map((g) => (
+                  <Button
+                    key={g}
+                    size="sm"
+                    variant={genre === g ? 'default' : 'outline'}
+                    className="shrink-0 rounded-xl"
+                    onClick={() => { setGenre(g); runSearch(q, g); }}
+                  >
+                    {g}
+                  </Button>
                 ))}
               </div>
-            )
-          )}
+            )}
 
-          {!loading && !err && data && data.totalPages > 1 && (
-            <div className="flex items-center justify-center gap-3 mt-10">
-              <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => runSearch(page - 1)}>
-                <ChevronLeft className="w-4 h-4 mr-1" /> Anterior
-              </Button>
-              <span className="text-sm text-muted-foreground">
-                Página {page} / {data.totalPages}
-              </span>
-              <Button variant="secondary" size="sm" disabled={page >= data.totalPages} onClick={() => runSearch(page + 1)}>
-                Siguiente <ChevronRight className="w-4 h-4 ml-1" />
-              </Button>
-            </div>
-          )}
-        </>
+            {!results && (
+              <div className="flex-1 grid place-items-center text-center text-muted-foreground">
+                <div>
+                  <Search className="w-8 h-8 mx-auto mb-3 opacity-50" />
+                  <p className="text-sm">Busca un manga para empezar.</p>
+                </div>
+              </div>
+            )}
+
+            {results && (
+              <>
+                {searching && (
+                  <p className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Buscando en {sources.length} {sources.length === 1 ? 'extensión' : 'extensiones'}...
+                  </p>
+                )}
+
+                {withResults.map((r) => (
+                  <SourceSection key={r.id} r={r} />
+                ))}
+
+                {done && withResults.length === 0 && (
+                  <div className="flex-1 grid place-items-center">
+                    <EmptyState
+                      icon={BookOpen}
+                      title="Sin resultados"
+                      description="Ninguna extensión encontró coincidencias. Prueba con otro título."
+                    />
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )
       ) : (
         <ExtensionsPanel />
       )}

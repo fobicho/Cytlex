@@ -18,6 +18,9 @@ function loadCats() {
   return fresh;
 }
 
+const SRC = (x) => x.sourceId || 'leercapitulo';
+const match = (a, url, sourceId = 'leercapitulo') => a.url === url && SRC(a) === sourceId;
+
 export const lib = {
   favs() {
     const stored = read(FAV, []);
@@ -33,21 +36,34 @@ export const lib = {
     if (changed) write(FAV, list);
     return list;
   },
-  fav(url) { return lib.favs().find((f) => f.url === url) || null; },
-  isFav(url) { return lib.favs().some((f) => f.url === url); },
+  fav(url, sourceId = 'leercapitulo') {
+    return lib.favs().find((f) => match(f, url, sourceId)) || null;
+  },
+  isFav(url, sourceId = 'leercapitulo') {
+    return lib.favs().some((f) => match(f, url, sourceId));
+  },
   toggleFav(manga, catIds) {
     const favs = lib.favs();
-    const i = favs.findIndex((f) => f.url === manga.url);
+    const i = favs.findIndex((f) => match(f, manga.url, SRC(manga)));
     if (i >= 0) favs.splice(i, 1);
     else favs.unshift({ ...manga, cats: catIds || [], savedAt: Date.now() });
     write(FAV, favs);
     return favs;
   },
-  updateFavCats(url, catIds) {
+  updateFavCats(url, catIds, sourceId = 'leercapitulo') {
     const favs = lib.favs();
-    const i = favs.findIndex((f) => f.url === url);
+    const i = favs.findIndex((f) => match(f, url, sourceId));
     if (i >= 0) {
       favs[i] = { ...favs[i], cats: catIds };
+      write(FAV, favs);
+    }
+    return favs;
+  },
+  updateFav(url, patch, sourceId = 'leercapitulo') {
+    const favs = lib.favs();
+    const i = favs.findIndex((f) => match(f, url, sourceId));
+    if (i >= 0) {
+      favs[i] = { ...favs[i], ...patch };
       write(FAV, favs);
     }
     return favs;

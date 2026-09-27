@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Sidebar from './components/Sidebar.jsx';
+import TitleBar from './components/TitleBar.jsx';
 import Library from './pages/Library.jsx';
 import Catalog from './pages/Catalog.jsx';
+import Results from './pages/Results.jsx';
 import Detail from './pages/Detail.jsx';
 import Reader from './pages/Reader.jsx';
 import Settings from './pages/Settings.jsx';
@@ -50,23 +52,27 @@ export default function App() {
   }, []);
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      {!isReader && <Sidebar />}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <main className={isReader ? 'flex-1 overflow-y-auto' : 'flex-1 overflow-y-auto p-6 xl:p-7'}>
-          <Routes>
-            <Route path="/" element={<Navigate to="/biblioteca" replace />} />
-            <Route path="/biblioteca" element={<Library />} />
-            <Route path="/explorar" element={<Catalog />} />
-            <Route path="/catalogo" element={<Navigate to="/explorar" replace />} />
-            <Route
-              path="/ajustes"
-              element={<Settings isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} />}
-            />
-            <Route path="/manga/*" element={<Detail />} />
-            <Route path="/leer/*" element={<Reader colorMode={mode} isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} />} />
-          </Routes>
-        </main>
+    <div className="flex flex-col h-screen overflow-hidden">
+      {!isFullscreen && <TitleBar />}
+      <div className="flex flex-1 overflow-hidden">
+        {!isReader && <Sidebar />}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <main className={isReader ? 'flex-1 overflow-y-auto [scrollbar-gutter:stable]' : 'flex-1 overflow-y-auto [scrollbar-gutter:stable] p-6 xl:p-7'}>
+            <Routes>
+              <Route path="/" element={<Navigate to="/biblioteca" replace />} />
+              <Route path="/biblioteca" element={<Library />} />
+              <Route path="/explorar" element={<Catalog />} />
+              <Route path="/resultados" element={<Results />} />
+              <Route path="/catalogo" element={<Navigate to="/explorar" replace />} />
+              <Route
+                path="/ajustes"
+                element={<Settings isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} />}
+              />
+              <Route path="/manga/*" element={<Detail />} />
+              <Route path="/leer/*" element={<Reader isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} />} />
+            </Routes>
+          </main>
+        </div>
       </div>
     </div>
   );

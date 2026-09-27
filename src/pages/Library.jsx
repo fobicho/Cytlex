@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { lib } from '../lib/library.js';
 import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
+import { extensions } from '../lib/extensions.js';
+import { makeCoverThumb } from '../lib/covers.js';
 import { Button } from '../components/ui/button.jsx';
 import { cn } from '../lib/utils.js';
 
@@ -16,15 +18,32 @@ export default function Library() {
     if (!cats.some((c) => c.id === sel)) setSel(cats[0]?.id || '');
   }, [cats, sel]);
 
-  const remove = (url) => {
-    const manga = favs.find((f) => f.url === url);
-    if (manga) {
-      lib.toggleFav(manga);
-      setFavs(lib.favs());
-    }
+  const remove = (manga) => {
+    lib.toggleFav(manga);
+    setFavs(lib.favs());
   };
 
   const shown = favs.filter((f) => (f.cats || []).includes(sel));
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let changed = false;
+      for (const f of shown) {
+        if (f.cover && !(f.coverLocal || '').startsWith('data:')) {
+          const local = await makeCoverThumb(f.cover);
+          if (cancelled) return;
+          if (local) {
+            lib.updateFav(f.url, { coverLocal: local }, f.sourceId);
+            changed = true;
+          }
+        }
+      }
+      if (changed && !cancelled) setFavs(lib.favs());
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line
+  }, [favs, sel]);
 
   return (
     <div className="min-h-full flex flex-col">
@@ -58,36 +77,42 @@ export default function Library() {
         </div>
       ) : view === 'grid' ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-x-5 gap-y-8">
-          {shown.map((m, i) => (
-            <MangaCard key={i} m={m} sourceId={m.sourceId || 'leercapitulo'} />
-          ))}
+          {shown.map((m, i) => {
+            const sid = m.sourceId || 'leercapitulo';
+            return <MangaCard key={i} m={m} sourceId={sid} unavailable={!extensions.isInstalled(sid)} minimal from="biblioteca" />;
+          })}
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {shown.map((m, i) => (
-            <div key={i} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5">
-              <a
-                href={`#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(m.sourceId || 'leercapitulo')}`}
-                className="flex items-center gap-3 flex-1 min-w-0"
-              >
-                {m.cover && (
-                  <img
-                    src={m.cover}
-                    alt=""
-                    referrerPolicy="no-referrer"
-                    className="w-10 h-14 object-cover rounded-lg shrink-0 bg-black"
-                  />
-                )}
-                <span className="flex-1 min-w-0">
-                  <span className="block font-semibold truncate">{m.title}</span>
-                  <span className="block text-xs text-muted-foreground truncate">{m.type || ''}</span>
-                </span>
-              </a>
-              <Button variant="ghost" size="sm" onClick={() => remove(m.url)} title="Quitar de biblioteca">
-                Quitar
-              </Button>
-            </div>
-          ))}
+          {shown.map((m, i) => {
+            const sid = m.sourceId || 'leercapitulo';
+            const unavailable = !extensions.isInstalled(sid);
+            return (
+              <div key={i} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5">
+                <a
+                  href={`#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sid)}&from=biblioteca`}
+                  className={cn('flex items-center gap-3 flex-1 min-w-0', unavailable && 'pointer-events-none opacity-60')}
+                  aria-disabled={unavailable}
+                  tabIndex={unavailable ? -1 : undefined}
+                >
+                  {m.cover && (
+                    <img
+                      src={m.cover}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      className="w-10 h-14 object-cover rounded-lg shrink-0 bg-black"
+                    />
+                  )}
+                  <span className="flex-1 min-w-0">
+                    <span className="block font-semibold truncate">{m.title}</span>
+                  </span>
+                </a>
+                <Button variant="ghost" size="sm" onClick={() => remove(m)} title="Quitar de biblioteca">
+                  Quitar
+                </Button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

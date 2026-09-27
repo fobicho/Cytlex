@@ -22,45 +22,27 @@ export default function Sidebar() {
   return (
     <motion.aside
       initial={false}
-      animate={{ width: collapsed ? 72 : 240 }}
+      animate={{ width: collapsed ? 72 : 196 }}
       transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
-      className="h-screen flex flex-col border-r border-border bg-sidebar overflow-hidden"
+      className="h-full flex flex-col border-r border-border bg-sidebar overflow-hidden"
     >
-      <div className="flex items-center h-16 px-4 border-b border-border">
-        <div className="w-8 h-8 rounded-lg shrink-0 bg-gradient-to-br from-primary to-primary/60 grid place-items-center font-bold text-primary-foreground text-sm shadow-lg shadow-primary/20">
-          C
-        </div>
-        <span
-          className={cn(
-            'ml-3 font-semibold text-sm tracking-tight whitespace-nowrap overflow-hidden transition-[max-width,opacity,transform] duration-300',
-            collapsed ? 'max-w-0 opacity-0 translate-x-2' : 'max-w-[160px] opacity-100 translate-x-0'
-          )}
-        >
-          Cytlex
-        </span>
-      </div>
-
       <nav className="flex-1 flex flex-col gap-1 p-3">
         {navItems.map((item) => {
           const isActive = location.pathname === item.to;
           return (
             <NavLink key={item.to} to={item.to}>
-              <motion.div
-                whileHover={{ x: collapsed ? 0 : 4 }}
-                whileTap={{ scale: 0.97 }}
+              <div
                 className={cn(
                   'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors relative',
                   collapsed && 'justify-center px-0 gap-0',
-                  isActive
-                    ? 'text-sidebar-accent-foreground bg-sidebar-accent'
-                    : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/50'
+                  isActive ? 'text-sidebar-accent-foreground' : 'text-sidebar-foreground'
                 )}
               >
                 {isActive && (
                   <motion.div
                     layoutId="active-pill"
                     className="absolute inset-0 rounded-lg bg-sidebar-accent"
-                    transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                    transition={{ type: 'spring', stiffness: 340, damping: 34, mass: 0.9 }}
                   />
                 )}
                 <item.icon className="w-5 h-5 shrink-0 relative z-10" />
@@ -72,7 +54,7 @@ export default function Sidebar() {
                 >
                   {item.label}
                 </span>
-              </motion.div>
+              </div>
             </NavLink>
           );
         })}

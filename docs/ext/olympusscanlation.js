@@ -41,23 +41,26 @@ export default function createSource({ fetchText }) {
 
   async function detail(mangaUrl) {
     const slug = String(mangaUrl).split('/').filter(Boolean).pop();
-    const data = await getJson(`${base}/api/series/${slug}?type=comic`);
+    const chaptersUrl = (p) => `${panel}/api/series/${slug}/chapters?page=${p}&direction=desc&type=comic`;
+
+    const [data, first] = await Promise.all([
+      getJson(`${base}/api/series/${slug}?type=comic`),
+      getJson(chaptersUrl(1))
+    ]);
     const s = data?.data || {};
 
-    const chapters = [];
-    for (let p = 1; p <= LIMIT_PAGES; p += 1) {
-      const res = await getJson(`${panel}/api/series/${slug}/chapters?page=${p}&direction=desc&type=comic`);
-      const list = res?.data || [];
-      chapters.push(
-        ...list.map((c) => ({
-          url: `${base}/capitulo/${slug}/${c.id}`,
-          title: c.name ? `Capítulo ${c.name}` : `Capítulo ${c.id}`,
-          date: c.published_at || ''
-        }))
-      );
-      const last = res?.meta?.last_page || 1;
-      if (p >= last || list.length === 0) break;
-    }
+    const lastPage = Math.min(first?.meta?.last_page || 1, LIMIT_PAGES);
+    const rest = lastPage > 1
+      ? await Promise.all(Array.from({ length: lastPage - 1 }, (_, i) => getJson(chaptersUrl(i + 2))))
+      : [];
+
+    const chapters = [first, ...rest]
+      .flatMap((res) => res?.data || [])
+      .map((c) => ({
+        url: `${base}/capitulo/${slug}/${c.id}`,
+        title: c.name ? `Capítulo ${c.name}` : `Capítulo ${c.id}`,
+        date: c.published_at || ''
+      }));
 
     const status = s.status?.name || '';
     return {

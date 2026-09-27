@@ -1,5 +1,6 @@
-import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { app, BrowserWindow, ipcMain, session, Menu, dialog } from 'electron';
 import path from 'node:path';
+import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { fetchHome, fetchCatalog, fetchDetail, fetchChapter } from './scraper.js';
 
@@ -12,7 +13,7 @@ function createWindow() {
     height: 680,
     minWidth: 860,
     minHeight: 560,
-    autoHideMenuBar: true,
+    frame: false,
     backgroundColor: '#09090b',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -22,6 +23,12 @@ function createWindow() {
   });
 
   win.maximize();
+
+  const emitMaximized = () => {
+    if (!win.isDestroyed()) win.webContents.send('window:maximized-changed', win.isMaximized());
+  };
+  win.on('maximize', emitMaximized);
+  win.on('unmaximize', emitMaximized);
 
   if (isDev) {
     win.loadURL('http://localhost:5173');
@@ -51,6 +58,7 @@ function hookImageHeaders() {
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   hookImageHeaders();
   createWindow();
   app.on('activate', () => {
@@ -77,6 +85,54 @@ ipcMain.handle('http:get', async (_e, url) => {
   return await res.text();
 });
 
+ipcMain.handle('image:fetch', async (_e, url) => {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
+        Referer: u.origin + '/'
+      }
+    });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    return { mime: res.headers.get('content-type') || 'application/octet-stream', base64: buf.toString('base64') };
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('image:download', async (e, payload = {}) => {
+  const { url, suggested } = payload;
+  if (!url) return { ok: false };
+  try {
+    const u = new URL(url);
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
+        Referer: u.origin + '/'
+      }
+    });
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    const buf = Buffer.from(await res.arrayBuffer());
+
+    const ext = (u.pathname.match(/\.(jpe?g|png|webp|gif|avif)$/i)?.[1] || 'jpg').toLowerCase();
+    const safe = String(suggested || '').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'panel';
+    const defaultPath = /\.[a-z0-9]+$/i.test(safe) ? safe : `${safe}.${ext}`;
+
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const opts = { defaultPath, filters: [{ name: 'Imagen', extensions: [ext] }] };
+    const { canceled, filePath } = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);
+    if (canceled || !filePath) return { ok: false, canceled: true };
+
+    await writeFile(filePath, buf);
+    return { ok: true, path: filePath };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 ipcMain.handle('window:toggle-fullscreen', (e) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (!win) return false;
@@ -88,6 +144,27 @@ ipcMain.handle('window:toggle-fullscreen', (e) => {
 ipcMain.handle('window:is-fullscreen', (e) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   return win ? win.isFullScreen() : false;
+});
+
+ipcMain.handle('window:minimize', (e) => {
+  BrowserWindow.fromWebContents(e.sender)?.minimize();
+});
+
+ipcMain.handle('window:toggle-maximize', (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (!win) return false;
+  if (win.isMaximized()) win.unmaximize();
+  else win.maximize();
+  return win.isMaximized();
+});
+
+ipcMain.handle('window:is-maximized', (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  return win ? win.isMaximized() : false;
+});
+
+ipcMain.handle('window:close', (e) => {
+  BrowserWindow.fromWebContents(e.sender)?.close();
 });
 
 ipcMain.handle('manga:home', async () => {

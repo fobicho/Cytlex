@@ -13,11 +13,12 @@ const write = (v) => localStorage.setItem(KEY, JSON.stringify(v));
 export const BUILTIN = [
   {
     id: 'leercapitulo',
-    name: 'leercapitulo.co',
+    name: 'LeerCapitulo',
     lang: 'es',
     version: '0.1',
     type: 'builtin',
     desc: 'Manga en español · fuente integrada',
+    icon: 'https://www.google.com/s2/favicons?domain=leercapitulo.co&sz=128',
     url: 'https://leercapitulo.co'
   }
 ];
@@ -64,24 +65,67 @@ async function loadModule(code) {
 const cache = new Map();
 
 export const extensions = {
-  builtins() {
-    return BUILTIN.map((m) => ({ manifest: m, builtin: true }));
-  },
-  externals() {
-    return read().map((r) => ({ manifest: r.manifest, builtin: false }));
-  },
   installed() {
-    return [...extensions.builtins(), ...extensions.externals()];
+    return read().map((r) => {
+      const b = BUILTIN.find((m) => m.id === r.manifest.id);
+      return { manifest: b ? { ...r.manifest, ...b } : r.manifest, builtin: !!b };
+    });
+  },
+  isNative(id) {
+    return BUILTIN.some((m) => m.id === id);
+  },
+  manifest(id) {
+    const b = BUILTIN.find((m) => m.id === id);
+    if (b) return b;
+    const rec = read().find((r) => r.manifest.id === id);
+    return rec?.manifest || { id, name: id || 'Fuente' };
   },
   isInstalled(id) {
-    return extensions.installed().some((e) => e.manifest.id === id);
+    return read().some((r) => r.manifest.id === id);
+  },
+
+  async sync(indexUrl) {
+    let repo = [];
+    try {
+      const text = await ctx().fetchText(indexUrl);
+      const list = JSON.parse(text);
+      if (Array.isArray(list)) repo = list;
+    } catch {}
+    const byId = new Map([...repo, ...BUILTIN].map((m) => [m.id, m]));
+
+    const records = read().map((r) => {
+      const fresh = byId.get(r.manifest.id);
+      return fresh ? { ...r, manifest: { ...r.manifest, ...fresh } } : r;
+    });
+
+    // Refresca también el código de las extensiones "module" instaladas.
+    await Promise.all(records.map(async (r) => {
+      if (r.manifest.type !== 'module' || !r.manifest.main) return;
+      try {
+        const mainUrl = /^https?:/i.test(r.manifest.main)
+          ? r.manifest.main
+          : new URL(r.manifest.main, indexUrl).href;
+        r.code = await ctx().fetchText(mainUrl);
+        cache.delete(r.manifest.id);
+      } catch {}
+    }));
+
+    write(records);
+    return extensions.installed();
   },
 
   async available(indexUrl) {
-    const text = await ctx().fetchText(indexUrl);
-    const list = JSON.parse(text);
-    if (!Array.isArray(list)) throw new Error('El índice no es un array JSON');
-    return list.filter((m) => m && m.id && !extensions.isInstalled(m.id));
+    const installedIds = new Set(extensions.installed().map((e) => e.manifest.id));
+    let repo = [];
+    try {
+      const text = await ctx().fetchText(indexUrl);
+      const list = JSON.parse(text);
+      if (!Array.isArray(list)) throw new Error('El índice no es un array JSON');
+      repo = list;
+    } catch (e) {
+      console.warn('[Cytlex] no se pudo leer el repositorio de extensiones:', e?.message || e);
+    }
+    return [...repo, ...BUILTIN].filter((m) => m && m.id && !installedIds.has(m.id));
   },
 
   async install(manifest, indexUrl) {
@@ -116,7 +160,9 @@ export const extensions = {
       if (!rec) throw new Error('Extensión no instalada: ' + id);
       src = rec.manifest.type === 'module'
         ? await loadModule(rec.code)
-        : buildSelectorSource(rec.manifest, ctx());
+        : rec.manifest.type === 'builtin'
+          ? builtinSource(rec.manifest)
+          : buildSelectorSource(rec.manifest, ctx());
     }
 
     cache.set(id, src);

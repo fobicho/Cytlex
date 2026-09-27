@@ -1,13 +1,58 @@
-import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
-import { ArrowLeft, Play, Star, ChevronRight, Search, AlertTriangle, BookOpen } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Play, Star, ChevronDown, Search, SlidersHorizontal, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Loader2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { lib } from '../lib/library.js';
+import { progress } from '../lib/progress.js';
+import { extensions } from '../lib/extensions.js';
+import { makeCoverThumb } from '../lib/covers.js';
+import { cn } from '../lib/utils.js';
 import { Button } from '../components/ui/button.jsx';
 import { Badge } from '../components/ui/badge.jsx';
 import { Input } from '../components/ui/input.jsx';
-import { Skeleton } from '../components/ui/skeleton.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
+import { Dialog } from '../components/ui/dialog.jsx';
+
+const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+// Reserva (mt-1 + mitad del botón) para que la línea del control quede justo al final del cover.
+const EXPAND_CTRL_H = 16;
+
+function SourceLine({ sourceId }) {
+  const m = extensions.manifest(sourceId);
+  const [ok, setOk] = useState(true);
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span className="w-4 h-4 rounded bg-secondary text-secondary-foreground grid place-items-center overflow-hidden shrink-0">
+        {m.icon && ok ? (
+          <img src={m.icon} alt="" className="w-full h-full object-cover" onError={() => setOk(false)} />
+        ) : (
+          <span className="text-[9px] font-bold">{(m.name?.[0] || '?').toUpperCase()}</span>
+        )}
+      </span>
+      {m.name}
+    </span>
+  );
+}
+
+function DuplicateRow({ cover, title, author, sourceId }) {
+  return (
+    <div className="flex items-end gap-4 py-4 border-b border-border">
+      {cover ? (
+        <img src={cover} alt="" referrerPolicy="no-referrer" className="w-32 aspect-[5/7] object-cover rounded-xl shrink-0 bg-black" />
+      ) : (
+        <div className="w-32 aspect-[5/7] rounded-xl shrink-0 bg-secondary" />
+      )}
+      <div className="flex-1 min-w-0">
+        <div className="font-semibold text-lg leading-snug line-clamp-2">{title}</div>
+        {author && <div className="mt-2 text-xs text-muted-foreground truncate">{author}</div>}
+        <div className="mt-1">
+          <SourceLine sourceId={sourceId} />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function useQueryUrl() {
   const loc = useLocation();
@@ -19,50 +64,168 @@ function useSourceId() {
   return new URLSearchParams(loc.search).get('s') || 'leercapitulo';
 }
 
+function useBackTo() {
+  const loc = useLocation();
+  const params = new URLSearchParams(loc.search);
+  const from = params.get('from');
+  if (from === 'resultados') return `/resultados?s=${encodeURIComponent(params.get('s') || 'leercapitulo')}`;
+  return from === 'explorar' ? '/explorar' : '/biblioteca';
+}
+
 export default function Detail() {
+  const navigate = useNavigate();
+  const loc = useLocation();
   const mangaUrl = useQueryUrl();
   const sourceId = useSourceId();
+  const backTo = useBackTo();
+  const fromParam = new URLSearchParams(loc.search).get('from') || 'biblioteca';
+  const sourceAvailable = extensions.isInstalled(sourceId);
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [fav, setFav] = useState(false);
-  const [cats, setCats] = useState([]);
-  const [selectedCats, setSelectedCats] = useState([]);
   const [filter, setFilter] = useState('');
   const [asc, setAsc] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [dup, setDup] = useState(null);
+  const [catPick, setCatPick] = useState(null);
+  const coverRef = useRef(null);
+  const synRef = useRef(null);
+  const [availH, setAvailH] = useState(240);
+  const [fullH, setFullH] = useState(0);
+  const [ready, setReady] = useState(false);
+  const [animate, setAnimate] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [overflow, setOverflow] = useState(false);
+  const [progressTick, setProgressTick] = useState(0);
+  const [markBefore, setMarkBefore] = useState(null);
+
+  useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
 
   useEffect(() => {
     if (!mangaUrl) return;
+    if (!extensions.isInstalled(sourceId)) return;
     setD(null);
-    const allCats = lib.cats();
-    const existing = lib.fav(mangaUrl);
-    setCats(allCats);
-    setFav(!!existing);
-    setSelectedCats(
-      existing?.cats?.length ? existing.cats : allCats[0] ? [allCats[0].id] : []
-    );
+    setExpanded(false);
+    setReady(false);
+    setAnimate(false);
+    setAvailH(240);
+    setFav(!!lib.fav(mangaUrl, sourceId));
     api
       .detail(mangaUrl, sourceId)
-      .then((r) => setD(r))
+      .then((r) => {
+        if (!r?.cover) { setD(r); return; }
+        let done = false;
+        const finish = () => { if (!done) { done = true; setD(r); } };
+        const img = new Image();
+        img.referrerPolicy = 'no-referrer';
+        img.onload = finish;
+        img.onerror = finish;
+        img.src = r.cover;
+        setTimeout(finish, 3000);
+      })
       .catch((e) => setErr(String(e)));
   }, [mangaUrl, sourceId]);
 
-  const toggleCat = (id) => {
-    setSelectedCats((prev) => {
-      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-      if (fav) lib.updateFavCats(mangaUrl, next);
-      return next;
+  // Espacio disponible para la sinopsis: del inicio de la sinopsis al final del cover.
+  useLayoutEffect(() => {
+    const cover = coverRef.current;
+    const syn = synRef.current;
+    if (!cover || !syn) return undefined;
+
+    const update = () => {
+      const c = cover.getBoundingClientRect();
+      const s = syn.getBoundingClientRect();
+      if (!c.height) return;
+      const avail = Math.max(80, c.bottom - s.top - EXPAND_CTRL_H);
+      setAvailH(avail);
+      setFullH(syn.scrollHeight);
+      setOverflow(syn.scrollHeight > avail + 4);
+      setReady(true);
+    };
+
+    update();
+
+    const raf = requestAnimationFrame(update);
+    const ro = new ResizeObserver(update);
+    ro.observe(cover);
+    if (syn.parentElement) ro.observe(syn.parentElement);
+    window.addEventListener('resize', update);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [d]);
+
+  useEffect(() => {
+    if (!synRef.current) return;
+    setFullH(synRef.current.scrollHeight);
+  }, [d, expanded]);
+
+  useEffect(() => {
+    if (!ready || animate) return undefined;
+    const id = requestAnimationFrame(() => setAnimate(true));
+    return () => cancelAnimationFrame(id);
+  }, [ready, animate]);
+
+  const addToLibrary = (manga, catIds) => {
+    lib.toggleFav(manga, catIds);
+    setFav(true);
+    makeCoverThumb(manga.cover).then((local) => {
+      if (local) lib.updateFav(manga.url, { coverLocal: local }, manga.sourceId);
     });
+  };
+
+  const chooseCatsOrAdd = (manga) => {
+    const allCats = lib.cats();
+    if (allCats.length <= 1) {
+      addToLibrary(manga, allCats[0] ? [allCats[0].id] : []);
+      return;
+    }
+    setCatPick({ list: allCats, selected: allCats[0] ? [allCats[0].id] : [], pending: manga });
+  };
+
+  const onAddClick = () => {
+    const manga = {
+      url: mangaUrl,
+      title: d.title,
+      cover: d.cover,
+      type: d.facts.tipo,
+      author: d.facts.autor,
+      sourceId
+    };
+    const key = norm(d.title);
+    const duplicates = lib
+      .favs()
+      .filter((f) => norm(f.title) === key && !(f.url === mangaUrl && (f.sourceId || 'leercapitulo') === sourceId));
+    if (duplicates.length) setDup({ list: duplicates, pending: manga });
+    else chooseCatsOrAdd(manga);
   };
 
   if (!mangaUrl)
     return <EmptyState icon={BookOpen} title="Sin manga seleccionado." />;
+  if (!sourceAvailable)
+    return (
+      <EmptyState
+        icon={Puzzle}
+        title="Fuente no instalada"
+        description="La extensión de este manga ya no está instalada. Vuelve a instalarla para poder abrirlo."
+        action={
+          <Button onClick={() => { window.location.hash = '#/explorar?tab=extensiones'; }}>
+            Ir a Extensiones
+          </Button>
+        }
+      />
+    );
   if (err)
     return <EmptyState icon={AlertTriangle} title="No se pudo cargar" description={err} />;
   if (!d)
     return (
-      <div className="w-full">
-        <Skeleton className="h-72 w-full rounded-2xl" />
-        <p className="text-sm text-muted-foreground mt-3">Cargando detalle…</p>
+      <div className="min-h-[60vh] grid place-items-center text-muted-foreground">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-6 h-6 animate-spin" />
+          <p className="text-sm">Cargando…</p>
+        </div>
       </div>
     );
 
@@ -70,151 +233,377 @@ export default function Detail() {
   if (asc) chapters = [...chapters].reverse();
   const firstChapter = d.chapters[0]?.url;
 
+  const inProgress = d.chapters
+    .map((c) => ({ ...c, cap: progress.get(c.url, sourceId) }))
+    .filter((c) => c.cap && !c.cap.read && Number.isInteger(c.cap.page))
+    .sort((a, b) => (b.cap.updatedAt || 0) - (a.cap.updatedAt || 0))[0] || null;
+  const continueChapter = inProgress;
+
   return (
     <div className="min-h-full flex flex-col">
-      <Button variant="ghost" size="sm" className="mb-6 self-start" onClick={() => { window.location.hash = '#/explorar'; }}>
-        <ArrowLeft className="w-4 h-4 mr-1.5" /> Explorar
+      <Button
+        variant="ghost"
+        size="sm"
+        className="-mt-2 -ml-2 mb-1 self-start hover:bg-transparent hover:text-foreground"
+        onClick={() => navigate(backTo)}
+      >
+        <ArrowLeft className="w-4 h-4 mr-1.5" /> Volver
       </Button>
 
-      <section className="relative rounded-2xl overflow-hidden border border-border">
-        <div className="absolute inset-0">
-          <img
-            src={d.cover}
-            alt=""
-            referrerPolicy="no-referrer"
-            className="w-full h-full object-cover blur-2xl brightness-[.45] saturate-150 scale-110"
-          />
-        </div>
-        <div className="relative flex flex-col md:flex-row gap-5 p-6 bg-gradient-to-b from-black/10 to-black/50">
-          <img
-            className="w-40 md:w-[168px] aspect-[5/7] object-cover rounded-xl shadow-2xl shrink-0"
-            src={d.cover}
-            alt={d.title}
-            referrerPolicy="no-referrer"
-          />
-          <div className="flex-1 min-w-0">
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white">{d.title}</h1>
-            <div className="text-sm text-gray-300 mt-1">{d.altTitles?.slice(0, 160)}</div>
+      <div className="flex flex-col md:flex-row gap-6">
+        <img
+          ref={coverRef}
+          className="w-40 md:w-[184px] h-auto rounded-xl shadow-2xl shrink-0 self-start"
+          src={d.cover}
+          alt={d.title}
+          referrerPolicy="no-referrer"
+        />
+        <div className="flex-1 min-w-0">
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-foreground">{d.title}</h1>
+          {d.facts.autor && <div className="text-base text-muted-foreground mt-1">Por {d.facts.autor}</div>}
+          <div className="text-sm text-muted-foreground mt-1">{d.altTitles?.slice(0, 160)}</div>
 
-            <div className="flex flex-wrap gap-2 mt-3">
-              {(d.facts.estado || d.facts.status) && (
-                <Badge>{d.facts.estado || d.facts.status}</Badge>
-              )}
-              {d.facts.tipo && <Badge>{d.facts.tipo}</Badge>}
-              {d.genres.slice(0, 6).map((g) => (
-                <Badge key={g} variant="outline" className="text-gray-200 border-white/20">
-                  {g}
-                </Badge>
-              ))}
-            </div>
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            {(d.facts.estado || d.facts.status) && (
+              <Badge>{d.facts.estado || d.facts.status}</Badge>
+            )}
+            {d.facts.tipo && <Badge>{d.facts.tipo}</Badge>}
+            {d.genres.slice(0, 6).map((g) => (
+              <Badge key={g} variant="outline">
+                {g}
+              </Badge>
+            ))}
+          </div>
 
-            <p className="text-sm text-gray-300 mt-3 max-w-2xl leading-relaxed">
-              {d.sinopsis?.slice(0, 420)}
-              {d.sinopsis?.length > 420 ? '…' : ''}
-            </p>
-
-            <div className="flex flex-wrap items-center gap-3 mt-4">
-              {firstChapter && (
-                <Button
-                  className="shadow-lg shadow-primary/30"
-                  onClick={() => {
-                    window.location.hash = `#/leer?u=${encodeURIComponent(firstChapter)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}`;
+          <div className="mt-3">
+            <div
+              ref={synRef}
+              style={{
+                maxHeight: expanded ? (fullH || undefined) : (availH || undefined),
+                overflow: 'hidden',
+                opacity: ready ? 1 : 0,
+                transition: animate ? 'max-height 320ms cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
+                WebkitMaskImage: !expanded && overflow
+                  ? 'linear-gradient(to bottom, #000 calc(100% - 48px), rgba(0,0,0,0.55) calc(100% - 22px), transparent 100%)'
+                  : undefined,
+                maskImage: !expanded && overflow
+                  ? 'linear-gradient(to bottom, #000 calc(100% - 48px), rgba(0,0,0,0.55) calc(100% - 22px), transparent 100%)'
+                  : undefined
+              }}
+              className="relative text-sm text-muted-foreground leading-relaxed"
+            >
+              <p>{d.sinopsis}</p>
+              {!expanded && overflow && (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-x-0 bottom-0 h-12 backdrop-blur-[3px]"
+                  style={{
+                    WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.5) 55%, #000 100%)',
+                    maskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.5) 55%, #000 100%)'
                   }}
-                >
-                  <Play className="w-4 h-4 mr-2" />
-                  Leer {d.chapters[0]?.title || ''}
-                </Button>
+                />
               )}
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  lib.toggleFav(
-                    { url: mangaUrl, title: d.title, cover: d.cover, type: d.facts.tipo, sourceId },
-                    selectedCats
-                  );
-                  setFav(!fav);
-                }}
-              >
-                <Star className={`w-4 h-4 mr-2 ${fav ? 'fill-current text-amber-400' : ''}`} />
-                {fav ? 'En biblioteca' : 'Añadir'}
-              </Button>
             </div>
-
-            {cats.length > 0 && (
-              <div className="mt-4">
-                <div className="text-xs text-gray-300 mb-2">Categorías</div>
-                <div className="flex flex-wrap gap-2">
-                  {cats.map((c) => {
-                    const on = selectedCats.includes(c.id);
-                    return (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => toggleCat(c.id)}
-                        className={`rounded-full px-3 py-1.5 text-xs font-medium border transition-colors ${
-                          on
-                            ? 'bg-primary text-primary-foreground border-transparent'
-                            : 'border-white/25 text-gray-200 hover:bg-white/10'
-                        }`}
-                      >
-                        {on ? `✓ ${c.name}` : c.name}
-                      </button>
-                    );
-                  })}
-                </div>
+            {overflow && (
+              <div className="mt-1 flex items-center gap-3">
+                <span className="h-px flex-1 bg-border" />
+                <button
+                  type="button"
+                  onClick={() => setExpanded((v) => !v)}
+                  aria-label={expanded ? 'Ver menos' : 'Ver más'}
+                  className="grid place-items-center w-6 h-6 rounded-full text-muted-foreground transition-colors hover:bg-accent"
+                >
+                  <ChevronDown className={cn('w-4 h-4 transition-transform duration-300', expanded && 'rotate-180')} />
+                </button>
+                <span className="h-px flex-1 bg-border" />
               </div>
             )}
-
-            <div className="text-xs text-gray-300 mt-3">
-              {d.chapters.length} capítulos
-              {d.facts.vistas ? ` · ${d.facts.vistas} vistas` : ''}
-              {d.facts.autor ? ` · Por ${d.facts.autor}` : ''}
-            </div>
           </div>
         </div>
-      </section>
+      </div>
 
-      <div className="flex items-center justify-between mt-10 mb-3">
-        <h2 className="text-xl font-semibold">Capítulos ({d.chapters.length})</h2>
-        <Button variant="ghost" size="sm" onClick={() => setAsc(!asc)}>
-          {asc ? 'Más antiguos primero' : 'Más recientes primero'}
+      <div className="flex flex-wrap items-center gap-3 mt-6 border-t border-border pt-5">
+        {continueChapter && (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              window.location.hash = `#/leer?u=${encodeURIComponent(continueChapter.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
+            }}
+          >
+            <BookOpen className="w-4 h-4 mr-2" />
+            Continuar {continueChapter.cap?.read ? '' : `· ${continueChapter.cap.page + 1}/${continueChapter.cap.total || '?'}`}
+          </Button>
+        )}
+        {firstChapter && (
+          <Button
+            className="shadow-lg shadow-primary/30"
+            onClick={() => {
+              window.location.hash = `#/leer?u=${encodeURIComponent(firstChapter)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
+            }}
+          >
+            <Play className="w-4 h-4 mr-2" />
+            Leer {d.chapters[0]?.title || ''}
+          </Button>
+        )}
+        <Button
+          variant="secondary"
+          onClick={() => {
+            if (fav) {
+              lib.toggleFav({ url: mangaUrl, sourceId });
+              setFav(false);
+              return;
+            }
+            onAddClick();
+          }}
+        >
+          <Star className={`w-4 h-4 mr-2 ${fav ? 'fill-current text-amber-400' : ''}`} />
+          {fav ? 'En biblioteca' : 'Añadir'}
         </Button>
       </div>
 
-      <div className="relative mb-4">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          className="pl-9 bg-muted/50 border-none"
-          placeholder="Filtrar por número… Ej. 12"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
+      <div className="mt-6 border-t border-border pt-5">
+        <div
+          className={cn(
+            'mb-4 flex items-center overflow-hidden rounded-xl border border-border bg-card',
+            filtersOpen ? 'w-full' : 'w-fit'
+          )}
+        >
+        <button
+          type="button"
+          onClick={() => setFiltersOpen((v) => !v)}
+          aria-expanded={filtersOpen}
+          className="flex h-11 shrink-0 items-center gap-2 px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+        >
+          <SlidersHorizontal className="w-4 h-4" />
+          Filtros
+          <ChevronDown className={cn('w-4 h-4 text-muted-foreground', filtersOpen && 'rotate-180')} />
+        </button>
+
+        {filtersOpen && (
+          <div className="flex min-w-0 flex-1 items-center gap-2 pr-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                autoFocus
+                className="pl-9 bg-muted/50 border-none"
+                placeholder="Filtrar por número… Ej. 12"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setAsc((v) => !v)}
+              title={asc ? 'Orden: más antiguos primero' : 'Orden: más recientes primero'}
+              aria-label={asc ? 'Cambiar a más recientes primero' : 'Cambiar a más antiguos primero'}
+              className="grid place-items-center w-8 h-8 shrink-0 rounded-full text-foreground transition-colors hover:bg-accent"
+            >
+              <span className="relative grid place-items-center w-4 h-4">
+                <ArrowUp
+                  className={cn(
+                    'col-start-1 row-start-1 w-4 h-4 transition-all duration-200',
+                    asc ? 'opacity-0 -rotate-90' : 'opacity-100 rotate-0'
+                  )}
+                />
+                <ArrowDown
+                  className={cn(
+                    'col-start-1 row-start-1 w-4 h-4 transition-all duration-200',
+                    asc ? 'opacity-100 rotate-0' : 'opacity-0 rotate-90'
+                  )}
+                />
+              </span>
+            </button>
+          </div>
+        )}
+      </div>
       </div>
 
       <div className="flex flex-col gap-2">
-        {chapters.slice(0, 300).map((c, i) => (
-          <a
-            key={i}
-            className="flex items-center gap-4 rounded-xl border border-border bg-card p-3 min-h-[60px] hover:bg-accent/50 transition-colors"
-            href={`#/leer?u=${encodeURIComponent(c.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}`}
-          >
-            <span className="w-11 h-11 rounded-2xl shrink-0 bg-secondary text-secondary-foreground grid place-items-center font-bold text-xs">
-              {c.title.replace(/[^0-9.]/g, '').slice(0, 5) || '·'}
-            </span>
-            <span className="flex-1 min-w-0">
-              <span className="block font-semibold truncate">{c.title}</span>
-              <span className="block text-xs text-muted-foreground">{c.date}</span>
-            </span>
-            <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-          </a>
-        ))}
+        {chapters.map((c, i) => {
+          const cap = progress.get(c.url, sourceId);
+          const read = !!cap?.read;
+          const inCourse = !read && cap && Number.isInteger(cap?.page) && cap.page > 0;
+          return (
+            <a
+              key={i}
+              className={cn(
+                'group relative flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-2.5 min-h-[52px] hover:bg-accent/50 transition-colors',
+                read && 'opacity-45 hover:opacity-70'
+              )}
+              href={`#/leer?u=${encodeURIComponent(c.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`}
+            >
+              <span className="flex-1 min-w-0">
+                <span className="block font-semibold truncate">{c.title}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {c.date}
+                  {inCourse && Number.isInteger(cap.total) && cap.total > 0
+                    ? ` · en página ${cap.page + 1} de ${cap.total}`
+                    : ''}
+                </span>
+              </span>
+              {read ? (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title="Marcar como no leído"
+                  aria-label={`Marcar ${c.title} como no leído`}
+                  className="shrink-0 flex items-center gap-1 text-xs text-primary"
+                  onClick={(e) => { e.preventDefault(); progress.markUnread(c.url, sourceId); setProgressTick((t) => t + 1); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markUnread(c.url, sourceId); setProgressTick((t) => t + 1); }
+                  }}
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  Leído
+                </span>
+              ) : (
+                <>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    title="Marcar como leído"
+                    aria-label={`Marcar ${c.title} como leído`}
+                    className="shrink-0 flex items-center gap-1 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                    onClick={(e) => { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0); setProgressTick((t) => t + 1); }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0); setProgressTick((t) => t + 1); }
+                    }}
+                  >
+                    <Check className="w-4 h-4" />
+                    Leído
+                  </span>
+                  <button
+                    type="button"
+                    title="Marcar todos los anteriores como leídos"
+                    aria-label={`Marcar anteriores a ${c.title} como leídos`}
+                    className="shrink-0 flex items-center rounded-md text-muted-foreground/70 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-accent hover:text-foreground transition-opacity"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMarkBefore({ chapter: c, index: i }); }}
+                  >
+                    <CheckCheck className="w-4 h-4" />
+                    <ChevronDown className="w-3.5 h-3.5 -ml-1" />
+                  </button>
+                </>
+              )}
+            </a>
+          );
+        })}
       </div>
 
-      {chapters.length > 300 && (
-        <p className="text-sm text-muted-foreground mt-3">
-          Mostrando 300 de {chapters.length}. Usa el filtro para encontrar más.
-        </p>
-      )}
+      <Dialog
+        open={!!dup}
+        onClose={() => setDup(null)}
+        title="Posible duplicado"
+        description="Ya tienes un manga con este título en la biblioteca."
+      >
+        {dup && (
+          <>
+            <div>
+              {dup.list.map((f, i) => (
+                <DuplicateRow key={i} cover={f.cover} title={f.title} author={f.author} sourceId={f.sourceId} />
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 pt-5">
+              <Button variant="secondary" onClick={() => setDup(null)}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => {
+                  const manga = dup.pending;
+                  setDup(null);
+                  chooseCatsOrAdd(manga);
+                }}
+              >
+                Añadir de todos modos
+              </Button>
+            </div>
+          </>
+        )}
+      </Dialog>
+
+      <Dialog
+        open={!!catPick}
+        onClose={() => setCatPick(null)}
+        title="Añadir a categorías"
+        description="Elige en qué categorías guardar este manga."
+      >
+        {catPick && (
+          <>
+            <div className="flex flex-wrap gap-2 pt-4 pb-5">
+              {catPick.list.map((c) => {
+                const on = catPick.selected.includes(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() =>
+                      setCatPick((p) => ({
+                        ...p,
+                        selected: on ? p.selected.filter((x) => x !== c.id) : [...p.selected, c.id]
+                      }))
+                    }
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium border transition-colors ${
+                      on
+                        ? 'bg-primary text-primary-foreground border-transparent'
+                        : 'border-border text-muted-foreground hover:bg-accent'
+                    }`}
+                  >
+                    {on ? `✓ ${c.name}` : c.name}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border pt-4">
+              <Button variant="secondary" onClick={() => setCatPick(null)}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => {
+                  addToLibrary(catPick.pending, catPick.selected);
+                  setCatPick(null);
+                }}
+              >
+                Añadir
+              </Button>
+            </div>
+          </>
+        )}
+      </Dialog>
+
+      <Dialog
+        open={!!markBefore}
+        onClose={() => setMarkBefore(null)}
+        title="Marcar anteriores como leídos"
+        description="Se marcarán como leídos los capítulos debajo de este en la lista. El capítulo actual no se marca."
+      >
+        {markBefore && (() => {
+          const below = chapters.slice(markBefore.index + 1);
+          const pending = below.filter((x) => !progress.get(x.url, sourceId)?.read);
+          return (
+            <>
+              <div className="py-2 text-sm">
+                Se marcarán <span className="font-semibold text-foreground">{pending.length}</span> capítulos
+                (anteriores a <span className="font-semibold text-foreground">{markBefore.chapter.title}</span>).
+              </div>
+              <div className="flex justify-end gap-2 pt-4">
+                <Button variant="secondary" onClick={() => setMarkBefore(null)}>
+                  Cancelar
+                </Button>
+                <Button
+                  disabled={!pending.length}
+                  onClick={() => {
+                    setMarkBefore(null);
+                    if (!pending.length) return;
+                    progress.markMany(pending.map((x) => x.url), sourceId);
+                    setProgressTick((t) => t + 1);
+                  }}
+                >
+                  Marcar {pending.length} capítulos
+                </Button>
+              </div>
+            </>
+          );
+        })()}
+      </Dialog>
     </div>
   );
 }

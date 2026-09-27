@@ -47,29 +47,55 @@ export default function createSource({ fetchText, parse }) {
   }
 
   async function detail(mangaUrl) {
-    const doc = parse(await fetchText(abs(mangaUrl)));
-    const coverImg = doc.querySelector('img.manga-cover') || doc.querySelector('.manga-cover img');
-    const status = text(doc, '.status-text');
+    const startUrl = abs(mangaUrl);
+    const first = parse(await fetchText(startUrl));
+    const coverImg = first.querySelector('img.manga-cover') || first.querySelector('.manga-cover img');
+    const status = text(first, '.status-text');
 
-    const chapters = [...doc.querySelectorAll('.chapter-card')]
-      .map((el) => {
+    const chapters = [];
+    const seen = new Set();
+
+    const collect = (doc, pageUrl) => {
+      for (const el of doc.querySelectorAll('.chapter-card')) {
+        if (el.classList.contains('chapter-card-full')) continue;
         const a = el.querySelector('a.chapter-link') || el.querySelector('a[href]');
-        const href = a?.getAttribute('href') || '';
-        return {
-          url: href && href !== '#' ? abs(href) : '',
-          title: text(el, '.chapter-title') || (a?.textContent || '').trim(),
+        if (!a || a.classList.contains('btn-ver-mas')) continue;
+        const href = a.getAttribute('href') || '';
+        if (!href || href === '#') continue;
+        const url = new URL(href, pageUrl).href;
+        if (seen.has(url)) continue;
+        seen.add(url);
+        chapters.push({
+          url,
+          title: text(el, '.chapter-title') || (a.textContent || '').trim(),
           date: text(el, '.chapter-date')
-        };
-      })
-      .filter((x) => x.url);
+        });
+      }
+    };
+
+    collect(first, startUrl);
+
+    const visited = new Set([startUrl]);
+    let pageUrl = startUrl;
+    let doc = first;
+    for (let i = 0; i < 200; i++) {
+      const href = doc.querySelector('#more-link, .btn-ver-mas')?.getAttribute('href');
+      if (!href) break;
+      const nextUrl = new URL(href, pageUrl).href;
+      if (visited.has(nextUrl)) break;
+      visited.add(nextUrl);
+      pageUrl = nextUrl;
+      doc = parse(await fetchText(pageUrl));
+      collect(doc, pageUrl);
+    }
 
     return {
-      title: text(doc, 'h1.manga-title'),
+      title: text(first, 'h1.manga-title'),
       cover: abs(coverImg?.getAttribute('src')),
-      altTitles: text(doc, '.alternate-titles'),
-      genres: [...doc.querySelectorAll('.genero-item')].map((e) => e.textContent.trim()).filter(Boolean),
+      altTitles: text(first, '.alternate-titles'),
+      genres: [...first.querySelectorAll('.genero-item')].map((e) => e.textContent.trim()).filter(Boolean),
       facts: { estado: status, status, tipo: '', autor: '', vistas: '' },
-      sinopsis: text(doc, '.synopsis'),
+      sinopsis: text(first, '.synopsis'),
       chapters
     };
   }
@@ -80,9 +106,10 @@ export default function createSource({ fetchText, parse }) {
       .filter((el) => !el.classList.contains('single-manga-page'))
       .map((el) => abs(el.getAttribute('src')))
       .filter(Boolean);
+    const slug = (String(chapterUrl).match(/lectura\/([^/]+)\//) || [])[1];
     return {
       label: text(doc, 'h1') || '',
-      mangaUrl: '',
+      mangaUrl: slug ? abs(`/info/${slug}/`) : '',
       pages: [...new Set(pages)],
       options: [],
       prev: null,

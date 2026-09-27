@@ -1,5 +1,4 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { X } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
 
 export function Dialog({ open, onClose, title, description, children, className }) {
@@ -25,23 +24,16 @@ export function Dialog({ open, onClose, title, description, children, className 
             )}
           >
             {(title || description) && (
-              <div className="flex items-start justify-between p-6 pb-0">
-                <div>
-                  {title && <h2 className="text-lg font-semibold tracking-tight">{title}</h2>}
-                  {description && <p className="text-sm text-muted-foreground mt-1">{description}</p>}
-                </div>
-                <button
-                  onClick={onClose}
-                  className="ml-4 p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+              <div className="px-6 py-4 border-b border-border">
+                {title && <h2 className="text-lg font-semibold tracking-tight">{title}</h2>}
+                {description && <p className="text-sm text-muted-foreground mt-1">{description}</p>}
               </div>
             )}
-            <div className="p-6 pb-8 overflow-y-auto">{children}</div>
+            <div className="px-6 pb-8 overflow-y-auto [scrollbar-gutter:stable]">{children}</div>
           </motion.div>
         </div>
       )}
     </AnimatePresence>
   );
 }
+

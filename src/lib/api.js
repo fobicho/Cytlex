@@ -11,7 +11,24 @@ function noBridgeError() {
   );
 }
 
-const isBuiltin = (id) => !id || id === 'leercapitulo';
+function notInstalledError(id) {
+  return new Error(
+    id ? `La extensión «${id}» no está instalada.` : 'No hay ninguna fuente seleccionada.'
+  );
+}
+
+async function resolveSource(sourceId) {
+  if (!sourceId || !extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
+  if (extensions.isNative(sourceId)) {
+    const b = bridge();
+    if (!b) throw noBridgeError();
+    return b;
+  }
+  return extensions.source(sourceId);
+}
+
+const detailCache = new Map();
+const detailKey = (url, sourceId) => `${sourceId}|${url}`;
 
 export const api = {
   isBridgeOk() { return !!bridge(); },
@@ -23,23 +40,29 @@ export const api = {
   },
 
   async catalog(args, sourceId) {
-    if (!isBuiltin(sourceId)) return (await extensions.source(sourceId)).catalog(args);
-    const b = bridge();
-    if (!b) throw noBridgeError();
-    return b.catalog(args);
+    const src = await resolveSource(sourceId);
+    return src.catalog(args);
   },
 
   async detail(url, sourceId) {
-    if (!isBuiltin(sourceId)) return (await extensions.source(sourceId)).detail(url);
-    const b = bridge();
-    if (!b) throw noBridgeError();
-    return b.detail(url);
+    const key = detailKey(url, sourceId);
+    if (detailCache.has(key)) return detailCache.get(key);
+    const src = await resolveSource(sourceId);
+    const result = await src.detail(url);
+    detailCache.set(key, result);
+    return result;
   },
 
   async chapter(url, sourceId) {
-    if (!isBuiltin(sourceId)) return (await extensions.source(sourceId)).chapter(url);
-    const b = bridge();
-    if (!b) throw noBridgeError();
-    return b.chapter(url);
-  }
+    const src = await resolveSource(sourceId);
+    return src.chapter(url);
+  },
+
+  prefetchDetail(url, sourceId) {
+    const key = detailKey(url, sourceId);
+    if (detailCache.has(key) || !sourceId) return;
+    try { resolveSource(sourceId).then((src) => src.detail(url)).then((r) => detailCache.set(key, r)).catch(() => {}); } catch {}
+  },
+
+  clearDetailCache() { detailCache.clear(); }
 };

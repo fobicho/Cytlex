@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Globe, Keyboard, Tags, Trash2 } from 'lucide-react';
+import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2 } from 'lucide-react';
 import { settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
+import { DEFAULT_INDEX_URL } from '../lib/extensions.js';
 import { THEMES } from '../lib/themes.js';
 import { Button } from '../components/ui/button.jsx';
 import { Card } from '../components/ui/card.jsx';
@@ -50,7 +51,7 @@ const SECTIONS = [
   { id: 'biblioteca', label: 'Biblioteca', icon: LibraryIcon },
   { id: 'lector', label: 'Lector', icon: BookOpen },
   { id: 'categorias', label: 'Categorías', icon: Tags },
-  { id: 'fuente', label: 'Fuente', icon: Globe },
+  { id: 'extensiones', label: 'Extensiones', icon: Puzzle },
   { id: 'atajos', label: 'Atajos', icon: Keyboard }
 ];
 
@@ -167,14 +168,14 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         />
         <Row
           title="Zoom inicial"
-          desc={`${s.readerZoom}% de ancho de página`}
+          desc={`Ancho de página: ${Math.round(s.readerZoom / 2)}%`}
           right={
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" aria-label="Reducir" onClick={() => set({ readerZoom: Math.max(50, s.readerZoom - 10) })}>
+              <Button variant="ghost" size="icon" aria-label="Reducir" onClick={() => set({ readerZoom: Math.max(20, s.readerZoom - 10) })}>
                 <Minus className="w-4 h-4" />
               </Button>
               <span className="text-sm text-muted-foreground min-w-[42px] text-center">{s.readerZoom}%</span>
-              <Button variant="ghost" size="icon" aria-label="Ampliar" onClick={() => set({ readerZoom: Math.min(140, s.readerZoom + 10) })}>
+              <Button variant="ghost" size="icon" aria-label="Ampliar" onClick={() => set({ readerZoom: Math.min(200, s.readerZoom + 10) })}>
                 <Plus className="w-4 h-4" />
               </Button>
             </div>
@@ -220,21 +221,22 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         </div>
       </div>
     );
-  } else if (section === 'fuente') {
+  } else if (section === 'extensiones') {
     content = (
-      <div>
-        <div className="text-xs text-muted-foreground">Contenido</div>
-        <a
-          className="font-bold text-primary hover:underline"
-          href="https://leercapitulo.co"
-          target="_blank"
-          rel="noreferrer"
-        >
-          leercapitulo.co
-        </a>
-        <p className="text-sm text-muted-foreground mt-1">
-          Cytlex no incluye manga propio: todo se lee online desde esa fuente, igual que Mihon usa extensiones.
-        </p>
+      <div className="space-y-4">
+        <div>
+          <div className="text-xs text-muted-foreground mb-1.5">Repositorio de extensiones</div>
+          <Input
+            readOnly
+            value={s.extIndexUrl || DEFAULT_INDEX_URL}
+            className="bg-muted/50 border-none font-mono text-xs"
+            aria-label="Repositorio de extensiones"
+          />
+          <p className="text-sm text-muted-foreground mt-2">
+            Este repositorio aporta las fuentes a Cytlex. No se edita: las extensiones se instalan y
+            desinstalan individualmente desde <b className="text-foreground">Explorar › Extensiones</b>.
+          </p>
+        </div>
       </div>
     );
   } else {

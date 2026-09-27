@@ -6,7 +6,18 @@ contextBridge.exposeInMainWorld('cytlex', {
   detail: (url) => ipcRenderer.invoke('manga:detail', url),
   chapter: (url) => ipcRenderer.invoke('manga:chapter', url),
   httpGet: (url) => ipcRenderer.invoke('http:get', url),
+  fetchImage: (url) => ipcRenderer.invoke('image:fetch', url),
+  downloadImage: (payload) => ipcRenderer.invoke('image:download', payload),
   toggleFullscreen: () => ipcRenderer.invoke('window:toggle-fullscreen'),
   isFullscreen: () => ipcRenderer.invoke('window:is-fullscreen'),
+  minimize: () => ipcRenderer.invoke('window:minimize'),
+  toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
+  isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+  close: () => ipcRenderer.invoke('window:close'),
+  onMaximizedChange: (cb) => {
+    const handler = (_e, value) => cb(value);
+    ipcRenderer.on('window:maximized-changed', handler);
+    return () => ipcRenderer.removeListener('window:maximized-changed', handler);
+  },
   ping: () => 'cytlex-bridge-ok'
 });
