@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../../lib/utils.js';
 
-export function Dialog({ open, onClose, title, description, children, className }) {
+export function Dialog({ open, onClose, title, description, children, className, hideDivider, bodyClassName, scrollableBody = true }) {
   return (
     <AnimatePresence>
       {open && (
@@ -14,6 +14,7 @@ export function Dialog({ open, onClose, title, description, children, className 
             onClick={onClose}
           />
           <motion.div
+            onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -24,12 +25,20 @@ export function Dialog({ open, onClose, title, description, children, className 
             )}
           >
             {(title || description) && (
-              <div className="px-6 py-4 border-b border-border">
+              <div className={cn('px-6 py-4 shrink-0', !hideDivider && 'border-b border-border')}>
                 {title && <h2 className="text-lg font-semibold tracking-tight">{title}</h2>}
                 {description && <p className="text-sm text-muted-foreground mt-1">{description}</p>}
               </div>
             )}
-            <div className="px-6 pb-8 overflow-y-auto [scrollbar-gutter:stable]">{children}</div>
+            <div
+              className={cn(
+                'px-6 pb-8',
+                scrollableBody ? 'overflow-y-auto' : 'overflow-hidden',
+                bodyClassName
+              )}
+            >
+              {children}
+            </div>
           </motion.div>
         </div>
       )}

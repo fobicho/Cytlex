@@ -12,7 +12,8 @@ const defaults = {
   libraryView: 'grid', // grid | list
   sidebarCollapsed: false,
   sourceUrl: 'https://leercapitulo.co',
-  extIndexUrl: DEFAULT_INDEX_URL
+  extIndexUrl: DEFAULT_INDEX_URL,
+  anilistSynopsisLang: 'romaji'
 };
 
 function normalize(s) {
@@ -22,7 +23,10 @@ function normalize(s) {
   else if (theme === 'light') { theme = 'default'; mode = 'light'; }
   if (!THEME_IDS.includes(theme)) theme = 'default';
   if (!MODE_IDS.includes(mode)) mode = 'dark';
-  return { ...s, theme, mode };
+  // El Client ID y el Secret ya no son ajustes: el Client ID va embebido en el
+  // proceso principal y AniList usa Implicit Grant.
+  const { anilistClientSecret, anilistClientId, ...rest } = s;
+  return { ...rest, theme, mode };
 }
 
 function read() {

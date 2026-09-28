@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2 } from 'lucide-react';
+import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2 } from 'lucide-react';
 import { settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
+import { anilist } from '../lib/anilist.js';
+import { session } from '../lib/session.js';
+import { tracking } from '../lib/tracking.js';
 import { DEFAULT_INDEX_URL } from '../lib/extensions.js';
 import { THEMES } from '../lib/themes.js';
 import { Button } from '../components/ui/button.jsx';
@@ -9,14 +12,20 @@ import { Card } from '../components/ui/card.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { cn } from '../lib/utils.js';
 
-function Row({ title, desc, right }) {
+function Row({ title, desc, right, first, last }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-3.5 border-b border-border last:border-0">
-      <div className="min-w-0">
-        <div className="text-sm font-medium">{title}</div>
-        {desc && <div className="text-xs text-muted-foreground mt-0.5">{desc}</div>}
+    <div
+      className={cn(
+        'flex items-center justify-between gap-4',
+        first ? 'pt-0 pb-4' : last ? 'pt-4 pb-0' : 'py-4',
+        !last && 'border-b border-border'
+      )}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium leading-tight">{title}</div>
+        {desc && <div className="text-xs text-muted-foreground mt-1 leading-snug">{desc}</div>}
       </div>
-      <div className="shrink-0">{right}</div>
+      {right && <div className="shrink-0 flex items-center">{right}</div>}
     </div>
   );
 }
@@ -52,6 +61,7 @@ const SECTIONS = [
   { id: 'lector', label: 'Lector', icon: BookOpen },
   { id: 'categorias', label: 'Categorías', icon: Tags },
   { id: 'extensiones', label: 'Extensiones', icon: Puzzle },
+  { id: 'seguimiento', label: 'Seguimiento', icon: Link2 },
   { id: 'atajos', label: 'Atajos', icon: Keyboard }
 ];
 
@@ -66,8 +76,36 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   const [section, setSection] = useState('apariencia');
   const [cats, setCats] = useState(() => lib.cats());
   const [newCat, setNewCat] = useState('');
+  const [linkedCount, setLinkedCount] = useState(() => tracking.linkedCount());
+  const [authState, setAuthState] = useState({ connected: false });
+  const [authViewer, setAuthViewer] = useState(null);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authErr, setAuthErr] = useState('');
 
   useEffect(() => settings.subscribe(setS), []);
+  useEffect(() => tracking.subscribe(() => setLinkedCount(tracking.linkedCount())), []);
+  useEffect(() => {
+    (async () => {
+      const st = await session.status();
+      setAuthState(st);
+      if (st.connected) setAuthViewer(await session.viewer());
+    })();
+  }, []);
+
+  const connect = async () => {
+    setAuthBusy(true);
+    setAuthErr('');
+    try {
+      const r = await session.login();
+      if (!r?.cancelled) {
+        setAuthState({ connected: true });
+        setAuthViewer(await session.viewer());
+      }
+    } catch (e) {
+      setAuthErr(String(e?.message || e));
+    }
+    setAuthBusy(false);
+  };
 
   const set = (patch) => setS(settings.set(patch));
 
@@ -83,13 +121,12 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
     setNewCat('');
   };
 
-  const active = SECTIONS.find((x) => x.id === section);
-
   let content;
   if (section === 'apariencia') {
     content = (
-      <div className="space-y-8">
+      <div>
         <Row
+          first
           title="Modo"
           desc="Claro u oscuro"
           right={
@@ -100,7 +137,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
             />
           }
         />
-        <div>
+        <div className="pt-6">
           <h3 className="text-sm font-medium mb-3">Tema</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             {THEMES.map((t) => {
@@ -128,6 +165,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           </div>
         </div>
         <Row
+          last
           title="Pantalla completa"
           desc="Oculta los bordes de la ventana (F11)"
           right={
@@ -141,6 +179,8 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   } else if (section === 'biblioteca') {
     content = (
       <Row
+        first
+        last
         title="Vista"
         desc="Cuadrícula de portadas o lista compacta"
         right={
@@ -156,6 +196,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
     content = (
       <div>
         <Row
+          first
           title="Modo por defecto"
           desc="Vertical continuo o paginado"
           right={
@@ -167,6 +208,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           }
         />
         <Row
+          last
           title="Zoom inicial"
           desc={`Ancho de página: ${Math.round(s.readerZoom / 2)}%`}
           right={
@@ -186,8 +228,15 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   } else if (section === 'categorias') {
     content = (
       <div className="flex flex-col">
-        {cats.map((c) => (
-          <div key={c.id} className="flex items-center gap-2 py-2 border-b border-border last:border-0">
+        {cats.map((c, i) => (
+          <div
+            key={c.id}
+            className={cn(
+              'flex items-center gap-2 border-b border-border',
+              i === 0 ? 'pt-0 pb-4' : 'py-4',
+              i === cats.length - 1 && 'border-0 pb-0'
+            )}
+          >
             <Input
               value={c.name}
               onChange={(e) => renameLocal(c.id, e.target.value)}
@@ -206,7 +255,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
             </Button>
           </div>
         ))}
-        <div className="flex items-center gap-2 pt-3">
+        <div className="flex items-center gap-2 pt-4">
           <Input
             placeholder="Nueva categoría…"
             value={newCat}
@@ -223,28 +272,108 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
     );
   } else if (section === 'extensiones') {
     content = (
-      <div className="space-y-4">
-        <div>
-          <div className="text-xs text-muted-foreground mb-1.5">Repositorio de extensiones</div>
-          <Input
-            readOnly
-            value={s.extIndexUrl || DEFAULT_INDEX_URL}
-            className="bg-muted/50 border-none font-mono text-xs"
-            aria-label="Repositorio de extensiones"
-          />
-          <p className="text-sm text-muted-foreground mt-2">
-            Este repositorio aporta las fuentes a Cytlex. No se edita: las extensiones se instalan y
-            desinstalan individualmente desde <b className="text-foreground">Explorar › Extensiones</b>.
-          </p>
-        </div>
+      <div>
+        <div className="text-xs text-muted-foreground mb-1.5">Repositorio de extensiones</div>
+        <Input
+          readOnly
+          value={s.extIndexUrl || DEFAULT_INDEX_URL}
+          className="bg-muted/50 border-none font-mono text-xs"
+          aria-label="Repositorio de extensiones"
+        />
+        <p className="text-sm text-muted-foreground mt-2">
+          Este repositorio aporta las fuentes a Cytlex. No se edita: las extensiones se instalan y
+          desinstalan individualmente desde <b className="text-foreground">Explorar › Extensiones</b>.
+        </p>
+      </div>
+    );
+  } else if (section === 'seguimiento') {
+    content = (
+      <div>
+        <Row
+          first
+          title="Cuenta de AniList"
+          desc={
+            authState.connected
+              ? `Conectada${authViewer?.name ? ` como ${authViewer.name}` : ''}${
+                  authState.expiresAt
+                    ? ` · caduca el ${new Date(authState.expiresAt).toLocaleDateString('es-ES')}`
+                    : ''
+                }`
+              : authState.expired
+                ? 'La sesión anterior caducó. Vuelve a conectarte.'
+                : 'Sin conectar.'
+          }
+          right={
+            authState.connected ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={async () => {
+                  await session.logout();
+                  anilist.clearCache();
+                  setAuthState({ connected: false });
+                  setAuthViewer(null);
+                }}
+              >
+                <LogOut className="w-4 h-4 mr-2" /> Desconectar
+              </Button>
+            ) : (
+              <Button size="sm" onClick={connect} disabled={authBusy}>
+                {authBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Link2 className="w-4 h-4 mr-2" />}
+                Conectar
+              </Button>
+            )
+          }
+        />
+
+        {authErr && <p className="text-sm text-destructive py-4">{authErr}</p>}
+
+        <Row
+          title="Mangas vinculados"
+          desc={
+            linkedCount
+              ? `${linkedCount} ${linkedCount === 1 ? 'manga vinculado' : 'mangas vinculados'}`
+              : 'Sin vínculos. Vincúlalos desde la ficha de cada manga.'
+          }
+          right={
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={() => anilist.clearCache()}>
+                <RefreshCw className="w-4 h-4 mr-2" /> Refrescar caché
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => { window.location.hash = '#/seguimiento'; }}>
+                Ver mi lista
+              </Button>
+            </div>
+          }
+        />
+
+        <Row
+          last
+          title="Idioma de la sinopsis"
+          desc="AniList guarda el título original del manga"
+          right={
+            <Segmented
+              value={s.anilistSynopsisLang}
+              onChange={(v) => set({ anilistSynopsisLang: v })}
+              options={[['romaji', 'Romaji'], ['english', 'Inglés']]}
+            />
+          }
+        />
       </div>
     );
   } else {
     content = (
       <div className="flex flex-col">
-        {SHORTCUTS.map((sc) => (
-          <div key={sc.desc} className="flex items-center justify-between gap-4 py-3.5 border-b border-border last:border-0">
-            <span className="text-sm">{sc.desc}</span>
+        {SHORTCUTS.map((sc, i) => (
+          <div
+            key={sc.desc}
+            className={cn(
+              'flex items-center justify-between gap-4 border-b border-border',
+              i === 0 ? 'pt-0 pb-4' : 'py-4',
+              i === SHORTCUTS.length - 1 && 'border-0 pb-0'
+            )}
+          >
+            <span className="text-sm leading-tight">{sc.desc}</span>
             <span className="flex items-center gap-1 shrink-0">
               {sc.keys.map((k) => (
                 <Kbd key={k}>{k}</Kbd>
@@ -285,10 +414,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         </Card>
 
         <Card className="hover:shadow-sm">
-          <div className="p-6">
-            <h2 className="text-lg font-semibold mb-3">{active.label}</h2>
-            {content}
-          </div>
+          <div className="p-6">{content}</div>
         </Card>
       </div>
     </div>

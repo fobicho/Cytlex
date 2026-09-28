@@ -4,6 +4,8 @@ import { ArrowLeft, Maximize2, Minimize2, ChevronLeft, ChevronRight, Download, A
 import { api } from '../lib/api.js';
 import { settings } from '../lib/settings.js';
 import { progress } from '../lib/progress.js';
+import { tracking } from '../lib/tracking.js';
+import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
 import { Button } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
@@ -42,6 +44,14 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     if (src && img.naturalWidth) sizesRef.current.set(src, { w: img.naturalWidth, h: img.naturalHeight });
   };
 
+  // El contenedor desplazable es <main>, no la ventana. Sin esto, cambiar de
+  // capítulo deja el scroll donde estaba el anterior y abre por el final.
+  const scrollToTop = () => {
+    const main = document.querySelector('main');
+    if (main) main.scrollTop = 0;
+    window.scrollTo(0, 0);
+  };
+
   useEffect(() => {
     if (!chapterUrl) return;
     setWheelZoom(0);
@@ -61,39 +71,53 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         }
       })
       .catch((e) => setErr(String(e)));
-    window.scrollTo(0, 0);
+    scrollToTop();
   }, [chapterUrl, sourceId]);
 
   const [lastSeen, setLastSeen] = useState(0);
   const savedRef = useRef(chapterUrl);
   useEffect(() => {
     if (!ch || !ch.pages?.length) return undefined;
-    if (savedRef.current !== chapterUrl) {
+    const changed = savedRef.current !== chapterUrl;
+    if (changed) {
       savedRef.current = chapterUrl;
       setLastSeen(0);
     }
     let raf = 0;
+    // Cambiar de capítulo desde el lector deja el contenedor desplazado donde
+    // estaba el anterior. Esa medición no es real, así que se espera a que el
+    // scroll se asiente antes de empezar a guardar. Al abrir el capítulo por
+    // primera vez no hay desplazamiento heredado y se guarda de inmediato.
+    let settled = !changed;
     const onScroll = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         if (mode !== 'vertical') return;
         let best = 0;
         let bestTop = -Infinity;
+        // La línea de lectura es el borde superior del <main>, no el de la
+        // ventana: así cuenta la página aunque la barra de controles esté.
+        const mainEl = document.querySelector('main');
+        const line = mainEl ? mainEl.getBoundingClientRect().top : 0;
         for (let i = 0; i < ch.pages.length; i++) {
           const el = document.getElementById(`pg-${i}`);
           // Ignora paneles sin cargar (alto 0) para no atribuirlos como leídos.
           if (!el || el.getBoundingClientRect().height <= 5) continue;
           const top = el.getBoundingClientRect().top;
-          if (top <= 90 && top > bestTop) { bestTop = top; best = i; }
+          if (top <= line + 24 && top > bestTop) { bestTop = top; best = i; }
         }
+        if (!settled) return;
         setLastSeen(best);
         progress.savePage(chapterUrl, sourceId, best, ch.pages.length);
       });
     };
+    const release = () => { settled = true; };
+    const timer = setTimeout(release, 300);
     // capture: el contenedor de scroll es <main>, no window.
     window.addEventListener('scroll', onScroll, { passive: true, capture: true });
     onScroll();
     return () => {
+      clearTimeout(timer);
       cancelAnimationFrame(raf);
       window.removeEventListener('scroll', onScroll, { capture: true });
     };
@@ -113,8 +137,14 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     if (done) {
       progress.markRead(chapterUrl, sourceId, total);
       setIsRead(true);
+      const manga = tracking.get(mangaUrl, sourceId);
+      if (manga) {
+        api.detail(mangaUrl, sourceId).then((d) => {
+          if (d?.chapters) sync.pushChapter({ mangaUrl, sourceId, chapters: d.chapters });
+        }).catch(() => {});
+      }
     }
-  }, [lastSeen, page, mode, ch, chapterUrl, sourceId, isRead]);
+  }, [lastSeen, page, mode, ch, chapterUrl, sourceId, isRead, mangaUrl]);
 
   useEffect(() => {
     if (!ch || pendingScrollRef.current == null) return undefined;
@@ -190,7 +220,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     if (mode === 'vertical') {
       requestAnimationFrame(() => document.getElementById(`pg-${p}`)?.scrollIntoView({ block: 'start' }));
     } else {
-      window.scrollTo(0, 0);
+      scrollToTop();
     }
   };
 

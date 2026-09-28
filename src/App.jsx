@@ -8,6 +8,7 @@ import Results from './pages/Results.jsx';
 import Detail from './pages/Detail.jsx';
 import Reader from './pages/Reader.jsx';
 import Settings from './pages/Settings.jsx';
+import Tracking from './pages/Tracking.jsx';
 import { settings } from './lib/settings.js';
 import { appWindow } from './lib/appWindow.js';
 
@@ -68,6 +69,7 @@ export default function App() {
                 path="/ajustes"
                 element={<Settings isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} />}
               />
+              <Route path="/seguimiento" element={<Tracking />} />
               <Route path="/manga/*" element={<Detail />} />
               <Route path="/leer/*" element={<Reader isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} />} />
             </Routes>

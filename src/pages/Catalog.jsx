@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, BookOpen, Filter, Loader2, Puzzle, ChevronRight } from 'lucide-react';
+import { Search, BookOpen, Loader2, Puzzle, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { extensions } from '../lib/extensions.js';
@@ -12,8 +12,6 @@ import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
-
-const GENRES = ['action', 'adventure', 'comedy', 'drama', 'fantasy', 'romance', 'shounen', 'seinen', 'isekai', 'slice-of-life'];
 
 const TABS = [
   { id: 'mangas', label: 'Mangas' },
@@ -98,9 +96,7 @@ export default function Catalog() {
   const [tab, setTab] = useState(() => (new URLSearchParams(loc.search).get('tab') === 'extensiones' ? 'extensiones' : 'mangas'));
   const [sources, setSources] = useState(() => extensions.installed());
   const [q, setQ] = useState(() => lastSearch.q);
-  const [genre, setGenre] = useState(() => lastSearch.genre);
   const [results, setResults] = useState(() => lastSearch.results);
-  const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
     setSources(extensions.installed());
@@ -115,17 +111,17 @@ export default function Catalog() {
     setResults(lastSearch.results);
   };
 
-  const runSearch = (query = q, g = genre) => {
+  const runSearch = (query = q) => {
     const list = extensions.installed();
     if (!list.length) return;
     lastSearch.q = query;
-    lastSearch.genre = g;
+    lastSearch.genre = '';
     lastSearch.results = list.map((s) => ({ id: s.manifest.id, manifest: s.manifest, status: 'loading', items: [] }));
     setResults(lastSearch.results);
 
     list.forEach((s) => {
       api
-        .catalog({ q: query, genre: g, page: 1 }, s.manifest.id)
+        .catalog({ q: query, genre: '', page: 1 }, s.manifest.id)
         .then(async (r) => {
           const items = r.items || [];
           const okFlags = await Promise.all(items.map((m) => testCover(m.cover)));
@@ -144,7 +140,7 @@ export default function Catalog() {
 
   useEffect(() => {
     if (lastSearch.results && lastSearch.results.some((r) => r.status === 'loading')) {
-      runSearch(lastSearch.q, lastSearch.genre);
+      runSearch(lastSearch.q);
     }
     // eslint-disable-next-line
   }, []);
@@ -158,7 +154,7 @@ export default function Catalog() {
     const nq = new URLSearchParams(loc.search).get('q') || '';
     if (nq) {
       setQ(nq);
-      runSearch(nq, '');
+      runSearch(nq);
     }
     // eslint-disable-next-line
   }, [loc.search]);
@@ -196,12 +192,15 @@ export default function Catalog() {
                 placeholder="Buscar en todas las extensiones..."
                 value={q}
                 onChange={(e) => { setQ(e.target.value); lastSearch.q = e.target.value; }}
-                onKeyDown={(e) => e.key === 'Enter' && runSearch()}
+                onKeyDown={(e) => e.key === 'Enter' && q.trim() && runSearch()}
               />
             </div>
-            <Button onClick={() => runSearch()}>Buscar</Button>
-            <Button variant="outline" onClick={() => setShowFilters((v) => !v)} aria-expanded={showFilters}>
-              <Filter className="w-4 h-4 mr-2" /> Filtros
+            <Button
+              onClick={() => runSearch()}
+              disabled={!q.trim()}
+              className={cn('disabled:opacity-40')}
+            >
+              Buscar
             </Button>
           </div>
         )}
@@ -214,30 +213,6 @@ export default function Catalog() {
           </div>
         ) : (
           <>
-            {showFilters && (
-              <div className="flex gap-2 overflow-x-auto no-scrollbar mb-6" role="tablist" aria-label="Géneros">
-                <Button
-                  size="sm"
-                  variant={genre === '' ? 'default' : 'outline'}
-                  className="shrink-0 rounded-xl"
-                  onClick={() => { setGenre(''); runSearch(q, ''); }}
-                >
-                  Todos
-                </Button>
-                {GENRES.map((g) => (
-                  <Button
-                    key={g}
-                    size="sm"
-                    variant={genre === g ? 'default' : 'outline'}
-                    className="shrink-0 rounded-xl"
-                    onClick={() => { setGenre(g); runSearch(q, g); }}
-                  >
-                    {g}
-                  </Button>
-                ))}
-              </div>
-            )}
-
             {!results && (
               <div className="flex-1 grid place-items-center text-center text-muted-foreground">
                 <div>

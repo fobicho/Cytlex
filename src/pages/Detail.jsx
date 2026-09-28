@@ -1,17 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, Star, ChevronDown, Search, SlidersHorizontal, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Loader2, Link2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { extensions } from '../lib/extensions.js';
 import { makeCoverThumb } from '../lib/covers.js';
+import { chapterOrder, detailScroll } from '../lib/searchState.js';
 import { cn } from '../lib/utils.js';
 import { Button } from '../components/ui/button.jsx';
 import { Badge } from '../components/ui/badge.jsx';
-import { Input } from '../components/ui/input.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { Dialog } from '../components/ui/dialog.jsx';
+import AniListPanel from '../components/AniListPanel.jsx';
+import { tracking } from '../lib/tracking.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -83,9 +85,7 @@ export default function Detail() {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [fav, setFav] = useState(false);
-  const [filter, setFilter] = useState('');
-  const [asc, setAsc] = useState(false);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [asc, setAsc] = useState(() => chapterOrder.get(mangaUrl));
   const [dup, setDup] = useState(null);
   const [catPick, setCatPick] = useState(null);
   const coverRef = useRef(null);
@@ -98,8 +98,26 @@ export default function Detail() {
   const [overflow, setOverflow] = useState(false);
   const [progressTick, setProgressTick] = useState(0);
   const [markBefore, setMarkBefore] = useState(null);
+  const [aniListOpen, setAniListOpen] = useState(false);
+  const [aniLinked, setAniLinked] = useState(() => !!tracking.get(mangaUrl, sourceId));
 
   useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
+
+  // Recuerda la posición exacta del scroll de la lista de capítulos.
+  useEffect(() => {
+    if (!d?.chapters?.length) return undefined;
+    const main = document.querySelector('main');
+    if (!main) return undefined;
+    const saved = detailScroll.get(mangaUrl);
+    if (saved > 0) main.scrollTop = saved;
+    const save = () => detailScroll.set(mangaUrl, main.scrollTop);
+    main.addEventListener('scroll', save, { passive: true });
+    return () => main.removeEventListener('scroll', save);
+  }, [d, mangaUrl]);
+  useEffect(
+    () => tracking.subscribe(() => setAniLinked(!!tracking.get(mangaUrl, sourceId))),
+    [mangaUrl, sourceId]
+  );
 
   useEffect(() => {
     if (!mangaUrl) return;
@@ -109,7 +127,9 @@ export default function Detail() {
     setReady(false);
     setAnimate(false);
     setAvailH(240);
+    setAsc(chapterOrder.get(mangaUrl));
     setFav(!!lib.fav(mangaUrl, sourceId));
+    setAniLinked(!!tracking.get(mangaUrl, sourceId));
     api
       .detail(mangaUrl, sourceId)
       .then((r) => {
@@ -229,7 +249,7 @@ export default function Detail() {
       </div>
     );
 
-  let chapters = d.chapters.filter((c) => c.title.toLowerCase().includes(filter.toLowerCase()));
+  let chapters = d.chapters;
   if (asc) chapters = [...chapters].reverse();
   const firstChapter = d.chapters[0]?.url;
 
@@ -323,27 +343,31 @@ export default function Detail() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3 mt-6 border-t border-border pt-5">
-        {continueChapter && (
+        {continueChapter ? (
           <Button
-            variant="secondary"
+            className="shadow-lg shadow-primary/30"
             onClick={() => {
               window.location.hash = `#/leer?u=${encodeURIComponent(continueChapter.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
             }}
           >
             <BookOpen className="w-4 h-4 mr-2" />
-            Continuar {continueChapter.cap?.read ? '' : `· ${continueChapter.cap.page + 1}/${continueChapter.cap.total || '?'}`}
+            Continuar {continueChapter.title}
+            <span className="opacity-70 ml-2">
+              · {continueChapter.cap.page + 1}/{continueChapter.cap.total || '?'}
+            </span>
           </Button>
-        )}
-        {firstChapter && (
-          <Button
-            className="shadow-lg shadow-primary/30"
-            onClick={() => {
-              window.location.hash = `#/leer?u=${encodeURIComponent(firstChapter)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
-            }}
-          >
-            <Play className="w-4 h-4 mr-2" />
-            Leer {d.chapters[0]?.title || ''}
-          </Button>
+        ) : (
+          firstChapter && (
+            <Button
+              className="shadow-lg shadow-primary/30"
+              onClick={() => {
+                window.location.hash = `#/leer?u=${encodeURIComponent(firstChapter)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
+              }}
+            >
+              <Play className="w-4 h-4 mr-2" />
+              Leer {d.chapters[0]?.title || ''}
+            </Button>
+          )
         )}
         <Button
           variant="secondary"
@@ -359,63 +383,45 @@ export default function Detail() {
           <Star className={`w-4 h-4 mr-2 ${fav ? 'fill-current text-amber-400' : ''}`} />
           {fav ? 'En biblioteca' : 'Añadir'}
         </Button>
+        <Button variant="secondary" onClick={() => setAniListOpen(true)} title="Vincular con AniList">
+          <Link2 className={`w-4 h-4 mr-2 ${aniLinked ? 'text-primary' : ''}`} />
+          Seguimiento
+        </Button>
       </div>
 
-      <div className="mt-6 border-t border-border pt-5">
-        <div
-          className={cn(
-            'mb-4 flex items-center overflow-hidden rounded-xl border border-border bg-card',
-            filtersOpen ? 'w-full' : 'w-fit'
-          )}
-        >
-        <button
-          type="button"
-          onClick={() => setFiltersOpen((v) => !v)}
-          aria-expanded={filtersOpen}
-          className="flex h-11 shrink-0 items-center gap-2 px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-        >
-          <SlidersHorizontal className="w-4 h-4" />
-          Filtros
-          <ChevronDown className={cn('w-4 h-4 text-muted-foreground', filtersOpen && 'rotate-180')} />
-        </button>
+      <AniListPanel
+        mangaUrl={mangaUrl}
+        sourceId={sourceId}
+        title={d.title}
+        open={aniListOpen}
+        onClose={() => setAniListOpen(false)}
+      />
 
-        {filtersOpen && (
-          <div className="flex min-w-0 flex-1 items-center gap-2 pr-2">
-            <div className="relative min-w-0 flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                autoFocus
-                className="pl-9 bg-muted/50 border-none"
-                placeholder="Filtrar por número… Ej. 12"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
+      <div className="mt-6 border-t border-border pt-3">
+        <div className="mb-2">
+          <button
+            type="button"
+            onClick={() => setAsc((v) => { chapterOrder.set(mangaUrl, !v); return !v; })}
+            title={asc ? 'Orden: más antiguos primero' : 'Orden: más recientes primero'}
+            aria-label={asc ? 'Cambiar a más recientes primero' : 'Cambiar a más antiguos primero'}
+            className="grid place-items-center w-8 h-8 rounded-lg text-foreground"
+          >
+            <span className="relative grid place-items-center w-4 h-4">
+              <ArrowUp
+                className={cn(
+                  'col-start-1 row-start-1 w-4 h-4 transition-all duration-200',
+                  asc ? 'opacity-0 -rotate-90' : 'opacity-100 rotate-0'
+                )}
               />
-            </div>
-            <button
-              type="button"
-              onClick={() => setAsc((v) => !v)}
-              title={asc ? 'Orden: más antiguos primero' : 'Orden: más recientes primero'}
-              aria-label={asc ? 'Cambiar a más recientes primero' : 'Cambiar a más antiguos primero'}
-              className="grid place-items-center w-8 h-8 shrink-0 rounded-full text-foreground transition-colors hover:bg-accent"
-            >
-              <span className="relative grid place-items-center w-4 h-4">
-                <ArrowUp
-                  className={cn(
-                    'col-start-1 row-start-1 w-4 h-4 transition-all duration-200',
-                    asc ? 'opacity-0 -rotate-90' : 'opacity-100 rotate-0'
-                  )}
-                />
-                <ArrowDown
-                  className={cn(
-                    'col-start-1 row-start-1 w-4 h-4 transition-all duration-200',
-                    asc ? 'opacity-100 rotate-0' : 'opacity-0 rotate-90'
-                  )}
-                />
-              </span>
-            </button>
-          </div>
-        )}
-      </div>
+              <ArrowDown
+                className={cn(
+                  'col-start-1 row-start-1 w-4 h-4 transition-all duration-200',
+                  asc ? 'opacity-100 rotate-0' : 'opacity-0 rotate-90'
+                )}
+              />
+            </span>
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col gap-2">
@@ -447,7 +453,7 @@ export default function Detail() {
                   tabIndex={0}
                   title="Marcar como no leído"
                   aria-label={`Marcar ${c.title} como no leído`}
-                  className="shrink-0 flex items-center gap-1 text-xs text-primary"
+                  className="shrink-0 flex items-center gap-1 text-xs text-primary rounded-md hover:bg-accent"
                   onClick={(e) => { e.preventDefault(); progress.markUnread(c.url, sourceId); setProgressTick((t) => t + 1); }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markUnread(c.url, sourceId); setProgressTick((t) => t + 1); }
@@ -463,7 +469,7 @@ export default function Detail() {
                     tabIndex={0}
                     title="Marcar como leído"
                     aria-label={`Marcar ${c.title} como leído`}
-                    className="shrink-0 flex items-center gap-1 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                    className="shrink-0 flex items-center gap-1 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded-md hover:bg-accent hover:text-foreground transition-opacity"
                     onClick={(e) => { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0); setProgressTick((t) => t + 1); }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0); setProgressTick((t) => t + 1); }
@@ -480,7 +486,7 @@ export default function Detail() {
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMarkBefore({ chapter: c, index: i }); }}
                   >
                     <CheckCheck className="w-4 h-4" />
-                    <ChevronDown className="w-3.5 h-3.5 -ml-1" />
+                    <ChevronDown className="w-3.5 h-3.5 ml-1.5" />
                   </button>
                 </>
               )}
@@ -573,34 +579,34 @@ export default function Detail() {
         open={!!markBefore}
         onClose={() => setMarkBefore(null)}
         title="Marcar anteriores como leídos"
-        description="Se marcarán como leídos los capítulos debajo de este en la lista. El capítulo actual no se marca."
+        hideDivider
+        bodyClassName="pb-4"
+        description={
+          markBefore
+            ? `Se marcarán como leídos todos los capítulos anteriores al ${markBefore.chapter.title}, ¿desea continuar?`
+            : ''
+        }
       >
         {markBefore && (() => {
           const below = chapters.slice(markBefore.index + 1);
           const pending = below.filter((x) => !progress.get(x.url, sourceId)?.read);
           return (
-            <>
-              <div className="py-2 text-sm">
-                Se marcarán <span className="font-semibold text-foreground">{pending.length}</span> capítulos
-                (anteriores a <span className="font-semibold text-foreground">{markBefore.chapter.title}</span>).
-              </div>
-              <div className="flex justify-end gap-2 pt-4">
-                <Button variant="secondary" onClick={() => setMarkBefore(null)}>
-                  Cancelar
-                </Button>
-                <Button
-                  disabled={!pending.length}
-                  onClick={() => {
-                    setMarkBefore(null);
-                    if (!pending.length) return;
-                    progress.markMany(pending.map((x) => x.url), sourceId);
-                    setProgressTick((t) => t + 1);
-                  }}
-                >
-                  Marcar {pending.length} capítulos
-                </Button>
-              </div>
-            </>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="secondary" onClick={() => setMarkBefore(null)}>
+                Cancelar
+              </Button>
+              <Button
+                disabled={!pending.length}
+                onClick={() => {
+                  setMarkBefore(null);
+                  if (!pending.length) return;
+                  progress.markMany(pending.map((x) => x.url), sourceId);
+                  setProgressTick((t) => t + 1);
+                }}
+              >
+                Marcar
+              </Button>
+            </div>
           );
         })()}
       </Dialog>

@@ -3,6 +3,10 @@ import path from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { fetchHome, fetchCatalog, fetchDetail, fetchChapter } from './scraper.js';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const auth = require('./auth.cjs');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
@@ -60,6 +64,7 @@ function hookImageHeaders() {
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   hookImageHeaders();
+  auth.register();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -83,6 +88,22 @@ ipcMain.handle('http:get', async (_e, url) => {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} al pedir ${url}`);
   return await res.text();
+});
+
+ipcMain.handle('http:post', async (_e, payload = {}) => {
+  const { url, body, headers } = payload;
+  if (!url) throw new Error('Falta la URL de la petición POST');
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
+      ...headers
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} al pedir ${url}`);
+  return await res.json();
 });
 
 ipcMain.handle('image:fetch', async (_e, url) => {
