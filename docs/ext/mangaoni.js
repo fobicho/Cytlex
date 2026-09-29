@@ -33,22 +33,50 @@ export default function createSource({ fetchText, parse, head }) {
     };
   }
 
-  // /directorio es el unico listado en HTML plano y sus filtros no incluyen el
-  // titulo, asi que ignora q. /buscar?s= si busca pero monta con JavaScript.
-  async function catalog({ q = '', page = 1 } = {}) {
-    const doc = parse(await fetchText(`${BASE}/directorio?page=${page}`));
+  const LAST_PAGE = 339;
 
+  async function listing(p) {
+    const doc = parse(await fetchText(`${BASE}/directorio?filtro=nombre&orden=asc&p=${p}`));
+    return [...doc.querySelectorAll('div._135yj')]
+      .map((el) => mapCard(el))
+      .filter((x) => x && x.title);
+  }
+
+  async function search(term) {
+    const needle = term.toLowerCase();
+
+    let lo = 1;
+    let hi = LAST_PAGE;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      const items = await listing(mid);
+      if (!items.length) { hi = mid - 1; continue; }
+      if (items[0].title.toLowerCase() > needle) hi = mid - 1;
+      else lo = mid + 1;
+    }
+
+    const found = new Map();
+    for (let p = Math.max(1, lo - 1); p <= lo + 1 && p <= LAST_PAGE; p++) {
+      for (const it of await listing(p)) {
+        if (it.title.toLowerCase().includes(needle)) found.set(it.url, it);
+      }
+    }
+    return [...found.values()];
+  }
+
+  async function catalog({ q = '', page = 1 } = {}) {
+    if (q) return { items: await search(q), totalPages: 1, totalText: '' };
+
+    const doc = parse(await fetchText(`${BASE}/directorio?p=${page}`));
     const seen = new Set();
     const items = [];
     for (const el of doc.querySelectorAll('div._135yj')) {
       const item = mapCard(el);
       if (!item || !item.title || seen.has(item.url)) continue;
       seen.add(item.url);
-      if (q && !item.title.toLowerCase().includes(q.toLowerCase())) continue;
       items.push(item);
     }
-
-    return { items, totalPages: page + 1, totalText: '' };
+    return { items, totalPages: LAST_PAGE, totalText: '' };
   }
 
   async function detail(mangaUrl) {
