@@ -339,7 +339,7 @@ function SearchDialog({ open, onClose, mangaTitle, onPick }) {
       open={open}
       onClose={onClose}
       className="max-w-2xl h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] flex flex-col"
-      bodyClassName="p-4 flex-1 flex flex-col min-h-0"
+      bodyClassName="p-4 flex-1 min-h-0 flex flex-col"
       scrollableBody={false}
     >
       <form
@@ -369,58 +369,60 @@ function SearchDialog({ open, onClose, mangaTitle, onPick }) {
         </Button>
       </form>
 
-      <div ref={listRef} className="pt-3 flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1">
-        {err && (
-          <p className="flex items-center gap-2 text-sm text-destructive">
-            <AlertTriangle className="w-4 h-4 shrink-0" />
-            {err}
-          </p>
-        )}
-        {!err && busy && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="w-4 h-4 animate-spin" /> Buscando en AniList…
-          </p>
-        )}
-        {!err && !busy && results?.length === 0 && (
-          <p className="text-sm text-muted-foreground">Sin resultados para «{term}».</p>
-        )}
-        {results?.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            onClick={() => onPick(m)}
-            className="flex w-full items-start gap-3 rounded-xl border border-border bg-card p-2.5 mb-2 text-left transition-colors hover:bg-accent"
-          >
-            {m.cover ? (
-              <img src={m.cover} alt="" referrerPolicy="no-referrer" className="w-12 h-16 object-cover rounded-lg bg-black shrink-0" />
-            ) : (
-              <div className="w-12 h-16 rounded-lg bg-secondary shrink-0" />
-            )}
-            <div className="min-w-0 flex-1">
-              <div className="font-semibold text-sm truncate">{m.title}</div>
-              {m.synonyms.length > 0 && (
-                <div className="text-xs text-muted-foreground truncate">{m.synonyms.slice(0, 2).join(' · ')}</div>
+      <div className="pt-3 flex-1 min-h-0 flex flex-col">
+        <div ref={listRef} className="max-h-full min-h-0 overflow-y-auto overscroll-contain pr-2">
+          {err && (
+            <p className="flex items-center gap-2 text-sm text-destructive">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              {err}
+            </p>
+          )}
+          {!err && busy && (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="w-4 h-4 animate-spin" /> Buscando en AniList…
+            </p>
+          )}
+          {!err && !busy && results?.length === 0 && (
+            <p className="text-sm text-muted-foreground">Sin resultados para «{term}».</p>
+          )}
+          {results?.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => onPick(m)}
+              className="flex w-full items-start gap-3 rounded-xl border border-border bg-card p-2.5 mb-2 text-left transition-colors hover:bg-accent"
+            >
+              {m.cover ? (
+                <img src={m.cover} alt="" referrerPolicy="no-referrer" className="w-12 h-16 object-cover rounded-lg bg-black shrink-0" />
+              ) : (
+                <div className="w-12 h-16 rounded-lg bg-secondary shrink-0" />
               )}
-              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                {m.status && <Badge>{STATUS_ES[m.status] || m.status}</Badge>}
-                {m.format && <Badge variant="outline">{FORMAT_ES[m.format] || m.format}</Badge>}
-                {m.startDate && <span className="text-xs text-muted-foreground">{m.startDate}</span>}
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-sm truncate">{m.title}</div>
+                {m.synonyms.length > 0 && (
+                  <div className="text-xs text-muted-foreground truncate">{m.synonyms.slice(0, 2).join(' · ')}</div>
+                )}
+                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                  {m.status && <Badge>{STATUS_ES[m.status] || m.status}</Badge>}
+                  {m.format && <Badge variant="outline">{FORMAT_ES[m.format] || m.format}</Badge>}
+                  {m.startDate && <span className="text-xs text-muted-foreground">{m.startDate}</span>}
+                </div>
               </div>
-            </div>
-            <div className="shrink-0 text-right">
-              {m.averageScore != null && (
-                <div className="text-sm font-semibold" title="Puntuación media de los usuarios en AniList, de 0 a 100">
-                  {m.averageScore}
-                </div>
-              )}
-              {m.popularity != null && (
-                <div className="text-[11px] text-muted-foreground" title="Personas con esta obra en su lista">
-                  {compact(m.popularity)}
-                </div>
-              )}
-            </div>
-          </button>
-        ))}
+              <div className="shrink-0 text-right">
+                {m.averageScore != null && (
+                  <div className="text-sm font-semibold" title="Puntuación media de los usuarios en AniList, de 0 a 100">
+                    {m.averageScore}
+                  </div>
+                )}
+                {m.popularity != null && (
+                  <div className="text-[11px] text-muted-foreground" title="Personas con esta obra en su lista">
+                    {compact(m.popularity)}
+                  </div>
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
       </div>
     </Dialog>
   );

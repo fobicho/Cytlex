@@ -614,6 +614,16 @@ export default function Detail() {
                 </span>
               ) : (
                 <>
+                  <button
+                    type="button"
+                    title="Marcar todos los anteriores como leídos"
+                    aria-label={`Marcar anteriores a ${c.title} como leídos`}
+                    className="shrink-0 flex items-center rounded-md text-muted-foreground/70 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-accent hover:text-foreground transition-opacity"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMarkBefore({ chapter: c, index: i }); }}
+                  >
+                    <CheckCheck className="w-4 h-4" />
+                    <ChevronDown className="w-3.5 h-3.5 ml-1.5" />
+                  </button>
                   <span
                     role="button"
                     tabIndex={0}
@@ -628,16 +638,6 @@ export default function Detail() {
                     <Check className="w-4 h-4" />
                     Leído
                   </span>
-                  <button
-                    type="button"
-                    title="Marcar todos los anteriores como leídos"
-                    aria-label={`Marcar anteriores a ${c.title} como leídos`}
-                    className="shrink-0 flex items-center rounded-md text-muted-foreground/70 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-accent hover:text-foreground transition-opacity"
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMarkBefore({ chapter: c, index: i }); }}
-                  >
-                    <CheckCheck className="w-4 h-4" />
-                    <ChevronDown className="w-3.5 h-3.5 ml-1.5" />
-                  </button>
                 </>
               )}
             </a>

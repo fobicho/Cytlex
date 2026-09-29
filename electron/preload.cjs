@@ -7,6 +7,17 @@ contextBridge.exposeInMainWorld('cytlex', {
   chapter: (url) => ipcRenderer.invoke('manga:chapter', url),
   httpGet: (url) => ipcRenderer.invoke('http:get', url),
   httpHead: (url) => ipcRenderer.invoke('http:head', url),
+  notify: (payload) => ipcRenderer.invoke('notify:show', payload),
+  notifySupported: () => ipcRenderer.invoke('notify:supported'),
+  setBackgroundCheck: (on) => ipcRenderer.invoke('notify:background', on),
+  confirmTask: () => ipcRenderer.invoke('notify:confirm'),
+  onNotifyClick: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on('notify:click', handler);
+    return () => ipcRenderer.removeListener('notify:click', handler);
+  },
+  isBackground: () => ipcRenderer.invoke('app:background'),
+  exitBackground: () => ipcRenderer.invoke('app:exit'),
   httpPost: (payload) => ipcRenderer.invoke('http:post', payload),
   authLogin: (creds) => ipcRenderer.invoke('auth:login', creds),
   authLogout: () => ipcRenderer.invoke('auth:logout'),

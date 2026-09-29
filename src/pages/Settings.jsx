@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2 } from 'lucide-react';
+import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell } from 'lucide-react';
 import { settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
 import { anilist } from '../lib/anilist.js';
@@ -9,16 +9,41 @@ import { DEFAULT_INDEX_URL } from '../lib/extensions.js';
 import { THEMES } from '../lib/themes.js';
 import { Button } from '../components/ui/button.jsx';
 import { Card } from '../components/ui/card.jsx';
+import { Dropdown } from '../components/ui/dropdown.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { cn } from '../lib/utils.js';
 
-function Row({ title, desc, right, first, last }) {
+function Switch({ on, onChange, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={!!on}
+      aria-label={label}
+      onClick={() => onChange(!on)}
+      className={cn(
+        'relative h-6 w-11 rounded-full transition-colors shrink-0',
+        on ? 'bg-primary' : 'bg-muted'
+      )}
+    >
+      <span
+        className={cn(
+          'absolute top-0.5 h-5 w-5 rounded-full bg-background shadow transition-all',
+          on ? 'left-[22px]' : 'left-0.5'
+        )}
+      />
+    </button>
+  );
+}
+
+function Row({ title, desc, right, first, last, className }) {
   return (
     <div
       className={cn(
         'flex items-center justify-between gap-4',
         first ? 'pt-0 pb-4' : last ? 'pt-4 pb-0' : 'py-4',
-        !last && 'border-b border-border'
+        !last && 'border-b border-border',
+        className
       )}
     >
       <div className="min-w-0 flex-1">
@@ -61,6 +86,7 @@ const SECTIONS = [
   { id: 'lector', label: 'Lector', icon: BookOpen },
   { id: 'categorias', label: 'Categorías', icon: Tags },
   { id: 'extensiones', label: 'Extensiones', icon: Puzzle },
+  { id: 'notificaciones', label: 'Notificaciones', icon: Bell },
   { id: 'seguimiento', label: 'Seguimiento', icon: Link2 },
   { id: 'atajos', label: 'Atajos', icon: Keyboard }
 ];
@@ -80,6 +106,21 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   const [authViewer, setAuthViewer] = useState(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [authErr, setAuthErr] = useState('');
+  const [bgErr, setBgErr] = useState('');
+
+  const toggleBackground = async (on) => {
+    setBgErr('');
+    if (on) {
+      const ok = await window.cytlex?.confirmTask?.();
+      if (!ok) return;
+    }
+    const r = await window.cytlex?.setBackgroundCheck?.(on, s.notifyInterval || 60);
+    if (r?.ok === false) {
+      setBgErr(r.error || 'No se pudo registrar la tarea.');
+      return;
+    }
+    set({ notifyBackground: on });
+  };
 
   useEffect(() => settings.subscribe(setS), []);
   useEffect(() => tracking.subscribe(() => setLinkedCount(tracking.linkedCount())), []);
@@ -163,10 +204,11 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
             })}
           </div>
         </div>
+        <div className="border-t border-border mt-6" />
         <Row
           last
           title="Pantalla completa"
-          desc="Oculta los bordes de la ventana (F11)"
+          desc="Oculta los bordes de la ventana"
           right={
             <Button variant="secondary" size="sm" onClick={onToggleFullscreen}>
               {isFullscreen ? 'Salir' : 'Activar'}
@@ -283,6 +325,60 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           Este repositorio aporta las fuentes a Cytlex. No se edita: las extensiones se instalan y
           desinstalan individualmente desde <b className="text-foreground">Explorar › Extensiones</b>.
         </p>
+      </div>
+    );
+  } else if (section === 'notificaciones') {
+    content = (
+      <div>
+        <Row
+          first
+          title="Avisar de capítulos nuevos"
+          desc="Revisa los mangas de tu biblioteca y avisa cuando aparezca un capítulo nuevo."
+          right={
+            <Switch
+              on={s.notifyEnabled}
+              onChange={(v) => set({ notifyEnabled: v })}
+              label="Avisar de capítulos nuevos"
+            />
+          }
+        />
+        <Row
+          title="Comprobar cada"
+          desc="Cada cuánto se revisa la biblioteca."
+          right={
+            <div className={cn(!s.notifyEnabled && 'pointer-events-none opacity-50')} aria-disabled={!s.notifyEnabled}>
+              <Dropdown
+                className="w-[132px]"
+                value={s.notifyInterval}
+                onChange={(v) => set({ notifyInterval: Number(v) })}
+                ariaLabel="Comprobar cada"
+                portal
+                options={[
+                  { value: 15, label: '15 minutos' },
+                  { value: 30, label: '30 minutos' },
+                  { value: 60, label: '1 hora' },
+                  { value: 180, label: '3 horas' },
+                  { value: 360, label: '6 horas' },
+                  { value: 720, label: '12 horas' },
+                  { value: 1440, label: '24 horas' }
+                ]}
+              />
+            </div>
+          }
+        />
+        <Row
+          last
+          className="min-h-[55px]"
+          title="Notificaciones en segundo plano"
+          right={
+            <Switch
+              on={s.notifyBackground}
+              onChange={toggleBackground}
+              label="Notificaciones en segundo plano"
+            />
+          }
+        />
+        {bgErr && <p className="text-sm text-destructive mt-2">{bgErr}</p>}
       </div>
     );
   } else if (section === 'seguimiento') {

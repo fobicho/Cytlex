@@ -11,6 +11,7 @@ import Settings from './pages/Settings.jsx';
 import Tracking from './pages/Tracking.jsx';
 import { settings } from './lib/settings.js';
 import { lastSearch, resultsScroll } from './lib/searchState.js';
+import { startNotifier, onNotifyClick } from './lib/notify.js';
 import { appWindow } from './lib/appWindow.js';
 
 class PageBoundary extends Component {
@@ -79,6 +80,17 @@ export default function App() {
   useEffect(() => {
     appWindow.isFullscreen().then(setIsFullscreen);
   }, []);
+
+  useEffect(() => startNotifier(), []);
+
+  useEffect(
+    () =>
+      onNotifyClick(({ url, sourceId }) => {
+        if (!url) return;
+        window.location.hash = `#/manga?u=${encodeURIComponent(url)}&s=${encodeURIComponent(sourceId || 'leercapitulo')}&from=biblioteca`;
+      }),
+    []
+  );
 
   const toggleFullscreen = () => {
     appWindow.toggleFullscreen().then(setIsFullscreen);

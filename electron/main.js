@@ -1,15 +1,21 @@
-import { app, BrowserWindow, ipcMain, session, Menu, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, session, Menu, dialog, Notification, shell } from 'electron';
 import path from 'node:path';
 import { writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { fetchHome, fetchCatalog, fetchDetail, fetchChapter } from './scraper.js';
 import { createRequire } from 'node:module';
 
+const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const auth = require('./auth.cjs');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
+const launchedInBackground = process.argv.includes('--background');
+
+let mainWindow = null;
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -18,6 +24,7 @@ function createWindow() {
     minWidth: 860,
     minHeight: 560,
     frame: false,
+    show: !launchedInBackground,
     backgroundColor: '#09090b',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -26,7 +33,19 @@ function createWindow() {
     }
   });
 
-  win.maximize();
+  mainWindow = win;
+  if (!launchedInBackground) win.maximize();
+
+  if (launchedInBackground) {
+    const bail = setTimeout(() => {
+      if (!win.isDestroyed()) app.quit();
+    }, 30000);
+    win.webContents.on('did-finish-load', () => clearTimeout(bail));
+    win.webContents.on('did-fail-load', () => { clearTimeout(bail); app.quit(); });
+  }
+
+  win.on('close', () => { if (mainWindow === win) mainWindow = null; });
+  win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
 
   const emitMaximized = () => {
     if (!win.isDestroyed()) win.webContents.send('window:maximized-changed', win.isMaximized());
@@ -49,6 +68,8 @@ function createWindow() {
       win.webContents.toggleDevTools();
     }
   });
+
+  return win;
 }
 
 // Referer + UA para que los CDN de imágenes no bloqueen el hotlink
@@ -70,11 +91,110 @@ function hookImageHeaders() {
   }
 }
 
+const TASK_NAME = 'Cytlex';
+
+let lastNotifiedAt = 0;
+
+ipcMain.handle('app:background', () => launchedInBackground);
+
+ipcMain.handle('app:exit', () => {
+  if (launchedInBackground) app.quit();
+  return true;
+});
+
+ipcMain.handle('notify:supported', () => Notification.isSupported());
+
+ipcMain.handle('notify:show', (_e, payload = {}) => {
+  if (!Notification.isSupported()) {
+    console.log('[notify] no soportado');
+    return false;
+  }
+  if (Date.now() - lastNotifiedAt < 30000) {
+    console.log('[notify] descartado por anti-flood:', payload.title);
+    return false;
+  }
+  lastNotifiedAt = Date.now();
+  const n = new Notification({
+    title: payload.title || 'Cytlex',
+    body: payload.body || '',
+    silent: false
+  });
+  n.on('show', () => console.log('[notify] mostrada:', payload.title));
+  n.on('failed', (_ev, err) => console.log('[notify] fallo:', err, payload.title));
+  n.on('close', () => console.log('[notify] cerrada:', payload.title));
+  n.on('click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send('notify:click', { url: payload.url, sourceId: payload.sourceId });
+    }
+  });
+  n.show();
+  return true;
+});
+
+ipcMain.handle('notify:confirm', async (e) => {
+  const r = await dialog.showMessageBox(BrowserWindow.fromWebContents(e.sender), {
+    type: 'question',
+    buttons: ['Cancelar', 'Permitir'],
+    defaultId: 0,
+    cancelId: 0,
+    title: 'Notificaciones en segundo plano',
+    message: '¿Permitir que Cytlex revise tu biblioteca aunque esté cerrado?',
+    detail:
+      'Se creará una tarea programada de Windows que ejecuta Cytlex en segundo plano. ' +
+      'Puedes desactivarlo cuando quieras desde Ajustes.'
+  });
+  return r.response === 1;
+});
+
+ipcMain.handle('notify:background', async (_e, on, minutes = 30) => {
+  if (process.platform !== 'win32') return { ok: false, error: 'Solo disponible en Windows' };
+  const tr = `"${process.execPath}" ${isDev ? `"${app.getAppPath()}" ` : ''}--background`;
+  const mo = String(Math.min(1440, Math.max(15, Number(minutes) || 30)));
+  try {
+    if (on) {
+      await execFileAsync('schtasks', [
+        '/Create', '/F', '/TN', TASK_NAME, '/TR', tr, '/SC', 'MINUTE', '/MO', mo
+      ]);
+    } else {
+      try {
+        await execFileAsync('schtasks', ['/Delete', '/F', '/TN', TASK_NAME]);
+      } catch (e) {
+        const raw = `${e?.message || ''} ${e?.stderr || ''}`;
+        if (e?.code === 1 && /no puede encontrar|no se encuentra|not found|cannot find/i.test(raw)) return { ok: true };
+        throw e;
+      }
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e?.stderr || e?.message || e) };
+  }
+});
+
+app.setAppUserModelId('com.fobicho.cytlex');
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   hookImageHeaders();
   auth.register();
-  createWindow();
+  const win = createWindow();
+  if (launchedInBackground) {
+    win.once('ready-to-show', () => {});
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

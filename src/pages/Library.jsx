@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { lib } from '../lib/library.js';
 import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
 import { extensions } from '../lib/extensions.js';
 import { makeCoverThumb } from '../lib/covers.js';
+import { checkLibrary } from '../lib/notify.js';
+import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { cn } from '../lib/utils.js';
 
@@ -16,6 +19,29 @@ export default function Library() {
   });
   const [favs, setFavs] = useState(() => lib.favs());
   const [view, setView] = useState(settings.get().libraryView);
+  const [checking, setChecking] = useState(false);
+  const { toast } = useToast();
+
+  const runCheck = async () => {
+    setChecking(true);
+    try {
+      const found = await checkLibrary({ silent: true, force: true });
+      const n = found.length;
+      if (n === 0) {
+        toast({ title: 'Todo está al día', description: 'No hay capítulos nuevos en tu biblioteca.', variant: 'info' });
+      } else {
+        toast({
+          title: n === 1 ? '1 obra actualizada' : `${n} obras actualizadas`,
+          description: 'Hay capítulos nuevos disponibles.',
+          variant: 'success'
+        });
+      }
+    } catch {
+      toast({ title: 'No se pudo comprobar', description: 'Revisa tu conexión e inténtalo de nuevo.', variant: 'error' });
+    } finally {
+      setChecking(false);
+    }
+  };
 
   useEffect(() => settings.subscribe((s) => setView(s.libraryView)), []);
   useEffect(() => {
@@ -76,6 +102,23 @@ export default function Library() {
             </button>
           );
         })}
+        <div className="ml-auto">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={checking || !favs.length}
+            onClick={runCheck}
+            title="Buscar actualizaciones"
+            className="rounded-lg"
+          >
+            {checking ? (
+              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 mr-2" />
+            )}
+            {checking ? 'Buscando…' : 'Buscar actualizaciones'}
+          </Button>
+        </div>
       </div>
 
       {shown.length === 0 ? (

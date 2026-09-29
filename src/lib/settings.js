@@ -14,7 +14,11 @@ const defaults = {
   extIndexUrl: DEFAULT_INDEX_URL,
   anilistSynopsisLang: 'romaji',
   libraryCategory: '',
-  settingsSection: 'apariencia'
+  settingsSection: 'apariencia',
+  notifyEnabled: false,
+  notifyInterval: 60,
+  notifyBackground: false,
+  notifyBaseline: {}
 };
 
 function normalize(s) {

@@ -22,6 +22,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const fromParam = params.get('from') || '';
   const fromQS = fromParam ? `&from=${encodeURIComponent(fromParam)}` : '';
   const [ch, setCh] = useState(null);
+  const [chUrl, setChUrl] = useState('');
   const [err, setErr] = useState('');
   const [mode, setMode] = useState(settings.get().readerMode);
   const [page, setPage] = useState(0);
@@ -107,10 +108,12 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     setWheelZoom(0);
     setIsRead(!!progress.get(chapterUrl, sourceId)?.read);
     setCh(null);
+    setChUrl('');
     api
       .chapter(chapterUrl, sourceId)
       .then((r) => {
         setCh(r);
+        setChUrl(chapterUrl);
         const total = r.pages?.length || 1;
         const saved = progress.get(chapterUrl, sourceId);
         const sp = saved && !saved.read ? Math.min(Math.max(saved.page ?? 0, 0), total - 1) : 0;
@@ -125,54 +128,51 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   }, [chapterUrl, sourceId]);
 
   const [lastSeen, setLastSeen] = useState(0);
-  const savedRef = useRef(chapterUrl);
   useEffect(() => {
-    if (!ch || !ch.pages?.length) return undefined;
-    const changed = savedRef.current !== chapterUrl;
-    if (changed) {
-      savedRef.current = chapterUrl;
-      setLastSeen(0);
-    }
+    if (!ch || !ch.pages?.length || chUrl !== chapterUrl) return undefined;
+    let atTop = true;
     let raf = 0;
-    let settled = !changed;
     const onScroll = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         if (mode !== 'vertical') return;
+        const mainEl = document.querySelector('main');
+        if (!mainEl) return;
+        if (!atTop) {
+          if (mainEl.scrollTop > 4) return;
+          atTop = true;
+        }
         let best = 0;
         let bestTop = -Infinity;
-        const mainEl = document.querySelector('main');
-        const line = mainEl ? mainEl.getBoundingClientRect().top : 0;
+        const line = mainEl.getBoundingClientRect().top;
         for (let i = 0; i < ch.pages.length; i++) {
           const el = document.getElementById(`pg-${i}`);
           if (!el || el.getBoundingClientRect().height <= 5) continue;
           const top = el.getBoundingClientRect().top;
           if (top <= line + 24 && top > bestTop) { bestTop = top; best = i; }
         }
-        if (!settled) return;
         setLastSeen(best);
+        setPage(best);
         progress.savePage(chapterUrl, sourceId, best, ch.pages.length);
       });
     };
-    const release = () => { settled = true; };
-    const timer = setTimeout(release, 300);
     window.addEventListener('scroll', onScroll, { passive: true, capture: true });
     onScroll();
     return () => {
-      clearTimeout(timer);
       cancelAnimationFrame(raf);
       window.removeEventListener('scroll', onScroll, { capture: true });
     };
-  }, [ch, chapterUrl, sourceId, mode]);
+  }, [ch, chUrl, chapterUrl, sourceId, mode]);
 
   useEffect(() => {
     if (!ch || mode !== 'paginado') return;
+    if (chUrl !== chapterUrl) return;
     setLastSeen(page);
     progress.savePage(chapterUrl, sourceId, page, ch.pages.length);
-  }, [page, mode, ch, chapterUrl, sourceId]);
+  }, [page, mode, ch, chUrl, chapterUrl, sourceId]);
 
   useEffect(() => {
-    if (!ch || isRead) return;
+    if (!ch || isRead || chUrl !== chapterUrl) return;
     const total = ch.pages?.length || 0;
     if (!total) return;
     const done = mode === 'paginado' ? page >= total - 1 : lastSeen >= total - 1;
@@ -186,7 +186,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         }).catch(() => {});
       }
     }
-  }, [lastSeen, page, mode, ch, chapterUrl, sourceId, isRead, mangaUrl]);
+  }, [lastSeen, page, mode, ch, chUrl, chapterUrl, sourceId, isRead, mangaUrl]);
 
   useEffect(() => {
     if (!ch || pendingScrollRef.current == null) return undefined;
@@ -343,7 +343,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         }
       />
     );
-  if (!ch)
+  if (!ch || chUrl !== chapterUrl)
     return (
       <div className="h-full grid place-items-center">
         <Loader2 className="w-7 h-7 animate-spin text-muted-foreground" />
