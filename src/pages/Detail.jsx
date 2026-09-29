@@ -18,6 +18,23 @@ import { tracking } from '../lib/tracking.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
+function sameImage(a, b) {
+  if (!a || !b) return false;
+  try {
+    const key = (u) => {
+      const x = new URL(u);
+      for (const k of [...x.searchParams.keys()]) {
+        if (/^(w|width|size|h|height|quality|q|v|ver)$/i.test(k)) x.searchParams.delete(k);
+      }
+      x.pathname = x.pathname.replace(/-[a-z]{1,3}\.(jpe?g|png|webp|avif|gif)$/i, '.$1');
+      return x.toString();
+    };
+    return key(a) === key(b);
+  } catch {
+    return a === b;
+  }
+}
+
 const EXPAND_CTRL_H = 16;
 
 function SourceLine({ sourceId }) {
@@ -113,8 +130,19 @@ export default function Detail() {
   const coverSrc = useMemo(() => {
     const local = lib.fav(mangaUrl, sourceId)?.coverLocal;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
-    return d?.cover || knownCover;
+    if (!d?.cover) return knownCover;
+    if (knownCover && sameImage(knownCover, d.cover)) return knownCover;
+    return d.cover;
   }, [d?.cover, knownCover, mangaUrl, sourceId]);
+
+  const coverImg = (alt) => (
+    <img
+      className="w-full h-full object-cover"
+      src={coverSrc}
+      alt={alt}
+      referrerPolicy="no-referrer"
+    />
+  );
 
   useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
 
@@ -295,8 +323,8 @@ export default function Detail() {
 
         <div className="flex flex-col md:flex-row gap-6">
           {knownCover ? (
-            <div className="w-40 md:w-[184px] aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start">
-              <img className="w-full h-full object-contain" src={coverSrc} alt="" referrerPolicy="no-referrer" />
+            <div className="w-40 md:w-[184px] aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50">
+              {coverImg('')}
             </div>
           ) : (
             <Skeleton className="w-40 md:w-[184px] aspect-[2/3] rounded-xl shrink-0" />
@@ -345,15 +373,10 @@ export default function Detail() {
       <div className="flex flex-col md:flex-row gap-6">
         <div
           ref={coverRef}
-          className="w-40 md:w-[184px] aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start"
+          className="w-40 md:w-[184px] aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
         >
           {coverSrc ? (
-            <img
-              className="w-full h-full object-contain"
-              src={coverSrc}
-              alt={d.title}
-              referrerPolicy="no-referrer"
-            />
+            coverImg(d.title)
           ) : (
             <div className="w-full h-full animate-pulse bg-muted/40" />
           )}

@@ -6,10 +6,12 @@ export default function createSource({ fetchText }) {
   const getJson = async (url) => JSON.parse(await fetchText(url));
   const isComic = (s) => (s.type || 'comic').toLowerCase() === 'comic';
 
+  const best = (u) => (u || '').replace(/-[a-z]{1,3}\.(jpe?g|png|webp|avif)$/i, '-xl.$1');
+
   const toItem = (s) => ({
     url: `${base}/series/${s.slug}`,
     title: s.name || '',
-    cover: s.cover || '',
+    cover: best(s.cover),
     type: s.type || 'comic'
   });
 
@@ -61,7 +63,7 @@ export default function createSource({ fetchText }) {
     const status = s.status?.name || '';
     return {
       title: s.name || '',
-      cover: s.cover || '',
+      cover: best(s.cover),
       altTitles: '',
       genres: [...(s.genres || [])].map((g) => g.name).filter(Boolean),
       facts: { estado: status, status, tipo: s.type || '', autor: s.team?.name || '', vistas: '' },

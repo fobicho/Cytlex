@@ -45,10 +45,10 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
                 if (src !== m.cover) setSrc(m.cover);
                 else setSrc('');
               }}
-              className="w-full h-auto block"
+              className="w-full h-full aspect-[2/3] object-cover block"
             />
           ) : (
-            <div className="w-full aspect-[5/7] animate-pulse bg-muted/40" />
+            <div className="w-full aspect-[2/3] animate-pulse bg-muted/40" />
           )}
           {unavailable ? (
             <span className="absolute inset-0 grid place-items-center bg-black/60">
