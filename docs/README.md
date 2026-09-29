@@ -1,58 +1,76 @@
-# Extensiones de Cytlex (repositorio)
+# Extensiones de Cytlex
 
-Repositorio de extensiones de **Cytlex**, publicado con GitHub Pages desde esta
-carpeta `docs/`.
+Fuentes para el lector. La app no trae ninguna instalada: entras en **Explorar ›
+Extensiones**, pulsas el icono de cada una y ya aparece en las búsquedas.
 
-- **URL del índice:** `https://fobicho.github.io/Cytlex/index.json`
-- En la app: **Explorar › Extensiones** (se carga solo). También puedes pegar la
-  URL a mano y pulsar «Cargar».
+El índice que usa la app es este:
+`https://fobicho.github.io/Cytlex/index.json`
 
-## Contenido
+Se publica con GitHub Pages desde la carpeta `docs/`, así que cualquier commit a
+`main` lo actualiza solo.
 
-| id | Nombre | Idioma | Tipo |
-|----|--------|--------|------|
-| `mangalect` | MangaLect (LeerMangaEsp) | es | module |
-| `onfmangas` | ONF Mangas | es | module |
-| `olympusscanlation` | Olympus Scanlation | es | module |
+## Fuentes
 
-Todas están basadas en el catálogo del repositorio de
-[Keiyoushi](https://github.com/keiyoushi/extensions), reimplementadas para
-Cytlex. Keiyoushi publica extensiones en **Kotlin/APK** para Mihon/Tachiyomi, que
-no son compatibles con Cytlex (Electron/JS); aquí se reescriben como fuentes
-nativas.
+| id | Nombre | Tipo |
+|----|--------|------|
+| `mangalect` | MangaLect | module |
+| `onfmangas` | ONF Mangas | module |
+| `olympusscanlation` | Olympus Scanlation | module |
+| `zonatmo` | ZonaTMO | module |
 
-## Formato
+MangaLect, ONF y Olympus se escribieron a partir del catálogo de
+[Keiyoushi](https://github.com/keiyoushi/extensions), que publica en Kotlin para
+Mihon. Como Cytlex es Electron, el código no sirve tal cual y hubo que reescribir
+cada fuente. ZonaTMO va directa contra su web.
 
-Un índice es un **array JSON** de manifiestos. Hay dos tipos:
+## Añadir una fuente
 
-- **`selector`** — solo configuración (URLs + selectores CSS). No requiere código.
-  Se describe con `selectors` inline. Ver [`templates/example-selectors.json`](./templates/example-selectors.json).
-- **`module`** — un módulo JS (`"main"` relativo al índice) que exporta una
-  factory y devuelve la fuente. Ver [`templates/example-module.js`](./templates/example-module.js).
+Dos formas. La fácil es `selector`: declaras las URLs y los selectores CSS en el
+manifiesto, sin escribir código. La otra es `module`, un archivo JS que exporta una
+factory y devuelve la fuente.
+
+La plantilla está en [`templates/`](./templates).
 
 ```json
 [
   {
-    "id": "mi-fuente", "name": "Mi Fuente", "lang": "es", "version": "1.0.0",
-    "type": "module", "main": "ext/mi-fuente.js", "baseUrl": "https://ejemplo.com"
+    "id": "mi-fuente",
+    "name": "Mi Fuente",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "main": "ext/mi-fuente.js",
+    "baseUrl": "https://ejemplo.com",
+    "icon": "https://fobicho.github.io/Cytlex/icons/mi-fuente.png"
   }
 ]
 ```
 
-El contrato de una fuente es `catalog`, `detail` y `chapter`:
+Una fuente devuelve tres cosas:
 
-- `catalog({ q, genre, page }) → { items: [{ url, title, cover, type, lastChapter }], totalPages, totalText }`
-- `detail(url) → { title, cover, altTitles, genres: [], facts: { estado, tipo, autor, vistas }, sinopsis, chapters: [{ title, url, date }] }`
-- `chapter(url) → { label, mangaUrl, pages: [url], options: [], prev, next }`
+| Método | Para qué |
+|--------|----------|
+| `catalog({ q, genre, page })` | el listado: items con `url`, `title`, `cover`, `type`, `lastChapter` |
+| `detail(url)` | la ficha: título, cover, sinopsis, géneros, `facts` y los capítulos |
+| `chapter(url)` | el lector: `pages` con las imágenes, y `options` con la lista de capítulos |
 
-## Aviso legal
+Dos detalles que rompen la app si no los respetas:
 
-Este repositorio **no aloja contenido**: solo define fuentes que apuntan a sitios
-de terceros. Todo el contenido pertenece a sus respectivos autores y sitios.
-Instala y usa las extensiones bajo tu propia responsabilidad.
+- `chapters` va **en orden de lectura**, capítulo 1 primero. El botón «Leer» abre
+  directamente el primero.
+- El `url` que devuelve `catalog` tiene que ser exactamente el mismo que espera
+  `detail`, y el de cada capítulo tiene que ser estable entre llamadas. Se usan
+  como clave para guardar el progreso de lectura.
 
-## Añadir una extensión
+Si la portada de tu fuente no carga, es el `Referer`: la app lo falsea para los
+dominios conocidos en `hookImageHeaders()` (`electron/main.js`). Añade el tuyo ahí.
 
-1. Crea el manifiesto en [`index.json`](./index.json).
-2. Si es `module`, añade el `.js` en [`ext/`](./ext).
-3. Sube los cambios a `main` (Pages los publica desde `docs/`).
+Un aviso que conviene tener presente al escribir una: una extensión es código que
+se descarga y se ejecuta dentro de la app, sin sandbox. Instala solo desde sitios en
+los que confíes.
+
+## Legal
+
+Aquí no hay nada de manga, solo código que apunta a sitios de terceros. El
+contenido es de sus autores y de sus sitios, y usas cada fuente bajo tu
+responsabilidad.

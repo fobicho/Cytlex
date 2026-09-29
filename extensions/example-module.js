@@ -1,11 +1,3 @@
-// Extensión de Cytlex (tipo "module").
-//
-// Exporta una factory que recibe el contexto y devuelve la fuente.
-//   ctx.fetchText(url) -> Promise<string>  (petición vía proceso principal, sin CORS)
-//   ctx.parse(html)    -> Document         (DOMParser del navegador)
-//
-// Devuelve la misma forma que usa la fuente integrada (ver README).
-
 export default function createSource({ fetchText, parse }) {
   const base = 'https://example.com';
   const abs = (u) => {

@@ -31,5 +31,16 @@
     "baseUrl": "https://olympusxyz.com",
     "icon": "https://fobicho.github.io/Cytlex/icons/olympusscanlation.webp",
     "desc": "Scanlation en español (cómics y manhwas)."
+  },
+  {
+    "id": "zonatmo",
+    "name": "ZonaTMO",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "main": "ext/zonatmo.js",
+    "baseUrl": "https://zonatmo.org",
+    "icon": "https://fobicho.github.io/Cytlex/icons/zonatmo.png",
+    "desc": "Manga, manhwa y manhua en español."
   }
 ]

@@ -1,9 +1,3 @@
-// Sincronización de lectura entre Cytlex y AniList.
-//
-// Cytlex guarda el progreso por página dentro de un capítulo, así que para
-// enviarlo a AniList hay que traducir "página 3 del capítulo 12" al número de
-// capítulo que espera su API. Solo se sube el progreso: la puntuación, el
-// estado y las fechas solo cambian si el usuario los edita en la ficha.
 import { anilistList } from './anilist.js';
 import { progress } from './progress.js';
 import { tracking } from './tracking.js';
@@ -19,8 +13,6 @@ const chapterNumber = (title) => {
   return Number.isFinite(n) ? n : null;
 };
 
-// Marca la obra como recién vinculada. Sirve para que el primer capítulo que
-// leas en Cytlex suba a AniList, aunque AniList ya tuviera progreso.
 const SEED_KEY = 'cytlex:anilistSeeded';
 
 export function seedFromAniList(anilistId) {
@@ -58,7 +50,6 @@ const schedule = (task) => {
   timer = setTimeout(flush, DEBOUNCE_MS);
 };
 
-// El manga más avanzado en la fuente es el que marca el avance real.
 function bestChapter(chapters, sourceId) {
   let best = null;
   for (const c of chapters) {
@@ -72,8 +63,6 @@ function bestChapter(chapters, sourceId) {
 }
 
 export const sync = {
-  // Se llama al terminar un capítulo, para subir el avance sin esperar a que
-  // el usuario cierre la app.
   pushChapter({ mangaUrl, sourceId, chapters }) {
     const linked = tracking.get(mangaUrl, sourceId);
     if (!linked?.id) return;
@@ -106,3 +95,4 @@ export const sync = {
     await anilistList.saveEntry({ mediaId: linked.id, entryId: entry?.entryId, progress: best.n });
   }
 };
+

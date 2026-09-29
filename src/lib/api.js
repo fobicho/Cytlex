@@ -27,11 +27,27 @@ async function resolveSource(sourceId) {
   return extensions.source(sourceId);
 }
 
+const DETAIL_TTL_MS = 10 * 60 * 1000;
+
 const detailCache = new Map();
 const detailKey = (url, sourceId) => `${sourceId}|${url}`;
 
+const freshEntry = (key) => {
+  const hit = detailCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > DETAIL_TTL_MS) {
+    detailCache.delete(key);
+    return null;
+  }
+  return hit.value;
+};
+
 export const api = {
   isBridgeOk() { return !!bridge(); },
+
+  peekDetail(url, sourceId) {
+    return freshEntry(detailKey(url, sourceId));
+  },
 
   async home() {
     const b = bridge();
@@ -46,10 +62,11 @@ export const api = {
 
   async detail(url, sourceId) {
     const key = detailKey(url, sourceId);
-    if (detailCache.has(key)) return detailCache.get(key);
+    const hit = freshEntry(key);
+    if (hit) return hit;
     const src = await resolveSource(sourceId);
     const result = await src.detail(url);
-    detailCache.set(key, result);
+    detailCache.set(key, { at: Date.now(), value: result });
     return result;
   },
 
@@ -60,9 +77,15 @@ export const api = {
 
   prefetchDetail(url, sourceId) {
     const key = detailKey(url, sourceId);
-    if (detailCache.has(key) || !sourceId) return;
-    try { resolveSource(sourceId).then((src) => src.detail(url)).then((r) => detailCache.set(key, r)).catch(() => {}); } catch {}
+    if (freshEntry(key) || !sourceId) return;
+    try {
+      resolveSource(sourceId)
+        .then((src) => src.detail(url))
+        .then((r) => detailCache.set(key, { at: Date.now(), value: r }))
+        .catch(() => {});
+    } catch {}
   },
 
   clearDetailCache() { detailCache.clear(); }
 };
+

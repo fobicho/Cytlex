@@ -11,8 +11,6 @@ export function Dropdown({ value, options, onChange, ariaLabel, placeholder = ''
   const selectedRef = useRef(null);
   const btnRef = useRef(null);
 
-  // Con `portal` el menú se dibuja fuera del flujo para que un contenedor con
-  // overflow no lo recorte.
   const place = () => {
     const el = btnRef.current;
     if (!el) return;
@@ -65,6 +63,7 @@ export function Dropdown({ value, options, onChange, ariaLabel, placeholder = ''
         'mt-1 min-w-full max-h-64 overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-2xl',
         menuClassName
       )}
+      data-scrollable
     >
       {options.map((o) => {
         const active = o.value === value;
@@ -109,3 +108,4 @@ export function Dropdown({ value, options, onChange, ariaLabel, placeholder = ''
     </div>
   );
 }
+

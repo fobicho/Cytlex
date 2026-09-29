@@ -1,12 +1,3 @@
-// Motor genérico de extensiones basadas en selectores CSS.
-//
-// Cada campo es un string "selector@atributo":
-//   ".title@text"      -> texto del elemento
-//   "a@href"           -> atributo href
-//   "img@src"          -> atributo src
-//   "img@attr:data-src"-> atributo arbitrario
-//   ".cover"           -> si se omite @, se usa text
-//   "@text"            -> sin selector: usa el propio nodo raíz
 
 function splitSpec(spec) {
   if (!spec) return ['', 'text'];
@@ -131,3 +122,4 @@ export function buildSelectorSource(manifest, ctx) {
 
   return { id: manifest.id, name: manifest.name, catalog, detail, chapter };
 }
+

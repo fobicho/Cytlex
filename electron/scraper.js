@@ -39,10 +39,8 @@ export async function fetchHome() {
   const html = await fetchHtml(BASE + '/');
   const $ = cheerio.load(html);
   const pick = (sectionTitle) => {
-    // Home usa varias secciones; tomamos tarjetas genéricas de las primeras filas
     return [];
   };
-  // Tendencias / Populares / Últimos: estructura con .lc-card o enlaces a /manga/
   const trending = [];
   $('a[href*="/manga/"]').each((_, a) => {
     const href = $(a).attr('href');
@@ -55,13 +53,12 @@ export async function fetchHome() {
     }
   });
 
-  // Últimos capítulos agregados: bloques con h3/a + lista de capítulos
   const latest = [];
   $('a[href^="/leer/"]').each((_, a) => {
     const href = $(a).attr('href');
     const text = $(a).text().trim();
     if (/^Capitulo/i.test(text) && href) {
-      const parts = href.split('/').filter(Boolean); // leer, id, slug, num
+      const parts = href.split('/').filter(Boolean);
       if (parts.length >= 4) {
         latest.push({ chapter: text, url: href, mangaId: parts[1], slug: parts[2], number: parts[3] });
       }
@@ -93,7 +90,6 @@ export async function fetchCatalog({ q = '', genre = '', theme = '', type = '', 
     if (c.title) items.push(c);
   });
 
-  // Total páginas: último número en paginación
   let totalPages = 1;
   $('.pagination .page-link').each((_, el) => {
     const t = $(el).text().trim();
@@ -105,7 +101,6 @@ export async function fetchCatalog({ q = '', genre = '', theme = '', type = '', 
 }
 
 export function parseMangaUrl(url) {
-  // /manga/{id}/{slug}/ o URL completa
   const m = url.match(/\/manga\/([^/]+)\/([^/]+)\/?/);
   if (!m) return null;
   return { id: m[1], slug: m[2] };
@@ -115,6 +110,38 @@ export function parseChapterUrl(url) {
   const m = url.match(/\/leer\/([^/]+)\/([^/]+)\/([^/]+)\/?/);
   if (!m) return null;
   return { id: m[1], slug: m[2], number: m[3] };
+}
+
+function chapterNumber(url) {
+  const m = String(url || '').match(/\/leer\/[^/]+\/[^/]+\/([^/?#]+)/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+const isSideTrack = (n) => n != null && !Number.isInteger(n) && Math.round(n * 10) % 10 === 1;
+
+function preferWholeChapters(list) {
+  const nums = list.map((c) => chapterNumber(c.url));
+  const whole = new Set(nums.filter((n) => n != null && Number.isInteger(n)));
+  return list.filter((_, i) => {
+    const n = nums[i];
+    if (n == null || Number.isInteger(n)) return true;
+    if (!isSideTrack(n)) return true;
+    return !whole.has(Math.floor(n));
+  });
+}
+
+function dedupeNames(value) {
+  const parts = String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (parts.length < 2) return parts[0] || '';
+
+  const seen = new Map();
+  for (const name of parts) {
+    const key = name.toLowerCase().replace(/[\s.]/g, '').split('').sort().join('');
+    if (!seen.has(key)) seen.set(key, name);
+  }
+  return [...seen.values()].join(', ');
 }
 
 export async function fetchDetail(mangaUrl) {
@@ -137,6 +164,9 @@ export async function fetchDetail(mangaUrl) {
     if (k) facts[k] = v;
   });
 
+  facts.autor = dedupeNames(facts.autor);
+  facts.dibujo = dedupeNames(facts.dibujo);
+
   const sinopsis = $('#sinopsis p').text().trim() || $('section:has(h2:contains("Sinopsis")) p').text().trim();
 
   const chapters = [];
@@ -148,7 +178,7 @@ export async function fetchDetail(mangaUrl) {
   });
 
   const info = parseMangaUrl(mangaUrl) || {};
-  return { title, cover, altTitles, genres, themes, facts, sinopsis, chapters, ...info, url: mangaUrl };
+  return { title, cover, altTitles, genres, themes, facts, sinopsis, chapters: preferWholeChapters(chapters), ...info, url: mangaUrl };
 }
 
 export async function fetchChapter(chapterUrl) {
@@ -166,18 +196,19 @@ export async function fetchChapter(chapterUrl) {
   $('#chapterSelect option').each((_, o) => {
     options.push({ title: $(o).text().trim(), url: $(o).attr('value') });
   });
+  const visibleOptions = preferWholeChapters(options);
 
   const meta = parseChapterUrl(chapterUrl) || {};
   const mangaBack = $('.lc-reader-top a').first().attr('href') || '';
   const currentLabel = $('#lcChapterPill span').text().trim() || $('title').text().trim();
 
-  // prev/next según orden del select (desc: más reciente primero)
-  const idx = options.findIndex((o) => chapterUrl.includes(o.url) || o.url === chapterUrl);
+  const idx = visibleOptions.findIndex((o) => chapterUrl.includes(o.url) || o.url === chapterUrl);
   let prev = null, next = null;
   if (idx >= 0) {
-    prev = options[idx + 1] || null; // capítulo anterior (más viejo)
-    next = options[idx - 1] || null; // capítulo siguiente (más nuevo)
+    prev = visibleOptions[idx + 1] || null;
+    next = visibleOptions[idx - 1] || null;
   }
 
-  return { pages, options, mangaUrl: mangaBack, label: currentLabel, prev, next, ...meta, url: chapterUrl };
+  return { pages, options: visibleOptions, mangaUrl: mangaBack, label: currentLabel, prev, next, ...meta, url: chapterUrl };
 }
+

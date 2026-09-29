@@ -1,6 +1,3 @@
-// Genera una miniatura local (data URL) de una portada para que la biblioteca
-// cargue al instante sin depender de la red. Los bytes los trae el proceso
-// principal (sin CORS) y el decodificado lo hace el renderer.
 const THUMB_WIDTH = 240;
 const MAX_DATAURL = 120000;
 
@@ -39,3 +36,4 @@ export async function makeCoverThumb(url) {
     return '';
   }
 }
+

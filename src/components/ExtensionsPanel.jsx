@@ -3,6 +3,7 @@ import { Trash2, Download, RefreshCw, AlertTriangle, Loader2 } from 'lucide-reac
 import { extensions, DEFAULT_INDEX_URL } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { Card } from './ui/card.jsx';
+import { Dialog } from './ui/dialog.jsx';
 import { Button } from './ui/button.jsx';
 import { EmptyState } from './ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
@@ -39,6 +40,7 @@ export default function ExtensionsPanel() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState('');
+  const [confirmRemove, setConfirmRemove] = useState(null);
 
   const repoUrl = settings.get().extIndexUrl || DEFAULT_INDEX_URL;
   const refresh = () => setInstalled(extensions.installed());
@@ -61,7 +63,6 @@ export default function ExtensionsPanel() {
       refresh();
       loadAvailable();
     })();
-    // eslint-disable-next-line
   }, []);
 
   const doInstall = async (m) => {
@@ -115,12 +116,13 @@ export default function ExtensionsPanel() {
                 m={m}
                 action={
                   <Button
-                    variant="destructive"
+                    variant="ghost"
                     size="icon"
+                    className="text-destructive hover:bg-transparent hover:text-destructive"
                     title="Desinstalar"
                     aria-label="Desinstalar"
                     disabled={busy === m.id}
-                    onClick={() => doUninstall(m.id)}
+                    onClick={() => setConfirmRemove(m)}
                   >
                     <Trash2 className="w-4 h-4" />
                   </Button>
@@ -163,7 +165,9 @@ export default function ExtensionsPanel() {
                 m={m}
                 action={
                   <Button
+                    variant="ghost"
                     size="icon"
+                    className="hover:bg-transparent hover:text-foreground"
                     title="Instalar"
                     aria-label="Instalar"
                     disabled={busy === m.id}
@@ -177,6 +181,30 @@ export default function ExtensionsPanel() {
           </div>
         )}
       </section>
+
+      {confirmRemove && (
+        <Dialog open onClose={() => setConfirmRemove(null)} title="Desinstalar extensión" hideDivider bodyClassName="p-5">
+          <p className="text-sm text-muted-foreground">
+            ¿Seguro que quieres desinstalar «{confirmRemove.name}»? Dejará de estar disponible en Cytlex.
+          </p>
+          <div className="flex justify-end gap-2 mt-5">
+            <Button variant="secondary" onClick={() => setConfirmRemove(null)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                const id = confirmRemove.id;
+                setConfirmRemove(null);
+                await doUninstall(id);
+              }}
+            >
+              Desinstalar
+            </Button>
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 }
+

@@ -18,8 +18,15 @@ function loadCats() {
   return fresh;
 }
 
+const sameUrl = (a, b) => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const strip = (u) => String(u).replace(/^https?:\/\/[^/]+/i, '').replace(/\/+$/, '') || '/';
+  return strip(a) === strip(b);
+};
+
 const SRC = (x) => x.sourceId || 'leercapitulo';
-const match = (a, url, sourceId = 'leercapitulo') => a.url === url && SRC(a) === sourceId;
+const match = (a, url, sourceId = 'leercapitulo') => sameUrl(a.url, url) && SRC(a) === sourceId;
 
 export const lib = {
   favs() {
@@ -94,3 +101,4 @@ export const lib = {
     return cats;
   }
 };
+

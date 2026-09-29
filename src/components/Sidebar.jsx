@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { NavLink, useLocation } from 'react-router-dom';
 import { BookOpen, Compass, Settings as SettingsIcon, ChevronLeft } from 'lucide-react';
+import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
 import { settings } from '../lib/settings.js';
 
@@ -30,7 +31,15 @@ export default function Sidebar() {
         {navItems.map((item) => {
           const isActive = location.pathname === item.to;
           return (
-            <NavLink key={item.to} to={item.to}>
+            <NavLink
+              key={item.to}
+              to={item.to}
+              onClick={() => {
+                if (location.pathname === item.to) {
+                  window.dispatchEvent(new CustomEvent(RESET_PAGE_EVENT));
+                }
+              }}
+            >
               <div
                 className={cn(
                   'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors relative',
@@ -86,3 +95,4 @@ export default function Sidebar() {
     </motion.aside>
   );
 }
+

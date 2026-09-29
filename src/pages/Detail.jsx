@@ -1,23 +1,23 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Loader2, Link2 } from 'lucide-react';
+import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Link2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { extensions } from '../lib/extensions.js';
 import { makeCoverThumb } from '../lib/covers.js';
-import { chapterOrder, detailScroll } from '../lib/searchState.js';
+import { chapterOrder, detailScroll, recallCover } from '../lib/searchState.js';
 import { cn } from '../lib/utils.js';
 import { Button } from '../components/ui/button.jsx';
 import { Badge } from '../components/ui/badge.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { Dialog } from '../components/ui/dialog.jsx';
+import { Skeleton } from '../components/ui/skeleton.jsx';
 import AniListPanel from '../components/AniListPanel.jsx';
 import { tracking } from '../lib/tracking.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
-// Reserva (mt-1 + mitad del botón) para que la línea del control quede justo al final del cover.
 const EXPAND_CTRL_H = 16;
 
 function SourceLine({ sourceId }) {
@@ -82,15 +82,16 @@ export default function Detail() {
   const backTo = useBackTo();
   const fromParam = new URLSearchParams(loc.search).get('from') || 'biblioteca';
   const sourceAvailable = extensions.isInstalled(sourceId);
-  const [d, setD] = useState(null);
+  const [d, setD] = useState(() => api.peekDetail(mangaUrl, sourceId));
   const [err, setErr] = useState('');
   const [fav, setFav] = useState(false);
   const [asc, setAsc] = useState(() => chapterOrder.get(mangaUrl));
   const [dup, setDup] = useState(null);
   const [catPick, setCatPick] = useState(null);
+  const catMenuRef = useRef(null);
   const coverRef = useRef(null);
   const synRef = useRef(null);
-  const [availH, setAvailH] = useState(240);
+  const [availH, setAvailH] = useState(0);
   const [fullH, setFullH] = useState(0);
   const [ready, setReady] = useState(false);
   const [animate, setAnimate] = useState(false);
@@ -100,53 +101,90 @@ export default function Detail() {
   const [markBefore, setMarkBefore] = useState(null);
   const [aniListOpen, setAniListOpen] = useState(false);
   const [aniLinked, setAniLinked] = useState(() => !!tracking.get(mangaUrl, sourceId));
+  const knownCover = useMemo(() => {
+    const fav = lib.fav(mangaUrl, sourceId);
+    const local = fav?.coverLocal;
+    if (typeof local === 'string' && local.startsWith('data:')) return local;
+    return (
+      fav?.cover || tracking.get(mangaUrl, sourceId)?.cover || recallCover(mangaUrl) || ''
+    );
+  }, [mangaUrl, sourceId, progressTick]);
+
+  const coverSrc = useMemo(() => {
+    const local = lib.fav(mangaUrl, sourceId)?.coverLocal;
+    if (typeof local === 'string' && local.startsWith('data:')) return local;
+    return d?.cover || knownCover;
+  }, [d?.cover, knownCover, mangaUrl, sourceId]);
 
   useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
 
-  // Recuerda la posición exacta del scroll de la lista de capítulos.
   useEffect(() => {
-    if (!d?.chapters?.length) return undefined;
     const main = document.querySelector('main');
     if (!main) return undefined;
-    const saved = detailScroll.get(mangaUrl);
-    if (saved > 0) main.scrollTop = saved;
-    const save = () => detailScroll.set(mangaUrl, main.scrollTop);
+
+    const saved = detailScroll.takeRestore(mangaUrl);
+    let restoring = saved > 0;
+    const apply = () => {
+      const max = main.scrollHeight - main.clientHeight;
+      main.scrollTop = restoring ? Math.min(saved, Math.max(0, max)) : 0;
+    };
+    apply();
+    const raf1 = requestAnimationFrame(() => requestAnimationFrame(apply));
+    const cover = coverRef.current;
+    cover?.addEventListener('load', apply);
+
+    let ticks = 0;
+    let lastH = -1;
+    let settleTimer = null;
+    const settle = () => {
+      if (ticks > 8) { restoring = false; return; }
+      ticks += 1;
+      const h = main.scrollHeight;
+      if (h === lastH) { restoring = false; return; }
+      lastH = h;
+      apply();
+      settleTimer = setTimeout(settle, 120);
+    };
+    settleTimer = setTimeout(settle, 120);
+
+    const save = () => { if (!restoring) detailScroll.set(mangaUrl, main.scrollTop); };
     main.addEventListener('scroll', save, { passive: true });
-    return () => main.removeEventListener('scroll', save);
-  }, [d, mangaUrl]);
+    return () => {
+      cancelAnimationFrame(raf1);
+      clearTimeout(settleTimer);
+      cover?.removeEventListener('load', apply);
+      main.removeEventListener('scroll', save);
+    };
+  }, [mangaUrl, d?.chapters?.length]);
   useEffect(
     () => tracking.subscribe(() => setAniLinked(!!tracking.get(mangaUrl, sourceId))),
     [mangaUrl, sourceId]
   );
 
   useEffect(() => {
-    if (!mangaUrl) return;
-    if (!extensions.isInstalled(sourceId)) return;
-    setD(null);
+    if (!mangaUrl) return undefined;
+    if (!extensions.isInstalled(sourceId)) return undefined;
+    setErr('');
     setExpanded(false);
     setReady(false);
     setAnimate(false);
-    setAvailH(240);
     setAsc(chapterOrder.get(mangaUrl));
     setFav(!!lib.fav(mangaUrl, sourceId));
     setAniLinked(!!tracking.get(mangaUrl, sourceId));
+
+    const cached = api.peekDetail(mangaUrl, sourceId);
+    if (cached) setD(cached);
+    else setD(null);
+
+    let alive = true;
     api
       .detail(mangaUrl, sourceId)
-      .then((r) => {
-        if (!r?.cover) { setD(r); return; }
-        let done = false;
-        const finish = () => { if (!done) { done = true; setD(r); } };
-        const img = new Image();
-        img.referrerPolicy = 'no-referrer';
-        img.onload = finish;
-        img.onerror = finish;
-        img.src = r.cover;
-        setTimeout(finish, 3000);
-      })
-      .catch((e) => setErr(String(e)));
+      .then((r) => { if (alive) setD(r); })
+      .catch((e) => { if (alive) setErr(String(e)); });
+
+    return () => { alive = false; };
   }, [mangaUrl, sourceId]);
 
-  // Espacio disponible para la sinopsis: del inicio de la sinopsis al final del cover.
   useLayoutEffect(() => {
     const cover = coverRef.current;
     const syn = synRef.current;
@@ -155,7 +193,6 @@ export default function Detail() {
     const update = () => {
       const c = cover.getBoundingClientRect();
       const s = syn.getBoundingClientRect();
-      if (!c.height) return;
       const avail = Math.max(80, c.bottom - s.top - EXPAND_CTRL_H);
       setAvailH(avail);
       setFullH(syn.scrollHeight);
@@ -164,15 +201,10 @@ export default function Detail() {
     };
 
     update();
-
     const raf = requestAnimationFrame(update);
-    const ro = new ResizeObserver(update);
-    ro.observe(cover);
-    if (syn.parentElement) ro.observe(syn.parentElement);
     window.addEventListener('resize', update);
     return () => {
       cancelAnimationFrame(raf);
-      ro.disconnect();
       window.removeEventListener('resize', update);
     };
   }, [d]);
@@ -196,14 +228,24 @@ export default function Detail() {
     });
   };
 
-  const chooseCatsOrAdd = (manga) => {
+  const openCatMenu = (manga) => {
     const allCats = lib.cats();
-    if (allCats.length <= 1) {
-      addToLibrary(manga, allCats[0] ? [allCats[0].id] : []);
-      return;
-    }
-    setCatPick({ list: allCats, selected: allCats[0] ? [allCats[0].id] : [], pending: manga });
+    setCatPick({ list: allCats, selected: allCats[0] ? [allCats[0].id] : [], pending: manga, inline: true });
   };
+
+  useEffect(() => {
+    if (!catPick?.inline) return undefined;
+    const onDown = (e) => {
+      if (!catMenuRef.current?.contains(e.target)) setCatPick(null);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setCatPick(null); };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [catPick?.inline]);
 
   const onAddClick = () => {
     const manga = {
@@ -217,9 +259,9 @@ export default function Detail() {
     const key = norm(d.title);
     const duplicates = lib
       .favs()
-      .filter((f) => norm(f.title) === key && !(f.url === mangaUrl && (f.sourceId || 'leercapitulo') === sourceId));
+      .filter((f) => norm(f.title) === key && !lib.isFav(mangaUrl, sourceId));
     if (duplicates.length) setDup({ list: duplicates, pending: manga });
-    else chooseCatsOrAdd(manga);
+    else openCatMenu(manga);
   };
 
   if (!mangaUrl)
@@ -241,10 +283,40 @@ export default function Detail() {
     return <EmptyState icon={AlertTriangle} title="No se pudo cargar" description={err} />;
   if (!d)
     return (
-      <div className="min-h-[60vh] grid place-items-center text-muted-foreground">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="w-6 h-6 animate-spin" />
-          <p className="text-sm">Cargando…</p>
+      <div className="min-h-full flex flex-col">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-mt-2 -ml-2 mb-1 self-start hover:bg-transparent hover:text-foreground"
+          onClick={() => navigate(backTo)}
+        >
+          <ArrowLeft className="w-4 h-4 mr-1.5" /> Volver
+        </Button>
+
+        <div className="flex flex-col md:flex-row gap-6">
+          {knownCover ? (
+            <div className="w-40 md:w-[184px] aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start">
+              <img className="w-full h-full object-contain" src={coverSrc} alt="" referrerPolicy="no-referrer" />
+            </div>
+          ) : (
+            <Skeleton className="w-40 md:w-[184px] aspect-[2/3] rounded-xl shrink-0" />
+          )}
+          <div className="flex-1 min-w-0">
+            <Skeleton className="h-8 md:h-9 w-2/3 max-w-md" />
+            <Skeleton className="h-5 w-40 mt-1" />
+            <Skeleton className="h-4 w-full max-w-lg mt-1" />
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <Skeleton className="h-6 w-24 rounded-full" />
+              <Skeleton className="h-6 w-20 rounded-full" />
+              <Skeleton className="h-6 w-28 rounded-full" />
+              <Skeleton className="h-6 w-24 rounded-full" />
+            </div>
+            <div className="flex flex-col gap-2 mt-3">
+              <Skeleton className="h-3.5 w-full" />
+              <Skeleton className="h-3.5 w-full" />
+              <Skeleton className="h-3.5 w-4/5" />
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -271,13 +343,21 @@ export default function Detail() {
       </Button>
 
       <div className="flex flex-col md:flex-row gap-6">
-        <img
+        <div
           ref={coverRef}
-          className="w-40 md:w-[184px] h-auto rounded-xl shadow-2xl shrink-0 self-start"
-          src={d.cover}
-          alt={d.title}
-          referrerPolicy="no-referrer"
-        />
+          className="w-40 md:w-[184px] aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start"
+        >
+          {coverSrc ? (
+            <img
+              className="w-full h-full object-contain"
+              src={coverSrc}
+              alt={d.title}
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="w-full h-full animate-pulse bg-muted/40" />
+          )}
+        </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-foreground">{d.title}</h1>
           {d.facts.autor && <div className="text-base text-muted-foreground mt-1">Por {d.facts.autor}</div>}
@@ -299,9 +379,8 @@ export default function Detail() {
             <div
               ref={synRef}
               style={{
-                maxHeight: expanded ? (fullH || undefined) : (availH || undefined),
+                maxHeight: expanded ? (fullH || undefined) : (overflow ? availH : undefined),
                 overflow: 'hidden',
-                opacity: ready ? 1 : 0,
                 transition: animate ? 'max-height 320ms cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
                 WebkitMaskImage: !expanded && overflow
                   ? 'linear-gradient(to bottom, #000 calc(100% - 48px), rgba(0,0,0,0.55) calc(100% - 22px), transparent 100%)'
@@ -369,20 +448,68 @@ export default function Detail() {
             </Button>
           )
         )}
-        <Button
-          variant="secondary"
-          onClick={() => {
-            if (fav) {
-              lib.toggleFav({ url: mangaUrl, sourceId });
-              setFav(false);
-              return;
-            }
-            onAddClick();
-          }}
-        >
-          <Star className={`w-4 h-4 mr-2 ${fav ? 'fill-current text-amber-400' : ''}`} />
-          {fav ? 'En biblioteca' : 'Añadir'}
-        </Button>
+        <div className="relative" ref={catMenuRef}>
+          <Button
+            variant="secondary"
+            aria-expanded={!!catPick?.inline}
+            onClick={() => {
+              if (fav) {
+                lib.toggleFav({ url: mangaUrl, sourceId });
+                setFav(false);
+                return;
+              }
+              if (catPick?.inline) {
+                setCatPick(null);
+                return;
+              }
+              onAddClick();
+            }}
+          >
+            <Star className={`w-4 h-4 mr-2 ${fav ? 'fill-current text-amber-400' : ''}`} />
+            {fav ? 'En biblioteca' : 'Añadir'}
+            {!fav && <ChevronDown className={cn('w-3.5 h-3.5 ml-2 transition-transform duration-200', catPick?.inline && 'rotate-180')} />}
+          </Button>
+
+          {catPick?.inline && (
+            <div className="absolute left-0 top-full z-40 mt-2 rounded-xl border border-border bg-card p-3 shadow-2xl">
+              <div className="flex flex-wrap gap-1.5 w-max max-w-96">
+                {catPick.list.map((c) => {
+                  const on = catPick.selected.includes(c.id);
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() =>
+                        setCatPick((p) => ({
+                          ...p,
+                          selected: on ? p.selected.filter((x) => x !== c.id) : [...p.selected, c.id]
+                        }))
+                      }
+                      className={cn(
+                        'rounded-md px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors',
+                        on ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent'
+                      )}
+                    >
+                      {c.name}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-3">
+                <Button
+                  size="sm"
+                  className="w-full"
+                  onClick={() => {
+                    addToLibrary(catPick.pending, catPick.selected);
+                    setCatPick(null);
+                  }}
+                >
+                  Añadir
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
         <Button variant="secondary" onClick={() => setAniListOpen(true)} title="Vincular con AniList">
           <Link2 className={`w-4 h-4 mr-2 ${aniLinked ? 'text-primary' : ''}`} />
           Seguimiento
@@ -516,59 +643,10 @@ export default function Detail() {
                 onClick={() => {
                   const manga = dup.pending;
                   setDup(null);
-                  chooseCatsOrAdd(manga);
+                  openCatMenu(manga);
                 }}
               >
                 Añadir de todos modos
-              </Button>
-            </div>
-          </>
-        )}
-      </Dialog>
-
-      <Dialog
-        open={!!catPick}
-        onClose={() => setCatPick(null)}
-        title="Añadir a categorías"
-        description="Elige en qué categorías guardar este manga."
-      >
-        {catPick && (
-          <>
-            <div className="flex flex-wrap gap-2 pt-4 pb-5">
-              {catPick.list.map((c) => {
-                const on = catPick.selected.includes(c.id);
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() =>
-                      setCatPick((p) => ({
-                        ...p,
-                        selected: on ? p.selected.filter((x) => x !== c.id) : [...p.selected, c.id]
-                      }))
-                    }
-                    className={`rounded-full px-3 py-1.5 text-xs font-medium border transition-colors ${
-                      on
-                        ? 'bg-primary text-primary-foreground border-transparent'
-                        : 'border-border text-muted-foreground hover:bg-accent'
-                    }`}
-                  >
-                    {on ? `✓ ${c.name}` : c.name}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex justify-end gap-2 border-t border-border pt-4">
-              <Button variant="secondary" onClick={() => setCatPick(null)}>
-                Cancelar
-              </Button>
-              <Button
-                onClick={() => {
-                  addToLibrary(catPick.pending, catPick.selected);
-                  setCatPick(null);
-                }}
-              >
-                Añadir
               </Button>
             </div>
           </>
@@ -613,3 +691,4 @@ export default function Detail() {
     </div>
   );
 }
+

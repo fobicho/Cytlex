@@ -1,10 +1,15 @@
-// Registro de lectura por capítulo: página donde se quedó, total de páginas y estado (en curso / leído).
 const KEY = 'cytlex:progress:v1';
 
+let cache = null;
+
 const read = () => {
-  try { return JSON.parse(localStorage.getItem(KEY)) ?? {}; } catch { return {}; }
+  if (cache) return cache;
+  try { cache = JSON.parse(localStorage.getItem(KEY)) ?? {}; } catch { cache = {}; }
+  return cache;
 };
+
 const write = (data) => {
+  cache = data;
   try { localStorage.setItem(KEY, JSON.stringify(data)); } catch {}
 };
 
@@ -27,7 +32,6 @@ export const progress = {
     return () => listeners.delete(l);
   },
 
-  // { page, total, read, readAt, updatedAt } | null
   get(url, sourceId = 'leercapitulo') {
     return read()[cap(url, sourceId)] || null;
   },
@@ -71,3 +75,4 @@ export const progress = {
     notify();
   }
 };
+

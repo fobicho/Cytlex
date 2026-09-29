@@ -98,7 +98,6 @@ export const extensions = {
       return fresh ? { ...r, manifest: { ...r.manifest, ...fresh } } : r;
     });
 
-    // Refresca también el código de las extensiones "module" instaladas.
     await Promise.all(records.map(async (r) => {
       if (r.manifest.type !== 'module' || !r.manifest.main) return;
       try {
@@ -169,3 +168,4 @@ export const extensions = {
     return src;
   }
 };
+

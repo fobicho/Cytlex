@@ -35,14 +35,21 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
         {...linkA11y}
       >
         <div className="relative rounded-xl overflow-hidden bg-muted/50 border border-border/50 shadow-sm">
-          <img
-            loading="lazy"
-            src={src}
-            alt={m.title}
-            referrerPolicy="no-referrer"
-            onError={() => { if (src !== m.cover) setSrc(m.cover); else onCoverError?.(); }}
-            className="w-full aspect-[5/7] object-cover bg-black"
-          />
+          {src ? (
+            <img
+              loading="lazy"
+              src={src}
+              alt={m.title}
+              referrerPolicy="no-referrer"
+              onError={() => {
+                if (src !== m.cover) setSrc(m.cover);
+                else setSrc('');
+              }}
+              className="w-full h-auto block"
+            />
+          ) : (
+            <div className="w-full aspect-[5/7] animate-pulse bg-muted/40" />
+          )}
           {unavailable ? (
             <span className="absolute inset-0 grid place-items-center bg-black/60">
               <span className="rounded-full bg-black/80 px-2.5 py-1 text-[10px] font-semibold text-white">

@@ -9,13 +9,21 @@ import { cn } from '../lib/utils.js';
 
 export default function Library() {
   const [cats, setCats] = useState(() => lib.cats());
-  const [sel, setSel] = useState(() => lib.cats()[0]?.id || '');
+  const [sel, setSel] = useState(() => {
+    const last = settings.get().libraryCategory;
+    const list = lib.cats();
+    return list.some((c) => c.id === last) ? last : list[0]?.id || '';
+  });
   const [favs, setFavs] = useState(() => lib.favs());
   const [view, setView] = useState(settings.get().libraryView);
 
   useEffect(() => settings.subscribe((s) => setView(s.libraryView)), []);
   useEffect(() => {
-    if (!cats.some((c) => c.id === sel)) setSel(cats[0]?.id || '');
+    if (cats.some((c) => c.id === sel)) {
+      if (settings.get().libraryCategory !== sel) settings.set({ libraryCategory: sel });
+      return;
+    }
+    setSel(cats[0]?.id || '');
   }, [cats, sel]);
 
   const remove = (manga) => {
@@ -23,7 +31,10 @@ export default function Library() {
     setFavs(lib.favs());
   };
 
-  const shown = favs.filter((f) => (f.cats || []).includes(sel));
+  const shown = favs
+    .filter((f) => (f.cats || []).includes(sel))
+    .slice()
+    .sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'es', { sensitivity: 'base', numeric: true }));
 
   useEffect(() => {
     let cancelled = false;
@@ -42,7 +53,6 @@ export default function Library() {
       if (changed && !cancelled) setFavs(lib.favs());
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line
   }, [favs, sel]);
 
   return (
@@ -118,3 +128,4 @@ export default function Library() {
     </div>
   );
 }
+

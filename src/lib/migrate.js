@@ -1,5 +1,3 @@
-// Migra los datos guardados con el nombre antiguo (fobi) al nuevo (cytlex),
-// para no perder ajustes, favoritos, categorías ni extensiones.
 const KEYS = ['favs', 'cats:v1', 'settings:v1', 'extensions:v1', 'theme'];
 
 export function migrateLegacyStorage() {
@@ -11,6 +9,6 @@ export function migrateLegacyStorage() {
       }
     }
   } catch {
-    /* almacenamiento no disponible */
   }
 }
+

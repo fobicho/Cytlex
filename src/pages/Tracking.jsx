@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link2, Loader2, AlertTriangle, LogOut, BookOpen } from 'lucide-react';
 import { session } from '../lib/session.js';
 import { anilistList, setScoreScale } from '../lib/anilist.js';
@@ -32,12 +32,13 @@ export default function Tracking() {
     setErr('');
     try {
       const v = await session.viewer();
-      if (v?.scoreFormat) setScoreScale(v.scoreFormat);
+      if (!v) throw new Error('No se pudo leer tu usuario de AniList. Vuelve a conectar la cuenta.');
+      if (v.scoreFormat) setScoreScale(v.scoreFormat);
       const list = await anilistList.myList();
       setEntries(list);
     } catch (e) {
       setErr(String(e?.message || e));
-      setEntries([]);
+      setEntries(null);
     }
     setBusy(false);
   };
@@ -57,6 +58,20 @@ export default function Tracking() {
     return () => { alive = false; };
   }, []);
 
+  const localByAnilist = useMemo(() => {
+    const map = new Map();
+    for (const f of lib.favs()) {
+      const linked = tracking.get(f.url, f.sourceId || 'leercapitulo');
+      if (linked?.id && !map.has(linked.id)) map.set(linked.id, f);
+    }
+    return map;
+  }, [entries]);
+
+  const grouped = STATUS_ORDER.map((status) => ({
+    status,
+    items: (entries || []).filter((e) => e.status === status)
+  })).filter((g) => g.items.length);
+
   if (auth && !auth.connected) {
     return (
       <div className="min-h-[60vh] grid place-items-center">
@@ -73,11 +88,6 @@ export default function Tracking() {
       </div>
     );
   }
-
-  const grouped = STATUS_ORDER.map((status) => ({
-    status,
-    items: (entries || []).filter((e) => e.status === status)
-  })).filter((g) => g.items.length);
 
   return (
     <div className="min-h-full flex flex-col">
@@ -136,6 +146,12 @@ export default function Tracking() {
         </div>
       )}
 
+      {!busy && !entries && !err && (
+        <div className="grid place-items-center">
+          <EmptyState icon={BookOpen} title="No se pudo cargar tu lista" />
+        </div>
+      )}
+
       {entries && entries.length === 0 && !busy && (
         <div className="grid place-items-center">
           <EmptyState icon={BookOpen} title="Tu lista de manga está vacía" />
@@ -150,7 +166,7 @@ export default function Tracking() {
           </div>
           <div className="flex flex-col gap-2">
             {g.items.map((e) => {
-              const local = lib.favs().find((f) => tracking.get(f.url, f.sourceId || 'leercapitulo')?.id === e.mediaId);
+              const local = localByAnilist.get(e.mediaId);
               const row = (
                 <>
                   {e.cover ? (
@@ -192,3 +208,4 @@ export default function Tracking() {
     </div>
   );
 }
+

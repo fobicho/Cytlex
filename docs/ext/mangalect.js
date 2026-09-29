@@ -1,6 +1,3 @@
-// Cytlex · MangaLect (LeerMangaEsp) — https://mangalect.org
-// Tipo "module": catálogo/detalle/capítulos en HTML + búsqueda por API JSON.
-
 export default function createSource({ fetchText, parse }) {
   const base = 'https://mangalect.org';
 

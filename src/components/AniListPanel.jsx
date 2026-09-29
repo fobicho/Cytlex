@@ -57,7 +57,6 @@ const WEEKDAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 const pad = (n) => String(n).padStart(2, '0');
 const toISO = (v) => (v ? `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}` : '');
 
-// AniList devuelve "20 ago 2025"; el calendario trabaja en ISO.
 const parseDate = (v) => {
   if (!v) return '';
   const m = String(v).match(/^(\d{1,2})\s+([a-z]{3})\s+(\d{4})$/i);
@@ -88,13 +87,10 @@ function Calendar({ value, onChange }) {
   const panelRef = useRef(null);
   const btnRef = useRef(null);
 
-  // El calendario se dibuja en document.body para que el overflow del modal
-  // no lo recorte ni genere scroll.
   const place = () => {
     const b = btnRef.current;
     if (!b) return;
     const r = b.getBoundingClientRect();
-    // El panel se alinea con el campo, con un mínimo para que quepan 7 días.
     const width = Math.max(r.width, 224);
     const height = panelRef.current?.offsetHeight || 300;
     const below = window.innerHeight - r.bottom;
@@ -150,6 +146,7 @@ function Calendar({ value, onChange }) {
       ref={panelRef}
       style={pos ? { top: pos.top, left: pos.left, width: pos.width } : undefined}
       className="fixed z-[70] rounded-lg border border-border bg-card p-3 shadow-2xl"
+      data-scrollable
     >
       <div className="flex items-center justify-between mb-2">
         <button
@@ -429,8 +426,6 @@ function SearchDialog({ open, onClose, mangaTitle, onPick }) {
   );
 }
 
-// Los campos son editables directamente y se guardan al salir de ellos o al
-// pulsar Guardar. AniList guarda `progress` como capítulos ya consumidos.
 const EntryForm = forwardRef(function EntryForm({ entry, scoreFormat = 'POINT_10', totalChapters, onSubmit, saving, err }, ref) {
   const [form, setForm] = useState({
     status: entry?.status || 'CURRENT',
@@ -533,8 +528,6 @@ const EntryForm = forwardRef(function EntryForm({ entry, scoreFormat = 'POINT_10
   );
 });
 
-// Todo lo relacionado con AniList vive aquí: al pulsar el botón "Seguimiento"
-// se abre el buscador o, si ya está vinculado, los datos de la obra y su editor.
 export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose }) {
   const [linkedId, setLinkedId] = useState(() => tracking.get(mangaUrl, sourceId)?.id || null);
   const [data, setData] = useState(null);
@@ -549,7 +542,6 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const formRef = useRef(null);
 
-  // Si el usuario cierra con cambios sin guardar, se pregunta antes de perderlos.
   const requestClose = () => {
     if (formRef.current?.dirty) setConfirmDiscard(true);
     else onClose();
@@ -587,6 +579,7 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
       setPicking(true);
       return undefined;
     }
+    anilistList.invalidateEntry(linkedId);
     let alive = true;
     setLoading(true);
     setErr('');
@@ -633,7 +626,7 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
         onClose={onClose}
         mangaTitle={title}
         onPick={(m) => {
-          tracking.link(mangaUrl, sourceId, m.id);
+          tracking.link(mangaUrl, sourceId, m.id, m.cover);
           setPicking(false);
         }}
       />
@@ -759,3 +752,4 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
     </Dialog>
   );
 }
+

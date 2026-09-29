@@ -1,7 +1,3 @@
-// Cytlex · Olympus Scanlation — https://olympusxyz.com
-// Tipo "module": la web es una SPA que consume su propia API JSON.
-// Catálogo: /api/rankings y /api/series/list · Capítulos: panel.olympusxyz.com
-
 export default function createSource({ fetchText }) {
   const base = 'https://olympusxyz.com';
   const panel = 'https://panel.olympusxyz.com';

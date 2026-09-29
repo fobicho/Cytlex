@@ -4,7 +4,7 @@ import { Search, BookOpen, Loader2, Puzzle, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { extensions } from '../lib/extensions.js';
-import { lastSearch, testCover, scrollMemory } from '../lib/searchState.js';
+import { lastSearch, testCover, scrollMemory, rememberCover } from '../lib/searchState.js';
 import MangaCard from '../components/MangaCard.jsx';
 import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
@@ -127,6 +127,7 @@ export default function Catalog() {
           const okFlags = await Promise.all(items.map((m) => testCover(m.cover)));
           const anyOk = okFlags.some(Boolean);
           const good = anyOk ? items.filter((_, i) => okFlags[i]) : items;
+          good.forEach((m) => rememberCover(m.url, m.cover));
           updateResults((prev) =>
             prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'done', items: good } : x)) : prev
           );
@@ -142,7 +143,6 @@ export default function Catalog() {
     if (lastSearch.results && lastSearch.results.some((r) => r.status === 'loading')) {
       runSearch(lastSearch.q);
     }
-    // eslint-disable-next-line
   }, []);
 
   useEffect(() => {
@@ -156,7 +156,6 @@ export default function Catalog() {
       setQ(nq);
       runSearch(nq);
     }
-    // eslint-disable-next-line
   }, [loc.search]);
 
   return (
@@ -254,3 +253,4 @@ export default function Catalog() {
     </div>
   );
 }
+

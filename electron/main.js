@@ -42,6 +42,13 @@ function createWindow() {
   } else {
     win.loadFile(path.join(__dirname, '../dist/index.html'));
   }
+
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.control && input.shift && input.key.toLowerCase() === 'i') {
+      event.preventDefault();
+      win.webContents.toggleDevTools();
+    }
+  });
 }
 
 // Referer + UA para que los CDN de imágenes no bloqueen el hotlink
@@ -50,7 +57,8 @@ function hookImageHeaders() {
     { urls: ['*://*.t34798ndc.com/*', '*://leercapitulo.co/*'], referer: 'https://leercapitulo.co/' },
     { urls: ['*://mangalect.org/*', '*://*.mangalect.org/*'], referer: 'https://mangalect.org/' },
     { urls: ['*://onfmangas.com/*', '*://*.onfmangas.com/*'], referer: 'https://onfmangas.com/' },
-    { urls: ['*://*.imagesolymp.xyz/*', '*://olympusxyz.com/*'], referer: 'https://olympusxyz.com/' }
+    { urls: ['*://*.imagesolymp.xyz/*', '*://olympusxyz.com/*'], referer: 'https://olympusxyz.com/' },
+    { urls: ['*://zonatmo.org/*', '*://*.zonatmo.org/*'], referer: 'https://zonatmo.org/' }
   ];
   for (const rule of rules) {
     session.defaultSession.webRequest.onBeforeSendHeaders({ urls: rule.urls }, (details, callback) => {
@@ -75,9 +83,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// Fetch genérico para extensiones (evita CORS en el renderer)
 ipcMain.handle('http:get', async (_e, url) => {
-  // Muchos sitios exigen que el Referer sea de su propio dominio.
   let referer = 'https://leercapitulo.co/';
   try { referer = new URL(url).origin + '/'; } catch {}
   const res = await fetch(url, {
@@ -224,3 +230,4 @@ ipcMain.handle('manga:chapter', async (_e, url) => {
     throw e;
   }
 });
+

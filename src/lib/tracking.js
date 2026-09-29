@@ -23,10 +23,14 @@ export const tracking = {
     return read()[cap(mangaUrl, sourceId)] || null;
   },
 
-  link(mangaUrl, sourceId, anilistId) {
+  link(mangaUrl, sourceId, anilistId, cover) {
     if (!mangaUrl || !anilistId) return;
     const data = read();
-    data[cap(mangaUrl, sourceId)] = { id: anilistId, linkedAt: Date.now() };
+    data[cap(mangaUrl, sourceId)] = {
+      id: anilistId,
+      linkedAt: Date.now(),
+      ...(cover ? { cover } : {})
+    };
     write(data);
     notify();
   },

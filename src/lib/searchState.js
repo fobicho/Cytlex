@@ -1,23 +1,40 @@
 export const lastSearch = { q: '', genre: '', results: null };
 
+const seenCovers = new Map();
+
+export function rememberCover(url, cover) {
+  if (url && cover) seenCovers.set(url, cover);
+}
+
+export function recallCover(url) {
+  return seenCovers.get(url || '') || '';
+}
+
 export const scrollMemory = { catalog: 0 };
 
-const SCROLL_KEY = 'cytlex:detailScroll:v2';
+const detailScrollMap = new Map();
 
-const readScroll = () => {
-  try { return JSON.parse(localStorage.getItem(SCROLL_KEY)) || {}; } catch { return {}; }
-};
+let restorePending = false;
 
-// Guarda la posición exacta del scroll de la lista de capítulos, por manga.
 export const detailScroll = {
   get(mangaUrl) {
-    return readScroll()[mangaUrl || ''] ?? 0;
+    return detailScrollMap.get(mangaUrl || '') ?? 0;
   },
   set(mangaUrl, top) {
-    if (!mangaUrl || !top) return;
-    try {
-      localStorage.setItem(SCROLL_KEY, JSON.stringify({ ...readScroll(), [mangaUrl]: top }));
-    } catch {}
+    if (!mangaUrl || !Number.isFinite(top) || top < 0) return;
+    detailScrollMap.set(mangaUrl, top);
+  },
+  requestRestore() {
+    restorePending = true;
+  },
+  takeRestore(mangaUrl) {
+    if (!restorePending) return 0;
+    restorePending = false;
+    return detailScrollMap.get(mangaUrl || '') ?? 0;
+  },
+  clear() {
+    detailScrollMap.clear();
+    restorePending = false;
   }
 };
 
@@ -59,3 +76,4 @@ export function testCover(url) {
     img.src = url;
   });
 }
+

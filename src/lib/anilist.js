@@ -39,8 +39,6 @@ async function gql(query, variables = {}) {
   return res?.data;
 }
 
-// AniList devuelve HTML en la descripción, con notas del editor y la fuente
-// entre paréntesis al final. Se descarta ese bloque y se queda solo el texto.
 export function cleanDescription(raw) {
   if (!raw) return '';
   return String(raw)
@@ -58,8 +56,6 @@ export function cleanDescription(raw) {
     .trim();
 }
 
-// Los sinónimos de AniList vienen en todos los alfabetos y a veces no tienen
-// nada que ver con la obra. Solo interesan los escritos en alfabeto latino.
 const isLatinish = (s) => /^[\p{Script=Latin}\p{P}\p{Zs}0-9'’&.\-!?]+$/u.test(s);
 
 const latinSynonyms = (list) => (list || []).filter((s) => s && isLatinish(s));
@@ -105,7 +101,6 @@ function normalize(media) {
   };
 }
 
-// El primer rol de guion y/o dibujo es quien firma la obra.
 const AUTHOR_ROLES = /story|art/i;
 
 function mainAuthor(staff) {
@@ -114,14 +109,20 @@ function mainAuthor(staff) {
   return credited?.node?.name?.full || '';
 }
 
-const cached = (key, run) => {
-  if (cache.has(key)) return cache.get(key);
-  const promise = run().catch((e) => {
+const TTL_MS = 60 * 1000;
+
+const cached = (key, run, ttl = Infinity) => {
+  const hit = cache.get(key);
+  if (hit) {
+    if (ttl === Infinity || Date.now() - hit.at < ttl) return hit.value;
+    cache.delete(key);
+  }
+  const value = run().catch((e) => {
     cache.delete(key);
     throw e;
   });
-  cache.set(key, promise);
-  return promise;
+  cache.set(key, { at: Date.now(), value });
+  return value;
 };
 
 export const anilist = {
@@ -167,10 +168,6 @@ const ENTRY_FIELDS = `
   media { id title { romaji english } coverImage { large } }
 `;
 
-// Al leer, AniList guarda la puntuación en 0-100 y `score(format:)` sí
-// convierte. Se pide el valor nativo y se pasa a la escala de la cuenta.
-// Al escribir ocurre lo contrario: `score` espera el valor ya en la escala del
-// usuario, así que se envía sin convertir.
 const toUserScale = (raw) => {
   if (raw == null) return null;
   if (SCORE_SCALE === 'POINT_100') return raw;
@@ -228,13 +225,12 @@ export const anilistList = {
         .flatMap((l) => l.entries || [])
         .map(normalizeEntry)
         .filter(Boolean);
-    });
+    }, TTL_MS);
   },
 
   async entry(mediaId) {
     if (!mediaId) return null;
     return cached(`entry|${mediaId}`, async () => {
-      // mediaListEntry pertenece al viewer autenticado: no admite userId.
       const data = await session.gql(
         `query ($mediaId: Int) {
           Media(id: $mediaId, type: MANGA) { mediaListEntry { ${ENTRY_FIELDS} } }
@@ -242,7 +238,7 @@ export const anilistList = {
         { mediaId }
       );
       return normalizeEntry(data?.Media?.mediaListEntry);
-    });
+    }, TTL_MS);
   },
 
   async saveEntry(patch) {
@@ -252,7 +248,6 @@ export const anilistList = {
     if (patch.status) variables.status = patch.status;
     if (patch.progress != null) variables.progress = patch.progress;
     if (patch.progressVolumes != null) variables.progressVolumes = patch.progressVolumes;
-    // `score` es Float y espera el valor ya en la escala de la cuenta.
     if (patch.score != null) variables.score = Number(patch.score);
     if (patch.startedAt !== undefined) variables.startedAt = fuzzyDate(patch.startedAt);
     if (patch.completedAt !== undefined) variables.completedAt = fuzzyDate(patch.completedAt);
@@ -271,12 +266,15 @@ export const anilistList = {
     cache.delete(`entry|${patch.mediaId}`);
     if (viewer) cache.delete(`mylist|${viewer.id}`);
     return normalizeEntry(data?.SaveMediaListEntry);
+  },
+
+  invalidateEntry(mediaId) {
+    if (mediaId) cache.delete(`entry|${mediaId}`);
   }
 };
 
 const MONTH_NUM = { ene: 1, feb: 2, mar: 3, abr: 4, may: 5, jun: 6, jul: 7, ago: 8, sep: 9, oct: 10, nov: 11, dic: 12 };
 
-// Acepta ISO ("2025-08-20"), el formato de AniList ("20 ago 2025") y año suelto.
 function fuzzyDate(str) {
   if (!str) return { year: null, month: null, day: null };
   const s = String(str).trim();
@@ -291,3 +289,4 @@ function fuzzyDate(str) {
   if (m) return { year: +m[1], month: m[2] ? +m[2] : null, day: m[3] ? +m[3] : null };
   return { year: null, month: null, day: null };
 }
+

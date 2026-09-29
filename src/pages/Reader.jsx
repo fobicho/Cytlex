@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ArrowLeft, Maximize2, Minimize2, ChevronLeft, ChevronRight, Download, AlertTriangle, BookOpen, List, Loader2 } from 'lucide-react';
+import { ArrowLeft, Maximize2, Minimize2, ChevronLeft, ChevronRight, ChevronDown, Download, AlertTriangle, BookOpen, Loader2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { settings } from '../lib/settings.js';
 import { progress } from '../lib/progress.js';
 import { tracking } from '../lib/tracking.js';
+import { detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
 import { Button } from '../components/ui/button.jsx';
@@ -24,7 +25,10 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const [err, setErr] = useState('');
   const [mode, setMode] = useState(settings.get().readerMode);
   const [page, setPage] = useState(0);
-  const [bars, setBars] = useState(true);
+  const [barsOpen, setBarsOpen] = useState(true);
+  const [barsLeaving, setBarsLeaving] = useState(false);
+  const barTimer = useRef(null);
+  const hideTimer = useRef(null);
   const [pgLoaded, setPgLoaded] = useState(false);
   const [nat, setNat] = useState(null);
   const [area, setArea] = useState({ w: 0, h: 0 });
@@ -37,15 +41,55 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const sizesRef = useRef(new Map());
   const areaRef = useRef(null);
 
-  // Ancho de página: el valor guardado se escala a la mitad (100% => 50%).
   const scalePct = Math.min(Math.max(settings.get().readerZoom, 20), 200) / 2;
+
+  const showBar = useCallback(() => {
+    clearTimeout(hideTimer.current);
+    if (barsOpen) return;
+    clearTimeout(barTimer.current);
+    setBarsOpen(true);
+    setBarsLeaving(false);
+  }, [barsOpen]);
+
+  const scheduleHide = useCallback(() => {
+    hideTimer.current = setTimeout(() => {
+      setBarsLeaving(true);
+      barTimer.current = setTimeout(() => {
+        setBarsOpen(false);
+        setBarsLeaving(false);
+      }, 300);
+    }, 700);
+  }, []);
+
+  useEffect(() => {
+    barTimer.current = setTimeout(() => {
+      setBarsLeaving(true);
+      hideTimer.current = setTimeout(() => {
+        setBarsOpen(false);
+        setBarsLeaving(false);
+      }, 300);
+    }, 4000);
+    return () => {
+      clearTimeout(barTimer.current);
+      clearTimeout(hideTimer.current);
+    };
+  }, [chapterUrl]);
+
+  useEffect(() => () => {
+    clearTimeout(barTimer.current);
+    clearTimeout(hideTimer.current);
+  }, []);
+
+  useEffect(() => () => {
+    const main = document.querySelector('main');
+    if (main) main.scrollTop = 0;
+    window.scrollTo(0, 0);
+  }, []);
 
   const remember = (src, img) => {
     if (src && img.naturalWidth) sizesRef.current.set(src, { w: img.naturalWidth, h: img.naturalHeight });
   };
 
-  // El contenedor desplazable es <main>, no la ventana. Sin esto, cambiar de
-  // capítulo deja el scroll donde estaba el anterior y abre por el final.
   const scrollToTop = () => {
     const main = document.querySelector('main');
     if (main) main.scrollTop = 0;
@@ -84,10 +128,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       setLastSeen(0);
     }
     let raf = 0;
-    // Cambiar de capítulo desde el lector deja el contenedor desplazado donde
-    // estaba el anterior. Esa medición no es real, así que se espera a que el
-    // scroll se asiente antes de empezar a guardar. Al abrir el capítulo por
-    // primera vez no hay desplazamiento heredado y se guarda de inmediato.
     let settled = !changed;
     const onScroll = () => {
       cancelAnimationFrame(raf);
@@ -95,13 +135,10 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         if (mode !== 'vertical') return;
         let best = 0;
         let bestTop = -Infinity;
-        // La línea de lectura es el borde superior del <main>, no el de la
-        // ventana: así cuenta la página aunque la barra de controles esté.
         const mainEl = document.querySelector('main');
         const line = mainEl ? mainEl.getBoundingClientRect().top : 0;
         for (let i = 0; i < ch.pages.length; i++) {
           const el = document.getElementById(`pg-${i}`);
-          // Ignora paneles sin cargar (alto 0) para no atribuirlos como leídos.
           if (!el || el.getBoundingClientRect().height <= 5) continue;
           const top = el.getBoundingClientRect().top;
           if (top <= line + 24 && top > bestTop) { bestTop = top; best = i; }
@@ -113,7 +150,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     };
     const release = () => { settled = true; };
     const timer = setTimeout(release, 300);
-    // capture: el contenedor de scroll es <main>, no window.
     window.addEventListener('scroll', onScroll, { passive: true, capture: true });
     onScroll();
     return () => {
@@ -225,8 +261,16 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   };
 
   useEffect(() => {
+    const scrollable = (el) => {
+      if (!(el instanceof Element)) return false;
+      if (el.closest('[data-scrollable]')) return true;
+      const s = getComputedStyle(el);
+      return /(auto|scroll)/.test(s.overflowY) && el.scrollHeight > el.clientHeight;
+    };
+
     const onWheel = (e) => {
       if (e.deltaY === 0) return;
+      if (scrollable(e.target)) return;
       const zoomable = mode === 'paginado' || e.ctrlKey;
       if (zoomable) e.preventDefault();
       else return;
@@ -248,7 +292,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         if (mode === 'paginado') goPage(Math.max(page - 1, 0));
         else window.scrollBy({ top: -600 });
       }
-      if (e.key === 'Escape' || e.key.toLowerCase() === 'h') setBars((b) => !b);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -274,6 +317,12 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     return () => clearTimeout(id);
   }, [toast]);
 
+  const backHash = `#/manga?u=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}`;
+  const goBack = () => {
+    detailScroll.requestRestore();
+    window.location.hash = backHash;
+  };
+
   if (!chapterUrl) return <EmptyState icon={BookOpen} title="Sin capítulo." />;
   if (err)
     return (
@@ -282,7 +331,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         title="No se pudo cargar el capítulo"
         description={err}
         action={
-          <Button onClick={() => { window.location.hash = `#/manga?u=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}`; }}>
+          <Button onClick={goBack}>
             Volver al detalle
           </Button>
         }
@@ -295,7 +344,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       </div>
     );
 
-  const backHash = `#/manga?u=${encodeURIComponent(mangaUrl || ch.mangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}`;
   const go = (url) => `#/leer?u=${encodeURIComponent(url)}&m=${encodeURIComponent(mangaUrl || ch.mangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}`;
   const last = ch.pages.length - 1;
 
@@ -319,7 +367,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
 
   const allPages = [...Array(ch.pages.length).keys()];
 
-  // Solo los paneles anchos (doble página, anuncios) se agrandan para llenar el alto; el resto usa el ancho del ajuste.
   const zoomPct = scalePct + (scalePct * wheelZoom) / 100;
   let pageStyle = { width: `${zoomPct}%`, maxHeight: 'calc(100vh - 60px)' };
   if (mode === 'paginado' && nat && area.w > 0 && nat.w > nat.h) {
@@ -329,61 +376,70 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   }
 
   return (
-    <div
-      className="h-full p-3"
-      onClick={(e) => {
-        if (e.detail === 1 && e.target.tagName === 'IMG') setBars((b) => !b);
-      }}
-    >
-      {bars && (
-        <div
-          className={cn(
-            'fixed left-3 z-20 flex items-center gap-1.5 rounded-xl border border-border bg-card/90 backdrop-blur-xl px-1.5 py-1 shadow-2xl max-w-[calc(100vw-1.5rem)]',
-            isFullscreen ? 'top-3' : 'top-12'
-          )}
-        >
-          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg shrink-0" title="Volver" aria-label="Volver" onClick={() => { window.location.hash = backHash; }}>
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
+    <div className="h-full p-3">
+      {barsOpen ? (
+            <div
+              onMouseEnter={showBar}
+              onMouseLeave={scheduleHide}
+              className={cn(
+                'fixed left-3 z-20 flex items-center gap-1.5 rounded-xl border border-border bg-card/90 backdrop-blur-xl px-1.5 py-1 shadow-2xl max-w-[calc(100vw-1.5rem)]',
+                isFullscreen ? 'top-3' : 'top-12',
+                barsLeaving ? 'animate-bars-out' : 'animate-bars-in'
+              )}
+            >
+              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg shrink-0" title="Volver" aria-label="Volver" onClick={goBack}>
+                <ArrowLeft className="w-4 h-4" />
+              </Button>
 
-          <Dropdown
-            className="w-[140px]"
-            value={chapterUrl}
-            onChange={(url) => { if (url !== chapterUrl) window.location.hash = go(url); }}
-            ariaLabel="Capítulo"
-            options={(ch.options.length ? ch.options : [{ title: ch.label, url: chapterUrl }]).map((o) => ({ value: o.url, label: o.title }))}
-          />
+              <Dropdown
+                className="w-[140px]"
+                value={chapterUrl}
+                onChange={(url) => { if (url !== chapterUrl) window.location.hash = go(url); }}
+                ariaLabel="Capítulo"
+                options={[...(ch.options.length ? ch.options : [{ title: ch.label, url: chapterUrl }])]
+                  .reverse()
+                  .map((o) => ({ value: o.url, label: o.title }))}
+              />
 
-          <Dropdown
-            className="w-[112px]"
-            value={page}
-            onChange={goPage}
-            ariaLabel="Página"
-            options={allPages.map((i) => ({ value: i, label: `Página ${i + 1}` }))}
-          />
+              <Dropdown
+                className="w-[112px]"
+                value={page}
+                onChange={goPage}
+                ariaLabel="Página"
+                options={allPages.map((i) => ({ value: i, label: `Página ${i + 1}` }))}
+              />
 
-          <Dropdown
-            className="w-[116px]"
-            value={mode}
-            onChange={setMode}
-            ariaLabel="Tipo de lectura"
-            options={[
-              { value: 'vertical', label: 'Vertical' },
-              { value: 'paginado', label: 'Paginado' }
-            ]}
-          />
+              <Dropdown
+                className="w-[116px]"
+                value={mode}
+                onChange={setMode}
+                ariaLabel="Tipo de lectura"
+                options={[
+                  { value: 'vertical', label: 'Vertical' },
+                  { value: 'paginado', label: 'Paginado' }
+                ]}
+              />
 
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 rounded-lg shrink-0"
-            title="Pantalla completa (F11)"
-            aria-label={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
-            onClick={onToggleFullscreen}
-          >
-            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-          </Button>
-        </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-lg shrink-0"
+                title="Pantalla completa (F11)"
+                aria-label={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+                onClick={onToggleFullscreen}
+              >
+                {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              </Button>
+            </div>
+          ) : (
+            <div
+              onMouseEnter={showBar}
+              className="fixed left-3 z-20 w-8 h-8 grid place-items-center rounded-lg text-muted-foreground"
+              style={isFullscreen ? { top: '0.75rem' } : { top: '3rem' }}
+              aria-hidden
+            >
+              <ChevronDown className="w-4 h-4" />
+            </div>
       )}
 
       {mode === 'vertical' ? (
@@ -425,38 +481,27 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
             className={cn('block max-w-full object-contain transition-opacity duration-150', pgLoaded ? 'opacity-100' : 'opacity-0')}
             style={pageStyle}
           />
-          {bars && (
-            <>
-              {page > 0 && (
-                <button
-                  type="button"
-                  className={`${navBtn} left-3`}
-                  aria-label="Página anterior"
-                  onClick={(e) => { e.stopPropagation(); goPage(page - 1); }}
-                >
-                  <ChevronLeft className="w-5 h-5" />
-                </button>
-              )}
-              {page < last && (
-                <button
-                  type="button"
-                  className={`${navBtn} right-3`}
-                  aria-label="Página siguiente"
-                  onClick={(e) => { e.stopPropagation(); goPage(page + 1); }}
-                >
-                  <ChevronRight className="w-5 h-5" />
-                </button>
-              )}
-            </>
+          {page > 0 && (
+            <button
+              type="button"
+              className={`${navBtn} left-3`}
+              aria-label="Página anterior"
+              onClick={(e) => { e.stopPropagation(); goPage(page - 1); }}
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+          )}
+          {page < last && (
+            <button
+              type="button"
+              className={`${navBtn} right-3`}
+              aria-label="Página siguiente"
+              onClick={(e) => { e.stopPropagation(); goPage(page + 1); }}
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
           )}
         </div>
-      )}
-
-      {!bars && (
-        <p className="fixed bottom-3 left-3 z-20 text-xs text-muted-foreground">
-          <List className="w-3.5 h-3.5 inline mr-1" />
-          Toca la imagen o pulsa H para mostrar controles
-        </p>
       )}
 
       {menu && (
@@ -489,3 +534,4 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     </div>
   );
 }
+

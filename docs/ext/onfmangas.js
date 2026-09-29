@@ -1,7 +1,3 @@
-// Cytlex · ONF Mangas — https://onfmangas.com
-// Tipo "module": catálogo y detalle en HTML, capítulos embebidos como JSON
-// hexadecimal y páginas del lector en HTML.
-
 export default function createSource({ fetchText, parse }) {
   const base = 'https://onfmangas.com';
 
@@ -73,7 +69,6 @@ export default function createSource({ fetchText, parse }) {
   async function chapter(chapterUrl) {
     const html = await fetchText(abs(chapterUrl));
     const outer = parse(html);
-    // El lector renderiza las páginas con JS; el HTML plano las trae en <noscript>.
     const ns = html.match(/<noscript[^>]*>([\s\S]*?)<\/noscript>/i);
     const reader = parse(ns ? ns[1] : html);
     const pages = [...reader.querySelectorAll('img.manga-page')]

@@ -67,7 +67,6 @@ const SECTIONS = [
 
 const SHORTCUTS = [
   { keys: ['F11'], desc: 'Pantalla completa' },
-  { keys: ['H', 'Esc'], desc: 'Mostrar u ocultar controles del lector' },
   { keys: ['←', '→'], desc: 'Página anterior / siguiente' }
 ];
 

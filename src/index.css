@@ -3,7 +3,6 @@
 @tailwind utilities;
 
 @layer base {
-  /* Tema Predeterminado · modo oscuro (base) */
   :root {
     --background: 240 10% 3.9%;
     --foreground: 0 0% 98%;
@@ -43,7 +42,6 @@
     --warning: 38 92% 50%;
   }
 
-  /* Tema Predeterminado · modo claro */
   [data-mode='light'] {
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
@@ -82,7 +80,6 @@
     --warning: 38 92% 50%;
   }
 
-  /* Tema Beige pastel · modo oscuro */
   [data-theme='beige'] {
     --background: 30 18% 10%;
     --foreground: 36 25% 92%;
@@ -121,7 +118,6 @@
     --warning: 38 75% 55%;
   }
 
-  /* Tema Beige pastel · modo claro */
   [data-theme='beige'][data-mode='light'] {
     --background: 40 44% 95%;
     --foreground: 28 16% 20%;
@@ -225,4 +221,34 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+}
+
+@keyframes bars-in {
+  from {
+    transform: translate3d(-14px, -14px, 0) scale(0.96);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@keyframes bars-out {
+  from {
+    transform: none;
+    opacity: 1;
+  }
+  to {
+    transform: translate3d(-14px, -14px, 0) scale(0.96);
+    opacity: 0;
+  }
+}
+
+.animate-bars-in {
+  animation: bars-in 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-bars-out {
+  animation: bars-out 300ms cubic-bezier(0.4, 0, 1, 1) both;
 }
