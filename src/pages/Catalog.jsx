@@ -116,7 +116,9 @@ export default function Catalog() {
     if (!list.length) return;
     lastSearch.q = query;
     lastSearch.genre = '';
-    lastSearch.results = list.map((s) => ({ id: s.manifest.id, manifest: s.manifest, status: 'loading', items: [] }));
+    lastSearch.results = list
+      .map((s) => ({ id: s.manifest.id, manifest: s.manifest, status: 'loading', items: [] }))
+      .sort((a, b) => a.manifest.name.localeCompare(b.manifest.name, 'es', { sensitivity: 'base' }));
     setResults(lastSearch.results);
 
     list.forEach((s) => {

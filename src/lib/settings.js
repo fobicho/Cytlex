@@ -13,7 +13,8 @@ const defaults = {
   sourceUrl: 'https://leercapitulo.co',
   extIndexUrl: DEFAULT_INDEX_URL,
   anilistSynopsisLang: 'romaji',
-  libraryCategory: ''
+  libraryCategory: '',
+  settingsSection: 'apariencia'
 };
 
 function normalize(s) {

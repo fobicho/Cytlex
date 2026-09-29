@@ -72,7 +72,7 @@ const SHORTCUTS = [
 
 export default function Settings({ isFullscreen, onToggleFullscreen }) {
   const [s, setS] = useState(settings.get());
-  const [section, setSection] = useState('apariencia');
+  const [section, setSection] = useState(() => settings.get().settingsSection || 'apariencia');
   const [cats, setCats] = useState(() => lib.cats());
   const [newCat, setNewCat] = useState('');
   const [linkedCount, setLinkedCount] = useState(() => tracking.linkedCount());
@@ -396,7 +396,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
                 <button
                   key={sec.id}
                   type="button"
-                  onClick={() => setSection(sec.id)}
+                  onClick={() => { setSection(sec.id); set({ settingsSection: sec.id }); }}
                   className={cn(
                     'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left',
                     on

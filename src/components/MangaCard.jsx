@@ -66,9 +66,9 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
           )}
         </div>
       </a>
-      <div className="pt-2 px-1">
+      <div className="pt-2">
         <a
-          className={cn('block text-[13.5px] font-semibold leading-snug line-clamp-2', linkCls)}
+          className={cn('block text-[13.5px] font-semibold leading-snug truncate', linkCls)}
           href={detailHash}
           title={m.title}
           {...linkA11y}

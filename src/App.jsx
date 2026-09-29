@@ -10,7 +10,7 @@ import Reader from './pages/Reader.jsx';
 import Settings from './pages/Settings.jsx';
 import Tracking from './pages/Tracking.jsx';
 import { settings } from './lib/settings.js';
-import { lastSearch } from './lib/searchState.js';
+import { lastSearch, resultsScroll } from './lib/searchState.js';
 import { appWindow } from './lib/appWindow.js';
 
 class PageBoundary extends Component {
@@ -56,6 +56,7 @@ export default function App() {
     lastSearch.q = '';
     lastSearch.genre = '';
     lastSearch.results = null;
+    resultsScroll.clear();
     const main = document.querySelector('main');
     if (main) main.scrollTop = 0;
   }, []);

@@ -58,7 +58,8 @@ function hookImageHeaders() {
     { urls: ['*://mangalect.org/*', '*://*.mangalect.org/*'], referer: 'https://mangalect.org/' },
     { urls: ['*://onfmangas.com/*', '*://*.onfmangas.com/*'], referer: 'https://onfmangas.com/' },
     { urls: ['*://*.imagesolymp.xyz/*', '*://olympusxyz.com/*'], referer: 'https://olympusxyz.com/' },
-    { urls: ['*://zonatmo.org/*', '*://*.zonatmo.org/*'], referer: 'https://zonatmo.org/' }
+    { urls: ['*://zonatmo.org/*', '*://*.zonatmo.org/*'], referer: 'https://zonatmo.org/' },
+    { urls: ['*://media.imagesolymp.xyz/*', '*://oni.ntr-files.online/*'], referer: 'https://manga-oni.com/' }
   ];
   for (const rule of rules) {
     session.defaultSession.webRequest.onBeforeSendHeaders({ urls: rule.urls }, (details, callback) => {
@@ -94,6 +95,19 @@ ipcMain.handle('http:get', async (_e, url) => {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} al pedir ${url}`);
   return await res.text();
+});
+
+ipcMain.handle('http:head', async (_e, url) => {
+  let referer = 'https://leercapitulo.co/';
+  try { referer = new URL(url).origin + '/'; } catch {}
+  const res = await fetch(url, {
+    method: 'HEAD',
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
+      Referer: referer
+    }
+  });
+  return { ok: res.ok, status: res.status, length: Number(res.headers.get('content-length')) || 0, type: res.headers.get('content-type') || '' };
 });
 
 ipcMain.handle('http:post', async (_e, payload = {}) => {

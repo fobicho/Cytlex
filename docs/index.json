@@ -42,5 +42,16 @@
     "baseUrl": "https://zonatmo.org",
     "icon": "https://fobicho.github.io/Cytlex/icons/zonatmo.png",
     "desc": "Manga, manhwa y manhua en español."
+  },
+  {
+    "id": "mangaoni",
+    "name": "MangaOni",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "main": "ext/mangaoni.js",
+    "baseUrl": "https://manga-oni.com",
+    "icon": "https://fobicho.github.io/Cytlex/icons/mangaoni.png",
+    "desc": "Manga, manhwa y manhua en español."
   }
 ]

@@ -17,11 +17,12 @@ Se publica con GitHub Pages desde la carpeta `docs/`, así que cualquier commit 
 | `onfmangas` | ONF Mangas | module |
 | `olympusscanlation` | Olympus Scanlation | module |
 | `zonatmo` | ZonaTMO | module |
+| `mangaoni` | MangaOni | module |
 
 MangaLect, ONF y Olympus se escribieron a partir del catálogo de
 [Keiyoushi](https://github.com/keiyoushi/extensions), que publica en Kotlin para
 Mihon. Como Cytlex es Electron, el código no sirve tal cual y hubo que reescribir
-cada fuente. ZonaTMO va directa contra su web.
+cada fuente. ZonaTMO y MangaOni van directas contra su web.
 
 ## Añadir una fuente
 

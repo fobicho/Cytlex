@@ -29,6 +29,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const [barsLeaving, setBarsLeaving] = useState(false);
   const barTimer = useRef(null);
   const hideTimer = useRef(null);
+  const hovering = useRef(false);
   const [pgLoaded, setPgLoaded] = useState(false);
   const [nat, setNat] = useState(null);
   const [area, setArea] = useState({ w: 0, h: 0 });
@@ -45,13 +46,16 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
 
   const showBar = useCallback(() => {
     clearTimeout(hideTimer.current);
-    if (barsOpen) return;
     clearTimeout(barTimer.current);
+    hovering.current = true;
+    if (barsOpen) return;
     setBarsOpen(true);
     setBarsLeaving(false);
   }, [barsOpen]);
 
   const scheduleHide = useCallback(() => {
+    clearTimeout(hideTimer.current);
+    hovering.current = false;
     hideTimer.current = setTimeout(() => {
       setBarsLeaving(true);
       barTimer.current = setTimeout(() => {
@@ -62,7 +66,9 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   }, []);
 
   useEffect(() => {
+    hovering.current = false;
     barTimer.current = setTimeout(() => {
+      if (hovering.current) return;
       setBarsLeaving(true);
       hideTimer.current = setTimeout(() => {
         setBarsOpen(false);
@@ -434,6 +440,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
           ) : (
             <div
               onMouseEnter={showBar}
+              onMouseLeave={scheduleHide}
               className="fixed left-3 z-20 w-8 h-8 grid place-items-center rounded-lg text-muted-foreground"
               style={isFullscreen ? { top: '0.75rem' } : { top: '3rem' }}
               aria-hidden

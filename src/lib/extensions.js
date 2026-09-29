@@ -31,7 +31,11 @@ function ctx() {
       }
       return window.cytlex.httpGet(url);
     },
-    parse: (html) => new DOMParser().parseFromString(html, 'text/html')
+    parse: (html) => new DOMParser().parseFromString(html, 'text/html'),
+    head: async (url) => {
+      if (typeof window === 'undefined' || !window.cytlex?.httpHead) return { ok: false, status: 0, length: 0, type: '' };
+      return window.cytlex.httpHead(url);
+    }
   };
 }
 

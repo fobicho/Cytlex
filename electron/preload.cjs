@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('cytlex', {
   detail: (url) => ipcRenderer.invoke('manga:detail', url),
   chapter: (url) => ipcRenderer.invoke('manga:chapter', url),
   httpGet: (url) => ipcRenderer.invoke('http:get', url),
+  httpHead: (url) => ipcRenderer.invoke('http:head', url),
   httpPost: (payload) => ipcRenderer.invoke('http:post', payload),
   authLogin: (creds) => ipcRenderer.invoke('auth:login', creds),
   authLogout: () => ipcRenderer.invoke('auth:logout'),
