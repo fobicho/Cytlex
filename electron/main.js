@@ -149,23 +149,37 @@ ipcMain.handle('notify:confirm', async (e) => {
   return r.response === 1;
 });
 
-ipcMain.handle('notify:background', async (_e, on, minutes = 30) => {
+const TASK_HOURS = { 6: ['00', '06', '12', '18'], 12: ['00', '12'], 24: ['12'] };
+
+function taskName(hh) {
+  return hh === '00' ? TASK_NAME : `${TASK_NAME}-${hh}`;
+}
+
+async function removeTasks() {
+  for (const hh of ['00', '06', '12', '18']) {
+    try {
+      await execFileAsync('schtasks', ['/Delete', '/F', '/TN', taskName(hh)]);
+    } catch (e) {
+      const raw = `${e?.message || ''} ${e?.stderr || ''}`;
+      if (!/no puede encontrar|no se encuentra|not found|cannot find/i.test(raw)) throw e;
+    }
+  }
+}
+
+ipcMain.handle('notify:background', async (_e, on, hours = 6) => {
   if (process.platform !== 'win32') return { ok: false, error: 'Solo disponible en Windows' };
   const tr = `"${process.execPath}" ${isDev ? `"${app.getAppPath()}" ` : ''}--background`;
-  const mo = String(Math.min(1440, Math.max(15, Number(minutes) || 30)));
+  const list = TASK_HOURS[hours] || TASK_HOURS[6];
   try {
-    if (on) {
+    if (!on) {
+      await removeTasks();
+      return { ok: true };
+    }
+    await removeTasks();
+    for (const hh of list) {
       await execFileAsync('schtasks', [
-        '/Create', '/F', '/TN', TASK_NAME, '/TR', tr, '/SC', 'MINUTE', '/MO', mo
+        '/Create', '/F', '/TN', taskName(hh), '/TR', tr, '/SC', 'DAILY', '/ST', `${hh}:00`
       ]);
-    } else {
-      try {
-        await execFileAsync('schtasks', ['/Delete', '/F', '/TN', TASK_NAME]);
-      } catch (e) {
-        const raw = `${e?.message || ''} ${e?.stderr || ''}`;
-        if (e?.code === 1 && /no puede encontrar|no se encuentra|not found|cannot find/i.test(raw)) return { ok: true };
-        throw e;
-      }
     }
     return { ok: true };
   } catch (e) {

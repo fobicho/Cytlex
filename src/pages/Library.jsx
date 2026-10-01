@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { lib } from '../lib/library.js';
 import { settings } from '../lib/settings.js';
@@ -6,6 +6,9 @@ import MangaCard from '../components/MangaCard.jsx';
 import { extensions } from '../lib/extensions.js';
 import { makeCoverThumb } from '../lib/covers.js';
 import { checkLibrary } from '../lib/notify.js';
+import { progress } from '../lib/progress.js';
+import { chapterIndex } from '../lib/chapterIndex.js';
+import { api } from '../lib/api.js';
 import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { cn } from '../lib/utils.js';
@@ -21,6 +24,20 @@ export default function Library() {
   const [view, setView] = useState(settings.get().libraryView);
   const [checking, setChecking] = useState(false);
   const { toast } = useToast();
+  const [coverSize, setCoverSize] = useState(() => settings.get().libraryCoverSize);
+  const [showUnread, setShowUnread] = useState(() => settings.get().libraryShowUnread);
+  const [unread, setUnread] = useState({});
+  const [progressTick, setProgressTick] = useState(0);
+  useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
+  useEffect(
+    () => settings.subscribe((s) => {
+      setCoverSize(s.libraryCoverSize);
+      setShowUnread(s.libraryShowUnread);
+    }),
+    []
+  );
+
+  const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
 
   const runCheck = async () => {
     setChecking(true);
@@ -57,10 +74,41 @@ export default function Library() {
     setFavs(lib.favs());
   };
 
-  const shown = favs
-    .filter((f) => (f.cats || []).includes(sel))
-    .slice()
-    .sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'es', { sensitivity: 'base', numeric: true }));
+  const shown = useMemo(
+    () =>
+      favs
+        .filter((f) => (f.cats || []).includes(sel))
+        .slice()
+        .sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'es', { sensitivity: 'base', numeric: true })),
+    [favs, sel]
+  );
+
+  useEffect(() => {
+    if (!showUnread) return undefined;
+    let alive = true;
+    (async () => {
+      for (const f of shown) {
+        const sid = f.sourceId || 'leercapitulo';
+        if (!extensions.isInstalled(sid)) continue;
+        const k = `${sid}|${f.url}`;
+        let urls = chapterIndex.get(f.url, sid);
+        if (!urls) {
+          let d = api.peekDetail(f.url, sid);
+          if (!d) {
+            try { d = await api.detail(f.url, sid); } catch { chapterIndex.drop(f.url, sid); continue; }
+          }
+          if (!alive) return;
+          if (!d || !Array.isArray(d.chapters)) continue;
+          urls = d.chapters.map((c) => c.url);
+          chapterIndex.set(f.url, sid, urls);
+        }
+        if (!alive) return;
+        const n = urls.reduce((acc, u) => acc + (progress.get(u, sid)?.read ? 0 : 1), 0);
+        setUnread((prev) => (prev[k] === n ? prev : { ...prev, [k]: n }));
+      }
+    })();
+    return () => { alive = false; };
+  }, [shown, progressTick, showUnread]);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,7 +131,7 @@ export default function Library() {
 
   return (
     <div className="min-h-full flex flex-col">
-      <div className="flex flex-wrap items-center gap-6 mb-6">
+      <div className="flex flex-wrap items-start gap-6 mb-3">
         {cats.map((c) => {
           const active = c.id === sel;
           return (
@@ -102,7 +150,7 @@ export default function Library() {
             </button>
           );
         })}
-        <div className="ml-auto">
+        <div className="ml-auto self-start">
           <Button
             size="sm"
             variant="secondary"
@@ -129,10 +177,24 @@ export default function Library() {
           </div>
         </div>
       ) : view === 'grid' ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-x-5 gap-y-8">
+        <div
+          className="grid gap-x-5 gap-y-8"
+          style={{ gridTemplateColumns: `repeat(auto-fill, ${cs}px)` }}
+        >
           {shown.map((m, i) => {
             const sid = m.sourceId || 'leercapitulo';
-            return <MangaCard key={i} m={m} sourceId={sid} unavailable={!extensions.isInstalled(sid)} minimal from="biblioteca" />;
+            return (
+              <MangaCard
+                key={i}
+                m={m}
+                sourceId={sid}
+                unavailable={!extensions.isInstalled(sid)}
+                minimal
+                from="biblioteca"
+                coverSize={cs}
+                chapterCount={showUnread ? unread[`${sid}|${m.url}`] ?? null : null}
+              />
+            );
           })}
         </div>
       ) : (

@@ -21,9 +21,10 @@ function loadCats() {
 const sameUrl = (a, b) => {
   if (a === b) return true;
   if (!a || !b) return false;
-  const strip = (u) => String(u).replace(/^https?:\/\/[^/]+/i, '').replace(/\/+$/, '') || '/';
-  return strip(a) === strip(b);
+  return sameUrlKey(a) === sameUrlKey(b);
 };
+
+const sameUrlKey = (u) => String(u || '').replace(/^https?:\/\/[^/]+/i, '').replace(/\/+$/, '') || '/';
 
 const SRC = (x) => x.sourceId || 'leercapitulo';
 const match = (a, url, sourceId = 'leercapitulo') => sameUrl(a.url, url) && SRC(a) === sourceId;
@@ -92,6 +93,9 @@ export const lib = {
     }
     return cats;
   },
+  countInCat(id) {
+    return lib.favs().filter((f) => (f.cats || []).includes(id)).length;
+  },
   removeCat(id) {
     let cats = loadCats().filter((c) => c.id !== id);
     if (!cats.length) cats = DEFAULT_CATS.map((c) => ({ ...c }));
@@ -99,6 +103,12 @@ export const lib = {
     const favs = lib.favs().map((f) => ({ ...f, cats: (f.cats || []).filter((c) => c !== id) }));
     write(FAV, favs);
     return cats;
+  },
+  removeFavs(mangas) {
+    const drop = new Set(mangas.map((m) => `${SRC(m)}|${sameUrlKey(m.url)}`));
+    const favs = lib.favs().filter((f) => !drop.has(`${SRC(f)}|${sameUrlKey(f.url)}`));
+    write(FAV, favs);
+    return favs;
   }
 };
 

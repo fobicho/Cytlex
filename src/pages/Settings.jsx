@@ -7,9 +7,13 @@ import { session } from '../lib/session.js';
 import { tracking } from '../lib/tracking.js';
 import { DEFAULT_INDEX_URL } from '../lib/extensions.js';
 import { THEMES } from '../lib/themes.js';
+import { notifyHours } from '../lib/notify.js';
+import { chapterIndex } from '../lib/chapterIndex.js';
 import { Button } from '../components/ui/button.jsx';
 import { Card } from '../components/ui/card.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
+import { Dialog } from '../components/ui/dialog.jsx';
+import { useToast } from '../components/Toast.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { cn } from '../lib/utils.js';
 
@@ -106,6 +110,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   const [authViewer, setAuthViewer] = useState(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [authErr, setAuthErr] = useState('');
+  const { toast } = useToast();
   const [bgErr, setBgErr] = useState('');
 
   const toggleBackground = async (on) => {
@@ -114,7 +119,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
       const ok = await window.cytlex?.confirmTask?.();
       if (!ok) return;
     }
-    const r = await window.cytlex?.setBackgroundCheck?.(on, s.notifyInterval || 60);
+    const r = await window.cytlex?.setBackgroundCheck?.(on, notifyHours());
     if (r?.ok === false) {
       setBgErr(r.error || 'No se pudo registrar la tarea.');
       return;
@@ -153,7 +158,33 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
     setCats((prev) => prev.map((c) => (c.id === id ? { ...c, name } : c)));
   const commitRename = (id) =>
     setCats(lib.renameCat(id, cats.find((c) => c.id === id)?.name || ''));
-  const removeCat = (id) => setCats(lib.removeCat(id));
+  const [pendingCat, setPendingCat] = useState(null);
+
+  const removeCat = (id) => {
+    const name = cats.find((c) => c.id === id)?.name || '';
+    const inside = lib.favs().filter((f) => (f.cats || []).includes(id));
+    if (inside.length === 0) {
+      setCats(lib.removeCat(id));
+      return;
+    }
+    setPendingCat({ id, name, inside });
+  };
+
+  const confirmRemoveCat = () => {
+    if (!pendingCat) return;
+    for (const m of pendingCat.inside) {
+      tracking.unlink(m.url, m.sourceId || 'leercapitulo');
+      chapterIndex.drop(m.url, m.sourceId || 'leercapitulo');
+    }
+    lib.removeFavs(pendingCat.inside);
+    setCats(lib.removeCat(pendingCat.id));
+    toast({
+      title: `Categoría "${pendingCat.name}" eliminada`,
+      description: `${pendingCat.inside.length} ${pendingCat.inside.length === 1 ? 'manga eliminado' : 'mangas eliminados'} de la biblioteca`,
+      variant: 'info'
+    });
+    setPendingCat(null);
+  };
   const addCat = () => {
     const v = newCat.trim();
     if (!v) return;
@@ -219,52 +250,74 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
     );
   } else if (section === 'biblioteca') {
     content = (
-      <Row
-        first
-        last
-        title="Vista"
-        desc="Cuadrícula de portadas o lista compacta"
-        right={
-          <Segmented
-            value={s.libraryView}
-            onChange={(v) => set({ libraryView: v })}
-            options={[['grid', 'Grid'], ['list', 'Lista']]}
-          />
-        }
-      />
-    );
-  } else if (section === 'lector') {
-    content = (
       <div>
         <Row
           first
-          title="Modo por defecto"
-          desc="Vertical continuo o paginado"
+          last={s.libraryView !== 'grid'}
+          title="Vista"
+          desc="Cuadrícula de portadas o lista compacta"
           right={
             <Segmented
-              value={s.readerMode}
-              onChange={(m) => set({ readerMode: m })}
-              options={[['vertical', 'Vertical'], ['paginado', 'Paginado']]}
+              value={s.libraryView}
+              onChange={(v) => set({ libraryView: v })}
+              options={[['grid', 'Grid'], ['list', 'Lista']]}
             />
           }
         />
-        <Row
-          last
-          title="Zoom inicial"
-          desc={`Ancho de página: ${Math.round(s.readerZoom / 2)}%`}
-          right={
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" aria-label="Reducir" onClick={() => set({ readerZoom: Math.max(20, s.readerZoom - 10) })}>
-                <Minus className="w-4 h-4" />
-              </Button>
-              <span className="text-sm text-muted-foreground min-w-[42px] text-center">{s.readerZoom}%</span>
-              <Button variant="ghost" size="icon" aria-label="Ampliar" onClick={() => set({ readerZoom: Math.min(200, s.readerZoom + 10) })}>
-                <Plus className="w-4 h-4" />
-              </Button>
-            </div>
-          }
-        />
+        {s.libraryView === 'grid' && (
+          <>
+            <Row
+              title="Tamaño de las portadas"
+              desc="Ajusta el tamaño manteniendo la proporción"
+              right={
+                <div className="flex items-center gap-3">
+                  <Minus className="w-3.5 h-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <input
+                    type="range"
+                    min={60}
+                    max={260}
+                    step={10}
+                    value={s.libraryCoverSize}
+                    onChange={(e) => set({ libraryCoverSize: Number(e.target.value) })}
+                    aria-label="Tamaño de las portadas"
+                    className="w-40 h-1.5 rounded-full bg-muted accent-primary cursor-pointer"
+                  />
+                  <Plus className="w-3.5 h-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <span className="text-sm text-muted-foreground min-w-[46px] text-center">{s.libraryCoverSize}px</span>
+                </div>
+              }
+            />
+            <Row
+              last
+              title="Mostrar capítulos sin leer"
+              desc="Muestra un contador en cada portada"
+              right={
+                <Switch
+                  on={s.libraryShowUnread}
+                  onChange={(v) => set({ libraryShowUnread: v })}
+                  label="Mostrar capítulos sin leer"
+                />
+              }
+            />
+          </>
+        )}
       </div>
+    );
+  } else if (section === 'lector') {
+    content = (
+      <Row
+        first
+        last
+        title="Modo por defecto"
+        desc="Vertical continuo o paginado"
+        right={
+          <Segmented
+            value={s.readerMode}
+            onChange={(m) => set({ readerMode: m })}
+            options={[['vertical', 'Vertical'], ['paginado', 'Paginado']]}
+          />
+        }
+      />
     );
   } else if (section === 'categorias') {
     content = (
@@ -344,23 +397,19 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         />
         <Row
           title="Comprobar cada"
-          desc="Cada cuánto se revisa la biblioteca."
+          desc="Cada cuántas horas se revisa la biblioteca."
           right={
             <div className={cn(!s.notifyEnabled && 'pointer-events-none opacity-50')} aria-disabled={!s.notifyEnabled}>
               <Dropdown
                 className="w-[132px]"
-                value={s.notifyInterval}
-                onChange={(v) => set({ notifyInterval: Number(v) })}
+                value={notifyHours()}
+                onChange={(v) => set({ notifyHours: Number(v) })}
                 ariaLabel="Comprobar cada"
                 portal
                 options={[
-                  { value: 15, label: '15 minutos' },
-                  { value: 30, label: '30 minutos' },
-                  { value: 60, label: '1 hora' },
-                  { value: 180, label: '3 horas' },
-                  { value: 360, label: '6 horas' },
-                  { value: 720, label: '12 horas' },
-                  { value: 1440, label: '24 horas' }
+                  { value: 6, label: '6 horas' },
+                  { value: 12, label: '12 horas' },
+                  { value: 24, label: '1 día' }
                 ]}
               />
             </div>
@@ -512,6 +561,29 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           <div className="p-6">{content}</div>
         </Card>
       </div>
+
+      <Dialog
+        open={!!pendingCat}
+        onClose={() => setPendingCat(null)}
+        title="Eliminar categoría"
+        description={
+          pendingCat
+            ? `"${pendingCat.name}" contiene ${pendingCat.inside.length} ${pendingCat.inside.length === 1 ? 'manga' : 'mangas'}. Si continúas, se eliminarán de la biblioteca y se desvincularán del seguimiento.`
+            : ''
+        }
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+      >
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setPendingCat(null)}>
+            Cancelar
+          </Button>
+          <Button variant="destructive" onClick={confirmRemoveCat}>
+            Eliminar
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }

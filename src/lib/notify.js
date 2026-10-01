@@ -95,6 +95,33 @@ export async function checkLibrary({ silent = false, force = false } = {}) {
   return found;
 }
 
+const HOURS = [6, 12, 24];
+
+const TARGET_HOURS = {
+  6: [0, 6, 12, 18],
+  12: [0, 12],
+  24: [12]
+};
+
+export function notifyHours() {
+  const h = Number(settings.get().notifyHours);
+  return HOURS.includes(h) ? h : 6;
+}
+
+function msToNextHour(hours) {
+  const list = TARGET_HOURS[hours] || TARGET_HOURS[6];
+  const now = new Date();
+  for (const h of list) {
+    const t = new Date(now);
+    t.setHours(h, 0, 0, 0);
+    if (t > now) return Math.max(1000, t - now);
+  }
+  const t = new Date(now);
+  t.setDate(t.getDate() + 1);
+  t.setHours(list[0], 0, 0, 0);
+  return Math.max(1000, t - now);
+}
+
 export function startNotifier() {
   const run = () => {
     if (!settings.get().notifyEnabled) {
@@ -106,11 +133,13 @@ export function startNotifier() {
 
   let id = null;
   const arm = () => {
-    if (id) clearInterval(id);
+    if (id) clearTimeout(id);
     id = null;
     if (!settings.get().notifyEnabled) return;
-    const min = Math.max(settings.get().notifyInterval || 60, 15);
-    id = setInterval(run, min * 60 * 1000);
+    id = setTimeout(() => {
+      run();
+      arm();
+    }, msToNextHour(notifyHours()));
   };
 
   arm();
@@ -121,12 +150,10 @@ export function startNotifier() {
     bg.then((v) => {
       if (v) setTimeout(run, 2500);
     });
-  } else {
-    setTimeout(run, 4000);
   }
 
   return () => {
-    if (id) clearInterval(id);
+    if (id) clearTimeout(id);
     off();
   };
 }

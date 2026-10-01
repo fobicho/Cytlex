@@ -10,7 +10,7 @@ function prefetch(url, sourceId) {
   api.prefetchDetail(url, sourceId);
 }
 
-export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unavailable = false, minimal = false, from = 'biblioteca' }) {
+export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unavailable = false, minimal = false, from = 'biblioteca', coverSize, chapterCount }) {
   const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}`;
   const status = m.status || m.lastChapter || (progress ? 'En progreso' : '');
   const linkCls = cn(unavailable && 'pointer-events-none');
@@ -23,6 +23,22 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
     setSrc(local || m.cover);
   }, [m.coverLocal, m.cover]);
 
+  const box = coverSize ? { width: `${coverSize}px` } : { aspectRatio: '2 / 3' };
+  const inner = coverSize ? 'h-full w-full object-cover block' : 'w-full h-full aspect-[2/3] object-cover block';
+  const ph = coverSize ? 'h-full w-full' : 'w-full aspect-[2/3]';
+
+  const scale = coverSize ? coverSize / 160 : 1;
+  const badgeStyle = coverSize
+    ? {
+        fontSize: `${Math.max(9, Math.round(11 * scale))}px`,
+        top: `${Math.max(4, Math.round(8 * scale))}px`,
+        right: `${Math.max(4, Math.round(8 * scale))}px`,
+        paddingLeft: `${Math.max(4, Math.round(6 * scale))}px`,
+        paddingRight: `${Math.max(4, Math.round(6 * scale))}px`,
+        minWidth: `${Math.max(18, Math.round(24 * scale))}px`
+      }
+    : undefined;
+
   return (
     <div className={cn(unavailable && 'opacity-60')}>
       <a
@@ -34,7 +50,7 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
         onFocus={() => !unavailable && prefetch(m.url, sourceId)}
         {...linkA11y}
       >
-        <div className="relative rounded-xl overflow-hidden bg-muted/50 border border-border/50 shadow-sm">
+        <div className="relative rounded-xl overflow-hidden bg-muted/50 border border-border/50 shadow-sm aspect-[2/3]" style={box}>
           {src ? (
             <img
               loading="lazy"
@@ -45,10 +61,10 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
                 if (src !== m.cover) setSrc(m.cover);
                 else setSrc('');
               }}
-              className="w-full h-full aspect-[2/3] object-cover block"
+              className={inner}
             />
           ) : (
-            <div className="w-full aspect-[2/3] animate-pulse bg-muted/40" />
+            <div className={cn(ph, 'animate-pulse bg-muted/40')} />
           )}
           {unavailable ? (
             <span className="absolute inset-0 grid place-items-center bg-black/60">
@@ -63,6 +79,15 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
                 <span className="truncate">{String(status).slice(0, 28)}</span>
               </span>
             )
+          )}
+          {chapterCount != null && !unavailable && (
+            <span
+              title={`${chapterCount} capítulos sin leer`}
+              style={badgeStyle}
+              className="absolute top-2 right-2 grid place-items-center rounded-full bg-black/70 font-semibold text-white backdrop-blur-md tabular-nums"
+            >
+              {chapterCount}
+            </span>
           )}
         </div>
       </a>

@@ -9,6 +9,8 @@ const defaults = {
   readerMode: 'vertical',
   readerZoom: 100,
   libraryView: 'grid',
+  libraryCoverSize: 160,
+  libraryShowUnread: false,
   sidebarCollapsed: false,
   sourceUrl: 'https://leercapitulo.co',
   extIndexUrl: DEFAULT_INDEX_URL,
@@ -16,7 +18,7 @@ const defaults = {
   libraryCategory: '',
   settingsSection: 'apariencia',
   notifyEnabled: false,
-  notifyInterval: 60,
+  notifyHours: 6,
   notifyBackground: false,
   notifyBaseline: {}
 };

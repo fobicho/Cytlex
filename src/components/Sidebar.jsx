@@ -27,7 +27,7 @@ export default function Sidebar() {
       transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
       className="h-full flex flex-col border-r border-border bg-sidebar overflow-hidden"
     >
-      <nav className="flex-1 flex flex-col gap-1 p-3">
+      <nav className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-1 p-3">
         {navItems.map((item) => {
           const isActive = location.pathname === item.to;
           return (
@@ -69,7 +69,7 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="p-3 border-t border-border">
+      <div className="shrink-0 p-3 border-t border-border">
         <motion.button
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.97 }}

@@ -246,8 +246,8 @@ export const anilistList = {
     const variables = { mediaId: patch.mediaId };
     if (patch.entryId) variables.id = patch.entryId;
     if (patch.status) variables.status = patch.status;
-    if (patch.progress != null) variables.progress = patch.progress;
-    if (patch.progressVolumes != null) variables.progressVolumes = patch.progressVolumes;
+    if (patch.progress != null) variables.progress = Math.round(Number(patch.progress));
+    if (patch.progressVolumes != null) variables.progressVolumes = Math.round(Number(patch.progressVolumes));
     if (patch.score != null) variables.score = Number(patch.score);
     if (patch.startedAt !== undefined) variables.startedAt = fuzzyDate(patch.startedAt);
     if (patch.completedAt !== undefined) variables.completedAt = fuzzyDate(patch.completedAt);

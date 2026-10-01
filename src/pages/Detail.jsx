@@ -7,6 +7,7 @@ import { progress } from '../lib/progress.js';
 import { extensions } from '../lib/extensions.js';
 import { makeCoverThumb } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover } from '../lib/searchState.js';
+import { chapterIndex } from '../lib/chapterIndex.js';
 import { cn } from '../lib/utils.js';
 import { Button } from '../components/ui/button.jsx';
 import { Badge } from '../components/ui/badge.jsx';
@@ -291,6 +292,11 @@ export default function Detail() {
     if (duplicates.length) setDup({ list: duplicates, pending: manga });
     else openCatMenu(manga);
   };
+
+  useEffect(() => {
+    if (!d?.chapters?.length) return;
+    chapterIndex.set(mangaUrl, sourceId, d.chapters.map((c) => c.url));
+  }, [mangaUrl, sourceId, d]);
 
   if (!mangaUrl)
     return <EmptyState icon={BookOpen} title="Sin manga seleccionado." />;
