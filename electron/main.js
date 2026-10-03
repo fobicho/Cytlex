@@ -13,6 +13,7 @@ const auth = require('./auth.cjs');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
+const devUrl = process.env.CYTLEX_DEV_URL || 'http://localhost:5173';
 const launchedInBackground = process.argv.includes('--background');
 
 let mainWindow = null;
@@ -54,7 +55,7 @@ function createWindow() {
   win.on('unmaximize', emitMaximized);
 
   if (isDev) {
-    win.loadURL('http://localhost:5173');
+    win.loadURL(devUrl);
     if (process.env.OPEN_DEVTOOLS === '1') {
       win.webContents.openDevTools({ mode: 'detach' });
     }

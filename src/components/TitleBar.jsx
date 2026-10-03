@@ -26,7 +26,7 @@ export default function TitleBar() {
         <div className="w-5 h-5 rounded-md bg-white grid place-items-center font-bold text-pink-500 text-[13px] leading-none select-none">
           粘
         </div>
-        <span className="text-xs font-semibold tracking-tight text-sidebar-foreground">Cytlex</span>
+        <span className="font-display text-xs font-semibold tracking-tight text-sidebar-foreground">Cytlex</span>
       </div>
 
       <div className="flex-1" />

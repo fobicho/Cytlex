@@ -531,7 +531,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
 
   return (
     <div className="min-h-full flex flex-col">
-      <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-8 items-stretch flex-1">
+      <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-6 items-stretch flex-1">
         <Card className="hover:shadow-sm">
           <nav className="p-2 flex flex-col gap-1" aria-label="Categorías de ajustes">
             {SECTIONS.map((sec) => {

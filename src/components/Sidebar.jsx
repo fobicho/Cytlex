@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { NavLink, useLocation } from 'react-router-dom';
-import { BookOpen, Compass, Settings as SettingsIcon, ChevronLeft } from 'lucide-react';
+import { BookOpen, Compass, Settings as SettingsIcon, ChevronsRight } from 'lucide-react';
 import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
 import { settings } from '../lib/settings.js';
@@ -11,6 +11,10 @@ const navItems = [
   { to: '/explorar', icon: Compass, label: 'Explorar' },
   { to: '/ajustes', icon: SettingsIcon, label: 'Ajustes' }
 ];
+
+const EASE = [0.25, 0.1, 0.25, 1];
+const DURATION = 0.3;
+const SIDEBAR_WIDTH = { expanded: 196, collapsed: 72 };
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(settings.get().sidebarCollapsed);
@@ -23,8 +27,8 @@ export default function Sidebar() {
   return (
     <motion.aside
       initial={false}
-      animate={{ width: collapsed ? 72 : 196 }}
-      transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
+      animate={{ width: collapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.expanded }}
+      transition={{ duration: DURATION, ease: EASE }}
       className="h-full flex flex-col border-r border-border bg-sidebar overflow-hidden"
     >
       <nav className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-1 p-3">
@@ -42,9 +46,12 @@ export default function Sidebar() {
             >
               <div
                 className={cn(
-                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors relative',
-                  collapsed && 'justify-center px-0 gap-0',
-                  isActive ? 'text-sidebar-accent-foreground' : 'text-sidebar-foreground'
+                  'flex items-center gap-3 py-2.5 px-[14px] rounded-lg text-sm font-medium transition-colors relative',
+                  'transition-[gap] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
+                  collapsed && 'gap-0',
+                  isActive
+                    ? 'text-sidebar-accent-foreground'
+                    : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/50'
                 )}
               >
                 {isActive && (
@@ -57,7 +64,7 @@ export default function Sidebar() {
                 <item.icon className="w-5 h-5 shrink-0 relative z-10" />
                 <span
                   className={cn(
-                    'relative z-10 whitespace-nowrap overflow-hidden transition-[max-width,opacity,transform] duration-300',
+                    'relative z-10 whitespace-nowrap overflow-hidden transition-[max-width,opacity,transform] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
                     collapsed ? 'max-w-0 opacity-0 translate-x-2' : 'max-w-[160px] opacity-100 translate-x-0'
                   )}
                 >
@@ -71,25 +78,20 @@ export default function Sidebar() {
 
       <div className="shrink-0 p-3 border-t border-border">
         <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.97 }}
+          whileHover={{ scale: 1.04 }}
+          whileTap={{ scale: 0.94 }}
           onClick={toggle}
-          className={cn(
-            'flex items-center justify-center w-full gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors',
-            collapsed && 'gap-0'
-          )}
+          aria-label={collapsed ? 'Expandir menu lateral' : 'Colapsar menu lateral'}
+          title={collapsed ? 'Expandir' : 'Colapsar'}
+          className="flex items-center justify-center w-full py-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
         >
-          <motion.div animate={{ rotate: collapsed ? -180 : 0 }} transition={{ duration: 0.3 }}>
-            <ChevronLeft className="w-4 h-4" />
-          </motion.div>
-          <span
-            className={cn(
-              'whitespace-nowrap overflow-hidden transition-[max-width,opacity,transform] duration-300',
-              collapsed ? 'max-w-0 opacity-0 translate-x-2' : 'max-w-[120px] opacity-100 translate-x-0'
-            )}
+<motion.span
+            className="flex items-center justify-center"
+            animate={{ rotate: collapsed ? 0 : 180 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 26, mass: 0.7 }}
           >
-            Colapsar
-          </span>
+            <ChevronsRight className="w-4 h-4" />
+          </motion.span>
         </motion.button>
       </div>
     </motion.aside>

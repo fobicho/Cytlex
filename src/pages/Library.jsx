@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 import { RefreshCw } from 'lucide-react';
 import { lib } from '../lib/library.js';
 import { settings } from '../lib/settings.js';
@@ -87,25 +88,31 @@ export default function Library() {
     if (!showUnread) return undefined;
     let alive = true;
     (async () => {
-      for (const f of shown) {
-        const sid = f.sourceId || 'leercapitulo';
-        if (!extensions.isInstalled(sid)) continue;
-        const k = `${sid}|${f.url}`;
-        let urls = chapterIndex.get(f.url, sid);
-        if (!urls) {
-          let d = api.peekDetail(f.url, sid);
-          if (!d) {
-            try { d = await api.detail(f.url, sid); } catch { chapterIndex.drop(f.url, sid); continue; }
+      const pending = shown.filter((f) => extensions.isInstalled(f.sourceId || 'leercapitulo'));
+      const results = await Promise.all(
+        pending.map(async (f) => {
+          const sid = f.sourceId || 'leercapitulo';
+          const k = `${sid}|${f.url}`;
+          let urls = chapterIndex.get(f.url, sid);
+          if (!urls) {
+            let d = api.peekDetail(f.url, sid);
+            if (!d) {
+              try { d = await api.detail(f.url, sid); } catch { chapterIndex.drop(f.url, sid); return null; }
+            }
+            if (!d || !Array.isArray(d.chapters)) return null;
+            urls = d.chapters.map((c) => c.url);
+            chapterIndex.set(f.url, sid, urls);
           }
-          if (!alive) return;
-          if (!d || !Array.isArray(d.chapters)) continue;
-          urls = d.chapters.map((c) => c.url);
-          chapterIndex.set(f.url, sid, urls);
-        }
-        if (!alive) return;
-        const n = urls.reduce((acc, u) => acc + (progress.get(u, sid)?.read ? 0 : 1), 0);
-        setUnread((prev) => (prev[k] === n ? prev : { ...prev, [k]: n }));
-      }
+          const n = urls.reduce((acc, u) => acc + (progress.get(u, sid)?.read ? 0 : 1), 0);
+          return [k, n];
+        })
+      );
+      if (!alive) return;
+      setUnread((prev) => {
+        const next = {};
+        for (const [k, n] of results) if (k) next[k] = n;
+        return next;
+      });
     })();
     return () => { alive = false; };
   }, [shown, progressTick, showUnread]);
@@ -113,21 +120,22 @@ export default function Library() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const pending = shown.filter((f) => f.cover && !(f.coverLocal || '').startsWith('data:'));
+      const thumbs = await Promise.all(
+        pending.map(async (f) => [f, await makeCoverThumb(f.cover)])
+      );
+      if (cancelled) return;
       let changed = false;
-      for (const f of shown) {
-        if (f.cover && !(f.coverLocal || '').startsWith('data:')) {
-          const local = await makeCoverThumb(f.cover);
-          if (cancelled) return;
-          if (local) {
-            lib.updateFav(f.url, { coverLocal: local }, f.sourceId);
-            changed = true;
-          }
+      for (const [f, local] of thumbs) {
+        if (local) {
+          lib.updateFav(f.url, { coverLocal: local }, f.sourceId);
+          changed = true;
         }
       }
-      if (changed && !cancelled) setFavs(lib.favs());
+      if (changed) setFavs(lib.favs());
     })();
     return () => { cancelled = true; };
-  }, [favs, sel]);
+  }, [shown]);
 
   return (
     <div className="min-h-full flex flex-col">
@@ -140,13 +148,18 @@ export default function Library() {
               type="button"
               onClick={() => setSel(c.id)}
               className={cn(
-                'pb-2 text-sm font-medium border-b-2 transition-colors',
-                active
-                  ? 'text-foreground border-primary'
-                  : 'text-muted-foreground border-transparent hover:text-foreground'
+                'relative pb-2 text-sm font-medium transition-colors',
+                active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
               )}
             >
               {c.name}
+              {active && (
+                <motion.span
+                  layoutId="cat-underline"
+                  className="absolute left-0 right-0 -bottom-px h-0.5 rounded-full bg-primary"
+                  transition={{ type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }}
+                />
+              )}
             </button>
           );
         })}

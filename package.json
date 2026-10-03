@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "dev:electron": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:electron": "node scripts/dev-electron.mjs",
     "eb:dev": "electron .",
     "dist": "vite build && electron-builder"
   },

@@ -80,7 +80,7 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
               </span>
             )
           )}
-          {chapterCount != null && !unavailable && (
+          {chapterCount > 0 && !unavailable && (
             <span
               title={`${chapterCount} capítulos sin leer`}
               style={badgeStyle}

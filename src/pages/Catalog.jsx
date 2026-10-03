@@ -167,18 +167,23 @@ export default function Catalog() {
           {TABS.map((t) => {
             const active = tab === t.id;
             return (
-              <button
+<button
                 key={t.id}
                 type="button"
                 onClick={() => setTab(t.id)}
                 className={cn(
-                  'pb-2 text-sm font-medium border-b-2 transition-colors',
-                  active
-                    ? 'text-foreground border-primary'
-                    : 'text-muted-foreground border-transparent hover:text-foreground'
+                  'relative pb-2 text-sm font-medium transition-colors',
+                  active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
                 )}
               >
                 {t.label}
+                {active && (
+                  <motion.span
+                    layoutId="catalog-underline"
+                    className="absolute left-0 right-0 -bottom-px h-0.5 rounded-full bg-primary"
+                    transition={{ type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }}
+                  />
+                )}
               </button>
             );
           })}
