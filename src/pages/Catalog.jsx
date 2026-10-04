@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, BookOpen, Loader2, Puzzle, ChevronRight } from 'lucide-react';
+import { Search, Loader2, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { extensions } from '../lib/extensions.js';
@@ -214,18 +214,28 @@ export default function Catalog() {
 
       {tab === 'mangas' ? (
         sources.length === 0 ? (
-          <div className="flex-1 grid place-items-center">
-            <EmptyState icon={Puzzle} title="No hay extensiones instaladas" />
-          </div>
+          <EmptyState
+            face="（눈﹏눈）"
+            title="No hay extensiones instaladas"
+            description="Instala al menos una fuente para empezar a buscar mangas."
+            action={
+              <Button onClick={() => { window.location.hash = '#/explorar?tab=extensiones'; }}>
+                Ir a Extensiones
+              </Button>
+            }
+          />
         ) : (
           <>
             {!results && (
-              <div className="flex-1 grid place-items-center text-center text-muted-foreground">
-                <div>
-                  <Search className="w-8 h-8 mx-auto mb-3 opacity-50" />
-                  <p className="text-sm">Busca un manga para empezar.</p>
-                </div>
-              </div>
+              <EmptyState
+                compact
+                face="(・_・)？"
+                tone="prompt"
+                title="Busca un manga para empezar"
+                description={`Escribe un título en el buscador para consultarlo en tus ${sources.length} ${
+                  sources.length === 1 ? 'extensión' : 'extensiones'
+                }.`}
+              />
             )}
 
             {results && (
@@ -242,13 +252,11 @@ export default function Catalog() {
                 ))}
 
                 {done && withResults.length === 0 && (
-                  <div className="flex-1 grid place-items-center">
-                    <EmptyState
-                      icon={BookOpen}
-                      title="Sin resultados"
-                      description="Ninguna extensión encontró coincidencias. Prueba con otro título."
-                    />
-                  </div>
+                  <EmptyState
+                    face="（・_・）"
+                    title="Sin resultados"
+                    description="Ninguna extensión encontró coincidencias. Prueba con otro título."
+                  />
                 )}
               </>
             )}

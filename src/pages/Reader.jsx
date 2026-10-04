@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ArrowLeft, Maximize2, Minimize2, ChevronLeft, ChevronRight, ChevronDown, Download, AlertTriangle, BookOpen, Loader2 } from 'lucide-react';
+import { ArrowLeft, Maximize2, Minimize2, ChevronLeft, ChevronRight, ChevronDown, Download, Loader2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { settings } from '../lib/settings.js';
 import { progress } from '../lib/progress.js';
@@ -329,18 +329,16 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     window.location.hash = backHash;
   };
 
-  if (!chapterUrl) return <EmptyState icon={BookOpen} title="Sin capítulo." />;
+  if (!chapterUrl)
+    return <EmptyState face="¯\\_(ツ)_/¯" title="Sin capítulo seleccionado." />;
   if (err)
     return (
       <EmptyState
-        icon={AlertTriangle}
+        face="（╯°□°）╯︵ ┻━┻"
+        tone="error"
         title="No se pudo cargar el capítulo"
         description={err}
-        action={
-          <Button onClick={goBack}>
-            Volver al detalle
-          </Button>
-        }
+        action={<Button onClick={goBack}>Volver al detalle</Button>}
       />
     );
   if (!ch || chUrl !== chapterUrl)

@@ -76,7 +76,8 @@ export default function Tracking() {
     return (
       <div className="min-h-[60vh] grid place-items-center">
         <EmptyState
-          icon={Link2}
+          face="（・_・）"
+          tone="prompt"
           title="Conecta tu cuenta de AniList"
           description="Conecta tu cuenta desde Ajustes › Seguimiento para ver y editar tu lista."
           action={
@@ -147,15 +148,26 @@ export default function Tracking() {
       )}
 
       {!busy && !entries && !err && (
-        <div className="grid place-items-center">
-          <EmptyState icon={BookOpen} title="No se pudo cargar tu lista" />
-        </div>
+        <EmptyState
+          face="（・_・）"
+          tone="error"
+          title="No se pudo cargar tu lista"
+          description="No hemos podido leer tu lista de AniList. Inténtalo de nuevo."
+          action={
+            <Button variant="secondary" onClick={load} disabled={busy}>
+              Reintentar
+            </Button>
+          }
+        />
       )}
 
       {entries && entries.length === 0 && !busy && (
-        <div className="grid place-items-center">
-          <EmptyState icon={BookOpen} title="Tu lista de manga está vacía" />
-        </div>
+        <EmptyState
+          face="（　´_ゝ`）"
+          tone="prompt"
+          title="Tu lista de manga está vacía"
+          description="Añade obras a tu lista de AniList desde el panel de seguimiento de cada manga."
+        />
       )}
 
       {grouped.map((g) => (

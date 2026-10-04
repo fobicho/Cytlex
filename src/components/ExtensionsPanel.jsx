@@ -105,9 +105,12 @@ export default function ExtensionsPanel() {
       <section>
         <h3 className="text-sm font-medium mb-3">Instaladas</h3>
         {installed.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No hay extensiones instaladas. Instálalas individualmente desde «Disponibles».
-          </p>
+          <EmptyState
+            compact
+            face="（・_・）"
+            title="No hay extensiones instaladas"
+            description="Instálalas individualmente desde «Disponibles» para añadir nuevas fuentes."
+          />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {installed.map(({ manifest: m }) => (
@@ -149,14 +152,21 @@ export default function ExtensionsPanel() {
             </div>
           ) : (
             <EmptyState
-              icon={Puzzle}
+              compact
+              face="（・_・;）"
+              tone="error"
               title="No se pudieron cargar las extensiones"
               description="Revisa tu conexión e inténtalo de nuevo."
               action={<Button size="sm" onClick={loadAvailable}>Reintentar</Button>}
             />
           )
         ) : available.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No quedan extensiones por instalar.</p>
+          <EmptyState
+            compact
+            face="ヽ(・∀・)ﾉ"
+            title="No quedan extensiones por instalar"
+            description="Ya tienes instaladas todas las fuentes del índice."
+          />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {available.map((m) => (

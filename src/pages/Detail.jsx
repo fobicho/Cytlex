@@ -299,11 +299,12 @@ export default function Detail() {
   }, [mangaUrl, sourceId, d]);
 
   if (!mangaUrl)
-    return <EmptyState icon={BookOpen} title="Sin manga seleccionado." />;
+    return <EmptyState face="¯\\_(ツ)_/¯" title="Sin manga seleccionado." />;
   if (!sourceAvailable)
     return (
       <EmptyState
-        icon={Puzzle}
+        face="（ノಠ益ಠ）ノ"
+        tone="prompt"
         title="Fuente no instalada"
         description="La extensión de este manga ya no está instalada. Vuelve a instalarla para poder abrirlo."
         action={
@@ -314,7 +315,15 @@ export default function Detail() {
       />
     );
   if (err)
-    return <EmptyState icon={AlertTriangle} title="No se pudo cargar" description={err} />;
+    return (
+      <EmptyState
+        face="（╯°□°）╯︵ ┻━┻"
+        tone="error"
+        title="No se pudo cargar"
+        description={err}
+        action={<Button variant="secondary" onClick={() => window.location.reload()}>Reintentar</Button>}
+      />
+    );
   if (!d)
     return (
       <div className="min-h-full flex flex-col">

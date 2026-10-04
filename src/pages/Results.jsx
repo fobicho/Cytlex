@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, BookOpen } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { extensions } from '../lib/extensions.js';
 import { lastSearch, resultsScroll } from '../lib/searchState.js';
@@ -63,7 +63,18 @@ export default function Results() {
   }, [sourceId, group?.items.length]);
 
   if (!group || !group.items.length)
-    return <EmptyState icon={BookOpen} title="Sin resultados" description="Vuelve a explorar para buscar mangas." />;
+    return (
+      <EmptyState
+        face="¯\\_(ツ)_/¯"
+        title="Sin resultados"
+        description="Vuelve a explorar para buscar mangas."
+        action={
+          <Button variant="secondary" onClick={() => navigate('/explorar')}>
+            Ir a Explorar
+          </Button>
+        }
+      />
+    );
 
   return (
     <div className="min-h-full flex flex-col">

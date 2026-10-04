@@ -12,6 +12,7 @@ import { chapterIndex } from '../lib/chapterIndex.js';
 import { api } from '../lib/api.js';
 import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
+import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 
 export default function Library() {
@@ -183,12 +184,18 @@ export default function Library() {
       </div>
 
       {shown.length === 0 ? (
-        <div className="flex-1 grid place-items-center text-center text-muted-foreground">
-          <div>
-            <div className="font-mono text-5xl mb-4">:(</div>
-            <p className="text-sm">Tu biblioteca está vacía</p>
-          </div>
-        </div>
+        <EmptyState
+          face="(っ-;)"
+          tone="sad"
+          title="Tu biblioteca está vacía"
+          description="Añade mangas desde Explorar para tenerlos siempre a mano."
+          action={
+            <Button onClick={() => { window.location.hash = '#/explorar'; }}>
+              Buscar mangas
+            </Button>
+          }
+          className="flex-1"
+        />
       ) : view === 'grid' ? (
         <div
           className="grid gap-x-5 gap-y-8"
