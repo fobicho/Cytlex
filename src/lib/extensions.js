@@ -167,7 +167,8 @@ export const extensions = {
 
     const records = read().map((r) => {
       const fresh = byId.get(r.manifest.id);
-      return fresh ? { ...r, manifest: { ...r.manifest, ...fresh } } : r;
+      if (!fresh) return r;
+      return { ...r, manifest: { ...fresh, ...r.manifest } };
     });
 
     await Promise.all(records.map(async (r) => {

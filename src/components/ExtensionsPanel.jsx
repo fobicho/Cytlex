@@ -78,6 +78,7 @@ export default function ExtensionsPanel() {
 
   useEffect(() => {
     (async () => {
+      await checkUpdates();
       try { await extensions.sync(repoUrl); } catch {}
       refresh();
       checkUpdates();
