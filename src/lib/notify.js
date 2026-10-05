@@ -1,6 +1,7 @@
 import { api } from './api.js';
 import { lib } from './library.js';
 import { settings } from './settings.js';
+import { extUpdates } from './extUpdates.js';
 
 const key = (url, sourceId) => `${sourceId}|${url}`;
 
@@ -12,6 +13,26 @@ async function finishIfBackground() {
     const bg = await window.cytlex.isBackground();
     if (bg) window.cytlex.exitBackground();
   } catch {}
+}
+
+async function avisarExtensiones() {
+  const nuevos = await extUpdates.check();
+  if (!nuevos.length) return false;
+
+  const titulo =
+    nuevos.length === 1
+      ? `${nuevos[0].name} tiene actualización`
+      : `${nuevos.length} extensiones tienen actualización`;
+  const cuerpo =
+    nuevos.length === 1
+      ? `Ya puedes instalar la versión ${nuevos[0].to}.`
+      : 'Ya puedes instalarlas desde Extensiones.';
+
+  return !!window.cytlex?.notify({
+    title: titulo,
+    body: cuerpo,
+    tipo: 'extensiones'
+  });
 }
 
 async function countChapters(manga) {
@@ -123,12 +144,18 @@ function msToNextHour(hours) {
 }
 
 export function startNotifier() {
-  const run = () => {
+  const run = async () => {
     if (!settings.get().notifyEnabled) {
       finishIfBackground();
       return;
     }
-    checkLibrary().catch(() => {});
+    await checkLibrary().catch(() => {});
+    const avisado = await avisarExtensiones().catch(() => false);
+    if (!avisado) {
+      finishIfBackground();
+      return;
+    }
+    setTimeout(finishIfBackground, 4 * 60 * 1000);
   };
 
   let id = null;

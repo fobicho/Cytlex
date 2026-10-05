@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Trash2, Download, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react';
+import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle } from 'lucide-react';
 import { extensions, DEFAULT_INDEX_URL } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { Card } from './ui/card.jsx';
 import { Dialog } from './ui/dialog.jsx';
 import { Button } from './ui/button.jsx';
 import { EmptyState } from './ui/empty-state.jsx';
+import { Badge } from './ui/badge.jsx';
+import { useToast } from './Toast.jsx';
 import { cn } from '../lib/utils.js';
 
-function ExtensionCard({ m, action }) {
+function ExtensionCard({ m, action, badge }) {
   const [imgOk, setImgOk] = useState(true);
   const showImg = m.icon && imgOk;
   return (
@@ -27,7 +29,13 @@ function ExtensionCard({ m, action }) {
             (m.name?.[0] || '?').toUpperCase()
           )}
         </div>
-        <div className="flex-1 min-w-0 font-semibold truncate" title={m.name}>{m.name}</div>
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold truncate" title={m.name}>{m.name}</div>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            {m.version && <span className="text-[11px] text-muted-foreground">v{m.version}</span>}
+            {badge}
+          </div>
+        </div>
         <div className="shrink-0">{action}</div>
       </div>
     </Card>
@@ -35,15 +43,26 @@ function ExtensionCard({ m, action }) {
 }
 
 export default function ExtensionsPanel() {
+  const { toast } = useToast();
   const [installed, setInstalled] = useState(() => extensions.installed());
   const [available, setAvailable] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState('');
   const [confirmRemove, setConfirmRemove] = useState(null);
+  const [updates, setUpdates] = useState([]);
+  const [updating, setUpdating] = useState(false);
 
   const repoUrl = settings.get().extIndexUrl || DEFAULT_INDEX_URL;
   const refresh = () => setInstalled(extensions.installed());
+
+  const checkUpdates = async () => {
+    try {
+      setUpdates(await extensions.checkUpdates(repoUrl));
+    } catch {
+      setUpdates([]);
+    }
+  };
 
   const loadAvailable = async () => {
     setLoading(true);
@@ -61,9 +80,44 @@ export default function ExtensionsPanel() {
     (async () => {
       try { await extensions.sync(repoUrl); } catch {}
       refresh();
+      checkUpdates();
       loadAvailable();
     })();
   }, []);
+
+  useEffect(() => {
+    const onGo = () => {
+      checkUpdates();
+      loadAvailable();
+    };
+    window.addEventListener('cytlex:go-extensions', onGo);
+    return () => window.removeEventListener('cytlex:go-extensions', onGo);
+  }, []);
+
+  const doUpdateAll = async () => {
+    setUpdating(true);
+    setErr('');
+    try {
+      const r = await extensions.updateAll(repoUrl);
+      refresh();
+      await checkUpdates();
+      if (r.fallos.length) {
+        toast({
+          title: 'Actualización parcial',
+          description: `${r.ok} actualizadas, ${r.fallos.length} fallaron.`,
+          variant: 'error'
+        });
+      } else {
+        toast({
+          title: r.ok === 1 ? '1 extensión actualizada' : `${r.ok} extensiones actualizadas`,
+          variant: 'success'
+        });
+      }
+    } catch (e) {
+      setErr(String(e?.message || e));
+    }
+    setUpdating(false);
+  };
 
   const doInstall = async (m) => {
     setBusy(m.id);
@@ -103,35 +157,53 @@ export default function ExtensionsPanel() {
       )}
 
       <section>
-        <h3 className="text-sm font-medium mb-3">Instaladas</h3>
+        <div className="flex items-center justify-between gap-4 mb-3">
+          <h3 className="text-sm font-medium">Instaladas</h3>
+          {updates.length > 0 && (
+            <Button variant="secondary" size="sm" onClick={doUpdateAll} disabled={updating}>
+              {updating ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <ArrowUpCircle className="w-4 h-4 mr-2" />
+              )}
+              Actualizar todo
+              <span className="opacity-70 ml-2">{updates.length}</span>
+            </Button>
+          )}
+        </div>
         {installed.length === 0 ? (
           <EmptyState
             compact
             face="（・_・）"
             title="No hay extensiones instaladas"
-            description="Instálalas individualmente desde «Disponibles» para añadir nuevas fuentes."
           />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {installed.map(({ manifest: m }) => (
-              <ExtensionCard
-                key={m.id}
-                m={m}
-                action={
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-destructive hover:bg-transparent hover:text-destructive"
-                    title="Desinstalar"
-                    aria-label="Desinstalar"
-                    disabled={busy === m.id}
-                    onClick={() => setConfirmRemove(m)}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                }
-              />
-            ))}
+            {installed.map(({ manifest: m }) => {
+              const upd = updates.find((u) => u.id === m.id);
+              return (
+                <ExtensionCard
+                  key={m.id}
+                  m={upd ? { ...m, version: upd.to } : m}
+                  badge={upd ? (
+                    <Badge title={`De v${upd.from} a v${upd.to}`}>Actualizable</Badge>
+                  ) : null}
+                  action={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive hover:bg-transparent hover:text-destructive"
+                      title="Desinstalar"
+                      aria-label="Desinstalar"
+                      disabled={busy === m.id}
+                      onClick={() => setConfirmRemove(m)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  }
+                />
+              );
+            })}
           </div>
         )}
       </section>
@@ -156,7 +228,6 @@ export default function ExtensionsPanel() {
               face="（・_・;）"
               tone="error"
               title="No se pudieron cargar las extensiones"
-              description="Revisa tu conexión e inténtalo de nuevo."
               action={<Button size="sm" onClick={loadAvailable}>Reintentar</Button>}
             />
           )
@@ -165,7 +236,6 @@ export default function ExtensionsPanel() {
             compact
             face="ヽ(・∀・)ﾉ"
             title="No quedan extensiones por instalar"
-            description="Ya tienes instaladas todas las fuentes del índice."
           />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">

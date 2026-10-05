@@ -162,7 +162,7 @@ export default function Catalog() {
 
   return (
     <div className="min-h-full flex flex-col">
-      <div className="flex flex-wrap items-start gap-6 mb-6">
+      <div className="flex flex-wrap items-start gap-6 mb-3">
         <div className="flex items-center gap-6">
           {TABS.map((t) => {
             const active = tab === t.id;
@@ -217,7 +217,6 @@ export default function Catalog() {
           <EmptyState
             face="（눈﹏눈）"
             title="No hay extensiones instaladas"
-            description="Instala al menos una fuente para empezar a buscar mangas."
             action={
               <Button onClick={() => { window.location.hash = '#/explorar?tab=extensiones'; }}>
                 Ir a Extensiones
@@ -228,13 +227,9 @@ export default function Catalog() {
           <>
             {!results && (
               <EmptyState
-                compact
                 face="(・_・)？"
                 tone="prompt"
                 title="Busca un manga para empezar"
-                description={`Escribe un título en el buscador para consultarlo en tus ${sources.length} ${
-                  sources.length === 1 ? 'extensión' : 'extensiones'
-                }.`}
               />
             )}
 
@@ -255,7 +250,6 @@ export default function Catalog() {
                   <EmptyState
                     face="（・_・）"
                     title="Sin resultados"
-                    description="Ninguna extensión encontró coincidencias. Prueba con otro título."
                   />
                 )}
               </>

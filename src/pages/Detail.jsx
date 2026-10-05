@@ -306,7 +306,6 @@ export default function Detail() {
         face="（ノಠ益ಠ）ノ"
         tone="prompt"
         title="Fuente no instalada"
-        description="La extensión de este manga ya no está instalada. Vuelve a instalarla para poder abrirlo."
         action={
           <Button onClick={() => { window.location.hash = '#/explorar?tab=extensiones'; }}>
             Ir a Extensiones
@@ -366,13 +365,13 @@ export default function Detail() {
 
   let chapters = d.chapters;
   if (asc) chapters = [...chapters].reverse();
-  const firstChapter = d.chapters[0]?.url;
 
-  const inProgress = d.chapters
-    .map((c) => ({ ...c, cap: progress.get(c.url, sourceId) }))
-    .filter((c) => c.cap && !c.cap.read && Number.isInteger(c.cap.page))
-    .sort((a, b) => (b.cap.updatedAt || 0) - (a.cap.updatedAt || 0))[0] || null;
-  const continueChapter = inProgress;
+  const ordered = [...d.chapters].reverse();
+
+  const pendiente = ordered.find((c) => !progress.get(c.url, sourceId)?.read) || null;
+  const cap = pendiente ? progress.get(pendiente.url, sourceId) : null;
+  const enMarcha = !!(cap && !cap.read && Number.isInteger(cap.page));
+  const resume = pendiente ? { ...pendiente, cap } : null;
 
   return (
     <div className="min-h-full flex flex-col">
@@ -460,32 +459,22 @@ export default function Detail() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3 mt-6 border-t border-border pt-5">
-        {continueChapter ? (
+        {resume ? (
           <Button
             className="shadow-lg shadow-primary/30"
             onClick={() => {
-              window.location.hash = `#/leer?u=${encodeURIComponent(continueChapter.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
+              window.location.hash = `#/leer?u=${encodeURIComponent(resume.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
             }}
           >
-            <BookOpen className="w-4 h-4 mr-2" />
-            Continuar {continueChapter.title}
-            <span className="opacity-70 ml-2">
-              · {continueChapter.cap.page + 1}/{continueChapter.cap.total || '?'}
-            </span>
+            {enMarcha ? <BookOpen className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
+            {enMarcha ? 'Continuar' : 'Leer'} {resume.title}
+            {enMarcha && (
+              <span className="opacity-70 ml-2">
+                · {cap.page + 1}/{cap.total || '?'}
+              </span>
+            )}
           </Button>
-        ) : (
-          firstChapter && (
-            <Button
-              className="shadow-lg shadow-primary/30"
-              onClick={() => {
-                window.location.hash = `#/leer?u=${encodeURIComponent(firstChapter)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
-              }}
-            >
-              <Play className="w-4 h-4 mr-2" />
-              Leer {d.chapters[0]?.title || ''}
-            </Button>
-          )
-        )}
+        ) : null}
         <div className="relative" ref={catMenuRef}>
           <Button
             variant="secondary"
@@ -509,14 +498,15 @@ export default function Detail() {
           </Button>
 
           {catPick?.inline && (
-            <div className="absolute left-0 top-full z-40 mt-2 rounded-xl border border-border bg-card p-3 shadow-2xl">
-              <div className="flex flex-wrap gap-1.5 w-max max-w-96">
+            <div className="absolute left-1/2 top-full z-40 mt-2 w-max min-w-full max-w-64 -translate-x-1/2 rounded-xl border border-border bg-card p-3 shadow-2xl">
+              <div className="flex flex-col gap-1.5">
                 {catPick.list.map((c) => {
                   const on = catPick.selected.includes(c.id);
                   return (
                     <button
                       key={c.id}
                       type="button"
+                      title={c.name}
                       onClick={() =>
                         setCatPick((p) => ({
                           ...p,
@@ -524,7 +514,7 @@ export default function Detail() {
                         }))
                       }
                       className={cn(
-                        'rounded-md px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors',
+                        'w-full min-w-0 truncate rounded-md px-2.5 py-1.5 text-xs font-medium text-center transition-colors',
                         on ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent'
                       )}
                     >
@@ -533,7 +523,7 @@ export default function Detail() {
                   );
                 })}
               </div>
-              <div className="mt-3">
+              <div className="mt-3 w-full">
                 <Button
                   size="sm"
                   className="w-full"
@@ -634,7 +624,7 @@ export default function Detail() {
                     title="Marcar todos los anteriores como leídos"
                     aria-label={`Marcar anteriores a ${c.title} como leídos`}
                     className="shrink-0 flex items-center rounded-md text-muted-foreground/70 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-accent hover:text-foreground transition-opacity"
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMarkBefore({ chapter: c, index: i }); }}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMarkBefore({ chapter: c }); }}
                   >
                     <CheckCheck className="w-4 h-4" />
                     <ChevronDown className="w-3.5 h-3.5 ml-1.5" />
@@ -704,8 +694,8 @@ export default function Detail() {
         }
       >
         {markBefore && (() => {
-          const below = chapters.slice(markBefore.index + 1);
-          const pending = below.filter((x) => !progress.get(x.url, sourceId)?.read);
+          const previos = ordered.slice(0, ordered.findIndex((c) => c.url === markBefore.chapter.url));
+          const pending = previos.filter((x) => !progress.get(x.url, sourceId)?.read);
           return (
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="secondary" onClick={() => setMarkBefore(null)}>

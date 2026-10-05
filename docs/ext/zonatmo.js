@@ -88,8 +88,7 @@ export default function createSource({ fetchText, parse }) {
         const date = text(el, '.chapter-detail .fa-calendar') || text(el, '.chapter-row-date');
         return { url, title: text(el, '.chapter-number'), date };
       })
-      .filter(Boolean)
-      .reverse();
+      .filter(Boolean);
 
     return {
       title,

@@ -15,12 +15,13 @@ import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 
+let sessionCategoria = '';
+
 export default function Library() {
   const [cats, setCats] = useState(() => lib.cats());
   const [sel, setSel] = useState(() => {
-    const last = settings.get().libraryCategory;
     const list = lib.cats();
-    return list.some((c) => c.id === last) ? last : list[0]?.id || '';
+    return sessionCategoria && list.some((c) => c.id === sessionCategoria) ? sessionCategoria : list[0]?.id || '';
   });
   const [favs, setFavs] = useState(() => lib.favs());
   const [view, setView] = useState(settings.get().libraryView);
@@ -65,7 +66,7 @@ export default function Library() {
   useEffect(() => settings.subscribe((s) => setView(s.libraryView)), []);
   useEffect(() => {
     if (cats.some((c) => c.id === sel)) {
-      if (settings.get().libraryCategory !== sel) settings.set({ libraryCategory: sel });
+      sessionCategoria = sel;
       return;
     }
     setSel(cats[0]?.id || '');
@@ -188,13 +189,6 @@ export default function Library() {
           face="(っ-;)"
           tone="sad"
           title="Tu biblioteca está vacía"
-          description="Añade mangas desde Explorar para tenerlos siempre a mano."
-          action={
-            <Button onClick={() => { window.location.hash = '#/explorar'; }}>
-              Buscar mangas
-            </Button>
-          }
-          className="flex-1"
         />
       ) : view === 'grid' ? (
         <div

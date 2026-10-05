@@ -67,7 +67,6 @@ export default function Results() {
       <EmptyState
         face="¯\\_(ツ)_/¯"
         title="Sin resultados"
-        description="Vuelve a explorar para buscar mangas."
         action={
           <Button variant="secondary" onClick={() => navigate('/explorar')}>
             Ir a Explorar

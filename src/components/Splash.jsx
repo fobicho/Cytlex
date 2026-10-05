@@ -32,18 +32,20 @@ function Logo() {
   );
 }
 
-export default function Splash() {
+export default function Splash({ trigger = 0 }) {
   const [exiting, setExiting] = useState(false);
   const [gone, setGone] = useState(false);
 
   useEffect(() => {
+    setExiting(false);
+    setGone(false);
     const toExit = setTimeout(() => setExiting(true), APPEAR + BEAT);
     const toDone = setTimeout(() => setGone(true), APPEAR + BEAT + EXIT);
     return () => {
       clearTimeout(toExit);
       clearTimeout(toDone);
     };
-  }, []);
+  }, [trigger]);
 
   if (gone) return null;
 

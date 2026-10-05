@@ -68,6 +68,20 @@ async function loadModule(code) {
 
 const cache = new Map();
 
+const parts = (v) => String(v || '0').split('.').map((n) => parseInt(n, 10) || 0);
+
+export function isNewer(remote, local) {
+  const a = parts(remote);
+  const b = parts(local);
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const d = (a[i] || 0) - (b[i] || 0);
+    if (d > 0) return true;
+    if (d < 0) return false;
+  }
+  return false;
+}
+
 export const extensions = {
   installed() {
     return read().map((r) => {
@@ -86,6 +100,60 @@ export const extensions = {
   },
   isInstalled(id) {
     return read().some((r) => r.manifest.id === id);
+  },
+
+  async repoIndex(indexUrl) {
+    const text = await ctx().fetchText(indexUrl);
+    const list = JSON.parse(text);
+    if (!Array.isArray(list)) throw new Error('El índice no es un array JSON');
+    return list;
+  },
+
+  async checkUpdates(indexUrl) {
+    const repo = await extensions.repoIndex(indexUrl);
+    const installed = read();
+    return installed
+      .map((r) => {
+        const remote = repo.find((m) => m.id === r.manifest.id);
+        if (!remote || !remote.version) return null;
+        const local = r.manifest.version || '0';
+        return isNewer(remote.version, local)
+          ? { id: r.manifest.id, name: remote.name || r.manifest.name, icon: remote.icon, from: local, to: remote.version }
+          : null;
+      })
+      .filter(Boolean);
+  },
+
+  async updateAll(indexUrl, ids) {
+    const repo = await extensions.repoIndex(indexUrl);
+    const lista = ids || read().map((r) => r.manifest.id);
+    const pendientes = new Set(lista);
+
+    const records = read().map((r) => {
+      const fresh = repo.find((m) => m.id === r.manifest.id);
+      return fresh ? { ...r, manifest: { ...r.manifest, ...fresh } } : r;
+    });
+
+    let ok = 0;
+    const fallos = [];
+    await Promise.all(records.map(async (r) => {
+      if (!pendientes.has(r.manifest.id)) return;
+      if (r.manifest.type !== 'module' || !r.manifest.main) return;
+      try {
+        const mainUrl = /^https?:/i.test(r.manifest.main)
+          ? r.manifest.main
+          : new URL(r.manifest.main, indexUrl).href;
+        const code = await ctx().fetchText(mainUrl);
+        r.code = code;
+        cache.delete(r.manifest.id);
+        ok += 1;
+      } catch {
+        fallos.push(r.manifest.id);
+      }
+    }));
+
+    write(records);
+    return { ok, fallos };
   },
 
   async sync(indexUrl) {

@@ -12,6 +12,8 @@ import Tracking from './pages/Tracking.jsx';
 import { settings } from './lib/settings.js';
 import { lastSearch, resultsScroll } from './lib/searchState.js';
 import { startNotifier, onNotifyClick } from './lib/notify.js';
+import { announceExtUpdates, extUpdates } from './lib/extUpdates.js';
+import { useToast } from './components/Toast.jsx';
 import { appWindow } from './lib/appWindow.js';
 
 class PageBoundary extends Component {
@@ -37,6 +39,12 @@ class PageBoundary extends Component {
 }
 
 export const RESET_PAGE_EVENT = 'cytlex:reset-page';
+export const GO_EXTENSIONS_EVENT = 'cytlex:go-extensions';
+
+export function goToExtensions() {
+  window.location.hash = '#/explorar?tab=extensiones';
+  window.dispatchEvent(new CustomEvent(GO_EXTENSIONS_EVENT));
+}
 
 function useResetPage(onReset) {
   useEffect(() => {
@@ -46,6 +54,7 @@ function useResetPage(onReset) {
 }
 
 export default function App() {
+  const { toast } = useToast();
   const [theme, setTheme] = useState(() => settings.get().theme);
   const [mode, setMode] = useState(() => settings.get().mode);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -83,11 +92,43 @@ export default function App() {
 
   useEffect(() => startNotifier(), []);
 
+  useEffect(() => {
+    const t = setTimeout(() => {
+      announceExtUpdates(({ titulo, cuerpo }) => {
+        toast({
+          title: titulo,
+          description: cuerpo,
+          variant: 'info',
+          duration: 9000,
+          action: { label: 'Ver extensiones', onClick: goToExtensions }
+        });
+      });
+    }, 2600);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    if (extUpdates.pendingCount === 0) return undefined;
+    const id = toast({
+      title: 'Hay extensiones por actualizar',
+      description: 'Revisa el panel de Extensiones.',
+      variant: 'info',
+      duration: 9000,
+      action: { label: 'Ver extensiones', onClick: goToExtensions }
+    });
+    return () => toast.dismiss(id);
+  }, []);
+
   useEffect(
     () =>
-      onNotifyClick(({ url, sourceId }) => {
+      onNotifyClick((payload) => {
+        if (payload?.tipo === 'extensiones') {
+          goToExtensions();
+          return;
+        }
+        const url = payload?.url;
         if (!url) return;
-        window.location.hash = `#/manga?u=${encodeURIComponent(url)}&s=${encodeURIComponent(sourceId || 'leercapitulo')}&from=biblioteca`;
+        window.location.hash = `#/manga?u=${encodeURIComponent(url)}&s=${encodeURIComponent(payload.sourceId || 'leercapitulo')}&from=biblioteca`;
       }),
     []
   );

@@ -20,7 +20,7 @@ export function Dialog({ open, onClose, title, description, children, className,
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
             className={cn(
-              'relative bg-card border border-border/50 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden',
+              'relative bg-card border border-border/50 rounded-2xl shadow-sm w-full max-w-lg max-h-[90vh] overflow-hidden',
               className
             )}
           >

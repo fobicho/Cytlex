@@ -1,6 +1,6 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Unlink, ExternalLink, Search, Loader2, AlertTriangle, Save, Minus, Plus, Calendar as CalendarIcon, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Unlink, ExternalLink, Search, Loader2, AlertTriangle, Save, Minus, Plus, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Users, Heart } from 'lucide-react';
 import { anilist, anilistList, setScoreScale } from '../lib/anilist.js';
 import { session } from '../lib/session.js';
 import { tracking } from '../lib/tracking.js';
@@ -399,9 +399,7 @@ function SearchDialog({ open, onClose, mangaTitle, onPick }) {
               )}
               <div className="min-w-0 flex-1">
                 <div className="font-semibold text-sm truncate">{m.title}</div>
-                {m.synonyms.length > 0 && (
-                  <div className="text-xs text-muted-foreground truncate">{m.synonyms.slice(0, 2).join(' · ')}</div>
-                )}
+                {m.author && <div className="text-xs text-muted-foreground truncate">{m.author}</div>}
                 <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                   {m.status && <Badge>{STATUS_ES[m.status] || m.status}</Badge>}
                   {m.format && <Badge variant="outline">{FORMAT_ES[m.format] || m.format}</Badge>}
@@ -530,6 +528,218 @@ const EntryForm = forwardRef(function EntryForm({ entry, scoreFormat = 'POINT_10
   );
 });
 
+const CHAR_ROLE_ES = {
+  MAIN: 'Principal',
+  SUPPORTING: 'Secundario',
+  BACKGROUND: 'Fondo'
+};
+
+function CharactersDialog({ open, onClose, mediaId, connected }) {
+  const [list, setList] = useState([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [moreBusy, setMoreBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [picked, setPicked] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [favBusy, setFavBusy] = useState(false);
+
+  const toggleFav = async () => {
+    if (!picked) return;
+    setFavBusy(true);
+    try {
+      await anilist.toggleFavourite(picked);
+      setDetail(await anilist.character(picked));
+    } catch {
+    } finally {
+      setFavBusy(false);
+    }
+  };
+
+  const loadMore = async () => {
+    const next = page + 1;
+    setMoreBusy(true);
+    try {
+      const r = await anilist.characters(mediaId, next);
+      setList((prev) => {
+        const seen = new Set(prev.map((c) => c.id));
+        return [...prev, ...r.items.filter((c) => !seen.has(c.id))];
+      });
+      setPage(next);
+      setHasMore(r.hasMore);
+      setTotal(r.total);
+    } catch {
+    } finally {
+      setMoreBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!open || !mediaId) return undefined;
+    let alive = true;
+    setList([]);
+    setPage(1);
+    setTotal(0);
+    setHasMore(false);
+    setErr('');
+    setPicked(null);
+    setDetail(null);
+    setBusy(true);
+    anilist
+      .characters(mediaId, 1)
+      .then((r) => {
+        if (!alive) return;
+        setList(r.items);
+        setTotal(r.total);
+        setHasMore(r.hasMore);
+      })
+      .catch((e) => { if (alive) setErr(String(e?.message || e)); })
+      .finally(() => { if (alive) setBusy(false); });
+    return () => { alive = false; };
+  }, [open, mediaId]);
+
+  useEffect(() => {
+    if (!open || !picked) return undefined;
+    let alive = true;
+    setDetail(null);
+    anilist
+      .character(picked)
+      .then((r) => { if (alive) setDetail(r); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [open, picked]);
+
+  const pickedChar = picked ? list.find((c) => c.id === picked) || null : null;
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      className="max-w-2xl max-h-[calc(100vh-3rem)] flex flex-col"
+      bodyClassName="p-5 overflow-y-auto"
+    >
+      {busy && (
+        <div className="flex items-center justify-center py-10 text-muted-foreground">
+          <Loader2 className="w-6 h-6 animate-spin" />
+        </div>
+      )}
+
+      {err && !busy && <p className="text-sm text-destructive">{err}</p>}
+
+      {!busy && !err && list.length === 0 && (
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          No hay personajes registrados en AniList.
+        </p>
+      )}
+
+      {!busy && !err && picked && pickedChar && (
+        <div className="relative flex flex-col gap-4">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={!connected || favBusy}
+            onClick={toggleFav}
+            title={connected ? (detail?.isFavourite ? 'Quitar de favoritos' : 'Añadir a favoritos') : 'Conecta tu cuenta para dar me gusta'}
+            aria-label={detail?.isFavourite ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+            className="absolute -top-1 -right-1 h-8 gap-1.5 px-2.5 text-xs"
+          >
+            <Heart className={cn('w-4 h-4', detail?.isFavourite && 'fill-destructive text-destructive')} />
+            {compact(detail?.favourites ?? pickedChar.favourites)}
+          </Button>
+
+          <div className="flex gap-4">
+            {pickedChar.image ? (
+              <img
+                src={pickedChar.image}
+                alt=""
+                referrerPolicy="no-referrer"
+                className="w-28 h-40 object-cover rounded-xl bg-black shrink-0"
+              />
+            ) : (
+              <div className="w-28 h-40 rounded-xl bg-secondary shrink-0" />
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="text-lg font-bold leading-snug">{pickedChar.name}</div>
+              {pickedChar.role && (
+                <div className="mt-1.5">
+                  <Badge variant="outline">{CHAR_ROLE_ES[pickedChar.role] || pickedChar.role}</Badge>
+                </div>
+              )}
+              {detail?.alternative && (
+                <p className="text-xs text-muted-foreground mt-1.5">{detail.alternative}</p>
+              )}
+              {detail?.native && detail.native !== pickedChar.name && (
+                <p className="text-xs text-muted-foreground mt-0.5">{detail.native}</p>
+              )}
+            </div>
+          </div>
+
+          <p className="text-sm text-muted-foreground whitespace-pre-line min-h-[3rem]">
+            {detail?.description || ''}
+          </p>
+
+          <Button variant="secondary" size="sm" className="self-start" onClick={() => setPicked(null)}>
+            Volver a la lista
+          </Button>
+        </div>
+      )}
+
+      {!busy && !err && !picked && list.length > 0 && (
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+            {list.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setPicked(c.id)}
+                className="group flex flex-col gap-1.5 text-left"
+              >
+                {c.image ? (
+                  <img
+                    src={c.image}
+                    alt=""
+                    referrerPolicy="no-referrer"
+                    className="w-full aspect-[2/3] object-cover rounded-xl bg-black"
+                  />
+                ) : (
+                  <div className="w-full aspect-[2/3] rounded-xl bg-secondary" />
+                )}
+                <span className="text-xs font-medium truncate">{c.name}</span>
+                {c.role && (
+                  <span className="text-[11px] text-muted-foreground">{CHAR_ROLE_ES[c.role] || c.role}</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {hasMore && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="self-center"
+              disabled={moreBusy}
+              onClick={loadMore}
+            >
+              {moreBusy ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <ChevronLeft className="w-4 h-4 mr-2 rotate-90" />
+              )}
+              Cargar más
+              <span className="opacity-70 ml-2">
+                {list.length}/{total}
+              </span>
+            </Button>
+          )}
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
 export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose }) {
   const [linkedId, setLinkedId] = useState(() => tracking.get(mangaUrl, sourceId)?.id || null);
   const [data, setData] = useState(null);
@@ -542,6 +752,7 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
   const [saveErr, setSaveErr] = useState('');
   const [picking, setPicking] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [showChars, setShowChars] = useState(false);
   const formRef = useRef(null);
 
   const requestClose = () => {
@@ -685,12 +896,19 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
                 <ExternalLink className="w-3.5 h-3.5" /> Ver en AniList
               </a>
             )}
+            <button
+              type="button"
+              onClick={() => setShowChars(true)}
+              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground mt-2 hover:text-foreground transition-colors"
+            >
+              <Users className="w-3.5 h-3.5" /> Ver personajes
+            </button>
           </div>
 
           <div className="flex-1 min-w-0">
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
-                <div className="font-semibold leading-snug">{data.title}</div>
+                <div className="text-lg font-bold leading-snug">{data.title}</div>
                 {data.author && <div className="text-sm text-muted-foreground mt-0.5">{data.author}</div>}
               </div>
               <Button
@@ -703,6 +921,33 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
                 <Unlink className="w-4 h-4" />
               </Button>
             </div>
+
+            {(() => {
+              const facts = [
+                data.status && STATUS_ES[data.status] || data.status,
+                data.format && FORMAT_ES[data.format] || data.format,
+                data.startDate,
+                data.endDate
+              ].filter(Boolean);
+              return facts.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-3 text-xs text-muted-foreground">
+                  {facts.map((f, i) => (
+                    <span key={f} className="inline-flex items-center gap-1.5">
+                      {i > 0 && <span aria-hidden>·</span>}
+                      {f}
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {(data.chapters != null || data.volumes != null) && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {data.chapters != null && <>{data.chapters} capítulos</>}
+                {data.chapters != null && data.volumes != null && ', '}
+                {data.volumes != null && <>en {data.volumes} volúmenes</>}
+              </p>
+            )}
 
             {connected && (
               <div className="mt-4">
@@ -750,6 +995,15 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
             </Button>
           </div>
         </Dialog>
+      )}
+
+      {showChars && data && (
+        <CharactersDialog
+          open
+          onClose={() => setShowChars(false)}
+          mediaId={data.id}
+          connected={connected}
+        />
       )}
     </Dialog>
   );

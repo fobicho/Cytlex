@@ -73,28 +73,46 @@ function createWindow() {
   return win;
 }
 
-// Referer + UA para que los CDN de imágenes no bloqueen el hotlink
+const REFERER_RULES = [
+  { hosts: ['t34798ndc.com'], referer: 'https://leercapitulo.co/' },
+  { hosts: ['leercapitulo.co'], referer: 'https://leercapitulo.co/' },
+  { hosts: ['mangalect.org'], referer: 'https://mangalect.org/' },
+  { hosts: ['onfmangas.com'], referer: 'https://onfmangas.com/' },
+  { hosts: ['imagesolymp.xyz', 'olympusxyz.com'], referer: 'https://olympusxyz.com/' },
+  { hosts: ['zonatmo.org'], referer: 'https://zonatmo.org/' },
+  { hosts: ['ntr-files.online'], referer: 'https://manga-oni.com/' }
+];
+
 function hookImageHeaders() {
-  const rules = [
-    { urls: ['*://*.t34798ndc.com/*', '*://leercapitulo.co/*'], referer: 'https://leercapitulo.co/' },
-    { urls: ['*://mangalect.org/*', '*://*.mangalect.org/*'], referer: 'https://mangalect.org/' },
-    { urls: ['*://onfmangas.com/*', '*://*.onfmangas.com/*'], referer: 'https://onfmangas.com/' },
-    { urls: ['*://*.imagesolymp.xyz/*', '*://olympusxyz.com/*'], referer: 'https://olympusxyz.com/' },
-    { urls: ['*://zonatmo.org/*', '*://*.zonatmo.org/*'], referer: 'https://zonatmo.org/' },
-    { urls: ['*://media.imagesolymp.xyz/*', '*://oni.ntr-files.online/*'], referer: 'https://manga-oni.com/' }
-  ];
-  for (const rule of rules) {
-    session.defaultSession.webRequest.onBeforeSendHeaders({ urls: rule.urls }, (details, callback) => {
-      details.requestHeaders['Referer'] = rule.referer;
-      details.requestHeaders['User-Agent'] = details.requestHeaders['User-Agent'] || 'Mozilla/5.0 Cytlex/0.1';
-      callback({ requestHeaders: details.requestHeaders });
-    });
-  }
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['<all_urls>'] },
+    (details, callback) => {
+      const { requestHeaders } = details;
+      let host = '';
+      try {
+        host = new URL(details.url).hostname.toLowerCase();
+      } catch {
+        callback({ requestHeaders });
+        return;
+      }
+
+      const rule = REFERER_RULES.find((r) => r.hosts.some((h) => host === h || host.endsWith(`.${h}`)));
+      if (!rule) {
+        callback({ requestHeaders });
+        return;
+      }
+
+      requestHeaders['referer'] = rule.referer;
+      requestHeaders['user-agent'] = requestHeaders['user-agent'] || 'Mozilla/5.0 Cytlex/0.1';
+      callback({ requestHeaders });
+    }
+  );
 }
 
 const TASK_NAME = 'Cytlex';
 
 let lastNotifiedAt = 0;
+let pendingClick = null;
 
 ipcMain.handle('app:background', () => launchedInBackground);
 
@@ -122,13 +140,19 @@ ipcMain.handle('notify:show', (_e, payload = {}) => {
   });
   n.on('show', () => console.log('[notify] mostrada:', payload.title));
   n.on('failed', (_ev, err) => console.log('[notify] fallo:', err, payload.title));
-  n.on('close', () => console.log('[notify] cerrada:', payload.title));
+  n.on('close', () => {
+    console.log('[notify] cerrada:', payload.title);
+    if (launchedInBackground) app.quit();
+  });
   n.on('click', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-      mainWindow.webContents.send('notify:click', { url: payload.url, sourceId: payload.sourceId });
+    pendingClick = payload;
+    const win = mainWindow;
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      if (launchedInBackground && !win.isMaximized()) win.maximize();
+      win.show();
+      win.focus();
+      win.webContents.send('notify:click', payload);
     }
   });
   n.show();
@@ -199,6 +223,11 @@ if (!gotLock) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
+    if (pendingClick) {
+      const payload = pendingClick;
+      pendingClick = null;
+      mainWindow.webContents.send('notify:click', payload);
+    }
   });
 }
 

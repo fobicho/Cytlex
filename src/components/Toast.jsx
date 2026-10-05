@@ -33,9 +33,9 @@ export function ToastProvider({ children }) {
   }, []);
 
   const toast = useCallback(
-    ({ title, description, variant = 'info', duration = 4500 }) => {
+    ({ title, description, variant = 'info', duration = 4500, action }) => {
       const id = ++seq;
-      setItems((list) => [...list.slice(-3), { id, title, description, variant }]);
+      setItems((list) => [...list.slice(-3), { id, title, description, variant, action }]);
       timers.current.set(id, setTimeout(() => dismiss(id), duration));
       return id;
     },
@@ -66,6 +66,18 @@ export function ToastProvider({ children }) {
                   <div className="text-sm font-medium leading-snug">{t.title}</div>
                   {t.description && (
                     <div className="text-xs text-muted-foreground mt-0.5 leading-snug">{t.description}</div>
+                  )}
+                  {t.action && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        dismiss(t.id);
+                        t.action.onClick?.();
+                      }}
+                      className="mt-2 text-xs font-medium text-primary hover:underline"
+                    >
+                      {t.action.label}
+                    </button>
                   )}
                 </div>
                 <button

@@ -120,8 +120,7 @@ export default function createSource({ fetchText, parse, head }) {
         const date = a.querySelector('span.timeago')?.getAttribute('datetime') || '';
         return { url, title: text(a, '.entry-title-h2'), date: date ? date.slice(0, 10) : '' };
       })
-      .filter(Boolean)
-      .reverse();
+      .filter(Boolean);
 
     const bloque = doc.querySelector('#sinopsis');
     const copia = bloque?.cloneNode(true);

@@ -60,7 +60,11 @@ export function EmptyState({
         </p>
       )}
 
-      {action}
+      {action && (
+        <div className={cn(!description && (compact ? 'mt-3' : 'mt-6'))}>
+          {action}
+        </div>
+      )}
     </motion.div>
   );
 }

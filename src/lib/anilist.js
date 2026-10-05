@@ -20,7 +20,6 @@ const MEDIA_FIELDS = `
   startDate { year month day }
   endDate { year month day }
   genres
-  synonyms
   title { romaji english native }
   coverImage { extraLarge large }
   description(asHtml: false)
@@ -39,9 +38,18 @@ async function gql(query, variables = {}) {
   return res?.data;
 }
 
+const stripFieldLines = (s) =>
+  s
+    .split('\n')
+    .filter((line) => !/^[ \t]*__[^_]+:__/.test(line))
+    .join('\n');
+
 export function cleanDescription(raw) {
   if (!raw) return '';
-  return String(raw)
+  return stripFieldLines(String(raw))
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/~!([\s\S]*?)!~/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
     .replace(/<i{1,2}>\s*(Notes?|Nota)\s*:[\s\S]*?<\/i{1,2}>/gi, '')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, '')
@@ -52,13 +60,10 @@ export function cleanDescription(raw) {
     .replace(/&quot;/g, '"')
     .replace(/&#039;/g, "'")
     .replace(/&nbsp;/g, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
-
-const isLatinish = (s) => /^[\p{Script=Latin}\p{P}\p{Zs}0-9'’&.\-!?]+$/u.test(s);
-
-const latinSynonyms = (list) => (list || []).filter((s) => s && isLatinish(s));
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
@@ -90,7 +95,6 @@ function normalize(media) {
     startDate: fmtDate(media.startDate),
     endDate: fmtDate(media.endDate),
     genres: media.genres || [],
-    synonyms: latinSynonyms(media.synonyms),
     cover: media.coverImage?.extraLarge || media.coverImage?.large || '',
     title: titles.userPreferred || titles.romaji || titles.english || titles.native || '',
     romaji: titles.romaji || '',
@@ -147,6 +151,99 @@ export const anilist = {
       const data = await gql(`query ($id: Int) { Media(id: $id, type: MANGA) { ${MEDIA_FIELDS} } }`, { id });
       return normalize(data?.Media);
     });
+  },
+
+  async characters(mediaId, page = 1) {
+    if (!mediaId) return { items: [], total: 0, hasMore: false };
+    return cached(`chars|${mediaId}|${page}`, async () => {
+      const data = await gql(
+        `query ($id: Int, $page: Int) {
+          Media(id: $id, type: MANGA) {
+            characters(page: $page, perPage: 25, sort: [ROLE, RELEVANCE, ID]) {
+              pageInfo { total hasNextPage }
+              edges {
+                role
+                node {
+                  id
+                  name { full native alternative }
+                  image { large medium }
+                  description(asHtml: false)
+                  favourites
+                }
+              }
+            }
+          }
+        }`,
+        { id: mediaId, page }
+      );
+      const c = data?.Media?.characters;
+      return {
+        items: (c?.edges || [])
+          .filter((e) => e?.node)
+          .map((e) => ({
+            id: e.node.id,
+            role: e.role || '',
+            name: e.node.name?.full || '',
+            native: e.node.name?.native || '',
+            alternative: e.node.name?.alternative || '',
+            image: e.node.image?.large || e.node.image?.medium || '',
+            favourites: e.node.favourites ?? 0,
+            description: cleanDescription(e.node.description)
+          })),
+        total: c?.pageInfo?.total ?? 0,
+        hasMore: !!c?.pageInfo?.hasNextPage
+      };
+    });
+  },
+
+  async character(id) {
+    if (!id) return null;
+    return cached(`char|${id}`, async () => {
+      const data = await gql(
+        `query ($id: Int) {
+          Character(id: $id) {
+            id
+            name { full native alternative }
+            image { large medium }
+            description(asHtml: false)
+            favourites
+            isFavourite
+          }
+        }`,
+        { id }
+      );
+      const c = data?.Character;
+      if (!c) return null;
+      return {
+        id: c.id,
+        name: c.name?.full || '',
+        native: c.name?.native || '',
+        alternative: c.name?.alternative || '',
+        image: c.image?.large || c.image?.medium || '',
+        favourites: c.favourites ?? 0,
+        isFavourite: !!c.isFavourite,
+        description: cleanDescription(c.description)
+      };
+    });
+  },
+
+  async toggleFavourite(characterId) {
+    if (!characterId) throw new Error('Falta el id del personaje');
+    const data = await session.gql(
+      `mutation ($characterId: Int) { ToggleFavourite(characterId: $characterId) { characterId } }`,
+      { characterId }
+    );
+    const changed = !!data?.ToggleFavourite?.characterId;
+    const key = `char|${characterId}`;
+    const hit = cache.get(key);
+    if (hit) {
+      const fav = Number(hit.value?.favourites || 0) + (changed ? 1 : -1);
+      cache.set(key, {
+        at: Date.now(),
+        value: { ...hit.value, isFavourite: changed, favourites: Math.max(0, fav) }
+      });
+    }
+    return changed;
   },
 
   clearCache() {
