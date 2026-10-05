@@ -51,7 +51,7 @@ export default function ExtensionsPanel() {
   const [busy, setBusy] = useState('');
   const [confirmRemove, setConfirmRemove] = useState(null);
   const [updates, setUpdates] = useState([]);
-  const [updating, setUpdating] = useState(false);
+  const [updating, setUpdating] = useState('');
 
   const repoUrl = settings.get().extIndexUrl || DEFAULT_INDEX_URL;
   const refresh = () => setInstalled(extensions.installed());
@@ -95,8 +95,26 @@ export default function ExtensionsPanel() {
     return () => window.removeEventListener('cytlex:go-extensions', onGo);
   }, []);
 
+  const doUpdateOne = async (id) => {
+    setUpdating(id);
+    setErr('');
+    try {
+      const r = await extensions.updateAll(repoUrl, [id]);
+      refresh();
+      await checkUpdates();
+      if (r.ok) {
+        toast({ title: 'Extensión actualizada', variant: 'success' });
+      } else {
+        setErr('No se pudo actualizar la extensión');
+      }
+    } catch (e) {
+      setErr(String(e?.message || e));
+    }
+    setUpdating('');
+  };
+
   const doUpdateAll = async () => {
-    setUpdating(true);
+    setUpdating('all');
     setErr('');
     try {
       const r = await extensions.updateAll(repoUrl);
@@ -117,7 +135,7 @@ export default function ExtensionsPanel() {
     } catch (e) {
       setErr(String(e?.message || e));
     }
-    setUpdating(false);
+    setUpdating('');
   };
 
   const doInstall = async (m) => {
@@ -158,11 +176,11 @@ export default function ExtensionsPanel() {
       )}
 
       <section>
-        <div className="flex items-center justify-between gap-4 mb-3">
+        <div className="flex items-center justify-between gap-4 mb-3 h-9">
           <h3 className="text-sm font-medium">Instaladas</h3>
           {updates.length > 0 && (
-            <Button variant="secondary" size="sm" onClick={doUpdateAll} disabled={updating}>
-              {updating ? (
+            <Button variant="secondary" size="sm" onClick={doUpdateAll} disabled={updating !== ''}>
+              {updating === 'all' ? (
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
               ) : (
                 <ArrowUpCircle className="w-4 h-4 mr-2" />
@@ -190,17 +208,35 @@ export default function ExtensionsPanel() {
                     <Badge title={`De v${upd.from} a v${upd.to}`}>Actualizable</Badge>
                   ) : null}
                   action={
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive hover:bg-transparent hover:text-destructive"
-                      title="Desinstalar"
-                      aria-label="Desinstalar"
-                      disabled={busy === m.id}
-                      onClick={() => setConfirmRemove(m)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      {upd && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title={`Actualizar a la v${upd.to}`}
+                          aria-label={`Actualizar ${m.name}`}
+                          disabled={updating !== ''}
+                          onClick={() => doUpdateOne(m.id)}
+                        >
+                          {updating === m.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="w-4 h-4" />
+                          )}
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive hover:bg-transparent hover:text-destructive"
+                        title="Desinstalar"
+                        aria-label="Desinstalar"
+                        disabled={busy === m.id}
+                        onClick={() => setConfirmRemove(m)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   }
                 />
               );

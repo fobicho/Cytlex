@@ -3,7 +3,7 @@
     "id": "mangalect",
     "name": "MangaLect",
     "lang": "es",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "type": "module",
     "main": "ext/mangalect.js",
     "baseUrl": "https://mangalect.org",
