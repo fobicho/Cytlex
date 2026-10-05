@@ -31,8 +31,8 @@ function ExtensionCard({ m, action, badge }) {
         </div>
         <div className="flex-1 min-w-0">
           <div className="font-semibold truncate" title={m.name}>{m.name}</div>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            {m.version && <span className="text-[11px] text-muted-foreground">v{m.version}</span>}
+          <div className="flex items-center gap-1.5 mt-0.5 h-5">
+            {m.version && <span className="text-[11px] text-muted-foreground leading-none">v{m.version}</span>}
             {badge}
           </div>
         </div>
@@ -205,7 +205,9 @@ export default function ExtensionsPanel() {
                   key={m.id}
                   m={upd ? { ...m, version: upd.to } : m}
                   badge={upd ? (
-                    <Badge title={`De v${upd.from} a v${upd.to}`}>Actualizable</Badge>
+                    <Badge className="px-2 py-0 text-[11px] leading-4" title={`De v${upd.from} a v${upd.to}`}>
+                      Actualizable
+                    </Badge>
                   ) : null}
                   action={
                     <div className="flex items-center gap-1">
