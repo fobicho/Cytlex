@@ -163,24 +163,13 @@ export const extensions = {
       const list = JSON.parse(text);
       if (Array.isArray(list)) repo = list;
     } catch {}
-    const byId = new Map([...repo, ...BUILTIN].map((m) => [m.id, m]));
 
+    const byId = new Map(repo.map((m) => [m.id, m]));
     const records = read().map((r) => {
       const fresh = byId.get(r.manifest.id);
       if (!fresh) return r;
-      return { ...r, manifest: { ...r.manifest, ...fresh } };
+      return { ...r, manifest: { ...fresh, ...r.manifest } };
     });
-
-    await Promise.all(records.map(async (r) => {
-      if (r.manifest.type !== 'module' || !r.manifest.main) return;
-      try {
-        const mainUrl = /^https?:/i.test(r.manifest.main)
-          ? r.manifest.main
-          : new URL(r.manifest.main, indexUrl).href;
-        r.code = await ctx().fetchText(mainUrl);
-        cache.delete(r.manifest.id);
-      } catch {}
-    }));
 
     write(records);
     return extensions.installed();

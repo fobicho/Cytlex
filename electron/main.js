@@ -40,7 +40,7 @@ function createWindow() {
   if (launchedInBackground) {
     const bail = setTimeout(() => {
       if (!win.isDestroyed()) app.quit();
-    }, 30000);
+    }, 90000);
     win.webContents.on('did-finish-load', () => clearTimeout(bail));
     win.webContents.on('did-fail-load', () => { clearTimeout(bail); app.quit(); });
   }
@@ -128,8 +128,6 @@ ipcMain.handle('notify:show', (_e, payload = {}) => {
     console.log('[notify] no soportado');
     return false;
   }
-  // Anti-flood por tema, no global: si no, la aviso de "biblioteca al día"
-  // pisaba el de extensiones en la misma pasada y se perdía.
   const bucket = payload.key || payload.tipo || payload.title || 'cytlex';
   const last = lastNotifiedAt.get(bucket) || 0;
   if (Date.now() - last < 30000) {
@@ -195,9 +193,20 @@ async function removeTasks() {
   }
 }
 
+const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
+
+const taskScript = (hh, tr) => `
+$ErrorActionPreference = 'Stop'
+$a = New-ScheduledTaskAction -Execute ${psQuote(process.execPath)} -Argument ${psQuote(tr)}
+$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+$p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+$t = New-ScheduledTaskTrigger -Daily -At '${hh}:00'
+Register-ScheduledTask -TaskName ${psQuote(taskName(hh))} -Action $a -Trigger $t -Settings $s -Principal $p -Force | Out-Null
+`;
+
 ipcMain.handle('notify:background', async (_e, on, hours = 6) => {
   if (process.platform !== 'win32') return { ok: false, error: 'Solo disponible en Windows' };
-  const tr = `"${process.execPath}" ${isDev ? `"${app.getAppPath()}" ` : ''}--background`;
+  const arg = isDev ? `"${app.getAppPath()}" --background` : '--background';
   const list = TASK_HOURS[hours] || TASK_HOURS[6];
   try {
     if (!on) {
@@ -206,14 +215,23 @@ ipcMain.handle('notify:background', async (_e, on, hours = 6) => {
     }
     await removeTasks();
     for (const hh of list) {
-      await execFileAsync('schtasks', [
-        '/Create', '/F', '/TN', taskName(hh), '/TR', tr, '/SC', 'DAILY', '/ST', `${hh}:00`
+      await execFileAsync('powershell', [
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-Command', taskScript(hh, arg)
       ]);
     }
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e?.stderr || e?.message || e) };
   }
+});
+
+ipcMain.handle('notify:test', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'Cytlex no está abierto' };
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.send('notify:run-now');
+  return { ok: true };
 });
 
 app.setAppUserModelId('com.fobicho.cytlex');

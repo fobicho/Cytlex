@@ -129,7 +129,6 @@ export default function ExtensionsPanel() {
           variant: 'error'
         });
       } else {
-        // Todo al día: el aviso pendiente ya no aplica.
         extUpdates.clear();
         toast({
           title: r.ok === 1 ? '1 extensión actualizada' : `${r.ok} extensiones actualizadas`,
@@ -219,6 +218,7 @@ export default function ExtensionsPanel() {
                         <Button
                           variant="ghost"
                           size="icon"
+                          className="hover:bg-transparent hover:text-foreground"
                           title={`Actualizar a la v${upd.to}`}
                           aria-label={`Actualizar ${m.name}`}
                           disabled={updating !== ''}
@@ -227,7 +227,7 @@ export default function ExtensionsPanel() {
                           {updating === m.id ? (
                             <Loader2 className="w-4 h-4 animate-spin" />
                           ) : (
-                            <RefreshCw className="w-4 h-4" />
+                            <Download className="w-4 h-4" />
                           )}
                         </Button>
                       )}

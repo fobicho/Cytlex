@@ -8,7 +8,6 @@ export default function createSource({ fetchText, parse }) {
     try { return new URL(u, base).href; } catch { return u; }
   };
 
-  // El sitio sirve las portadas como rutas relativas colgadas del mirror.
   const coverUrl = (p) => (p ? (/^https?:/i.test(p) ? p : `${assets}/${p}`) : '');
 
   const text = (el, sel) => (el.querySelector(sel)?.textContent || '').replace(/\s+/g, ' ').trim();
@@ -88,7 +87,7 @@ export default function createSource({ fetchText, parse }) {
         autor: '',
         vistas: ''
       },
-      sinopsis: text(doc, '.synopsis'),
+      sinopsis: text(doc, '#synopsis-text'),
       chapters
     };
   }

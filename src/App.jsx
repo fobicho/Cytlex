@@ -12,7 +12,7 @@ import Tracking from './pages/Tracking.jsx';
 import { settings } from './lib/settings.js';
 import { lastSearch, resultsScroll } from './lib/searchState.js';
 import { startNotifier, onNotifyClick } from './lib/notify.js';
-import { announceExtUpdates, extUpdates } from './lib/extUpdates.js';
+import { announceExtUpdates } from './lib/extUpdates.js';
 import { useToast } from './components/Toast.jsx';
 import { appWindow } from './lib/appWindow.js';
 
@@ -93,7 +93,6 @@ export default function App() {
   useEffect(() => startNotifier(), []);
 
   useEffect(() => {
-    // Al abrir la app se avisa siempre, sea cual sea la configuración de fondo.
     const t = setTimeout(() => {
       announceExtUpdates(({ titulo, cuerpo }) => {
         toast({
@@ -106,18 +105,6 @@ export default function App() {
       });
     }, 2600);
     return () => clearTimeout(t);
-  }, []);
-
-  useEffect(() => {
-    if (extUpdates.pendingCount === 0) return undefined;
-    const id = toast({
-      title: 'Hay extensiones por actualizar',
-      description: 'Revisa el panel de Extensiones.',
-      variant: 'info',
-      duration: 9000,
-      action: { label: 'Ver extensiones', onClick: goToExtensions }
-    });
-    return () => toast.dismiss(id);
   }, []);
 
   useEffect(

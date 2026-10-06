@@ -114,6 +114,26 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   const [authErr, setAuthErr] = useState('');
   const { toast } = useToast();
   const [bgErr, setBgErr] = useState('');
+  const [testing, setTesting] = useState(false);
+
+  const testNotify = async () => {
+    setTesting(true);
+    try {
+      const r = await window.cytlex?.testNotify?.();
+      if (r && r.ok === false) {
+        setBgErr(r.error || 'No se pudo lanzar la comprobación.');
+        return;
+      }
+      setBgErr('');
+      toast({
+        title: 'Comprobación lanzada',
+        description: 'Si hay novedades, te llegará un aviso del sistema.',
+        variant: 'info'
+      });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const toggleBackground = async (on) => {
     setBgErr('');
@@ -464,6 +484,19 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           }
         />
         {bgErr && <p className="text-sm text-destructive mt-2">{bgErr}</p>}
+        <div className="border-t border-border mt-6" />
+        <Row
+          first
+          last
+          title="Probar ahora"
+          desc="Lanza la comprobación que hacen las tareas programadas, sin esperar a la próxima hora."
+          right={
+            <Button variant="secondary" size="sm" onClick={testNotify} disabled={testing}>
+              {testing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Bell className="w-4 h-4 mr-2" />}
+              Probar
+            </Button>
+          }
+        />
       </div>
     );
   } else if (section === 'seguimiento') {

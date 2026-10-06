@@ -7,6 +7,7 @@ const key = (url, sourceId) => `${sourceId}|${url}`;
 
 let running = false;
 let lastRun = 0;
+const listeners = new Set();
 
 async function finishIfBackground() {
   try {
@@ -29,8 +30,6 @@ async function avisarExtensiones() {
       ? `Ya puedes instalar la versión ${nuevos[0].to}.`
       : 'Ya puedes instalarlas desde Extensiones.';
 
-  // Solo se marca si el sistema acepto el aviso: si lo descarto, la
-  // proxima pasada vuelve a intentarlo.
   const enviado = await window.cytlex.notify({
     title: titulo,
     body: cuerpo,
@@ -149,23 +148,23 @@ function msToNextHour(hours) {
 }
 
 export function startNotifier() {
-  // Cada aviso va por su propio interruptor: el de extensiones no depende
-  // de que esté activo el de capítulos, ni al revés.
-  const run = async () => {
+  const run = async ({ silent = false } = {}) => {
     const cfg = settings.get();
     const quiereLib = cfg.notifyEnabled;
     const quiereExt = cfg.extUpdateNotify;
     if (!quiereLib && !quiereExt) {
-      finishIfBackground();
+      if (!silent) finishIfBackground();
       return;
     }
-    if (quiereLib) await checkLibrary().catch(() => {});
+    if (quiereLib) await checkLibrary({ silent }).catch(() => {});
     const avisado = quiereExt ? await avisarExtensiones().catch(() => false) : false;
-    if (!avisado) {
-      finishIfBackground();
-      return;
+    if (!silent) {
+      if (!avisado) {
+        finishIfBackground();
+        return;
+      }
+      setTimeout(finishIfBackground, 4 * 60 * 1000);
     }
-    setTimeout(finishIfBackground, 4 * 60 * 1000);
   };
 
   let id = null;
@@ -184,16 +183,31 @@ export function startNotifier() {
   arm();
   const off = settings.subscribe(arm);
 
+  const onTest = window.cytlex?.onRunNotifyCheck?.(() => run({ silent: true }));
+  if (onTest) listeners.add(onTest);
+
   const bg = window.cytlex?.isBackground?.();
   if (bg && typeof bg.then === 'function') {
     bg.then((v) => {
-      if (v) setTimeout(run, 2500);
+      if (!v) return;
+      let done = false;
+      const cerrar = () => {
+        if (done) return;
+        done = true;
+        finishIfBackground();
+      };
+      const tope = setTimeout(cerrar, 90 * 1000);
+      run({ silent: true }).finally(() => {
+        clearTimeout(tope);
+        setTimeout(cerrar, 2500);
+      });
     });
   }
 
   return () => {
     if (id) clearTimeout(id);
     off();
+    if (onTest) listeners.delete(onTest);
   };
 }
 

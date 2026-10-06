@@ -31,8 +31,6 @@ export const extUpdates = {
     listeners.forEach((l) => l());
   },
 
-  // Detecta sin marcar: el marcado es explicito para que el primer consumidor
-  // (toast al abrir o aviso del sistema) sea el que decida, no check() en silencio.
   async check() {
     if (checking) return [];
     if (typeof window === 'undefined' || !window.cytlex?.httpGet) return [];
@@ -66,7 +64,6 @@ export const extUpdates = {
 export async function announceExtUpdates(onNew) {
   const nuevos = await extUpdates.check();
   if (!nuevos.length) return [];
-  // Se avisa al usuario y queda marcado: no repetir el mismo aviso al reabrir.
   extUpdates.markSeen(nuevos);
   const titulo =
     nuevos.length === 1
