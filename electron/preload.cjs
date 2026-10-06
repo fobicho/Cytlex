@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('cytlex', {
   httpHead: (url) => ipcRenderer.invoke('http:head', url),
   notify: (payload) => ipcRenderer.invoke('notify:show', payload),
   notifySupported: () => ipcRenderer.invoke('notify:supported'),
-  setBackgroundCheck: (on) => ipcRenderer.invoke('notify:background', on),
+  setBackgroundCheck: (on, hours) => ipcRenderer.invoke('notify:background', on, hours),
   confirmTask: () => ipcRenderer.invoke('notify:confirm'),
   onNotifyClick: (cb) => {
     const handler = (_e, payload) => cb(payload);

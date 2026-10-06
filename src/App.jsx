@@ -93,6 +93,7 @@ export default function App() {
   useEffect(() => startNotifier(), []);
 
   useEffect(() => {
+    // Al abrir la app se avisa siempre, sea cual sea la configuración de fondo.
     const t = setTimeout(() => {
       announceExtUpdates(({ titulo, cuerpo }) => {
         toast({

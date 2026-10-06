@@ -18,6 +18,7 @@ const defaults = {
   notifyEnabled: false,
   notifyHours: 6,
   notifyBackground: false,
+  extUpdateNotify: false,
   notifyBaseline: {}
 };
 

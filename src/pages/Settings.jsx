@@ -369,6 +369,40 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   } else if (section === 'extensiones') {
     content = (
       <div>
+        <Row
+          first
+          title="Avisar de actualizaciones"
+          desc="Revisa el repositorio y avisa cuando una extensión tenga versión nueva."
+          right={
+            <Switch
+              on={s.extUpdateNotify}
+              onChange={(v) => set({ extUpdateNotify: v })}
+              label="Avisar de actualizaciones de extensiones"
+            />
+          }
+        />
+        <Row
+          last
+          title="Avisos en segundo plano"
+          desc={
+            s.extUpdateNotify
+              ? 'Comprueba con la app cerrada y avisa por el sistema. Al abrir Cytlex siempre te indica si hay novedades.'
+              : 'Activa el aviso anterior para poder comprobar con la app cerrada.'
+          }
+          right={
+            <div
+              className={cn(!s.extUpdateNotify && 'pointer-events-none opacity-50')}
+              aria-disabled={!s.extUpdateNotify}
+            >
+              <Switch
+                on={s.notifyBackground}
+                onChange={toggleBackground}
+                label="Avisos de extensiones en segundo plano"
+              />
+            </div>
+          }
+        />
+        <div className="border-t border-border mt-6" />
         <div className="text-xs text-muted-foreground mb-1.5">Repositorio de extensiones</div>
         <Input
           readOnly

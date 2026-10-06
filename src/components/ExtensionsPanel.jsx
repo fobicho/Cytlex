@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle } from 'lucide-react';
 import { extensions, DEFAULT_INDEX_URL } from '../lib/extensions.js';
+import { extUpdates } from '../lib/extUpdates.js';
 import { settings } from '../lib/settings.js';
 import { Card } from './ui/card.jsx';
 import { Dialog } from './ui/dialog.jsx';
@@ -103,6 +104,7 @@ export default function ExtensionsPanel() {
       refresh();
       await checkUpdates();
       if (r.ok) {
+        extUpdates.clear();
         toast({ title: 'Extensión actualizada', variant: 'success' });
       } else {
         setErr('No se pudo actualizar la extensión');
@@ -127,6 +129,8 @@ export default function ExtensionsPanel() {
           variant: 'error'
         });
       } else {
+        // Todo al día: el aviso pendiente ya no aplica.
+        extUpdates.clear();
         toast({
           title: r.ok === 1 ? '1 extensión actualizada' : `${r.ok} extensiones actualizadas`,
           variant: 'success'

@@ -31,6 +31,8 @@ export const extUpdates = {
     listeners.forEach((l) => l());
   },
 
+  // Detecta sin marcar: el marcado es explicito para que el primer consumidor
+  // (toast al abrir o aviso del sistema) sea el que decida, no check() en silencio.
   async check() {
     if (checking) return [];
     if (typeof window === 'undefined' || !window.cytlex?.httpGet) return [];
@@ -38,17 +40,22 @@ export const extUpdates = {
     try {
       const found = await extensions.checkUpdates(repoUrl());
       const yaAvisadas = readNotified();
-      const nuevos = found.filter((u) => yaAvisadas[u.id] !== u.to);
-      if (nuevos.length) {
-        writeNotified({ ...yaAvisadas, ...Object.fromEntries(nuevos.map((u) => [u.id, u.to])) });
-        listeners.forEach((l) => l());
-      }
-      return nuevos;
+      return found.filter((u) => yaAvisadas[u.id] !== u.to);
     } catch {
       return [];
     } finally {
       checking = false;
     }
+  },
+
+  markSeen(updates) {
+    const list = Array.isArray(updates) ? updates : [updates];
+    if (!list.length) return;
+    writeNotified({
+      ...readNotified(),
+      ...Object.fromEntries(list.map((u) => [u.id, u.to]))
+    });
+    listeners.forEach((l) => l());
   },
 
   get pendingCount() {
@@ -59,6 +66,8 @@ export const extUpdates = {
 export async function announceExtUpdates(onNew) {
   const nuevos = await extUpdates.check();
   if (!nuevos.length) return [];
+  // Se avisa al usuario y queda marcado: no repetir el mismo aviso al reabrir.
+  extUpdates.markSeen(nuevos);
   const titulo =
     nuevos.length === 1
       ? `${nuevos[0].name} tiene actualización`

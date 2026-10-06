@@ -111,7 +111,7 @@ function hookImageHeaders() {
 
 const TASK_NAME = 'Cytlex';
 
-let lastNotifiedAt = 0;
+const lastNotifiedAt = new Map();
 let pendingClick = null;
 
 ipcMain.handle('app:background', () => launchedInBackground);
@@ -128,11 +128,15 @@ ipcMain.handle('notify:show', (_e, payload = {}) => {
     console.log('[notify] no soportado');
     return false;
   }
-  if (Date.now() - lastNotifiedAt < 30000) {
+  // Anti-flood por tema, no global: si no, la aviso de "biblioteca al día"
+  // pisaba el de extensiones en la misma pasada y se perdía.
+  const bucket = payload.key || payload.tipo || payload.title || 'cytlex';
+  const last = lastNotifiedAt.get(bucket) || 0;
+  if (Date.now() - last < 30000) {
     console.log('[notify] descartado por anti-flood:', payload.title);
     return false;
   }
-  lastNotifiedAt = Date.now();
+  lastNotifiedAt.set(bucket, Date.now());
   const n = new Notification({
     title: payload.title || 'Cytlex',
     body: payload.body || '',

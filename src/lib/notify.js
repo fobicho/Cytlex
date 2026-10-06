@@ -16,6 +16,7 @@ async function finishIfBackground() {
 }
 
 async function avisarExtensiones() {
+  if (!settings.get().extUpdateNotify) return false;
   const nuevos = await extUpdates.check();
   if (!nuevos.length) return false;
 
@@ -28,11 +29,15 @@ async function avisarExtensiones() {
       ? `Ya puedes instalar la versión ${nuevos[0].to}.`
       : 'Ya puedes instalarlas desde Extensiones.';
 
-  return !!window.cytlex?.notify({
+  // Solo se marca si el sistema acepto el aviso: si lo descarto, la
+  // proxima pasada vuelve a intentarlo.
+  const enviado = await window.cytlex.notify({
     title: titulo,
     body: cuerpo,
     tipo: 'extensiones'
   });
+  if (enviado) extUpdates.markSeen(nuevos);
+  return !!enviado;
 }
 
 async function countChapters(manga) {
@@ -144,13 +149,18 @@ function msToNextHour(hours) {
 }
 
 export function startNotifier() {
+  // Cada aviso va por su propio interruptor: el de extensiones no depende
+  // de que esté activo el de capítulos, ni al revés.
   const run = async () => {
-    if (!settings.get().notifyEnabled) {
+    const cfg = settings.get();
+    const quiereLib = cfg.notifyEnabled;
+    const quiereExt = cfg.extUpdateNotify;
+    if (!quiereLib && !quiereExt) {
       finishIfBackground();
       return;
     }
-    await checkLibrary().catch(() => {});
-    const avisado = await avisarExtensiones().catch(() => false);
+    if (quiereLib) await checkLibrary().catch(() => {});
+    const avisado = quiereExt ? await avisarExtensiones().catch(() => false) : false;
     if (!avisado) {
       finishIfBackground();
       return;
@@ -159,10 +169,12 @@ export function startNotifier() {
   };
 
   let id = null;
+  const wanted = () => settings.get().notifyEnabled || settings.get().extUpdateNotify;
+
   const arm = () => {
     if (id) clearTimeout(id);
     id = null;
-    if (!settings.get().notifyEnabled) return;
+    if (!wanted()) return;
     id = setTimeout(() => {
       run();
       arm();
