@@ -13,10 +13,34 @@ const auth = require('./auth.cjs');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
-const devUrl = process.env.CYTLEX_DEV_URL || 'http://localhost:5173';
+const devUrl = process.env.CYTLEX_DEV_URL || 'http://localhost:5174';
 const launchedInBackground = process.argv.includes('--background');
 
 let mainWindow = null;
+let devServer = null;
+let pageUrl = null;
+let backgroundBail = null;
+
+function liberarFondo() {
+  if (backgroundBail) { clearTimeout(backgroundBail); backgroundBail = null; }
+}
+
+async function ensureDevServer() {
+  if (!isDev) return null;
+  if (!launchedInBackground) return devUrl;
+  try {
+    const { createServer } = await import('vite');
+    const server = await createServer({
+      configFile: path.join(__dirname, '../vite.config.js'),
+      logLevel: 'silent'
+    });
+    await server.listen();
+    devServer = server;
+    return server.resolvedUrls?.local?.[0] || devUrl;
+  } catch {
+    return devUrl;
+  }
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -38,11 +62,10 @@ function createWindow() {
   if (!launchedInBackground) win.maximize();
 
   if (launchedInBackground) {
-    const bail = setTimeout(() => {
+    backgroundBail = setTimeout(() => {
       if (!win.isDestroyed()) app.quit();
     }, 90000);
-    win.webContents.on('did-finish-load', () => clearTimeout(bail));
-    win.webContents.on('did-fail-load', () => { clearTimeout(bail); app.quit(); });
+    win.webContents.on('did-fail-load', () => { liberarFondo(); app.quit(); });
   }
 
   win.on('close', () => { if (mainWindow === win) mainWindow = null; });
@@ -54,8 +77,8 @@ function createWindow() {
   win.on('maximize', emitMaximized);
   win.on('unmaximize', emitMaximized);
 
-  if (isDev) {
-    win.loadURL(devUrl);
+  if (pageUrl) {
+    win.loadURL(pageUrl);
     if (process.env.OPEN_DEVTOOLS === '1') {
       win.webContents.openDevTools({ mode: 'detach' });
     }
@@ -148,6 +171,7 @@ ipcMain.handle('notify:show', (_e, payload = {}) => {
   });
   n.on('click', () => {
     pendingClick = payload;
+    liberarFondo();
     const win = mainWindow;
     if (win && !win.isDestroyed()) {
       if (win.isMinimized()) win.restore();
@@ -197,7 +221,7 @@ const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
 
 const taskScript = (hh, tr) => `
 $ErrorActionPreference = 'Stop'
-$a = New-ScheduledTaskAction -Execute ${psQuote(process.execPath)} -Argument ${psQuote(tr)}
+$a = New-ScheduledTaskAction -Execute ${psQuote(process.execPath)} -Argument ${psQuote(tr)} -WorkingDirectory ${psQuote(app.getAppPath())}
 $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
 $p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 $t = New-ScheduledTaskTrigger -Daily -At '${hh}:00'
@@ -241,6 +265,7 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
+    liberarFondo();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
@@ -253,10 +278,11 @@ if (!gotLock) {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   hookImageHeaders();
   auth.register();
+  pageUrl = await ensureDevServer();
   const win = createWindow();
   if (launchedInBackground) {
     win.once('ready-to-show', () => {});
@@ -268,6 +294,11 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('quit', () => {
+  liberarFondo();
+  if (devServer) devServer.close().catch(() => {});
 });
 
 ipcMain.handle('http:get', async (_e, url) => {

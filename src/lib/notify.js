@@ -199,7 +199,7 @@ export function startNotifier() {
       const tope = setTimeout(cerrar, 90 * 1000);
       run({ silent: true }).finally(() => {
         clearTimeout(tope);
-        setTimeout(cerrar, 2500);
+        setTimeout(cerrar, 10 * 1000);
       });
     });
   }
