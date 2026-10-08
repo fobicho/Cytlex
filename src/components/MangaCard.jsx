@@ -28,6 +28,26 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
   const ph = coverSize ? 'h-full w-full' : 'w-full aspect-[2/3]';
 
   const scale = coverSize ? coverSize / 160 : 1;
+  const px = (n, min) => Math.max(min, Math.round(n * scale));
+  const statusStyle = coverSize
+    ? {
+        fontSize: `${px(11, 9)}px`,
+        left: `${px(8, 4)}px`,
+        bottom: `${px(8, 4)}px`,
+        gap: `${px(6, 4)}px`,
+        paddingLeft: `${px(10, 5)}px`,
+        paddingRight: `${px(10, 5)}px`,
+        paddingTop: `${px(4, 2)}px`,
+        paddingBottom: `${px(4, 2)}px`
+      }
+    : undefined;
+  const statusDotStyle = coverSize ? { width: `${px(6, 4)}px`, height: `${px(6, 4)}px` } : undefined;
+  const titleStyle = coverSize
+    ? { fontSize: `${px(13.5, 11)}px` }
+    : { fontSize: '13.5px' };
+  const subStyle = coverSize
+    ? { fontSize: `${px(12, 10)}px` }
+    : { fontSize: '12px' };
   const badgeStyle = coverSize
     ? {
         fontSize: `${Math.max(9, Math.round(11 * scale))}px`,
@@ -74,8 +94,11 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
             </span>
           ) : (
             !minimal && status && (
-              <span className="absolute left-2 bottom-2 inline-flex items-center gap-1.5 max-w-[calc(100%-16px)] rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur-md">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+              <span
+                style={statusStyle}
+                className="absolute inline-flex items-center max-w-[calc(100%-16px)] rounded-full bg-black/70 font-semibold text-white backdrop-blur-md"
+              >
+                <span style={statusDotStyle} className="rounded-full bg-emerald-400 shrink-0" />
                 <span className="truncate">{String(status).slice(0, 28)}</span>
               </span>
             )
@@ -93,7 +116,8 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
       </a>
       <div className="pt-2">
         <a
-          className={cn('block text-[13.5px] font-semibold leading-snug truncate', linkCls)}
+          className={cn('block font-semibold leading-snug truncate', linkCls)}
+          style={titleStyle}
           href={detailHash}
           title={m.title}
           {...linkA11y}
@@ -101,7 +125,7 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
           {m.title}
         </a>
         {!minimal && (
-          <div className="text-xs text-muted-foreground mt-0.5 truncate">
+          <div className="text-muted-foreground mt-0.5 truncate" style={subStyle}>
             {unavailable
               ? 'Fuente no instalada'
               : ([m.type, m.lastChapter].filter(Boolean).join(' · ') || '\u00a0')}

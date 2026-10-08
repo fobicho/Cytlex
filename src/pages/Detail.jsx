@@ -38,6 +38,36 @@ function sameImage(a, b) {
 
 const EXPAND_CTRL_H = 16;
 
+const BASE_W = 1280;
+const BASE_H = 860;
+const SCALE_MIN = 0.78;
+const SCALE_MAX = 1.35;
+const COVER_BASE = 184;
+
+function computeScale() {
+  if (typeof window === 'undefined') return 1;
+  const w = window.innerWidth / BASE_W;
+  const h = window.innerHeight / BASE_H;
+  return Math.min(Math.max(Math.min(w, h), SCALE_MIN), SCALE_MAX);
+}
+
+function useScaleFactor() {
+  const [scale, setScale] = useState(computeScale);
+
+  useEffect(() => {
+    const update = () => setScale(computeScale());
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  return scale;
+}
+
+function useCoverSize(scale) {
+  return Math.round(COVER_BASE * scale);
+}
+
 function SourceLine({ sourceId }) {
   const m = extensions.manifest(sourceId);
   const [ok, setOk] = useState(true);
@@ -111,7 +141,6 @@ export default function Detail() {
   const synRef = useRef(null);
   const [availH, setAvailH] = useState(0);
   const [fullH, setFullH] = useState(0);
-  const [ready, setReady] = useState(false);
   const [animate, setAnimate] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [overflow, setOverflow] = useState(false);
@@ -119,6 +148,8 @@ export default function Detail() {
   const [markBefore, setMarkBefore] = useState(null);
   const [aniListOpen, setAniListOpen] = useState(false);
   const [aniLinked, setAniLinked] = useState(() => !!tracking.get(mangaUrl, sourceId));
+  const scale = useScaleFactor();
+  const coverSize = useCoverSize(scale);
   const knownCover = useMemo(() => {
     const fav = lib.fav(mangaUrl, sourceId);
     const local = fav?.coverLocal;
@@ -195,7 +226,6 @@ export default function Detail() {
     if (!extensions.isInstalled(sourceId)) return undefined;
     setErr('');
     setExpanded(false);
-    setReady(false);
     setAnimate(false);
     setAsc(chapterOrder.get(mangaUrl));
     setFav(!!lib.fav(mangaUrl, sourceId));
@@ -226,7 +256,6 @@ export default function Detail() {
       setAvailH(avail);
       setFullH(syn.scrollHeight);
       setOverflow(syn.scrollHeight > avail + 4);
-      setReady(true);
     };
 
     update();
@@ -236,7 +265,7 @@ export default function Detail() {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', update);
     };
-  }, [d]);
+  }, [d, scale]);
 
   useEffect(() => {
     if (!synRef.current) return;
@@ -244,10 +273,10 @@ export default function Detail() {
   }, [d, expanded]);
 
   useEffect(() => {
-    if (!ready || animate) return undefined;
+    if (animate) return undefined;
     const id = requestAnimationFrame(() => setAnimate(true));
     return () => cancelAnimationFrame(id);
-  }, [ready, animate]);
+  }, [animate]);
 
   const addToLibrary = (manga, catIds) => {
     lib.toggleFav(manga, catIds);
@@ -337,11 +366,14 @@ export default function Detail() {
 
         <div className="flex flex-col md:flex-row gap-6">
           {knownCover ? (
-            <div className="w-40 md:w-[184px] aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50">
+            <div
+              className="aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
+              style={{ width: `${coverSize}px` }}
+            >
               {coverImg('')}
             </div>
           ) : (
-            <Skeleton className="w-40 md:w-[184px] aspect-[2/3] rounded-xl shrink-0" />
+            <Skeleton className="aspect-[2/3] rounded-xl shrink-0" style={{ width: `${coverSize}px` }} />
           )}
           <div className="flex-1 min-w-0">
             <Skeleton className="h-8 md:h-9 w-2/3 max-w-md" />
@@ -387,7 +419,8 @@ export default function Detail() {
       <div className="flex flex-col md:flex-row gap-6">
         <div
           ref={coverRef}
-          className="w-40 md:w-[184px] aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
+          className="aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
+          style={{ width: `${coverSize}px` }}
         >
           {coverSrc ? (
             coverImg(d.title)
@@ -396,13 +429,24 @@ export default function Detail() {
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-foreground">{d.title}</h1>
-          {d.facts.autor && <div className="text-base text-muted-foreground mt-1">Por {d.facts.autor}</div>}
-          <div className="text-sm text-muted-foreground mt-1">{d.altTitles?.slice(0, 160)}</div>
+          <h1
+            className="font-extrabold tracking-tight text-foreground"
+            style={{ fontSize: `${Math.round(32 * scale)}px`, lineHeight: 1.1 }}
+          >
+            {d.title}
+          </h1>
+          {d.facts.autor && (
+            <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(17 * scale)}px` }}>
+              Por {d.facts.autor}
+            </div>
+          )}
+          <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(15 * scale)}px` }}>
+            {d.altTitles?.slice(0, 160)}
+          </div>
 
           <div className="flex flex-wrap items-center gap-2 mt-3">
             {(d.facts.estado || d.facts.status) && (
-              <Badge>{d.facts.estado || d.facts.status}</Badge>
+              <Badge>{(d.facts.estado || d.facts.status)}</Badge>
             )}
             {d.facts.tipo && <Badge>{d.facts.tipo}</Badge>}
             {d.genres.slice(0, 6).map((g) => (
@@ -424,9 +468,10 @@ export default function Detail() {
                   : undefined,
                 maskImage: !expanded && overflow
                   ? 'linear-gradient(to bottom, #000 calc(100% - 48px), rgba(0,0,0,0.55) calc(100% - 22px), transparent 100%)'
-                  : undefined
+                  : undefined,
+                fontSize: `${Math.round(15 * scale)}px`
               }}
-              className="relative text-sm text-muted-foreground leading-relaxed"
+              className="relative text-muted-foreground leading-relaxed"
             >
               <p>{d.sinopsis}</p>
               {!expanded && overflow && (
@@ -588,14 +633,23 @@ export default function Detail() {
             <a
               key={i}
               className={cn(
-                'group relative flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-2.5 min-h-[52px] hover:bg-accent/50 transition-colors',
+                'group relative flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-2.5 hover:bg-accent/50 transition-colors',
                 read && 'opacity-45 hover:opacity-70'
               )}
+              style={{ minHeight: `${Math.round(52 * scale)}px` }}
               href={`#/leer?u=${encodeURIComponent(c.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`}
             >
               <span className="flex-1 min-w-0">
-                <span className="block font-semibold truncate">{c.title}</span>
-                <span className="block text-xs text-muted-foreground">
+                <span
+                  className="block font-semibold truncate"
+                  style={{ fontSize: `${Math.round(15 * scale)}px` }}
+                >
+                  {c.title}
+                </span>
+                <span
+                  className="block text-muted-foreground"
+                  style={{ fontSize: `${Math.round(13 * scale)}px` }}
+                >
                   {c.date}
                   {inCourse && Number.isInteger(cap.total) && cap.total > 0
                     ? ` · en página ${cap.page + 1} de ${cap.total}`
@@ -608,7 +662,8 @@ export default function Detail() {
                   tabIndex={0}
                   title="Marcar como no leído"
                   aria-label={`Marcar ${c.title} como no leído`}
-                  className="shrink-0 flex items-center gap-1 text-xs text-primary rounded-md hover:bg-accent"
+                  className="shrink-0 flex items-center gap-1 text-primary rounded-md hover:bg-accent"
+                  style={{ fontSize: `${Math.round(13 * scale)}px` }}
                   onClick={(e) => { e.preventDefault(); progress.markUnread(c.url, sourceId); setProgressTick((t) => t + 1); }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markUnread(c.url, sourceId); setProgressTick((t) => t + 1); }
@@ -634,7 +689,8 @@ export default function Detail() {
                     tabIndex={0}
                     title="Marcar como leído"
                     aria-label={`Marcar ${c.title} como leído`}
-                    className="shrink-0 flex items-center gap-1 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded-md hover:bg-accent hover:text-foreground transition-opacity"
+                    className="shrink-0 flex items-center gap-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded-md hover:bg-accent hover:text-foreground transition-opacity"
+                    style={{ fontSize: `${Math.round(13 * scale)}px` }}
                     onClick={(e) => { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0); setProgressTick((t) => t + 1); }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0); setProgressTick((t) => t + 1); }

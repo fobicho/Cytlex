@@ -250,14 +250,6 @@ ipcMain.handle('notify:background', async (_e, on, hours = 6) => {
   }
 });
 
-ipcMain.handle('notify:test', async () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'Cytlex no está abierto' };
-  mainWindow.show();
-  mainWindow.focus();
-  mainWindow.webContents.send('notify:run-now');
-  return { ok: true };
-});
-
 app.setAppUserModelId('com.fobicho.cytlex');
 
 const gotLock = app.requestSingleInstanceLock();

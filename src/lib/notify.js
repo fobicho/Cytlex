@@ -183,9 +183,6 @@ export function startNotifier() {
   arm();
   const off = settings.subscribe(arm);
 
-  const onTest = window.cytlex?.onRunNotifyCheck?.(() => run({ silent: true }));
-  if (onTest) listeners.add(onTest);
-
   const bg = window.cytlex?.isBackground?.();
   if (bg && typeof bg.then === 'function') {
     bg.then((v) => {
@@ -207,7 +204,6 @@ export function startNotifier() {
   return () => {
     if (id) clearTimeout(id);
     off();
-    if (onTest) listeners.delete(onTest);
   };
 }
 

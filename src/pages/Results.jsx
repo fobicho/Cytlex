@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { extensions } from '../lib/extensions.js';
+import { settings } from '../lib/settings.js';
 import { lastSearch, resultsScroll } from '../lib/searchState.js';
 import MangaCard from '../components/MangaCard.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
@@ -15,6 +16,11 @@ export default function Results() {
   const sourceId = new URLSearchParams(loc.search).get('s') || '';
   const group = lastSearch.results?.find((r) => r.id === sourceId);
   const manifest = group?.manifest || extensions.manifest(sourceId);
+  const [coverSize, setCoverSize] = useState(() => settings.get().libraryCoverSize);
+
+  useEffect(() => settings.subscribe((s) => setCoverSize(s.libraryCoverSize)), []);
+
+  const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
 
   useEffect(() => {
     const main = document.querySelector('main');
@@ -93,13 +99,14 @@ export default function Results() {
       </div>
 
       <motion.div
-        className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-x-5 gap-y-8"
+        className="grid gap-x-5 gap-y-8"
+        style={{ gridTemplateColumns: `repeat(auto-fill, ${cs}px)` }}
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease: 'easeOut' }}
       >
         {group.items.map((m, i) => (
-          <MangaCard key={i} m={m} sourceId={sourceId} from="resultados" />
+          <MangaCard key={i} m={m} sourceId={sourceId} from="resultados" coverSize={cs} />
         ))}
       </motion.div>
     </div>

@@ -1,9 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, Loader2, ChevronRight } from 'lucide-react';
+import { Search, Loader2, ChevronRight, ChevronLeft } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { extensions } from '../lib/extensions.js';
+import { settings } from '../lib/settings.js';
 import { lastSearch, testCover, scrollMemory, rememberCover } from '../lib/searchState.js';
 import MangaCard from '../components/MangaCard.jsx';
 import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
@@ -18,12 +19,11 @@ const TABS = [
   { id: 'extensiones', label: 'Extensiones' }
 ];
 
-const GRID_CLS = 'grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-x-5 gap-y-8';
-
-function SourceSection({ r }) {
-  const gridRef = useRef(null);
+function SourceSection({ r, coverSize }) {
+  const trackRef = useRef(null);
   const mainRef = useRef(null);
-  const [cols, setCols] = useState(0);
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
 
   useEffect(() => {
     mainRef.current = document.querySelector('main');
@@ -44,18 +44,34 @@ function SourceSection({ r }) {
     return () => main.removeEventListener('scroll', save);
   }, []);
 
-  useLayoutEffect(() => {
-    const el = gridRef.current;
+  const measure = () => {
+    const el = trackRef.current;
     if (!el) return;
-    const compute = () => setCols(getComputedStyle(el).gridTemplateColumns.split(' ').length);
-    compute();
-    const ro = new ResizeObserver(compute);
+    setCanLeft(el.scrollLeft > 1);
+    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  };
+
+  useEffect(() => {
+    measure();
+    const el = trackRef.current;
+    if (!el) return undefined;
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [r.items.length]);
+  }, [r.items.length, coverSize]);
 
-  const overflow = cols > 0 && r.items.length > cols;
-  const visible = overflow ? r.items.slice(0, cols) : r.items;
+  useEffect(() => {
+    const el = trackRef.current;
+    if (el) el.scrollLeft = 0;
+  }, [r.id, r.items.length]);
+
+  const step = (dir) => {
+    const el = trackRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * (coverSize + 20) * 2, behavior: 'smooth' });
+  };
+
+  const visible = r.items.slice(0, 15);
 
   return (
     <motion.section
@@ -70,12 +86,39 @@ function SourceSection({ r }) {
         <span className="text-xs text-muted-foreground">· {r.items.length}</span>
       </div>
       <div className="relative">
-        <div ref={gridRef} className={GRID_CLS}>
+        <div
+          ref={trackRef}
+          onScroll={measure}
+          className="flex gap-5 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          style={{ scrollSnapType: 'x proximity' }}
+        >
           {visible.map((m, i) => (
-            <MangaCard key={i} m={m} sourceId={r.id} from="explorar" />
+            <div key={i} className="shrink-0" style={{ scrollSnapAlign: 'start', width: coverSize || 150 }}>
+              <MangaCard m={m} sourceId={r.id} from="explorar" coverSize={coverSize} />
+            </div>
           ))}
         </div>
-        {overflow && (
+        {canLeft && (
+          <button
+            type="button"
+            onClick={() => step(-1)}
+            aria-label="Ver mangas anteriores"
+            className="absolute -left-3 top-[38%] z-10 grid h-9 w-9 place-items-center rounded-full border border-border bg-background/90 text-foreground shadow-md backdrop-blur-sm transition hover:bg-background"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+        )}
+        {canRight && (
+          <button
+            type="button"
+            onClick={() => step(1)}
+            aria-label="Ver más mangas"
+            className="absolute -right-3 top-[38%] z-10 grid h-9 w-9 place-items-center rounded-full border border-border bg-background/90 text-foreground shadow-md backdrop-blur-sm transition hover:bg-background"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        )}
+        {r.items.length > 15 && (
           <a
             className={cn(
               buttonVariants({ variant: 'ghost', size: 'sm' }),
@@ -97,6 +140,11 @@ export default function Catalog() {
   const [sources, setSources] = useState(() => extensions.installed());
   const [q, setQ] = useState(() => lastSearch.q);
   const [results, setResults] = useState(() => lastSearch.results);
+  const [coverSize, setCoverSize] = useState(() => settings.get().libraryCoverSize);
+
+  useEffect(() => settings.subscribe((s) => setCoverSize(s.libraryCoverSize)), []);
+
+  const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
 
   useEffect(() => {
     setSources(extensions.installed());
@@ -162,12 +210,12 @@ export default function Catalog() {
 
   return (
     <div className="min-h-full flex flex-col">
-      <div className="flex flex-wrap items-start gap-6 mb-3">
+      <div className="-mt-1 flex flex-wrap items-center gap-6 mb-3 min-h-9">
         <div className="flex items-center gap-6">
           {TABS.map((t) => {
             const active = tab === t.id;
             return (
-<button
+              <button
                 key={t.id}
                 type="button"
                 onClick={() => setTab(t.id)}
@@ -190,11 +238,11 @@ export default function Catalog() {
         </div>
 
         {tab === 'mangas' && sources.length > 0 && (
-          <div className="flex flex-1 flex-col sm:flex-row sm:items-center gap-3 sm:justify-end">
-            <div className="relative flex-1 sm:max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <div className="ml-auto self-center flex items-center gap-3">
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input
-                className="pl-9 bg-muted/50 border-none"
+                className="h-9 pl-9 bg-muted/50 border-none"
                 placeholder="Buscar en todas las extensiones..."
                 value={q}
                 onChange={(e) => { setQ(e.target.value); lastSearch.q = e.target.value; }}
@@ -202,9 +250,10 @@ export default function Catalog() {
               />
             </div>
             <Button
+              size="sm"
               onClick={() => runSearch()}
               disabled={!q.trim()}
-              className={cn('disabled:opacity-40')}
+              className={cn('rounded-lg disabled:opacity-40')}
             >
               Buscar
             </Button>
@@ -243,7 +292,7 @@ export default function Catalog() {
                 )}
 
                 {withResults.map((r) => (
-                  <SourceSection key={r.id} r={r} />
+                  <SourceSection key={r.id} r={r} coverSize={cs} />
                 ))}
 
                 {done && withResults.length === 0 && (

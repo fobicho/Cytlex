@@ -11,12 +11,6 @@ contextBridge.exposeInMainWorld('cytlex', {
   notifySupported: () => ipcRenderer.invoke('notify:supported'),
   setBackgroundCheck: (on, hours) => ipcRenderer.invoke('notify:background', on, hours),
   confirmTask: () => ipcRenderer.invoke('notify:confirm'),
-  testNotify: () => ipcRenderer.invoke('notify:test'),
-  onRunNotifyCheck: (cb) => {
-    const handler = () => cb();
-    ipcRenderer.on('notify:run-now', handler);
-    return () => ipcRenderer.removeListener('notify:run-now', handler);
-  },
   onNotifyClick: (cb) => {
     const handler = (_e, payload) => cb(payload);
     ipcRenderer.on('notify:click', handler);

@@ -141,7 +141,7 @@ export default function Library() {
 
   return (
     <div className="min-h-full flex flex-col">
-      <div className="flex flex-wrap items-start gap-6 mb-3">
+      <div className="-mt-1 flex flex-wrap items-center gap-6 mb-3">
         {cats.map((c) => {
           const active = c.id === sel;
           return (
@@ -165,7 +165,7 @@ export default function Library() {
             </button>
           );
         })}
-        <div className="ml-auto self-start">
+        <div className="ml-auto self-center">
           <Button
             size="sm"
             variant="secondary"
