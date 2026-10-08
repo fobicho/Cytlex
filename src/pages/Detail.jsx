@@ -252,17 +252,24 @@ export default function Detail() {
     const update = () => {
       const c = cover.getBoundingClientRect();
       const s = syn.getBoundingClientRect();
-      const avail = Math.max(80, c.bottom - s.top - EXPAND_CTRL_H);
-      setAvailH(avail);
+      const avail = Math.max(0, c.bottom - s.top - EXPAND_CTRL_H);
       setFullH(syn.scrollHeight);
+      setAvailH(avail);
       setOverflow(syn.scrollHeight > avail + 4);
     };
 
     update();
     const raf = requestAnimationFrame(update);
+    let raf2 = 0;
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(() => {
+        raf2 = requestAnimationFrame(update);
+      });
+    }
     window.addEventListener('resize', update);
     return () => {
       cancelAnimationFrame(raf);
+      cancelAnimationFrame(raf2);
       window.removeEventListener('resize', update);
     };
   }, [d, scale]);
@@ -405,6 +412,11 @@ export default function Detail() {
   const enMarcha = !!(cap && !cap.read && Number.isInteger(cap.page));
   const resume = pendiente ? { ...pendiente, cap } : null;
 
+  const fade = Math.min(48, (overflow ? availH : 0) * 0.4);
+  const synMask = !expanded && overflow && fade > 4
+    ? `linear-gradient(to bottom, #000 calc(100% - ${Math.round(fade)}px), rgba(0,0,0,0.55) calc(100% - ${Math.round(fade * 0.45)}px), transparent 100%)`
+    : undefined;
+
   return (
     <div className="min-h-full flex flex-col">
       <Button
@@ -463,12 +475,8 @@ export default function Detail() {
                 maxHeight: expanded ? (fullH || undefined) : (overflow ? availH : undefined),
                 overflow: 'hidden',
                 transition: animate ? 'max-height 320ms cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
-                WebkitMaskImage: !expanded && overflow
-                  ? 'linear-gradient(to bottom, #000 calc(100% - 48px), rgba(0,0,0,0.55) calc(100% - 22px), transparent 100%)'
-                  : undefined,
-                maskImage: !expanded && overflow
-                  ? 'linear-gradient(to bottom, #000 calc(100% - 48px), rgba(0,0,0,0.55) calc(100% - 22px), transparent 100%)'
-                  : undefined,
+                WebkitMaskImage: synMask,
+                maskImage: synMask,
                 fontSize: `${Math.round(15 * scale)}px`
               }}
               className="relative text-muted-foreground leading-relaxed"
@@ -477,8 +485,9 @@ export default function Detail() {
               {!expanded && overflow && (
                 <span
                   aria-hidden
-                  className="pointer-events-none absolute inset-x-0 bottom-0 h-12 backdrop-blur-[3px]"
+                  className="pointer-events-none absolute inset-x-0 bottom-0 backdrop-blur-[3px]"
                   style={{
+                    height: `${Math.round(fade)}px`,
                     WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.5) 55%, #000 100%)',
                     maskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.5) 55%, #000 100%)'
                   }}

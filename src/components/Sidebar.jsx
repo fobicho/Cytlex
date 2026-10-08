@@ -15,10 +15,32 @@ const navItems = [
 const EASE = [0.25, 0.1, 0.25, 1];
 const DURATION = 0.3;
 const SIDEBAR_WIDTH = { expanded: 196, collapsed: 72 };
+const SIDEBAR_BASE_W = 1280;
+const SIDEBAR_SCALE_MIN = 0.82;
+const SIDEBAR_SCALE_MAX = 1;
+
+function useSidebarScale() {
+  const [scale, setScale] = useState(() => {
+    if (typeof window === 'undefined') return 1;
+    return Math.min(Math.max(window.innerWidth / SIDEBAR_BASE_W, SIDEBAR_SCALE_MIN), SIDEBAR_SCALE_MAX);
+  });
+
+  useEffect(() => {
+    const update = () => {
+      setScale(Math.min(Math.max(window.innerWidth / SIDEBAR_BASE_W, SIDEBAR_SCALE_MIN), SIDEBAR_SCALE_MAX));
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  return scale;
+}
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(settings.get().sidebarCollapsed);
   const location = useLocation();
+  const scale = useSidebarScale();
 
   useEffect(() => settings.subscribe((s) => setCollapsed(s.sidebarCollapsed)), []);
 
@@ -27,11 +49,14 @@ export default function Sidebar() {
   return (
     <motion.aside
       initial={false}
-      animate={{ width: collapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.expanded }}
+      animate={{ width: Math.round((collapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.expanded) * scale) }}
       transition={{ duration: DURATION, ease: EASE }}
       className="h-full flex flex-col border-r border-border bg-sidebar overflow-hidden"
     >
-      <nav className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-1 p-3">
+      <nav
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col p-3"
+        style={{ gap: `${Math.max(2, Math.round(4 * scale))}px` }}
+      >
         {navItems.map((item) => {
           const isActive = location.pathname === item.to;
           return (
@@ -46,13 +71,21 @@ export default function Sidebar() {
             >
               <div
                 className={cn(
-                  'flex items-center gap-3 py-2.5 px-[14px] rounded-lg text-sm font-medium transition-colors relative',
+                  'flex items-center rounded-lg font-medium transition-colors relative',
                   'transition-[gap] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
                   collapsed && 'gap-0',
                   isActive
                     ? 'text-sidebar-accent-foreground'
                     : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/50'
                 )}
+                style={{
+                  gap: collapsed ? 0 : `${Math.max(8, Math.round(12 * scale))}px`,
+                  paddingTop: `${Math.max(8, Math.round(10 * scale))}px`,
+                  paddingBottom: `${Math.max(8, Math.round(10 * scale))}px`,
+                  paddingLeft: `${Math.max(10, Math.round(14 * scale))}px`,
+                  paddingRight: `${Math.max(10, Math.round(14 * scale))}px`,
+                  fontSize: `${Math.max(13, Math.round(14 * scale))}px`
+                }}
               >
                 {isActive && (
                   <motion.div
@@ -61,12 +94,13 @@ export default function Sidebar() {
                     transition={{ type: 'spring', stiffness: 340, damping: 34, mass: 0.9 }}
                   />
                 )}
-                <item.icon className="w-5 h-5 shrink-0 relative z-10" />
+                <item.icon className="relative z-10 shrink-0" style={{ width: `${Math.max(18, Math.round(20 * scale))}px`, height: `${Math.max(18, Math.round(20 * scale))}px` }} />
                 <span
                   className={cn(
                     'relative z-10 whitespace-nowrap overflow-hidden transition-[max-width,opacity,transform] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
-                    collapsed ? 'max-w-0 opacity-0 translate-x-2' : 'max-w-[160px] opacity-100 translate-x-0'
+                    collapsed ? 'max-w-0 opacity-0 translate-x-2' : 'opacity-100 translate-x-0'
                   )}
+                  style={collapsed ? undefined : { maxWidth: `${Math.round(160 * scale)}px` }}
                 >
                   {item.label}
                 </span>
@@ -76,21 +110,27 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="shrink-0 p-3 border-t border-border">
+      <div
+        className="shrink-0 border-t border-border"
+        style={{ padding: `${Math.max(8, Math.round(12 * scale))}px` }}
+      >
         <motion.button
           whileHover={{ scale: 1.04 }}
           whileTap={{ scale: 0.94 }}
           onClick={toggle}
           aria-label={collapsed ? 'Expandir menu lateral' : 'Colapsar menu lateral'}
           title={collapsed ? 'Expandir' : 'Colapsar'}
-          className="flex items-center justify-center w-full py-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          className="flex items-center justify-center w-full rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          style={{ paddingTop: `${Math.max(6, Math.round(8 * scale))}px`, paddingBottom: `${Math.max(6, Math.round(8 * scale))}px` }}
         >
-<motion.span
+          <motion.span
             className="flex items-center justify-center"
             animate={{ rotate: collapsed ? 0 : 180 }}
             transition={{ type: 'spring', stiffness: 380, damping: 26, mass: 0.7 }}
           >
-            <ChevronsRight className="w-4 h-4" />
+            <ChevronsRight
+              style={{ width: `${Math.max(14, Math.round(16 * scale))}px`, height: `${Math.max(14, Math.round(16 * scale))}px` }}
+            />
           </motion.span>
         </motion.button>
       </div>
