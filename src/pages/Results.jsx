@@ -9,6 +9,7 @@ import MangaCard from '../components/MangaCard.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
+import { useScale } from '../lib/useScale.js';
 
 export default function Results() {
   const navigate = useNavigate();
@@ -17,6 +18,7 @@ export default function Results() {
   const group = lastSearch.results?.find((r) => r.id === sourceId);
   const manifest = group?.manifest || extensions.manifest(sourceId);
   const [coverSize, setCoverSize] = useState(() => settings.get().libraryCoverSize);
+  const scale = useScale();
 
   useEffect(() => settings.subscribe((s) => setCoverSize(s.libraryCoverSize)), []);
 
@@ -100,7 +102,10 @@ export default function Results() {
 
       <motion.div
         className="grid gap-x-5 gap-y-8"
-        style={{ gridTemplateColumns: `repeat(auto-fill, ${cs}px)` }}
+        style={{
+          gridTemplateColumns: `repeat(auto-fill, ${cs}px)`,
+          gap: `${Math.max(16, Math.round(20 * scale))}px ${Math.max(12, Math.round(20 * scale))}px`
+        }}
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease: 'easeOut' }}

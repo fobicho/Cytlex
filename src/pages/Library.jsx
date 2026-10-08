@@ -14,6 +14,7 @@ import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
+import { useScale } from '../lib/useScale.js';
 
 let sessionCategoria = '';
 
@@ -30,6 +31,7 @@ export default function Library() {
   const [coverSize, setCoverSize] = useState(() => settings.get().libraryCoverSize);
   const [showUnread, setShowUnread] = useState(() => settings.get().libraryShowUnread);
   const [unread, setUnread] = useState({});
+  const scale = useScale();
   const [progressTick, setProgressTick] = useState(0);
   useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
   useEffect(
@@ -141,7 +143,13 @@ export default function Library() {
 
   return (
     <div className="min-h-full flex flex-col">
-      <div className="-mt-1 flex flex-wrap items-center gap-6 mb-3">
+      <div
+        className="-mt-1 flex flex-wrap items-center gap-6 mb-3"
+        style={{
+          gap: `${Math.max(16, Math.round(24 * scale))}px`,
+          marginBottom: `${Math.max(8, Math.round(12 * scale))}px`
+        }}
+      >
         {cats.map((c) => {
           const active = c.id === sel;
           return (
@@ -150,9 +158,10 @@ export default function Library() {
               type="button"
               onClick={() => setSel(c.id)}
               className={cn(
-                'relative pb-2 text-sm font-medium transition-colors',
+                'relative pb-2 font-medium transition-colors',
                 active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
               )}
+              style={{ fontSize: `${Math.round(14 * scale)}px` }}
             >
               {c.name}
               {active && (
@@ -173,11 +182,18 @@ export default function Library() {
             onClick={runCheck}
             title="Buscar actualizaciones"
             className="rounded-lg"
+            style={{ fontSize: `${Math.round(14 * scale)}px` }}
           >
             {checking ? (
-              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+              <RefreshCw
+                className="mr-2 animate-spin"
+                style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }}
+              />
             ) : (
-              <RefreshCw className="w-4 h-4 mr-2" />
+              <RefreshCw
+                className="mr-2"
+                style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }}
+              />
             )}
             {checking ? 'Buscando…' : 'Buscar actualizaciones'}
           </Button>
@@ -193,7 +209,10 @@ export default function Library() {
       ) : view === 'grid' ? (
         <div
           className="grid gap-x-5 gap-y-8"
-          style={{ gridTemplateColumns: `repeat(auto-fill, ${cs}px)` }}
+          style={{
+            gridTemplateColumns: `repeat(auto-fill, ${cs}px)`,
+            gap: `${Math.max(16, Math.round(20 * scale))}px ${Math.max(12, Math.round(20 * scale))}px`
+          }}
         >
           {shown.map((m, i) => {
             const sid = m.sourceId || 'leercapitulo';

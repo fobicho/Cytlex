@@ -9,6 +9,7 @@ import { makeCoverThumb } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { cn } from '../lib/utils.js';
+import { useScale, px } from '../lib/useScale.js';
 import { Button } from '../components/ui/button.jsx';
 import { Badge } from '../components/ui/badge.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
@@ -37,36 +38,7 @@ function sameImage(a, b) {
 }
 
 const EXPAND_CTRL_H = 16;
-
-const BASE_W = 1280;
-const BASE_H = 860;
-const SCALE_MIN = 0.78;
-const SCALE_MAX = 1.35;
 const COVER_BASE = 184;
-
-function computeScale() {
-  if (typeof window === 'undefined') return 1;
-  const w = window.innerWidth / BASE_W;
-  const h = window.innerHeight / BASE_H;
-  return Math.min(Math.max(Math.min(w, h), SCALE_MIN), SCALE_MAX);
-}
-
-function useScaleFactor() {
-  const [scale, setScale] = useState(computeScale);
-
-  useEffect(() => {
-    const update = () => setScale(computeScale());
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, []);
-
-  return scale;
-}
-
-function useCoverSize(scale) {
-  return Math.round(COVER_BASE * scale);
-}
 
 function SourceLine({ sourceId }) {
   const m = extensions.manifest(sourceId);
@@ -148,8 +120,8 @@ export default function Detail() {
   const [markBefore, setMarkBefore] = useState(null);
   const [aniListOpen, setAniListOpen] = useState(false);
   const [aniLinked, setAniLinked] = useState(() => !!tracking.get(mangaUrl, sourceId));
-  const scale = useScaleFactor();
-  const coverSize = useCoverSize(scale);
+  const scale = useScale();
+  const coverSize = Math.round(COVER_BASE * scale);
   const knownCover = useMemo(() => {
     const fav = lib.fav(mangaUrl, sourceId);
     const local = fav?.coverLocal;
@@ -422,10 +394,16 @@ export default function Detail() {
       <Button
         variant="ghost"
         size="sm"
-        className="-mt-2 -ml-2 mb-1 self-start hover:bg-transparent hover:text-foreground"
+        className="self-start hover:bg-transparent hover:text-foreground"
         onClick={() => navigate(backTo)}
+        style={{
+          marginTop: px(-8, scale, -6),
+          marginLeft: px(-8, scale, -6),
+          marginBottom: px(4, scale, 3),
+          fontSize: px(14, scale, 12)
+        }}
       >
-        <ArrowLeft className="w-4 h-4 mr-1.5" /> Volver
+        <ArrowLeft className="mr-1.5" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Volver
       </Button>
 
       <div className="flex flex-col md:flex-row gap-6">
@@ -512,15 +490,28 @@ export default function Detail() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 mt-6 border-t border-border pt-5">
+      <div
+        className="flex flex-wrap items-center border-t border-border"
+        style={{ gap: px(12, scale, 8), marginTop: px(24, scale, 16), paddingTop: px(20, scale, 14) }}
+      >
         {resume ? (
           <Button
             className="shadow-lg shadow-primary/30"
             onClick={() => {
               window.location.hash = `#/leer?u=${encodeURIComponent(resume.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
             }}
+            style={{
+              height: px(40, scale, 33),
+              paddingLeft: px(16, scale, 13),
+              paddingRight: px(16, scale, 13),
+              fontSize: px(14, scale, 12)
+            }}
           >
-            {enMarcha ? <BookOpen className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
+            {enMarcha ? (
+              <BookOpen className="mr-2 shrink-0" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+            ) : (
+              <Play className="mr-2 shrink-0" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+            )}
             {enMarcha ? 'Continuar' : 'Leer'} {resume.title}
             {enMarcha && (
               <span className="opacity-70 ml-2">
@@ -545,10 +536,24 @@ export default function Detail() {
               }
               onAddClick();
             }}
+            style={{
+              height: px(40, scale, 33),
+              paddingLeft: px(16, scale, 13),
+              paddingRight: px(16, scale, 13),
+              fontSize: px(14, scale, 12)
+            }}
           >
-            <Star className={`w-4 h-4 mr-2 ${fav ? 'fill-current text-amber-400' : ''}`} />
+            <Star
+              className={cn('mr-2 shrink-0', fav && 'fill-current text-amber-400')}
+              style={{ width: px(16, scale, 14), height: px(16, scale, 14) }}
+            />
             {fav ? 'En biblioteca' : 'Añadir'}
-            {!fav && <ChevronDown className={cn('w-3.5 h-3.5 ml-2 transition-transform duration-200', catPick?.inline && 'rotate-180')} />}
+            {!fav && (
+              <ChevronDown
+                className={cn('ml-2 transition-transform duration-200', catPick?.inline && 'rotate-180')}
+                style={{ width: px(14, scale, 12), height: px(14, scale, 12) }}
+              />
+            )}
           </Button>
 
           {catPick?.inline && (
@@ -592,8 +597,21 @@ export default function Detail() {
             </div>
           )}
         </div>
-        <Button variant="secondary" onClick={() => setAniListOpen(true)} title="Vincular con AniList">
-          <Link2 className={`w-4 h-4 mr-2 ${aniLinked ? 'text-primary' : ''}`} />
+        <Button
+          variant="secondary"
+          onClick={() => setAniListOpen(true)}
+          title="Vincular con AniList"
+          style={{
+            height: px(40, scale, 33),
+            paddingLeft: px(16, scale, 13),
+            paddingRight: px(16, scale, 13),
+            fontSize: px(14, scale, 12)
+          }}
+        >
+          <Link2
+            className={cn('mr-2 shrink-0', aniLinked && 'text-primary')}
+            style={{ width: px(16, scale, 14), height: px(16, scale, 14) }}
+          />
           Seguimiento
         </Button>
       </div>
@@ -613,20 +631,23 @@ export default function Detail() {
             onClick={() => setAsc((v) => { chapterOrder.set(mangaUrl, !v); return !v; })}
             title={asc ? 'Orden: más antiguos primero' : 'Orden: más recientes primero'}
             aria-label={asc ? 'Cambiar a más recientes primero' : 'Cambiar a más antiguos primero'}
-            className="grid place-items-center w-8 h-8 rounded-lg text-foreground"
+            className="grid place-items-center rounded-lg text-foreground"
+            style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
           >
-            <span className="relative grid place-items-center w-4 h-4">
+            <span className="relative grid place-items-center" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }}>
               <ArrowUp
                 className={cn(
-                  'col-start-1 row-start-1 w-4 h-4 transition-all duration-200',
+                  'col-start-1 row-start-1 transition-all duration-200',
                   asc ? 'opacity-0 -rotate-90' : 'opacity-100 rotate-0'
                 )}
+                style={{ width: px(16, scale, 14), height: px(16, scale, 14) }}
               />
               <ArrowDown
                 className={cn(
-                  'col-start-1 row-start-1 w-4 h-4 transition-all duration-200',
+                  'col-start-1 row-start-1 transition-all duration-200',
                   asc ? 'opacity-100 rotate-0' : 'opacity-0 rotate-90'
                 )}
+                style={{ width: px(16, scale, 14), height: px(16, scale, 14) }}
               />
             </span>
           </button>

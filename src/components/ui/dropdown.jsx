@@ -2,8 +2,20 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
+import { px } from '../../lib/useScale.js';
 
-export function Dropdown({ value, options, onChange, ariaLabel, placeholder = '', className, menuClassName, portal }) {
+export function Dropdown({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  placeholder = '',
+  className,
+  menuClassName,
+  portal,
+  style,
+  scale = 1
+}) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const rootRef = useRef(null);
@@ -57,10 +69,16 @@ export function Dropdown({ value, options, onChange, ariaLabel, placeholder = ''
     <div
       ref={listRef}
       role="listbox"
-      style={portal && pos ? { top: pos.top, left: pos.left, minWidth: pos.width } : undefined}
+      style={{
+        ...(portal && pos ? { top: pos.top, left: pos.left, minWidth: pos.width } : null),
+        marginTop: px(4, scale, 3),
+        maxHeight: px(256, scale, 200),
+        padding: px(4, scale, 3),
+        fontSize: px(14, scale, 12)
+      }}
       className={cn(
         portal ? 'fixed z-[60]' : 'absolute z-40',
-        'mt-1 min-w-full max-h-64 overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-2xl',
+        'min-w-full overflow-y-auto rounded-lg border border-border bg-card shadow-2xl',
         menuClassName
       )}
       data-scrollable
@@ -76,9 +94,16 @@ export function Dropdown({ value, options, onChange, ariaLabel, placeholder = ''
             ref={active ? selectedRef : null}
             onClick={() => { onChange(o.value); setOpen(false); }}
             className={cn(
-              'block w-full truncate rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
+              'block w-full truncate rounded-md text-left transition-colors',
               active ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent'
             )}
+            style={{
+              paddingLeft: px(10, scale, 8),
+              paddingRight: px(10, scale, 8),
+              paddingTop: px(6, scale, 4),
+              paddingBottom: px(6, scale, 4),
+              fontSize: px(14, scale, 12)
+            }}
           >
             {o.label}
           </button>
@@ -88,7 +113,7 @@ export function Dropdown({ value, options, onChange, ariaLabel, placeholder = ''
   );
 
   return (
-    <div ref={rootRef} className={cn('relative', className)}>
+    <div ref={rootRef} className={cn('relative', className)} style={style}>
       <button
         ref={btnRef}
         type="button"
@@ -96,10 +121,21 @@ export function Dropdown({ value, options, onChange, ariaLabel, placeholder = ''
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 h-8 w-full rounded-lg border border-border bg-background pl-3 pr-2.5 text-sm text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex items-center rounded-lg border border-border bg-background text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        style={{
+          gap: px(8, scale, 6),
+          height: px(32, scale, 27),
+          width: '100%',
+          paddingLeft: px(12, scale, 10),
+          paddingRight: px(10, scale, 8),
+          fontSize: px(14, scale, 12)
+        }}
       >
         <span className="flex-1 truncate text-left">{current ? current.label : placeholder}</span>
-        <ChevronDown className={cn('w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform duration-200', open && 'rotate-180')} />
+        <ChevronDown
+          className={cn('shrink-0 text-muted-foreground transition-transform duration-200', open && 'rotate-180')}
+          style={{ width: px(14, scale, 12), height: px(14, scale, 12) }}
+        />
       </button>
 
       {portal

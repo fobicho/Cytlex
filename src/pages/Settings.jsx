@@ -16,8 +16,9 @@ import { Dialog } from '../components/ui/dialog.jsx';
 import { useToast } from '../components/Toast.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { cn } from '../lib/utils.js';
+import { useScale, px } from '../lib/useScale.js';
 
-function Switch({ on, onChange, label }) {
+function Switch({ on, onChange, label, scale = 1 }) {
   return (
     <button
       type="button"
@@ -26,48 +27,68 @@ function Switch({ on, onChange, label }) {
       aria-label={label}
       onClick={() => onChange(!on)}
       className={cn(
-        'relative h-6 w-11 rounded-full transition-colors shrink-0',
+        'relative rounded-full transition-colors shrink-0',
         on ? 'bg-primary' : 'bg-muted'
       )}
+      style={{
+        height: px(24, scale, 20),
+        width: px(44, scale, 38)
+      }}
     >
       <span
-        className={cn(
-          'absolute top-0.5 h-5 w-5 rounded-full bg-background shadow transition-all',
-          on ? 'left-[22px]' : 'left-0.5'
-        )}
+        className="absolute rounded-full bg-background shadow transition-all"
+        style={{
+          top: px(2, scale, 1.5),
+          height: px(20, scale, 17),
+          width: px(20, scale, 17),
+          left: on ? `calc(${px(44, scale, 38)} - ${px(22, scale, 19)}px)` : px(2, scale, 1.5)
+        }}
       />
     </button>
   );
 }
 
-function Row({ title, desc, right, first, last, className }) {
+function Row({ title, desc, right, first, last, className, scale = 1 }) {
   return (
     <div
       className={cn(
         'flex items-center justify-between gap-4',
-        first ? 'pt-0 pb-4' : last ? 'pt-4 pb-0' : 'py-4',
         !last && 'border-b border-border',
         className
       )}
+      style={{
+        paddingTop: first ? '0' : px(16, scale, 11),
+        paddingBottom: last ? '0' : px(16, scale, 11)
+      }}
     >
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium leading-tight">{title}</div>
-        {desc && <div className="text-xs text-muted-foreground mt-1 leading-snug">{desc}</div>}
+        <div className="font-medium leading-tight" style={{ fontSize: px(14, scale, 12) }}>
+          {title}
+        </div>
+        {desc && (
+          <div
+            className="text-muted-foreground mt-1 leading-snug"
+            style={{ fontSize: px(12, scale, 10) }}
+          >
+            {desc}
+          </div>
+        )}
       </div>
       {right && <div className="shrink-0 flex items-center">{right}</div>}
     </div>
   );
 }
 
-function Segmented({ value, options, onChange }) {
+function Segmented({ value, options, onChange, scale = 1 }) {
   return (
-    <div className="flex gap-2">
+    <div className="flex" style={{ gap: px(8, scale, 5) }}>
       {options.map(([val, label]) => (
         <Button
           key={val}
           size="sm"
           variant={value === val ? 'default' : 'outline'}
           onClick={() => onChange(val)}
+          style={{ fontSize: px(14, scale, 12) }}
         >
           {label}
         </Button>
@@ -76,9 +97,18 @@ function Segmented({ value, options, onChange }) {
   );
 }
 
-function Kbd({ children }) {
+function Kbd({ children, scale = 1 }) {
   return (
-    <kbd className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] font-mono text-muted-foreground">
+    <kbd
+      className="rounded-md border border-border bg-muted text-muted-foreground font-mono"
+      style={{
+        fontSize: px(11, scale, 9),
+        paddingLeft: px(6, scale, 4),
+        paddingRight: px(6, scale, 4),
+        paddingTop: px(2, scale, 1),
+        paddingBottom: px(2, scale, 1)
+      }}
+    >
       {children}
     </kbd>
   );
@@ -114,6 +144,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   const [authErr, setAuthErr] = useState('');
   const { toast } = useToast();
   const [bgErr, setBgErr] = useState('');
+  const scale = useScale();
 
   const toggleBackground = async (on) => {
     setBgErr('');
@@ -199,11 +230,13 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
     content = (
       <div>
         <Row
+          scale={scale}
           first
           title="Modo"
           desc="Claro u oscuro"
           right={
             <Segmented
+              scale={scale}
               value={s.mode}
               onChange={(m) => set({ mode: m })}
               options={[['dark', 'Oscuro'], ['light', 'Claro']]}
@@ -211,7 +244,9 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           }
         />
         <div className="pt-6">
-          <h3 className="text-sm font-medium mb-3">Tema</h3>
+          <h3 className="font-medium mb-3" style={{ fontSize: px(14, scale, 12) }}>
+            Tema
+          </h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             {THEMES.map((t) => {
               const on = s.theme === t.id;
@@ -225,13 +260,24 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
                     'rounded-xl border p-4 text-left transition-colors',
                     on ? 'border-primary ring-2 ring-ring' : 'border-border hover:bg-accent'
                   )}
+                  style={{ padding: px(16, scale, 11), gap: px(16, scale, 11) }}
                 >
-                  <div className="flex gap-2 mb-3">
-                    <span className="w-7 h-7 rounded-full border border-border" style={{ background: sw[0] }} />
-                    <span className="w-7 h-7 rounded-full border border-border" style={{ background: sw[1] }} />
+                  <div className="flex gap-2 mb-3" style={{ marginBottom: px(12, scale, 8), gap: px(8, scale, 6) }}>
+                    <span
+                      className="rounded-full border border-border"
+                      style={{ background: sw[0], width: px(28, scale, 22), height: px(28, scale, 22) }}
+                    />
+                    <span
+                      className="rounded-full border border-border"
+                      style={{ background: sw[1], width: px(28, scale, 22), height: px(28, scale, 22) }}
+                    />
                   </div>
-                  <div className="text-sm font-medium">{t.name}</div>
-                  <div className="text-xs text-muted-foreground">{t.desc}</div>
+                  <div className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
+                    {t.name}
+                  </div>
+                  <div className="text-muted-foreground" style={{ fontSize: px(12, scale, 10) }}>
+                    {t.desc}
+                  </div>
                 </button>
               );
             })}
@@ -239,6 +285,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         </div>
         <div className="border-t border-border mt-6" />
         <Row
+          scale={scale}
           last
           title="Pantalla completa"
           desc="Oculta los bordes de la ventana"
@@ -254,12 +301,14 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
     content = (
       <div>
         <Row
+          scale={scale}
           first
           last={s.libraryView !== 'grid'}
           title="Vista"
           desc="Cuadrícula de portadas o lista compacta"
           right={
             <Segmented
+              scale={scale}
               value={s.libraryView}
               onChange={(v) => set({ libraryView: v })}
               options={[['grid', 'Grid'], ['list', 'Lista']]}
@@ -269,11 +318,16 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         {s.libraryView === 'grid' && (
           <>
             <Row
+              scale={scale}
               title="Tamaño de las portadas"
               desc="Ajusta el tamaño manteniendo la proporción"
               right={
                 <div className="flex items-center gap-3">
-                  <Minus className="w-3.5 h-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <Minus
+                    className="shrink-0 text-muted-foreground"
+                    style={{ width: px(14, scale, 12), height: px(14, scale, 12) }}
+                    aria-hidden="true"
+                  />
                   <input
                     type="range"
                     min={60}
@@ -282,19 +336,31 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
                     value={s.libraryCoverSize}
                     onChange={(e) => set({ libraryCoverSize: Number(e.target.value) })}
                     aria-label="Tamaño de las portadas"
-                    className="w-40 h-1.5 rounded-full bg-muted accent-primary cursor-pointer"
+                    className="rounded-full bg-muted accent-primary cursor-pointer"
+                    style={{ width: px(160, scale, 110), height: px(6, scale, 4) }}
                   />
-                  <Plus className="w-3.5 h-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="text-sm text-muted-foreground min-w-[46px] text-center">{s.libraryCoverSize}px</span>
+                  <Plus
+                    className="shrink-0 text-muted-foreground"
+                    style={{ width: px(14, scale, 12), height: px(14, scale, 12) }}
+                    aria-hidden="true"
+                  />
+                  <span
+                    className="text-muted-foreground text-center"
+                    style={{ fontSize: px(14, scale, 12), minWidth: px(46, scale, 38) }}
+                  >
+                    {s.libraryCoverSize}px
+                  </span>
                 </div>
               }
             />
             <Row
+              scale={scale}
               last
               title="Mostrar capítulos sin leer"
               desc="Muestra un contador en cada portada"
               right={
                 <Switch
+                  scale={scale}
                   on={s.libraryShowUnread}
                   onChange={(v) => set({ libraryShowUnread: v })}
                   label="Mostrar capítulos sin leer"
@@ -308,12 +374,14 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   } else if (section === 'lector') {
     content = (
       <Row
+        scale={scale}
         first
         last
         title="Modo por defecto"
         desc="Vertical continuo o paginado"
         right={
           <Segmented
+            scale={scale}
             value={s.readerMode}
             onChange={(m) => set({ readerMode: m })}
             options={[['vertical', 'Vertical'], ['paginado', 'Paginado']]}
@@ -322,46 +390,93 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
       />
     );
   } else if (section === 'categorias') {
+    const counts = new Map();
+    for (const f of lib.favs()) {
+      for (const id of f.cats || []) counts.set(id, (counts.get(id) || 0) + 1);
+    }
+
     content = (
       <div className="flex flex-col">
         {cats.map((c, i) => (
           <div
             key={c.id}
             className={cn(
-              'flex items-center gap-2 border-b border-border',
-              i === 0 ? 'pt-0 pb-4' : 'py-4',
-              i === cats.length - 1 && 'border-0 pb-0'
+              'flex items-center border-b border-border',
+              i === cats.length - 1 && 'border-0'
             )}
+            style={{
+              gap: px(6, scale, 4),
+              paddingTop: i === 0 ? '0' : px(10, scale, 7),
+              paddingBottom: i === cats.length - 1 ? '0' : px(10, scale, 7)
+            }}
           >
             <Input
               value={c.name}
               onChange={(e) => renameLocal(c.id, e.target.value)}
               onBlur={() => commitRename(c.id)}
-              className="h-9 bg-muted/50 border-none"
+              className="bg-muted/50 border-none focus:bg-muted transition-colors"
               aria-label="Nombre de categoría"
+              style={{
+                height: px(34, scale, 28),
+                fontSize: px(14, scale, 12),
+                paddingLeft: px(12, scale, 9),
+                paddingRight: px(12, scale, 9)
+              }}
             />
+            <span
+              className="shrink-0 tabular-nums text-muted-foreground text-center"
+              style={{ fontSize: px(12, scale, 10), minWidth: px(28, scale, 22) }}
+              title={`${counts.get(c.id) || 0} mangas en esta categoría`}
+            >
+              {counts.get(c.id) || 0}
+            </span>
             <Button
               variant="ghost"
               size="icon"
               title="Eliminar categoría"
-              aria-label="Eliminar categoría"
+              aria-label={`Eliminar categoría ${c.name}`}
               onClick={() => removeCat(c.id)}
+              className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
+              style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 style={{ width: px(15, scale, 13), height: px(15, scale, 13) }} />
             </Button>
           </div>
         ))}
-        <div className="flex items-center gap-2 pt-4">
+
+        {cats.length === 0 && (
+          <p className="text-muted-foreground" style={{ fontSize: px(14, scale, 12) }}>
+            No hay categorías. Crea la primera para organizar tu biblioteca.
+          </p>
+        )}
+
+        <div
+          className="flex items-center"
+          style={{ gap: px(6, scale, 4), paddingTop: px(12, scale, 9) }}
+        >
           <Input
             placeholder="Nueva categoría…"
             value={newCat}
             onChange={(e) => setNewCat(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addCat()}
-            className="h-9 bg-muted/50 border-none"
+            className="bg-muted/50 border-none focus:bg-muted transition-colors"
             aria-label="Nueva categoría"
+            style={{
+              height: px(34, scale, 28),
+              fontSize: px(14, scale, 12),
+              paddingLeft: px(12, scale, 9),
+              paddingRight: px(12, scale, 9)
+            }}
           />
-          <Button size="icon" title="Añadir categoría" aria-label="Añadir categoría" onClick={addCat}>
-            <Plus className="w-4 h-4" />
+          <Button
+            size="icon"
+            title="Añadir categoría"
+            aria-label="Añadir categoría"
+            onClick={addCat}
+            className="shrink-0 rounded-lg"
+            style={{ width: px(34, scale, 28), height: px(34, scale, 28) }}
+          >
+            <Plus style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
           </Button>
         </div>
       </div>
@@ -370,11 +485,13 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
     content = (
       <div>
         <Row
+          scale={scale}
           first
           title="Avisar de actualizaciones"
           desc="Revisa el repositorio y avisa cuando una extensión tenga versión nueva."
           right={
             <Switch
+              scale={scale}
               on={s.extUpdateNotify}
               onChange={(v) => set({ extUpdateNotify: v })}
               label="Avisar de actualizaciones de extensiones"
@@ -382,6 +499,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           }
         />
         <Row
+          scale={scale}
           last
           title="Avisos en segundo plano"
           desc={
@@ -395,6 +513,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
               aria-disabled={!s.extUpdateNotify}
             >
               <Switch
+                scale={scale}
                 on={s.notifyBackground}
                 onChange={toggleBackground}
                 label="Avisos de extensiones en segundo plano"
@@ -403,14 +522,20 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           }
         />
         <div className="border-t border-border mt-6" />
-        <div className="text-xs text-muted-foreground mt-4 mb-1.5">Repositorio de extensiones</div>
+        <div
+          className="text-muted-foreground mt-4 mb-1.5"
+          style={{ fontSize: px(12, scale, 10) }}
+        >
+          Repositorio de extensiones
+        </div>
         <Input
           readOnly
           value={s.extIndexUrl || DEFAULT_INDEX_URL}
-          className="bg-muted/50 border-none font-mono text-xs"
+          className="bg-muted/50 border-none font-mono"
           aria-label="Repositorio de extensiones"
+          style={{ fontSize: px(12, scale, 10) }}
         />
-        <p className="text-sm text-muted-foreground mt-2">
+        <p className="text-muted-foreground mt-2" style={{ fontSize: px(14, scale, 12) }}>
           Este repositorio aporta las fuentes a Cytlex. No se edita: las extensiones se instalan y
           desinstalan individualmente desde <b className="text-foreground">Explorar › Extensiones</b>.
         </p>
@@ -420,11 +545,13 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
     content = (
       <div>
         <Row
+          scale={scale}
           first
           title="Avisar de capítulos nuevos"
           desc="Revisa los mangas de tu biblioteca y avisa cuando aparezca un capítulo nuevo."
           right={
             <Switch
+              scale={scale}
               on={s.notifyEnabled}
               onChange={(v) => set({ notifyEnabled: v })}
               label="Avisar de capítulos nuevos"
@@ -432,12 +559,14 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           }
         />
         <Row
+          scale={scale}
           title="Comprobar cada"
           desc="Cada cuántas horas se revisa la biblioteca."
           right={
             <div className={cn(!s.notifyEnabled && 'pointer-events-none opacity-50')} aria-disabled={!s.notifyEnabled}>
               <Dropdown
-                className="w-[132px]"
+                scale={scale}
+                style={{ width: px(132, scale, 108) }}
                 value={notifyHours()}
                 onChange={(v) => set({ notifyHours: Number(v) })}
                 ariaLabel="Comprobar cada"
@@ -452,24 +581,31 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           }
         />
         <Row
+          scale={scale}
           last
           className="min-h-[55px]"
           title="Notificaciones en segundo plano"
           right={
             <Switch
+              scale={scale}
               on={s.notifyBackground}
               onChange={toggleBackground}
               label="Notificaciones en segundo plano"
             />
           }
         />
-        {bgErr && <p className="text-sm text-destructive mt-2">{bgErr}</p>}
+        {bgErr && (
+          <p className="text-destructive mt-2" style={{ fontSize: px(14, scale, 12) }}>
+            {bgErr}
+          </p>
+        )}
       </div>
     );
   } else if (section === 'seguimiento') {
     content = (
       <div>
         <Row
+          scale={scale}
           first
           title="Cuenta de AniList"
           desc={
@@ -506,9 +642,14 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           }
         />
 
-        {authErr && <p className="text-sm text-destructive py-4">{authErr}</p>}
+        {authErr && (
+          <p className="text-destructive py-4" style={{ fontSize: px(14, scale, 12) }}>
+            {authErr}
+          </p>
+        )}
 
         <Row
+          scale={scale}
           title="Mangas vinculados"
           desc={
             linkedCount
@@ -528,11 +669,13 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         />
 
         <Row
+          scale={scale}
           last
           title="Idioma de la sinopsis"
           desc="AniList guarda el título original del manga"
           right={
             <Segmented
+              scale={scale}
               value={s.anilistSynopsisLang}
               onChange={(v) => set({ anilistSynopsisLang: v })}
               options={[['romaji', 'Romaji'], ['english', 'Inglés']]}
@@ -549,14 +692,21 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
             key={sc.desc}
             className={cn(
               'flex items-center justify-between gap-4 border-b border-border',
-              i === 0 ? 'pt-0 pb-4' : 'py-4',
-              i === SHORTCUTS.length - 1 && 'border-0 pb-0'
+              i === SHORTCUTS.length - 1 && 'border-0'
             )}
+            style={{
+              paddingTop: i === 0 ? '0' : px(16, scale, 11),
+              paddingBottom: i === SHORTCUTS.length - 1 ? '0' : px(16, scale, 11)
+            }}
           >
-            <span className="text-sm leading-tight">{sc.desc}</span>
-            <span className="flex items-center gap-1 shrink-0">
+            <span className="leading-tight" style={{ fontSize: px(14, scale, 12) }}>
+              {sc.desc}
+            </span>
+            <span className="flex items-center shrink-0" style={{ gap: px(4, scale, 3) }}>
               {sc.keys.map((k) => (
-                <Kbd key={k}>{k}</Kbd>
+                <Kbd key={k} scale={scale}>
+                  {k}
+                </Kbd>
               ))}
             </span>
           </div>
@@ -567,9 +717,22 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
 
   return (
     <div className="min-h-full flex flex-col">
-      <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-6 items-stretch flex-1">
+      <div
+        className="grid items-stretch flex-1"
+        style={{
+          gap: px(24, scale, 16),
+          gridTemplateColumns: `${px(220, scale, 190)} 1fr`
+        }}
+      >
         <Card className="hover:shadow-sm">
-          <nav className="p-2 flex flex-col gap-1" aria-label="Categorías de ajustes">
+          <nav
+            className="flex flex-col"
+            aria-label="Categorías de ajustes"
+            style={{
+              padding: px(8, scale, 6),
+              gap: px(4, scale, 2)
+            }}
+          >
             {SECTIONS.map((sec) => {
               const Icon = sec.icon;
               const on = sec.id === section;
@@ -579,13 +742,24 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
                   type="button"
                   onClick={() => { setSection(sec.id); sessionSeccion = sec.id; }}
                   className={cn(
-                    'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left',
+                    'flex items-center rounded-lg font-medium transition-colors text-left',
                     on
                       ? 'bg-accent text-accent-foreground'
                       : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
                   )}
+                  style={{
+                    gap: px(12, scale, 8),
+                    paddingLeft: px(12, scale, 8),
+                    paddingRight: px(12, scale, 8),
+                    paddingTop: px(10, scale, 7),
+                    paddingBottom: px(10, scale, 7),
+                    fontSize: px(14, scale, 12)
+                  }}
                 >
-                  <Icon className="w-4 h-4 shrink-0" />
+                  <Icon
+                    className="shrink-0"
+                    style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }}
+                  />
                   {sec.label}
                 </button>
               );
@@ -594,7 +768,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         </Card>
 
         <Card className="hover:shadow-sm">
-          <div className="p-6">{content}</div>
+          <div style={{ padding: px(24, scale, 16) }}>{content}</div>
         </Card>
       </div>
 

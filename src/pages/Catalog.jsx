@@ -13,13 +13,14 @@ import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
+import { useScale } from '../lib/useScale.js';
 
 const TABS = [
   { id: 'mangas', label: 'Mangas' },
   { id: 'extensiones', label: 'Extensiones' }
 ];
 
-function SourceSection({ r, coverSize }) {
+function SourceSection({ r, coverSize, scale = 1 }) {
   const trackRef = useRef(null);
   const mainRef = useRef(null);
   const [canLeft, setCanLeft] = useState(false);
@@ -76,24 +77,40 @@ function SourceSection({ r, coverSize }) {
   return (
     <motion.section
       className="mb-10"
+      style={{ marginBottom: `${Math.max(24, Math.round(40 * scale))}px` }}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: 'easeOut' }}
     >
-      <div className="flex items-center gap-2.5 mb-4">
+      <div
+        className="flex items-center gap-2.5 mb-4"
+        style={{ marginBottom: `${Math.max(10, Math.round(16 * scale))}px` }}
+      >
         <SourceBadge m={r.manifest} />
-        <h3 className="text-sm font-semibold">{r.manifest.name}</h3>
-        <span className="text-xs text-muted-foreground">· {r.items.length}</span>
+        <h3 className="font-semibold" style={{ fontSize: `${Math.round(14 * scale)}px` }}>
+          {r.manifest.name}
+        </h3>
+        <span className="text-muted-foreground" style={{ fontSize: `${Math.round(12 * scale)}px` }}>
+          · {r.items.length}
+        </span>
       </div>
       <div className="relative">
         <div
           ref={trackRef}
           onScroll={measure}
-          className="flex gap-5 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          style={{ scrollSnapType: 'x proximity' }}
+          className="flex overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          style={{
+            gap: `${Math.max(12, Math.round(20 * scale))}px`,
+            scrollSnapType: 'x proximity',
+            paddingBottom: `${Math.max(6, Math.round(8 * scale))}px`
+          }}
         >
           {visible.map((m, i) => (
-            <div key={i} className="shrink-0" style={{ scrollSnapAlign: 'start', width: coverSize || 150 }}>
+            <div
+              key={i}
+              className="shrink-0"
+              style={{ scrollSnapAlign: 'start', width: coverSize || 150 }}
+            >
               <MangaCard m={m} sourceId={r.id} from="explorar" coverSize={coverSize} />
             </div>
           ))}
@@ -103,9 +120,14 @@ function SourceSection({ r, coverSize }) {
             type="button"
             onClick={() => step(-1)}
             aria-label="Ver mangas anteriores"
-            className="absolute -left-3 top-[38%] z-10 grid h-9 w-9 place-items-center rounded-full border border-border bg-background/90 text-foreground shadow-md backdrop-blur-sm transition hover:bg-background"
+            className="absolute -left-3 top-[38%] z-10 grid place-items-center rounded-full border border-border bg-background/90 text-foreground shadow-md backdrop-blur-sm transition hover:bg-background"
+            style={{
+              width: `${Math.round(36 * scale)}px`,
+              height: `${Math.round(36 * scale)}px`,
+              marginLeft: `${Math.round(-12 * scale)}px`
+            }}
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
           </button>
         )}
         {canRight && (
@@ -113,9 +135,14 @@ function SourceSection({ r, coverSize }) {
             type="button"
             onClick={() => step(1)}
             aria-label="Ver más mangas"
-            className="absolute -right-3 top-[38%] z-10 grid h-9 w-9 place-items-center rounded-full border border-border bg-background/90 text-foreground shadow-md backdrop-blur-sm transition hover:bg-background"
+            className="absolute -right-3 top-[38%] z-10 grid place-items-center rounded-full border border-border bg-background/90 text-foreground shadow-md backdrop-blur-sm transition hover:bg-background"
+            style={{
+              width: `${Math.round(36 * scale)}px`,
+              height: `${Math.round(36 * scale)}px`,
+              marginRight: `${Math.round(-12 * scale)}px`
+            }}
           >
-            <ChevronRight className="w-4 h-4" />
+            <ChevronRight style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
           </button>
         )}
         {r.items.length > 15 && (
@@ -125,6 +152,7 @@ function SourceSection({ r, coverSize }) {
               'absolute -top-11 right-0 hover:bg-transparent hover:text-foreground'
             )}
             href={`#/resultados?s=${encodeURIComponent(r.id)}`}
+            style={{ top: `${Math.round(-44 * scale)}px`, fontSize: `${Math.round(14 * scale)}px` }}
           >
             Ver todos <ChevronRight className="w-4 h-4 ml-1.5" />
           </a>
@@ -141,6 +169,7 @@ export default function Catalog() {
   const [q, setQ] = useState(() => lastSearch.q);
   const [results, setResults] = useState(() => lastSearch.results);
   const [coverSize, setCoverSize] = useState(() => settings.get().libraryCoverSize);
+  const scale = useScale();
 
   useEffect(() => settings.subscribe((s) => setCoverSize(s.libraryCoverSize)), []);
 
@@ -210,7 +239,13 @@ export default function Catalog() {
 
   return (
     <div className="min-h-full flex flex-col">
-      <div className="-mt-1 flex flex-wrap items-center gap-6 mb-3 min-h-9">
+      <div
+        className="-mt-1 flex flex-wrap items-center gap-6 mb-3 min-h-9"
+        style={{
+          gap: `${Math.max(16, Math.round(24 * scale))}px`,
+          marginBottom: `${Math.max(8, Math.round(12 * scale))}px`
+        }}
+      >
         <div className="flex items-center gap-6">
           {TABS.map((t) => {
             const active = tab === t.id;
@@ -220,9 +255,10 @@ export default function Catalog() {
                 type="button"
                 onClick={() => setTab(t.id)}
                 className={cn(
-                  'relative pb-2 text-sm font-medium transition-colors',
+                  'relative pb-2 font-medium transition-colors',
                   active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
                 )}
+                style={{ fontSize: `${Math.round(14 * scale)}px` }}
               >
                 {t.label}
                 {active && (
@@ -240,13 +276,20 @@ export default function Catalog() {
         {tab === 'mangas' && sources.length > 0 && (
           <div className="ml-auto self-center flex items-center gap-3">
             <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Search
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                style={{ width: `${Math.round(14 * scale)}px`, height: `${Math.round(14 * scale)}px` }}
+              />
               <Input
-                className="h-9 pl-9 bg-muted/50 border-none"
+                className="h-9 bg-muted/50 border-none"
                 placeholder="Buscar en todas las extensiones..."
                 value={q}
                 onChange={(e) => { setQ(e.target.value); lastSearch.q = e.target.value; }}
                 onKeyDown={(e) => e.key === 'Enter' && q.trim() && runSearch()}
+                style={{
+                  fontSize: `${Math.round(14 * scale)}px`,
+                  paddingLeft: `${Math.max(28, Math.round(36 * scale))}px`
+                }}
               />
             </div>
             <Button
@@ -254,6 +297,7 @@ export default function Catalog() {
               onClick={() => runSearch()}
               disabled={!q.trim()}
               className={cn('rounded-lg disabled:opacity-40')}
+              style={{ fontSize: `${Math.round(14 * scale)}px` }}
             >
               Buscar
             </Button>
@@ -292,7 +336,7 @@ export default function Catalog() {
                 )}
 
                 {withResults.map((r) => (
-                  <SourceSection key={r.id} r={r} coverSize={cs} />
+                  <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} />
                 ))}
 
                 {done && withResults.length === 0 && (

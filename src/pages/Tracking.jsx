@@ -8,6 +8,7 @@ import { Badge } from '../components/ui/badge.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
+import { useScale } from '../lib/useScale.js';
 
 const STATUS_ES = {
   CURRENT: 'Leyendo',
@@ -26,6 +27,7 @@ export default function Tracking() {
   const [entries, setEntries] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const scale = useScale();
 
   const load = async () => {
     setBusy(true);
@@ -94,13 +96,29 @@ export default function Tracking() {
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
           {viewer?.avatar?.medium ? (
-            <img src={viewer.avatar.medium} alt="" className="w-9 h-9 rounded-full" />
+            <img
+              src={viewer.avatar.medium}
+              alt=""
+              className="rounded-full shrink-0"
+              style={{ width: `${Math.round(36 * scale)}px`, height: `${Math.round(36 * scale)}px` }}
+            />
           ) : (
-            <span className="w-9 h-9 rounded-full bg-secondary grid place-items-center font-bold">A</span>
+            <span
+              className="rounded-full bg-secondary grid place-items-center font-bold shrink-0"
+              style={{ width: `${Math.round(36 * scale)}px`, height: `${Math.round(36 * scale)}px` }}
+            >
+              A
+            </span>
           )}
           <div>
-            <h1 className="text-lg font-bold tracking-tight leading-tight">Tu lista en AniList</h1>
-            {viewer?.name && <p className="text-xs text-muted-foreground">{viewer.name}</p>}
+            <h1 className="font-bold tracking-tight leading-tight" style={{ fontSize: `${Math.round(18 * scale)}px` }}>
+              Tu lista en AniList
+            </h1>
+            {viewer?.name && (
+              <p className="text-muted-foreground" style={{ fontSize: `${Math.round(12 * scale)}px` }}>
+                {viewer.name}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -179,13 +197,24 @@ export default function Tracking() {
               const row = (
                 <>
                   {e.cover ? (
-                    <img src={e.cover} alt="" referrerPolicy="no-referrer" className="w-10 h-14 object-cover rounded-lg bg-black shrink-0" />
+                    <img
+                      src={e.cover}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      className="object-cover rounded-lg bg-black shrink-0"
+                      style={{ width: `${Math.round(40 * scale)}px`, height: `${Math.round(56 * scale)}px` }}
+                    />
                   ) : (
-                    <div className="w-10 h-14 rounded-lg bg-secondary shrink-0" />
+                    <div
+                      className="rounded-lg bg-secondary shrink-0"
+                      style={{ width: `${Math.round(40 * scale)}px`, height: `${Math.round(56 * scale)}px` }}
+                    />
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className="font-semibold truncate">{e.title}</div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="font-semibold truncate" style={{ fontSize: `${Math.round(15 * scale)}px` }}>
+                      {e.title}
+                    </div>
+                    <div className="text-muted-foreground" style={{ fontSize: `${Math.round(12 * scale)}px` }}>
                       {e.progress} {e.progress === 1 ? 'capítulo' : 'capítulos'}
                       {e.startedAt && ` · desde ${e.startedAt}`}
                     </div>

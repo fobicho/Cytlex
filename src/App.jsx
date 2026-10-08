@@ -15,6 +15,7 @@ import { startNotifier, onNotifyClick } from './lib/notify.js';
 import { announceExtUpdates } from './lib/extUpdates.js';
 import { useToast } from './components/Toast.jsx';
 import { appWindow } from './lib/appWindow.js';
+import { useScale } from './lib/useScale.js';
 
 class PageBoundary extends Component {
   constructor(props) {
@@ -58,6 +59,7 @@ export default function App() {
   const [theme, setTheme] = useState(() => settings.get().theme);
   const [mode, setMode] = useState(() => settings.get().mode);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const scale = useScale();
   const [resetTick, setResetTick] = useState(0);
   const location = useLocation();
   const isReader = location.pathname.startsWith('/leer');
@@ -142,7 +144,10 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden">
         {!isReader && <Sidebar />}
         <div className="flex-1 flex flex-col overflow-hidden">
-          <main className={isReader ? 'flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]' : 'flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none] p-6 xl:p-7'}>
+          <main
+            className={isReader ? 'flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]' : 'flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]'}
+            style={isReader ? undefined : { padding: `${Math.max(16, Math.round(24 * scale))}px` }}
+          >
             <PageBoundary>
               <Routes>
                 <Route path="/" element={<Navigate to="/biblioteca" replace />} />

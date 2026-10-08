@@ -5,6 +5,7 @@ import { BookOpen, Compass, Settings as SettingsIcon, ChevronsRight } from 'luci
 import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
 import { settings } from '../lib/settings.js';
+import { useScale } from '../lib/useScale.js';
 
 const navItems = [
   { to: '/biblioteca', icon: BookOpen, label: 'Biblioteca' },
@@ -15,32 +16,11 @@ const navItems = [
 const EASE = [0.25, 0.1, 0.25, 1];
 const DURATION = 0.3;
 const SIDEBAR_WIDTH = { expanded: 196, collapsed: 72 };
-const SIDEBAR_BASE_W = 1280;
-const SIDEBAR_SCALE_MIN = 0.82;
-const SIDEBAR_SCALE_MAX = 1;
-
-function useSidebarScale() {
-  const [scale, setScale] = useState(() => {
-    if (typeof window === 'undefined') return 1;
-    return Math.min(Math.max(window.innerWidth / SIDEBAR_BASE_W, SIDEBAR_SCALE_MIN), SIDEBAR_SCALE_MAX);
-  });
-
-  useEffect(() => {
-    const update = () => {
-      setScale(Math.min(Math.max(window.innerWidth / SIDEBAR_BASE_W, SIDEBAR_SCALE_MIN), SIDEBAR_SCALE_MAX));
-    };
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, []);
-
-  return scale;
-}
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(settings.get().sidebarCollapsed);
   const location = useLocation();
-  const scale = useSidebarScale();
+  const scale = useScale();
 
   useEffect(() => settings.subscribe((s) => setCollapsed(s.sidebarCollapsed)), []);
 
@@ -54,8 +34,11 @@ export default function Sidebar() {
       className="h-full flex flex-col border-r border-border bg-sidebar overflow-hidden"
     >
       <nav
-        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col p-3"
-        style={{ gap: `${Math.max(2, Math.round(4 * scale))}px` }}
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col"
+        style={{
+          gap: `${Math.max(2, Math.round(4 * scale))}px`,
+          padding: `${Math.max(6, Math.round(12 * scale))}px`
+        }}
       >
         {navItems.map((item) => {
           const isActive = location.pathname === item.to;
@@ -73,7 +56,6 @@ export default function Sidebar() {
                 className={cn(
                   'flex items-center rounded-lg font-medium transition-colors relative',
                   'transition-[gap] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
-                  collapsed && 'gap-0',
                   isActive
                     ? 'text-sidebar-accent-foreground'
                     : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/50'
@@ -82,8 +64,9 @@ export default function Sidebar() {
                   gap: collapsed ? 0 : `${Math.max(8, Math.round(12 * scale))}px`,
                   paddingTop: `${Math.max(8, Math.round(10 * scale))}px`,
                   paddingBottom: `${Math.max(8, Math.round(10 * scale))}px`,
-                  paddingLeft: `${Math.max(10, Math.round(14 * scale))}px`,
-                  paddingRight: `${Math.max(10, Math.round(14 * scale))}px`,
+                  paddingLeft: `${collapsed ? 0 : Math.max(10, Math.round(14 * scale))}px`,
+                  paddingRight: `${collapsed ? 0 : Math.max(10, Math.round(14 * scale))}px`,
+                  justifyContent: collapsed ? 'center' : 'flex-start',
                   fontSize: `${Math.max(13, Math.round(14 * scale))}px`
                 }}
               >
@@ -94,7 +77,13 @@ export default function Sidebar() {
                     transition={{ type: 'spring', stiffness: 340, damping: 34, mass: 0.9 }}
                   />
                 )}
-                <item.icon className="relative z-10 shrink-0" style={{ width: `${Math.max(18, Math.round(20 * scale))}px`, height: `${Math.max(18, Math.round(20 * scale))}px` }} />
+                <item.icon
+                  className="relative z-10 shrink-0"
+                  style={{
+                    width: `${Math.max(18, Math.round(20 * scale))}px`,
+                    height: `${Math.max(18, Math.round(20 * scale))}px`
+                  }}
+                />
                 <span
                   className={cn(
                     'relative z-10 whitespace-nowrap overflow-hidden transition-[max-width,opacity,transform] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
