@@ -16,11 +16,12 @@ const navItems = [
 const EASE = [0.25, 0.1, 0.25, 1];
 const DURATION = 0.3;
 const SIDEBAR_WIDTH = { expanded: 196, collapsed: 72 };
+const SIDEBAR_SCALE_MIN = 0.72;
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(settings.get().sidebarCollapsed);
   const location = useLocation();
-  const scale = useScale();
+  const scale = useScale(SIDEBAR_SCALE_MIN);
 
   useEffect(() => settings.subscribe((s) => setCollapsed(s.sidebarCollapsed)), []);
 
@@ -61,13 +62,13 @@ export default function Sidebar() {
                     : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/50'
                 )}
                 style={{
-                  gap: collapsed ? 0 : `${Math.max(8, Math.round(12 * scale))}px`,
-                  paddingTop: `${Math.max(8, Math.round(10 * scale))}px`,
-                  paddingBottom: `${Math.max(8, Math.round(10 * scale))}px`,
-                  paddingLeft: `${collapsed ? 0 : Math.max(10, Math.round(14 * scale))}px`,
-                  paddingRight: `${collapsed ? 0 : Math.max(10, Math.round(14 * scale))}px`,
+                  gap: collapsed ? 0 : `${Math.max(7, Math.round(12 * scale))}px`,
+                  paddingTop: `${Math.max(7, Math.round(10 * scale))}px`,
+                  paddingBottom: `${Math.max(7, Math.round(10 * scale))}px`,
+                  paddingLeft: `${collapsed ? 0 : Math.max(9, Math.round(14 * scale))}px`,
+                  paddingRight: `${collapsed ? 0 : Math.max(9, Math.round(14 * scale))}px`,
                   justifyContent: collapsed ? 'center' : 'flex-start',
-                  fontSize: `${Math.max(13, Math.round(14 * scale))}px`
+                  fontSize: `${Math.max(11, Math.round(14 * scale))}px`
                 }}
               >
                 {isActive && (
@@ -80,8 +81,8 @@ export default function Sidebar() {
                 <item.icon
                   className="relative z-10 shrink-0"
                   style={{
-                    width: `${Math.max(18, Math.round(20 * scale))}px`,
-                    height: `${Math.max(18, Math.round(20 * scale))}px`
+                    width: `${Math.max(14, Math.round(20 * scale))}px`,
+                    height: `${Math.max(14, Math.round(20 * scale))}px`
                   }}
                 />
                 <span
@@ -118,7 +119,7 @@ export default function Sidebar() {
             transition={{ type: 'spring', stiffness: 380, damping: 26, mass: 0.7 }}
           >
             <ChevronsRight
-              style={{ width: `${Math.max(14, Math.round(16 * scale))}px`, height: `${Math.max(14, Math.round(16 * scale))}px` }}
+              style={{ width: `${Math.max(11, Math.round(16 * scale))}px`, height: `${Math.max(11, Math.round(16 * scale))}px` }}
             />
           </motion.span>
         </motion.button>

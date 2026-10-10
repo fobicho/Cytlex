@@ -337,13 +337,22 @@ export default function Detail() {
         <Button
           variant="ghost"
           size="sm"
-          className="-mt-2 -ml-2 mb-1 self-start hover:bg-transparent hover:text-foreground"
+          className="self-start hover:bg-transparent hover:text-foreground"
           onClick={() => navigate(backTo)}
+          style={{
+            marginTop: px(-8, scale, -6),
+            marginLeft: px(-8, scale, -6),
+            marginBottom: px(4, scale, 3),
+            fontSize: px(14, scale, 12)
+          }}
         >
-          <ArrowLeft className="w-4 h-4 mr-1.5" /> Volver
+          <ArrowLeft className="mr-1.5" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Volver
         </Button>
 
-        <div className="flex flex-col md:flex-row gap-6">
+        <div
+          className="flex flex-col md:flex-row"
+          style={{ gap: px(24, scale, 19) }}
+        >
           {knownCover ? (
             <div
               className="aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
@@ -355,19 +364,19 @@ export default function Detail() {
             <Skeleton className="aspect-[2/3] rounded-xl shrink-0" style={{ width: `${coverSize}px` }} />
           )}
           <div className="flex-1 min-w-0">
-            <Skeleton className="h-8 md:h-9 w-2/3 max-w-md" />
-            <Skeleton className="h-5 w-40 mt-1" />
-            <Skeleton className="h-4 w-full max-w-lg mt-1" />
-            <div className="flex flex-wrap items-center gap-2 mt-3">
-              <Skeleton className="h-6 w-24 rounded-full" />
-              <Skeleton className="h-6 w-20 rounded-full" />
-              <Skeleton className="h-6 w-28 rounded-full" />
-              <Skeleton className="h-6 w-24 rounded-full" />
+            <Skeleton style={{ height: px(32, scale, 25), width: '66%', maxWidth: px(448, scale, 350) }} />
+            <Skeleton style={{ height: px(17, scale, 13), width: px(160, scale, 125), marginTop: px(4, scale, 3) }} />
+            <Skeleton style={{ height: px(15, scale, 11), width: '100%', maxWidth: px(512, scale, 400), marginTop: px(4, scale, 3) }} />
+            <div className="flex flex-wrap items-center" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 9) }}>
+              <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(96, scale, 75) }} />
+              <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(80, scale, 63) }} />
+              <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(112, scale, 88) }} />
+              <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(96, scale, 75) }} />
             </div>
-            <div className="flex flex-col gap-2 mt-3">
-              <Skeleton className="h-3.5 w-full" />
-              <Skeleton className="h-3.5 w-full" />
-              <Skeleton className="h-3.5 w-4/5" />
+            <div className="flex flex-col" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 9) }}>
+              <Skeleton style={{ height: px(14, scale, 11) }} />
+              <Skeleton style={{ height: px(14, scale, 11) }} />
+              <Skeleton style={{ height: px(14, scale, 11), width: '80%' }} />
             </div>
           </div>
         </div>
@@ -388,6 +397,13 @@ export default function Detail() {
   const synMask = !expanded && overflow && fade > 4
     ? `linear-gradient(to bottom, #000 calc(100% - ${Math.round(fade)}px), rgba(0,0,0,0.55) calc(100% - ${Math.round(fade * 0.45)}px), transparent 100%)`
     : undefined;
+  const badgeStyle = {
+    fontSize: px(12, scale, 10),
+    paddingLeft: px(10, scale, 8),
+    paddingRight: px(10, scale, 8),
+    paddingTop: px(2, scale, 1),
+    paddingBottom: px(2, scale, 1)
+  };
 
   return (
     <div className="min-h-full flex flex-col">
@@ -406,7 +422,10 @@ export default function Detail() {
         <ArrowLeft className="mr-1.5" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Volver
       </Button>
 
-      <div className="flex flex-col md:flex-row gap-6">
+      <div
+        className="flex flex-col md:flex-row"
+        style={{ gap: px(24, scale, 19) }}
+      >
         <div
           ref={coverRef}
           className="aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
@@ -434,19 +453,22 @@ export default function Detail() {
             {d.altTitles?.slice(0, 160)}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 mt-3">
+          <div
+            className="flex flex-wrap items-center"
+            style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 9) }}
+          >
             {(d.facts.estado || d.facts.status) && (
-              <Badge>{(d.facts.estado || d.facts.status)}</Badge>
+              <Badge style={badgeStyle}>{(d.facts.estado || d.facts.status)}</Badge>
             )}
-            {d.facts.tipo && <Badge>{d.facts.tipo}</Badge>}
+            {d.facts.tipo && <Badge style={badgeStyle}>{d.facts.tipo}</Badge>}
             {d.genres.slice(0, 6).map((g) => (
-              <Badge key={g} variant="outline">
+              <Badge key={g} variant="outline" style={badgeStyle}>
                 {g}
               </Badge>
             ))}
           </div>
 
-          <div className="mt-3">
+          <div style={{ marginTop: px(12, scale, 9) }}>
             <div
               ref={synRef}
               style={{

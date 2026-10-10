@@ -249,7 +249,7 @@
 
 @keyframes bars-in {
   from {
-    transform: translate3d(-14px, -14px, 0) scale(0.96);
+    transform: translate3d(0, -10px, 0) scale(0.98);
     opacity: 0;
   }
   to {
@@ -264,7 +264,7 @@
     opacity: 1;
   }
   to {
-    transform: translate3d(-14px, -14px, 0) scale(0.96);
+    transform: translate3d(0, -10px, 0) scale(0.98);
     opacity: 0;
   }
 }

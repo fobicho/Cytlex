@@ -12,6 +12,7 @@ import { Button } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
+import { useScale, px } from '../lib/useScale.js';
 
 export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const loc = useLocation();
@@ -28,6 +29,15 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const [page, setPage] = useState(0);
   const [barsOpen, setBarsOpen] = useState(true);
   const [barsLeaving, setBarsLeaving] = useState(false);
+  const scale = useScale();
+  const barH = Number(px(32, scale, 27).replace('px', ''));
+  const barPad = Number(px(4, scale, 3).replace('px', ''));
+  const arrowH = Number(px(24, scale, 20).replace('px', ''));
+  const titleH = isFullscreen ? 0 : 36;
+  const barLeft = Number(px(12, scale, 8).replace('px', ''));
+  const barTop = titleH + Number(px(10, scale, 8).replace('px', ''));
+  const arrowLeft = barLeft + barPad;
+  const arrowTop = barTop + barPad + barH / 2 - arrowH / 2;
   const barTimer = useRef(null);
   const hideTimer = useRef(null);
   const hovering = useRef(false);
@@ -386,17 +396,32 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
               onMouseEnter={showBar}
               onMouseLeave={scheduleHide}
               className={cn(
-                'fixed left-3 z-20 flex items-center gap-1.5 rounded-xl border border-border bg-card/90 backdrop-blur-xl px-1.5 py-1 shadow-2xl max-w-[calc(100vw-1.5rem)]',
-                isFullscreen ? 'top-3' : 'top-12',
+                'fixed z-20 flex items-center rounded-xl border border-border bg-card/90 backdrop-blur-xl shadow-2xl w-max',
                 barsLeaving ? 'animate-bars-out' : 'animate-bars-in'
               )}
+              style={{
+                top: `${barTop}px`,
+                left: `${barLeft}px`,
+                gap: px(6, scale, 4),
+                padding: `${barPad}px`,
+                boxSizing: 'border-box'
+              }}
             >
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg shrink-0" title="Volver" aria-label="Volver" onClick={goBack}>
-                <ArrowLeft className="w-4 h-4" />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-lg shrink-0"
+                title="Volver"
+                aria-label="Volver"
+                onClick={goBack}
+                style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
+              >
+                <ArrowLeft style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
               </Button>
 
               <Dropdown
-                className="w-[140px]"
+                scale={scale}
+                style={{ width: px(150, scale, 100) }}
                 value={chapterUrl}
                 onChange={(url) => { if (url !== chapterUrl) window.location.hash = go(url); }}
                 ariaLabel="Capítulo"
@@ -406,7 +431,8 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
               />
 
               <Dropdown
-                className="w-[112px]"
+                scale={scale}
+                style={{ width: px(118, scale, 78) }}
                 value={page}
                 onChange={goPage}
                 ariaLabel="Página"
@@ -414,7 +440,8 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
               />
 
               <Dropdown
-                className="w-[116px]"
+                scale={scale}
+                style={{ width: px(122, scale, 80) }}
                 value={mode}
                 onChange={setMode}
                 ariaLabel="Tipo de lectura"
@@ -427,23 +454,33 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 rounded-lg shrink-0"
+                className="rounded-lg shrink-0"
                 title="Pantalla completa (F11)"
                 aria-label={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
                 onClick={onToggleFullscreen}
+                style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
               >
-                {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                {isFullscreen ? (
+                  <Minimize2 style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+                ) : (
+                  <Maximize2 style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+                )}
               </Button>
             </div>
           ) : (
             <div
               onMouseEnter={showBar}
               onMouseLeave={scheduleHide}
-              className="fixed left-3 z-20 w-8 h-8 grid place-items-center rounded-lg text-muted-foreground"
-              style={isFullscreen ? { top: '0.75rem' } : { top: '3rem' }}
+              className="fixed z-20 grid place-items-center text-muted-foreground"
+              style={{
+                left: `${arrowLeft}px`,
+                width: `${barH}px`,
+                height: `${arrowH}px`,
+                top: `${arrowTop}px`
+              }}
               aria-hidden
             >
-              <ChevronDown className="w-4 h-4" />
+              <ChevronDown style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
             </div>
       )}
 
@@ -532,7 +569,17 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       )}
 
       {toast && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-lg border border-border bg-card px-4 py-2 text-sm shadow-2xl">
+        <div
+          className="fixed left-1/2 -translate-x-1/2 z-50 rounded-lg border border-border bg-card shadow-2xl"
+          style={{
+            bottom: px(16, scale, 11),
+            paddingLeft: px(16, scale, 11),
+            paddingRight: px(16, scale, 11),
+            paddingTop: px(8, scale, 6),
+            paddingBottom: px(8, scale, 6),
+            fontSize: px(14, scale, 12)
+          }}
+        >
           {toast}
         </div>
       )}

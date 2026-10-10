@@ -1,6 +1,6 @@
-import { app, BrowserWindow, ipcMain, session, Menu, dialog, Notification, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, session, Menu, dialog, Notification, shell, screen } from 'electron';
 import path from 'node:path';
-import { writeFile } from 'node:fs/promises';
+import { writeFile, readFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -42,12 +42,19 @@ async function ensureDevServer() {
   }
 }
 
-function createWindow() {
+function createWindow(startBounds = null, startMaximized = false) {
+  const bounds = startBounds || {
+    width: DEFAULT_WIDTH,
+    height: DEFAULT_HEIGHT
+  };
+
   const win = new BrowserWindow({
-    width: 980,
-    height: 680,
-    minWidth: 860,
-    minHeight: 560,
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     frame: false,
     show: !launchedInBackground,
     backgroundColor: '#09090b',
@@ -59,7 +66,8 @@ function createWindow() {
   });
 
   mainWindow = win;
-  if (!launchedInBackground) win.maximize();
+  if (startMaximized && !launchedInBackground) win.maximize();
+  trackWindowState(win);
 
   if (launchedInBackground) {
     backgroundBail = setTimeout(() => {
@@ -133,6 +141,76 @@ function hookImageHeaders() {
 }
 
 const TASK_NAME = 'Cytlex';
+
+const MIN_WIDTH = 860;
+const MIN_HEIGHT = 560;
+const DEFAULT_WIDTH = 980;
+const DEFAULT_HEIGHT = 680;
+
+let saveStateTimer = null;
+
+function stateFile() {
+  return path.join(app.getPath('userData'), 'window-state.json');
+}
+
+function clampSize(size, area) {
+  return {
+    width: Math.max(MIN_WIDTH, Math.min(Math.round(size.width), area.width)),
+    height: Math.max(MIN_HEIGHT, Math.min(Math.round(size.height), area.height))
+  };
+}
+
+async function readWindowState() {
+  try {
+    const s = JSON.parse(await readFile(stateFile(), 'utf8'));
+    if (!Number.isFinite(s.width) || !Number.isFinite(s.height)) return null;
+    return { width: s.width, height: s.height, maximized: !!s.maximized };
+  } catch {
+    return null;
+  }
+}
+
+function persistWindowState(win) {
+  if (!win || win.isDestroyed()) return;
+  const normal = win.isMaximized() || win.isFullScreen() ? win.getNormalBounds() : win.getBounds();
+  const payload = JSON.stringify({
+    width: normal.width,
+    height: normal.height,
+    maximized: win.isMaximized()
+  });
+  writeFile(stateFile(), payload).catch(() => {});
+}
+
+function trackWindowState(win) {
+  const schedule = () => {
+    if (saveStateTimer) clearTimeout(saveStateTimer);
+    saveStateTimer = setTimeout(() => persistWindowState(win), 400);
+  };
+  win.on('resize', schedule);
+  win.on('move', schedule);
+  win.on('maximize', schedule);
+  win.on('unmaximize', schedule);
+  win.on('close', () => {
+    if (saveStateTimer) { clearTimeout(saveStateTimer); saveStateTimer = null; }
+    persistWindowState(win);
+  });
+}
+
+async function initialBounds() {
+  const area = screen.getPrimaryDisplay().workArea;
+  const saved = await readWindowState();
+  const size = saved
+    ? clampSize(saved, area)
+    : clampSize({ width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }, area);
+  return {
+    bounds: {
+      ...size,
+      x: Math.round(area.x + (area.width - size.width) / 2),
+      y: Math.round(area.y + (area.height - size.height) / 2)
+    },
+    maximized: saved ? saved.maximized : false
+  };
+}
 
 const lastNotifiedAt = new Map();
 let pendingClick = null;
@@ -275,7 +353,8 @@ app.whenReady().then(async () => {
   hookImageHeaders();
   auth.register();
   pageUrl = await ensureDevServer();
-  const win = createWindow();
+  const start = await initialBounds();
+  const win = createWindow(start.bounds, start.maximized);
   if (launchedInBackground) {
     win.once('ready-to-show', () => {});
   }

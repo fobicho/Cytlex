@@ -131,7 +131,7 @@ export function Dropdown({
           fontSize: px(14, scale, 12)
         }}
       >
-        <span className="flex-1 truncate text-left">{current ? current.label : placeholder}</span>
+        <span className="min-w-0 flex-1 truncate text-left">{current ? current.label : placeholder}</span>
         <ChevronDown
           className={cn('shrink-0 text-muted-foreground transition-transform duration-200', open && 'rotate-180')}
           style={{ width: px(14, scale, 12), height: px(14, scale, 12) }}

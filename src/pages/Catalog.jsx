@@ -13,7 +13,7 @@ import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
-import { useScale } from '../lib/useScale.js';
+import { useScale, px } from '../lib/useScale.js';
 
 const TABS = [
   { id: 'mangas', label: 'Mangas' },
@@ -240,13 +240,14 @@ export default function Catalog() {
   return (
     <div className="min-h-full flex flex-col">
       <div
-        className="-mt-1 flex flex-wrap items-center gap-6 mb-3 min-h-9"
+        className="-mt-1 flex flex-wrap items-center mb-3"
         style={{
           gap: `${Math.max(16, Math.round(24 * scale))}px`,
-          marginBottom: `${Math.max(8, Math.round(12 * scale))}px`
+          marginBottom: `${Math.max(8, Math.round(12 * scale))}px`,
+          minHeight: px(36, scale, 30)
         }}
       >
-        <div className="flex items-center gap-6">
+        <div className="flex items-center" style={{ gap: `${Math.max(16, Math.round(24 * scale))}px` }}>
           {TABS.map((t) => {
             const active = tab === t.id;
             return (
@@ -255,16 +256,20 @@ export default function Catalog() {
                 type="button"
                 onClick={() => setTab(t.id)}
                 className={cn(
-                  'relative pb-2 font-medium transition-colors',
+                  'relative font-medium transition-colors',
                   active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
                 )}
-                style={{ fontSize: `${Math.round(14 * scale)}px` }}
+                style={{
+                  fontSize: `${Math.round(14 * scale)}px`,
+                  paddingBottom: px(8, scale, 6)
+                }}
               >
                 {t.label}
                 {active && (
                   <motion.span
                     layoutId="catalog-underline"
-                    className="absolute left-0 right-0 -bottom-px h-0.5 rounded-full bg-primary"
+                    className="absolute left-0 right-0 bottom-0 rounded-full bg-primary"
+                    style={{ height: `${Math.max(1.5, Math.round(2 * scale))}px` }}
                     transition={{ type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }}
                   />
                 )}
@@ -274,21 +279,27 @@ export default function Catalog() {
         </div>
 
         {tab === 'mangas' && sources.length > 0 && (
-          <div className="ml-auto self-center flex items-center gap-3">
-            <div className="relative w-full sm:w-72">
+          <div className="ml-auto self-center flex items-center" style={{ gap: px(12, scale, 9) }}>
+            <div className="relative w-full sm:w-auto" style={{ width: px(288, scale, 190) }}>
               <Search
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                style={{ width: `${Math.round(14 * scale)}px`, height: `${Math.round(14 * scale)}px` }}
+                className="absolute top-1/2 -translate-y-1/2 text-muted-foreground"
+                style={{
+                  left: px(12, scale, 9),
+                  width: `${Math.round(14 * scale)}px`,
+                  height: `${Math.round(14 * scale)}px`
+                }}
               />
               <Input
-                className="h-9 bg-muted/50 border-none"
+                className="bg-muted/50 border-none"
                 placeholder="Buscar en todas las extensiones..."
                 value={q}
                 onChange={(e) => { setQ(e.target.value); lastSearch.q = e.target.value; }}
                 onKeyDown={(e) => e.key === 'Enter' && q.trim() && runSearch()}
                 style={{
+                  height: px(36, scale, 30),
                   fontSize: `${Math.round(14 * scale)}px`,
-                  paddingLeft: `${Math.max(28, Math.round(36 * scale))}px`
+                  paddingLeft: px(36, scale, 30),
+                  paddingRight: px(12, scale, 9)
                 }}
               />
             </div>
@@ -297,7 +308,12 @@ export default function Catalog() {
               onClick={() => runSearch()}
               disabled={!q.trim()}
               className={cn('rounded-lg disabled:opacity-40')}
-              style={{ fontSize: `${Math.round(14 * scale)}px` }}
+              style={{
+                height: px(36, scale, 30),
+                fontSize: `${Math.round(14 * scale)}px`,
+                paddingLeft: px(12, scale, 9),
+                paddingRight: px(12, scale, 9)
+              }}
             >
               Buscar
             </Button>
@@ -310,11 +326,6 @@ export default function Catalog() {
           <EmptyState
             face="（눈﹏눈）"
             title="No hay extensiones instaladas"
-            action={
-              <Button onClick={() => { window.location.hash = '#/explorar?tab=extensiones'; }}>
-                Ir a Extensiones
-              </Button>
-            }
           />
         ) : (
           <>

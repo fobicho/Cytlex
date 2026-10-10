@@ -8,7 +8,7 @@ import { Badge } from '../components/ui/badge.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
-import { useScale } from '../lib/useScale.js';
+import { useScale, px } from '../lib/useScale.js';
 
 const STATUS_ES = {
   CURRENT: 'Leyendo',
@@ -82,7 +82,15 @@ export default function Tracking() {
           tone="prompt"
           title="Conecta tu cuenta de AniList"
           action={
-            <Button onClick={() => { window.location.hash = '#/ajustes'; }}>
+            <Button
+              onClick={() => { window.location.hash = '#/ajustes'; }}
+              style={{
+                height: px(40, scale, 33),
+                fontSize: px(14, scale, 12),
+                paddingLeft: px(16, scale, 12),
+                paddingRight: px(16, scale, 12)
+              }}
+            >
               Ir a Ajustes
             </Button>
           }

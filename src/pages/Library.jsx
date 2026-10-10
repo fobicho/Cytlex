@@ -14,7 +14,7 @@ import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
-import { useScale } from '../lib/useScale.js';
+import { useScale, px } from '../lib/useScale.js';
 
 let sessionCategoria = '';
 
@@ -114,7 +114,7 @@ export default function Library() {
       if (!alive) return;
       setUnread((prev) => {
         const next = {};
-        for (const [k, n] of results) if (k) next[k] = n;
+        for (const entry of results) if (entry) next[entry[0]] = entry[1];
         return next;
       });
     })();
@@ -144,10 +144,11 @@ export default function Library() {
   return (
     <div className="min-h-full flex flex-col">
       <div
-        className="-mt-1 flex flex-wrap items-center gap-6 mb-3"
+        className="-mt-1 flex flex-wrap items-center mb-3"
         style={{
           gap: `${Math.max(16, Math.round(24 * scale))}px`,
-          marginBottom: `${Math.max(8, Math.round(12 * scale))}px`
+          marginBottom: `${Math.max(8, Math.round(12 * scale))}px`,
+          minHeight: px(36, scale, 30)
         }}
       >
         {cats.map((c) => {
@@ -158,16 +159,20 @@ export default function Library() {
               type="button"
               onClick={() => setSel(c.id)}
               className={cn(
-                'relative pb-2 font-medium transition-colors',
+                'relative font-medium transition-colors',
                 active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
               )}
-              style={{ fontSize: `${Math.round(14 * scale)}px` }}
+              style={{
+                fontSize: `${Math.round(14 * scale)}px`,
+                paddingBottom: px(8, scale, 6)
+              }}
             >
               {c.name}
               {active && (
                 <motion.span
                   layoutId="cat-underline"
-                  className="absolute left-0 right-0 -bottom-px h-0.5 rounded-full bg-primary"
+                  className="absolute left-0 right-0 bottom-0 rounded-full bg-primary"
+                  style={{ height: `${Math.max(1.5, Math.round(2 * scale))}px` }}
                   transition={{ type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }}
                 />
               )}
@@ -182,7 +187,12 @@ export default function Library() {
             onClick={runCheck}
             title="Buscar actualizaciones"
             className="rounded-lg"
-            style={{ fontSize: `${Math.round(14 * scale)}px` }}
+            style={{
+              height: px(36, scale, 30),
+              fontSize: `${Math.round(14 * scale)}px`,
+              paddingLeft: px(12, scale, 9),
+              paddingRight: px(12, scale, 9)
+            }}
           >
             {checking ? (
               <RefreshCw

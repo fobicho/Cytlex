@@ -9,7 +9,7 @@ import MangaCard from '../components/MangaCard.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
-import { useScale } from '../lib/useScale.js';
+import { useScale, px } from '../lib/useScale.js';
 
 export default function Results() {
   const navigate = useNavigate();
@@ -76,7 +76,16 @@ export default function Results() {
         face="¯\\_(ツ)_/¯"
         title="Sin resultados"
         action={
-          <Button variant="secondary" onClick={() => navigate('/explorar')}>
+          <Button
+            variant="secondary"
+            onClick={() => navigate('/explorar')}
+            style={{
+              height: px(40, scale, 33),
+              fontSize: px(14, scale, 12),
+              paddingLeft: px(16, scale, 12),
+              paddingRight: px(16, scale, 12)
+            }}
+          >
             Ir a Explorar
           </Button>
         }

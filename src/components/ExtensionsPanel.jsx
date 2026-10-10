@@ -10,14 +10,27 @@ import { EmptyState } from './ui/empty-state.jsx';
 import { Badge } from './ui/badge.jsx';
 import { useToast } from './Toast.jsx';
 import { cn } from '../lib/utils.js';
+import { useScale, px } from '../lib/useScale.js';
 
-function ExtensionCard({ m, action, badge }) {
+function ExtensionCard({ m, action, badge, scale = 1 }) {
   const [imgOk, setImgOk] = useState(true);
   const showImg = m.icon && imgOk;
+  const iconSize = Number(px(40, scale, 32).replace('px', ''));
   return (
     <Card className="hover:shadow-sm">
-      <div className="p-3.5 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-secondary text-secondary-foreground grid place-items-center font-bold shrink-0 overflow-hidden">
+      <div
+        className="flex items-center"
+        style={{ padding: px(14, scale, 11), gap: px(12, scale, 9) }}
+      >
+        <div
+          className="rounded-xl bg-secondary text-secondary-foreground grid place-items-center font-bold shrink-0 overflow-hidden"
+          style={{
+            width: `${iconSize}px`,
+            height: `${iconSize}px`,
+            fontSize: px(16, scale, 13),
+            borderRadius: px(12, scale, 9)
+          }}
+        >
           {showImg ? (
             <img
               src={m.icon}
@@ -31,9 +44,29 @@ function ExtensionCard({ m, action, badge }) {
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="font-semibold truncate" title={m.name}>{m.name}</div>
-          <div className="flex items-center gap-1.5 mt-0.5 h-5">
-            {m.version && <span className="text-[11px] text-muted-foreground leading-none">v{m.version}</span>}
+          <div
+            className="font-semibold truncate"
+            title={m.name}
+            style={{ fontSize: px(15, scale, 13) }}
+          >
+            {m.name}
+          </div>
+          <div
+            className="flex items-center"
+            style={{
+              marginTop: px(2, scale, 1.5),
+              gap: px(6, scale, 4),
+              height: px(20, scale, 16)
+            }}
+          >
+            {m.version && (
+              <span
+                className="text-muted-foreground leading-none"
+                style={{ fontSize: px(11, scale, 9) }}
+              >
+                v{m.version}
+              </span>
+            )}
             {badge}
           </div>
         </div>
@@ -45,6 +78,7 @@ function ExtensionCard({ m, action, badge }) {
 
 export default function ExtensionsPanel() {
   const { toast } = useToast();
+  const scale = useScale();
   const [installed, setInstalled] = useState(() => extensions.installed());
   const [available, setAvailable] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -167,26 +201,59 @@ export default function ExtensionsPanel() {
     setBusy('');
   };
 
+  const grid = {
+    gridTemplateColumns: `repeat(auto-fill, minmax(${px(240, scale, 200).replace('px', '')}px, 1fr))`,
+    gap: px(12, scale, 9)
+  };
+
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col" style={{ gap: px(32, scale, 22) }}>
       {err && (
         <Card className="border-destructive/40 hover:shadow-sm">
-          <div className="p-4 flex items-center gap-2 text-sm">
-            <AlertTriangle className="w-4 h-4 text-destructive shrink-0" />
+          <div
+            className="flex items-center"
+            style={{ padding: px(16, scale, 11), gap: px(8, scale, 6), fontSize: px(14, scale, 12) }}
+          >
+            <AlertTriangle
+              className="text-destructive shrink-0"
+              style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
+            />
             <span className="text-muted-foreground">{err}</span>
           </div>
         </Card>
       )}
 
       <section>
-        <div className="flex items-center justify-between gap-4 mb-3 h-9">
-          <h3 className="text-sm font-medium">Instaladas</h3>
+        <div
+          className="flex items-center justify-between"
+          style={{ gap: px(16, scale, 11), marginBottom: px(12, scale, 9), height: px(36, scale, 30) }}
+        >
+          <h3 className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
+            Instaladas
+          </h3>
           {updates.length > 0 && (
-            <Button variant="secondary" size="sm" onClick={doUpdateAll} disabled={updating !== ''}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={doUpdateAll}
+              disabled={updating !== ''}
+              style={{
+                height: px(36, scale, 30),
+                fontSize: px(14, scale, 12),
+                paddingLeft: px(12, scale, 9),
+                paddingRight: px(12, scale, 9)
+              }}
+            >
               {updating === 'all' ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                <Loader2
+                  className="mr-2 animate-spin"
+                  style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
+                />
               ) : (
-                <ArrowUpCircle className="w-4 h-4 mr-2" />
+                <ArrowUpCircle
+                  className="mr-2"
+                  style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
+                />
               )}
               Actualizar todo
               <span className="opacity-70 ml-2">{updates.length}</span>
@@ -200,20 +267,29 @@ export default function ExtensionsPanel() {
             title="No hay extensiones instaladas"
           />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid" style={grid}>
             {installed.map(({ manifest: m }) => {
               const upd = updates.find((u) => u.id === m.id);
               return (
                 <ExtensionCard
                   key={m.id}
+                  scale={scale}
                   m={upd ? { ...m, version: upd.to } : m}
                   badge={upd ? (
-                    <Badge className="px-2 py-0 text-[11px] leading-4" title={`De v${upd.from} a v${upd.to}`}>
+                    <Badge
+                      style={{
+                        fontSize: px(11, scale, 9),
+                        paddingLeft: px(8, scale, 6),
+                        paddingRight: px(8, scale, 6),
+                        lineHeight: px(16, scale, 13)
+                      }}
+                      title={`De v${upd.from} a v${upd.to}`}
+                    >
                       Actualizable
                     </Badge>
                   ) : null}
                   action={
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center" style={{ gap: px(4, scale, 3) }}>
                       {upd && (
                         <Button
                           variant="ghost"
@@ -223,11 +299,12 @@ export default function ExtensionsPanel() {
                           aria-label={`Actualizar ${m.name}`}
                           disabled={updating !== ''}
                           onClick={() => doUpdateOne(m.id)}
+                          style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
                         >
                           {updating === m.id ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <Loader2 className="animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                           ) : (
-                            <Download className="w-4 h-4" />
+                            <Download style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                           )}
                         </Button>
                       )}
@@ -239,8 +316,9 @@ export default function ExtensionsPanel() {
                         aria-label="Desinstalar"
                         disabled={busy === m.id}
                         onClick={() => setConfirmRemove(m)}
+                        style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                       </Button>
                     </div>
                   }
@@ -252,18 +330,41 @@ export default function ExtensionsPanel() {
       </section>
 
       <section>
-        <div className="flex items-center justify-between gap-4 mb-3">
-          <h3 className="text-sm font-medium">Disponibles</h3>
-          <Button variant="secondary" size="sm" onClick={loadAvailable} disabled={loading}>
-            <RefreshCw className={cn('w-4 h-4 mr-2', loading && 'animate-spin')} /> Recargar
+        <div
+          className="flex items-center justify-between"
+          style={{ gap: px(16, scale, 11), marginBottom: px(12, scale, 9), height: px(36, scale, 30) }}
+        >
+          <h3 className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
+            Disponibles
+          </h3>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={loadAvailable}
+            disabled={loading}
+            style={{
+              height: px(36, scale, 30),
+              fontSize: px(14, scale, 12),
+              paddingLeft: px(12, scale, 9),
+              paddingRight: px(12, scale, 9)
+            }}
+          >
+            <RefreshCw
+              className={cn('mr-2', loading && 'animate-spin')}
+              style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
+            />
+            Recargar
           </Button>
         </div>
 
         {available === null ? (
           loading ? (
-            <div className="flex flex-col items-center gap-3 py-6 text-muted-foreground">
-              <Loader2 className="w-6 h-6 animate-spin" />
-              <p className="text-sm">Cargando extensiones...</p>
+            <div
+              className="flex flex-col items-center text-muted-foreground"
+              style={{ gap: px(12, scale, 9), padding: `${px(24, scale, 18)}px 0` }}
+            >
+              <Loader2 className="animate-spin" style={{ width: px(24, scale, 19), height: px(24, scale, 19) }} />
+              <p style={{ fontSize: px(14, scale, 12) }}>Cargando extensiones...</p>
             </div>
           ) : (
             <EmptyState
@@ -281,10 +382,11 @@ export default function ExtensionsPanel() {
             title="No quedan extensiones por instalar"
           />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid" style={grid}>
             {available.map((m) => (
               <ExtensionCard
                 key={m.id}
+                scale={scale}
                 m={m}
                 action={
                   <Button
@@ -295,8 +397,9 @@ export default function ExtensionsPanel() {
                     aria-label="Instalar"
                     disabled={busy === m.id}
                     onClick={() => doInstall(m)}
+                    style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
                   >
-                    <Download className="w-4 h-4" />
+                    <Download style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                   </Button>
                 }
               />
@@ -307,11 +410,23 @@ export default function ExtensionsPanel() {
 
       {confirmRemove && (
         <Dialog open onClose={() => setConfirmRemove(null)} title="Desinstalar extensión" hideDivider bodyClassName="p-5">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground" style={{ fontSize: px(14, scale, 12) }}>
             ¿Seguro que quieres desinstalar «{confirmRemove.name}»? Dejará de estar disponible en Cytlex.
           </p>
-          <div className="flex justify-end gap-2 mt-5">
-            <Button variant="secondary" onClick={() => setConfirmRemove(null)}>
+          <div
+            className="flex justify-end"
+            style={{ gap: px(8, scale, 6), marginTop: px(20, scale, 14) }}
+          >
+            <Button
+              variant="secondary"
+              onClick={() => setConfirmRemove(null)}
+              style={{
+                height: px(36, scale, 30),
+                fontSize: px(14, scale, 12),
+                paddingLeft: px(12, scale, 9),
+                paddingRight: px(12, scale, 9)
+              }}
+            >
               Cancelar
             </Button>
             <Button
@@ -320,6 +435,12 @@ export default function ExtensionsPanel() {
                 const id = confirmRemove.id;
                 setConfirmRemove(null);
                 await doUninstall(id);
+              }}
+              style={{
+                height: px(36, scale, 30),
+                fontSize: px(14, scale, 12),
+                paddingLeft: px(12, scale, 9),
+                paddingRight: px(12, scale, 9)
               }}
             >
               Desinstalar
@@ -330,4 +451,3 @@ export default function ExtensionsPanel() {
     </div>
   );
 }
-

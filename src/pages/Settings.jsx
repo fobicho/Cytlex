@@ -52,11 +52,12 @@ function Row({ title, desc, right, first, last, className, scale = 1 }) {
   return (
     <div
       className={cn(
-        'flex items-center justify-between gap-4',
+        'flex items-center justify-between',
         !last && 'border-b border-border',
         className
       )}
       style={{
+        gap: px(16, scale, 11),
         paddingTop: first ? '0' : px(16, scale, 11),
         paddingBottom: last ? '0' : px(16, scale, 11)
       }}
@@ -67,8 +68,8 @@ function Row({ title, desc, right, first, last, className, scale = 1 }) {
         </div>
         {desc && (
           <div
-            className="text-muted-foreground mt-1 leading-snug"
-            style={{ fontSize: px(12, scale, 10) }}
+            className="text-muted-foreground leading-snug"
+            style={{ fontSize: px(12, scale, 10), marginTop: px(4, scale, 3) }}
           >
             {desc}
           </div>
@@ -88,7 +89,12 @@ function Segmented({ value, options, onChange, scale = 1 }) {
           size="sm"
           variant={value === val ? 'default' : 'outline'}
           onClick={() => onChange(val)}
-          style={{ fontSize: px(14, scale, 12) }}
+          style={{
+            height: px(36, scale, 30),
+            fontSize: px(14, scale, 12),
+            paddingLeft: px(12, scale, 9),
+            paddingRight: px(12, scale, 9)
+          }}
         >
           {label}
         </Button>
@@ -290,7 +296,17 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           title="Pantalla completa"
           desc="Oculta los bordes de la ventana"
           right={
-            <Button variant="secondary" size="sm" onClick={onToggleFullscreen}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onToggleFullscreen}
+              style={{
+                height: px(36, scale, 30),
+                fontSize: px(14, scale, 12),
+                paddingLeft: px(12, scale, 9),
+                paddingRight: px(12, scale, 9)
+              }}
+            >
               {isFullscreen ? 'Salir' : 'Activar'}
             </Button>
           }
@@ -533,7 +549,12 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           value={s.extIndexUrl || DEFAULT_INDEX_URL}
           className="bg-muted/50 border-none font-mono"
           aria-label="Repositorio de extensiones"
-          style={{ fontSize: px(12, scale, 10) }}
+          style={{
+            height: px(36, scale, 30),
+            fontSize: px(12, scale, 10),
+            paddingLeft: px(12, scale, 9),
+            paddingRight: px(12, scale, 9)
+          }}
         />
         <p className="text-muted-foreground mt-2" style={{ fontSize: px(14, scale, 12) }}>
           Este repositorio aporta las fuentes a Cytlex. No se edita: las extensiones se instalan y
@@ -583,7 +604,6 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         <Row
           scale={scale}
           last
-          className="min-h-[55px]"
           title="Notificaciones en segundo plano"
           right={
             <Switch
@@ -630,12 +650,33 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
                   setAuthState({ connected: false });
                   setAuthViewer(null);
                 }}
+                style={{
+                  height: px(36, scale, 30),
+                  fontSize: px(14, scale, 12),
+                  paddingLeft: px(12, scale, 9),
+                  paddingRight: px(12, scale, 9)
+                }}
               >
-                <LogOut className="w-4 h-4 mr-2" /> Desconectar
+                <LogOut className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                Desconectar
               </Button>
             ) : (
-              <Button size="sm" onClick={connect} disabled={authBusy}>
-                {authBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Link2 className="w-4 h-4 mr-2" />}
+              <Button
+                size="sm"
+                onClick={connect}
+                disabled={authBusy}
+                style={{
+                  height: px(36, scale, 30),
+                  fontSize: px(14, scale, 12),
+                  paddingLeft: px(12, scale, 9),
+                  paddingRight: px(12, scale, 9)
+                }}
+              >
+                {authBusy ? (
+                  <Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                ) : (
+                  <Link2 className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                )}
                 Conectar
               </Button>
             )
@@ -657,11 +698,32 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
               : 'Sin vínculos. Vincúlalos desde la ficha de cada manga.'
           }
           right={
-            <div className="flex items-center gap-2">
-              <Button variant="secondary" size="sm" onClick={() => anilist.clearCache()}>
-                <RefreshCw className="w-4 h-4 mr-2" /> Refrescar caché
+            <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => anilist.clearCache()}
+                style={{
+                  height: px(36, scale, 30),
+                  fontSize: px(14, scale, 12),
+                  paddingLeft: px(12, scale, 9),
+                  paddingRight: px(12, scale, 9)
+                }}
+              >
+                <RefreshCw className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                Refrescar caché
               </Button>
-              <Button variant="secondary" size="sm" onClick={() => { window.location.hash = '#/seguimiento'; }}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => { window.location.hash = '#/seguimiento'; }}
+                style={{
+                  height: px(36, scale, 30),
+                  fontSize: px(14, scale, 12),
+                  paddingLeft: px(12, scale, 9),
+                  paddingRight: px(12, scale, 9)
+                }}
+              >
                 Ver mi lista
               </Button>
             </div>
