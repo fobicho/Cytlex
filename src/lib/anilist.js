@@ -1,0 +1,389 @@
+import { session } from './session.js';
+
+const API = 'https://graphql.anilist.co';
+
+const MEDIA_FIELDS = `
+  id
+  type
+  siteUrl
+  countryOfOrigin
+  status
+  format
+  chapters
+  volumes
+  averageScore
+  meanScore
+  popularity
+  favourites
+  isAdult
+  source
+  startDate { year month day }
+  endDate { year month day }
+  genres
+  title { romaji english native }
+  coverImage { extraLarge large }
+  description(asHtml: false)
+  staff(perPage: 4) { edges { role node { name { full } } } }
+`;
+
+const cache = new Map();
+
+const noBridge = () =>
+  new Error('Sin puente Electron para consultar AniList. Abre la app con "npm run dev:electron".');
+
+async function gql(query, variables = {}) {
+  if (typeof window === 'undefined' || !window.cytlex?.httpPost) throw noBridge();
+  const res = await window.cytlex.httpPost({ url: API, body: { query, variables } });
+  if (res?.errors?.length) throw new Error(res.errors[0].message || 'Error de AniList');
+  return res?.data;
+}
+
+const stripFieldLines = (s) =>
+  s
+    .split('\n')
+    .filter((line) => !/^[ \t]*__[^_]+:__/.test(line))
+    .join('\n');
+
+export function cleanDescription(raw) {
+  if (!raw) return '';
+  return stripFieldLines(String(raw))
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/~!([\s\S]*?)!~/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/<i{1,2}>\s*(Notes?|Nota)\s*:[\s\S]*?<\/i{1,2}>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\(\s*Source:[^)]*\)/gi, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+const fmtDate = (d) => {
+  if (!d?.year) return '';
+  if (!d.month) return String(d.year);
+  if (!d.day) return `${MONTHS[d.month - 1]} ${d.year}`;
+  return `${d.day} ${MONTHS[d.month - 1]} ${d.year}`;
+};
+
+function normalize(media) {
+  if (!media) return null;
+  const titles = media.title || {};
+  return {
+    id: media.id,
+    type: media.type,
+    siteUrl: media.siteUrl,
+    countryOfOrigin: media.countryOfOrigin,
+    status: media.status,
+    format: media.format,
+    source: media.source,
+    isAdult: !!media.isAdult,
+    chapters: media.chapters ?? null,
+    volumes: media.volumes ?? null,
+    averageScore: media.averageScore ?? null,
+    meanScore: media.meanScore ?? null,
+    popularity: media.popularity ?? null,
+    favourites: media.favourites ?? null,
+    startDate: fmtDate(media.startDate),
+    endDate: fmtDate(media.endDate),
+    genres: media.genres || [],
+    cover: media.coverImage?.extraLarge || media.coverImage?.large || '',
+    title: titles.userPreferred || titles.romaji || titles.english || titles.native || '',
+    romaji: titles.romaji || '',
+    english: titles.english || '',
+    native: titles.native || '',
+    description: cleanDescription(media.description),
+    author: mainAuthor(media.staff)
+  };
+}
+
+const AUTHOR_ROLES = /story|art/i;
+
+function mainAuthor(staff) {
+  const edges = staff?.edges || [];
+  const credited = edges.find((e) => AUTHOR_ROLES.test(e?.role || ''));
+  return credited?.node?.name?.full || '';
+}
+
+const TTL_MS = 60 * 1000;
+
+const cached = (key, run, ttl = Infinity) => {
+  const hit = cache.get(key);
+  if (hit) {
+    if (ttl === Infinity || Date.now() - hit.at < ttl) return hit.value;
+    cache.delete(key);
+  }
+  const value = run().catch((e) => {
+    cache.delete(key);
+    throw e;
+  });
+  cache.set(key, { at: Date.now(), value });
+  return value;
+};
+
+export const anilist = {
+  async search(term, page = 1) {
+    const q = String(term || '').trim();
+    if (!q) return [];
+    const key = `search|${q.toLowerCase()}|${page}`;
+    return cached(key, async () => {
+      const data = await gql(
+        `query ($search: String, $page: Int) {
+          Page(page: $page, perPage: 10) { media(search: $search, type: MANGA) { ${MEDIA_FIELDS} } }
+        }`,
+        { search: q, page }
+      );
+      return (data?.Page?.media || []).map(normalize);
+    });
+  },
+
+  async byId(id) {
+    if (!id) return null;
+    return cached(`id|${id}`, async () => {
+      const data = await gql(`query ($id: Int) { Media(id: $id, type: MANGA) { ${MEDIA_FIELDS} } }`, { id });
+      return normalize(data?.Media);
+    });
+  },
+
+  async characters(mediaId, page = 1) {
+    if (!mediaId) return { items: [], total: 0, hasMore: false };
+    return cached(`chars|${mediaId}|${page}`, async () => {
+      const data = await gql(
+        `query ($id: Int, $page: Int) {
+          Media(id: $id, type: MANGA) {
+            characters(page: $page, perPage: 25, sort: [ROLE, RELEVANCE, ID]) {
+              pageInfo { total hasNextPage }
+              edges {
+                role
+                node {
+                  id
+                  name { full native alternative }
+                  image { large medium }
+                  description(asHtml: false)
+                  favourites
+                }
+              }
+            }
+          }
+        }`,
+        { id: mediaId, page }
+      );
+      const c = data?.Media?.characters;
+      return {
+        items: (c?.edges || [])
+          .filter((e) => e?.node)
+          .map((e) => ({
+            id: e.node.id,
+            role: e.role || '',
+            name: e.node.name?.full || '',
+            native: e.node.name?.native || '',
+            alternative: e.node.name?.alternative || '',
+            image: e.node.image?.large || e.node.image?.medium || '',
+            favourites: e.node.favourites ?? 0,
+            description: cleanDescription(e.node.description)
+          })),
+        total: c?.pageInfo?.total ?? 0,
+        hasMore: !!c?.pageInfo?.hasNextPage
+      };
+    });
+  },
+
+  async character(id) {
+    if (!id) return null;
+    return cached(`char|${id}`, async () => {
+      const data = await gql(
+        `query ($id: Int) {
+          Character(id: $id) {
+            id
+            name { full native alternative }
+            image { large medium }
+            description(asHtml: false)
+            favourites
+            isFavourite
+          }
+        }`,
+        { id }
+      );
+      const c = data?.Character;
+      if (!c) return null;
+      return {
+        id: c.id,
+        name: c.name?.full || '',
+        native: c.name?.native || '',
+        alternative: c.name?.alternative || '',
+        image: c.image?.large || c.image?.medium || '',
+        favourites: c.favourites ?? 0,
+        isFavourite: !!c.isFavourite,
+        description: cleanDescription(c.description)
+      };
+    });
+  },
+
+  async toggleFavourite(characterId) {
+    if (!characterId) throw new Error('Falta el id del personaje');
+    const data = await session.gql(
+      `mutation ($characterId: Int) { ToggleFavourite(characterId: $characterId) { characterId } }`,
+      { characterId }
+    );
+    const changed = !!data?.ToggleFavourite?.characterId;
+    const key = `char|${characterId}`;
+    const hit = cache.get(key);
+    if (hit) {
+      const fav = Number(hit.value?.favourites || 0) + (changed ? 1 : -1);
+      cache.set(key, {
+        at: Date.now(),
+        value: { ...hit.value, isFavourite: changed, favourites: Math.max(0, fav) }
+      });
+    }
+    return changed;
+  },
+
+  clearCache() {
+    cache.clear();
+  }
+};
+
+const ENTRY_FIELDS = `
+  id
+  status
+  progress
+  progressVolumes
+  score(format: POINT_100)
+  repeat
+  notes
+  updatedAt
+  startedAt { year month day }
+  completedAt { year month day }
+  media { id title { romaji english } coverImage { large } }
+`;
+
+const toUserScale = (raw) => {
+  if (raw == null) return null;
+  if (SCORE_SCALE === 'POINT_100') return raw;
+  if (SCORE_SCALE === 'POINT_10' || SCORE_SCALE === 'POINT_10_DECIMAL') return Math.round(raw) / 10;
+  if (SCORE_SCALE === 'POINT_5') return Math.round(raw / 20);
+  if (SCORE_SCALE === 'POINT_3') return Math.round((raw / 100) * 3);
+  return raw;
+};
+
+let SCORE_SCALE = 'POINT_10_DECIMAL';
+
+export function setScoreScale(format) {
+  if (format) SCORE_SCALE = format;
+}
+
+function normalizeEntry(e) {
+  if (!e) return null;
+  const t = e.media?.title || {};
+  return {
+    entryId: e.id,
+    mediaId: e.media?.id,
+    title: t.romaji || t.english || '',
+    cover: e.media?.coverImage?.large || '',
+    status: e.status,
+    progress: e.progress ?? 0,
+    progressVolumes: e.progressVolumes ?? null,
+    score: toUserScale(e.score) ?? null,
+    repeat: e.repeat ?? null,
+    notes: e.notes || '',
+    updatedAt: e.updatedAt || 0,
+    startedAt: fmtDate(e.startedAt),
+    completedAt: fmtDate(e.completedAt)
+  };
+}
+
+export const anilistList = {
+  async myList() {
+    const viewer = await session.viewer();
+    if (!viewer) return [];
+    return cached(`mylist|${viewer.id}`, async () => {
+      const data = await session.gql(
+        `query ($userId: Int) {
+          MediaListCollection(userId: $userId, type: MANGA) {
+            lists {
+              entries {
+                ${ENTRY_FIELDS}
+              }
+            }
+          }
+        }`,
+        { userId: viewer.id }
+      );
+      const lists = data?.MediaListCollection?.lists || [];
+      return lists
+        .flatMap((l) => l.entries || [])
+        .map(normalizeEntry)
+        .filter(Boolean);
+    }, TTL_MS);
+  },
+
+  async entry(mediaId) {
+    if (!mediaId) return null;
+    return cached(`entry|${mediaId}`, async () => {
+      const data = await session.gql(
+        `query ($mediaId: Int) {
+          Media(id: $mediaId, type: MANGA) { mediaListEntry { ${ENTRY_FIELDS} } }
+        }`,
+        { mediaId }
+      );
+      return normalizeEntry(data?.Media?.mediaListEntry);
+    }, TTL_MS);
+  },
+
+  async saveEntry(patch) {
+    if (!patch?.mediaId) throw new Error('Falta el id de la obra');
+    const variables = { mediaId: patch.mediaId };
+    if (patch.entryId) variables.id = patch.entryId;
+    if (patch.status) variables.status = patch.status;
+    if (patch.progress != null) variables.progress = Math.round(Number(patch.progress));
+    if (patch.progressVolumes != null) variables.progressVolumes = Math.round(Number(patch.progressVolumes));
+    if (patch.score != null) variables.score = Number(patch.score);
+    if (patch.startedAt !== undefined) variables.startedAt = fuzzyDate(patch.startedAt);
+    if (patch.completedAt !== undefined) variables.completedAt = fuzzyDate(patch.completedAt);
+
+    const data = await session.gql(
+      `mutation ($id: Int, $mediaId: Int, $status: MediaListStatus, $progress: Int, $progressVolumes: Int, $score: Float, $startedAt: FuzzyDateInput, $completedAt: FuzzyDateInput) {
+        SaveMediaListEntry(
+          id: $id, mediaId: $mediaId, status: $status, progress: $progress,
+          progressVolumes: $progressVolumes, score: $score,
+          startedAt: $startedAt, completedAt: $completedAt
+        ) { ${ENTRY_FIELDS} }
+      }`,
+      variables
+    );
+    const viewer = await session.viewer();
+    cache.delete(`entry|${patch.mediaId}`);
+    if (viewer) cache.delete(`mylist|${viewer.id}`);
+    return normalizeEntry(data?.SaveMediaListEntry);
+  },
+
+  invalidateEntry(mediaId) {
+    if (mediaId) cache.delete(`entry|${mediaId}`);
+  }
+};
+
+const MONTH_NUM = { ene: 1, feb: 2, mar: 3, abr: 4, may: 5, jun: 6, jul: 7, ago: 8, sep: 9, oct: 10, nov: 11, dic: 12 };
+
+function fuzzyDate(str) {
+  if (!str) return { year: null, month: null, day: null };
+  const s = String(str).trim();
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) return { year: +iso[1], month: +iso[2], day: +iso[3] };
+  const d = s.match(/^(\d{1,2})\s+([a-z]{3})\s+(\d{4})$/i);
+  if (d) {
+    const mon = MONTH_NUM[d[2].toLowerCase()];
+    return { year: +d[3], month: mon || null, day: +d[1] };
+  }
+  const m = s.match(/^(\d{4})(?:[/-](\d{1,2}))?(?:[/-](\d{1,2}))?$/);
+  if (m) return { year: +m[1], month: m[2] ? +m[2] : null, day: m[3] ? +m[3] : null };
+  return { year: null, month: null, day: null };
+}
+

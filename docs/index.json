@@ -1,0 +1,68 @@
+[
+  {
+    "id": "leercapitulo",
+    "name": "LeerCapitulo",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "main": "ext/leercapitulo.js",
+    "baseUrl": "https://leercapitulo.co",
+    "icon": "https://www.google.com/s2/favicons?domain=leercapitulo.co&sz=128",
+    "desc": "Manga, manhwa y manhua en español."
+  },
+  {
+    "id": "mangalect",
+    "name": "MangaLect",
+    "lang": "es",
+    "version": "1.2.1",
+    "type": "module",
+    "main": "ext/mangalect.js",
+    "baseUrl": "https://mangalect.org",
+    "icon": "https://fobicho.github.io/Cytlex/icons/mangalect.png",
+    "desc": "Manga, manhwa y manhua en español."
+  },
+  {
+    "id": "onfmangas",
+    "name": "ONF Mangas",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "main": "ext/onfmangas.js",
+    "baseUrl": "https://onfmangas.com",
+    "icon": "https://fobicho.github.io/Cytlex/icons/onfmangas.png",
+    "desc": "Manga, manhwa y manhua en español."
+  },
+  {
+    "id": "olympusscanlation",
+    "name": "Olympus Scanlation",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "main": "ext/olympusscanlation.js",
+    "baseUrl": "https://olympusxyz.com",
+    "icon": "https://fobicho.github.io/Cytlex/icons/olympusscanlation.webp",
+    "desc": "Scanlation en español (cómics y manhwas)."
+  },
+  {
+    "id": "zonatmo",
+    "name": "ZonaTMO",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "main": "ext/zonatmo.js",
+    "baseUrl": "https://zonatmo.org",
+    "icon": "https://fobicho.github.io/Cytlex/icons/zonatmo.png",
+    "desc": "Manga, manhwa y manhua en español."
+  },
+  {
+    "id": "mangaoni",
+    "name": "MangaOni",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "main": "ext/mangaoni.js",
+    "baseUrl": "https://manga-oni.com",
+    "icon": "https://fobicho.github.io/Cytlex/icons/mangaoni.png",
+    "desc": "Manga, manhwa y manhua en español."
+  }
+]
