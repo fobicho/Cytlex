@@ -17,7 +17,8 @@ const defaults = {
   notifyHours: 6,
   notifyBackground: false,
   extUpdateNotify: false,
-  notifyBaseline: {}
+  notifyBaseline: {},
+  tutorialSeen: false
 };
 
 function normalize(s) {
@@ -51,8 +52,15 @@ export const settings = {
   set(patch) {
     cache = normalize({ ...cache, ...patch });
     try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch {}
-    if (patch.theme) document.documentElement.setAttribute('data-theme', cache.theme);
-    if (patch.mode) document.documentElement.setAttribute('data-mode', cache.mode);
+    const applyDom = () => {
+      if (patch.theme) document.documentElement.setAttribute('data-theme', cache.theme);
+      if (patch.mode) document.documentElement.setAttribute('data-mode', cache.mode);
+    };
+    if (patch.mode && typeof document !== 'undefined' && typeof document.startViewTransition === 'function') {
+      document.startViewTransition(() => { applyDom(); });
+    } else {
+      applyDom();
+    }
     window.dispatchEvent(new CustomEvent('cytlex:settings', { detail: { ...cache } }));
     return { ...cache };
   },
@@ -62,4 +70,11 @@ export const settings = {
     return () => window.removeEventListener('cytlex:settings', h);
   }
 };
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pointerdown', (e) => {
+    document.documentElement.style.setProperty('--vt-x', `${e.clientX}px`);
+    document.documentElement.style.setProperty('--vt-y', `${e.clientY}px`);
+  }, { passive: true });
+}
 

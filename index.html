@@ -3,6 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem('cytlex:settings:v1');
+          var s = raw ? JSON.parse(raw) : {};
+          var theme = (s && s.theme) || 'default';
+          var mode = (s && s.mode) || 'light';
+          if (theme === 'dark') theme = 'default';
+          if (theme === 'light') { theme = 'default'; mode = 'light'; }
+          var themes = ['default','beige','esmeralda','violeta','rosa','oceano'];
+          if (themes.indexOf(theme) === -1) theme = 'default';
+          if (mode !== 'dark' && mode !== 'light') mode = 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+          document.documentElement.setAttribute('data-mode', mode);
+        } catch (e) {}
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

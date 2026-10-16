@@ -32,7 +32,7 @@ function Logo() {
   );
 }
 
-export default function Splash({ trigger = 0 }) {
+export default function Splash({ trigger = 0, onDone = null }) {
   const [exiting, setExiting] = useState(false);
   const [gone, setGone] = useState(false);
 
@@ -40,12 +40,15 @@ export default function Splash({ trigger = 0 }) {
     setExiting(false);
     setGone(false);
     const toExit = setTimeout(() => setExiting(true), APPEAR + BEAT);
-    const toDone = setTimeout(() => setGone(true), APPEAR + BEAT + EXIT);
+    const toDone = setTimeout(() => {
+      setGone(true);
+      if (typeof onDone === 'function') onDone();
+    }, APPEAR + BEAT + EXIT);
     return () => {
       clearTimeout(toExit);
       clearTimeout(toDone);
     };
-  }, [trigger]);
+  }, [trigger, onDone]);
 
   if (gone) return null;
 
