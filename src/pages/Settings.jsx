@@ -192,6 +192,14 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   };
 
   const set = (patch) => setS(settings.set(patch));
+  const setAppearance = (patch) => {
+    const run = () => set(patch);
+    if (typeof document !== 'undefined' && typeof document.startViewTransition === 'function') {
+      document.startViewTransition(run);
+    } else {
+      run();
+    }
+  };
 
   const addRepo = () => {
     const url = repoInput.trim();
@@ -251,7 +259,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
             <Segmented
               scale={scale}
               value={s.mode}
-              onChange={(m) => set({ mode: m })}
+              onChange={(m) => setAppearance({ mode: m })}
               options={[['dark', 'Oscuro'], ['light', 'Claro']]}
             />
           }
@@ -268,7 +276,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
                 <button
                   key={t.id}
                   type="button"
-                  onClick={() => set({ theme: t.id })}
+                    onClick={() => setAppearance({ theme: t.id })}
                   className={cn(
                     'rounded-xl border p-4 text-left transition-colors',
                     on ? 'border-primary ring-2 ring-ring' : 'border-border hover:bg-accent'

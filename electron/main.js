@@ -75,6 +75,8 @@ function createWindow(startBounds = null, startMaximized = false) {
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
     frame: false,
+    roundedCorners: true,
+    fullscreenable: true,
     show: !launchedInBackground,
     backgroundColor: themeBg(),
     webPreferences: {

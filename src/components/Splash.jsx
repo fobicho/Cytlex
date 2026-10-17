@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 
-const APPEAR = 900;
+const APPEAR = 400;
 const BEAT = 500;
 const EXIT = 800;
 
@@ -65,7 +65,7 @@ export default function Splash({ trigger = 0, onDone = null, onExitStart = null 
       <motion.div
         className="flex items-center gap-4"
         initial={{ opacity: 0, scale: 0.92 }}
-        animate={{ opacity: exiting ? 0 : 1, scale: exiting ? 0.96 : 1 }}
+        animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: APPEAR / 1000, ease: 'easeOut' }}
       >
         <Logo />

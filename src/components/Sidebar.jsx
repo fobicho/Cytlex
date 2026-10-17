@@ -65,9 +65,9 @@ export default function Sidebar() {
                   gap: collapsed ? 0 : `${Math.max(7, Math.round(12 * scale))}px`,
                   paddingTop: `${Math.max(7, Math.round(10 * scale))}px`,
                   paddingBottom: `${Math.max(7, Math.round(10 * scale))}px`,
-                  paddingLeft: `${collapsed ? 0 : Math.max(9, Math.round(14 * scale))}px`,
-                  paddingRight: `${collapsed ? 0 : Math.max(9, Math.round(14 * scale))}px`,
-                  justifyContent: collapsed ? 'center' : 'flex-start',
+                    paddingLeft: `${Math.max(6, Math.round(8 * scale))}px`,
+                  paddingRight: '0px',
+                  justifyContent: 'flex-start',
                   fontSize: `${Math.max(11, Math.round(14 * scale))}px`
                 }}
               >
@@ -78,13 +78,20 @@ export default function Sidebar() {
                     transition={{ type: 'spring', stiffness: 340, damping: 34, mass: 0.9 }}
                   />
                 )}
-                <item.icon
-                  className="relative z-10 shrink-0"
+                <div
+                  className="relative z-10 shrink-0 grid place-items-center"
                   style={{
-                    width: `${Math.max(14, Math.round(20 * scale))}px`,
+                    width: `${Math.max(20, Math.round(32 * scale))}px`,
                     height: `${Math.max(14, Math.round(20 * scale))}px`
                   }}
-                />
+                >
+                  <item.icon
+                    style={{
+                      width: `${Math.max(14, Math.round(20 * scale))}px`,
+                      height: `${Math.max(14, Math.round(20 * scale))}px`
+                    }}
+                  />
+                </div>
                 <span
                   className={cn(
                     'relative z-10 whitespace-nowrap overflow-hidden transition-[max-width,opacity,transform] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
