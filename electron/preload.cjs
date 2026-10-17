@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('cytlex', {
   fetchImage: (url) => ipcRenderer.invoke('image:fetch', url),
   downloadImage: (payload) => ipcRenderer.invoke('image:download', payload),
   toggleFullscreen: () => ipcRenderer.invoke('window:toggle-fullscreen'),
+  saveTheme: (payload) => ipcRenderer.invoke('theme:save', payload),
   isFullscreen: () => ipcRenderer.invoke('window:is-fullscreen'),
   minimize: () => ipcRenderer.invoke('window:minimize'),
   toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),

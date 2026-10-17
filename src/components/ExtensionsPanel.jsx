@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle } from 'lucide-react';
 import { extensions } from '../lib/extensions.js';
 import { extUpdates } from '../lib/extUpdates.js';
@@ -9,6 +9,7 @@ import { Button } from './ui/button.jsx';
 import { EmptyState } from './ui/empty-state.jsx';
 import { Badge } from './ui/badge.jsx';
 import { useToast } from './Toast.jsx';
+import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 
@@ -89,9 +90,23 @@ export default function ExtensionsPanel() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState('');
   const [confirmRemove, setConfirmRemove] = useState(null);
+  const [confirmInstall, setConfirmInstall] = useState(null);
+  const [confirmUpdate, setConfirmUpdate] = useState(null);
   const [updates, setUpdates] = useState(() => (cacheHit ? repoCache.updates || [] : []));
   const [updating, setUpdating] = useState('');
   const [repoUrl, setRepoUrl] = useState(initialRepo);
+  const confirmRef = useRef(null);
+
+  useEffect(() => {
+    if (!confirmInstall) return;
+    const onDown = (e) => {
+      if (confirmRef.current && !confirmRef.current.contains(e.target)) {
+        setConfirmInstall(null);
+      }
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [confirmInstall]);
 
   const refresh = () => setInstalled(extensions.installed());
 
@@ -269,7 +284,7 @@ export default function ExtensionsPanel() {
             <Button
               variant="secondary"
               size="sm"
-              onClick={doUpdateAll}
+              onClick={() => setConfirmUpdate('all')}
               disabled={updating !== ''}
               style={{
                 height: px(36, scale, 30),
@@ -332,7 +347,7 @@ export default function ExtensionsPanel() {
                           title={`Actualizar a la v${upd.to}`}
                           aria-label={`Actualizar ${m.name}`}
                           disabled={updating !== ''}
-                          onClick={() => doUpdateOne(m.id)}
+                          onClick={() => setConfirmUpdate(upd)}
                           style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
                         >
                           {updating === m.id ? (
@@ -430,18 +445,49 @@ export default function ExtensionsPanel() {
                 scale={scale}
                 m={m}
                 action={
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="hover:bg-transparent hover:text-foreground"
-                    title="Instalar"
-                    aria-label="Instalar"
-                    disabled={busy === m.id}
-                    onClick={() => doInstall(m)}
+                  <div
+                    ref={confirmInstall?.id === m.id ? confirmRef : null}
+                    className="relative flex items-center justify-center"
                     style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
                   >
-                    <Download style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                  </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="hover:bg-transparent hover:text-foreground"
+                      title="Instalar"
+                      aria-label="Instalar"
+                      disabled={busy === m.id}
+                      onClick={() => setConfirmInstall(m)}
+                      style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
+                    >
+                      <Download style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    </Button>
+                    <AnimatePresence>
+                      {confirmInstall?.id === m.id && (
+                        <motion.div
+                          key="confirm"
+                          initial={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                          animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
+                          exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                          transition={{ duration: 0.14, ease: 'easeOut' }}
+                          className="absolute z-20 rounded-lg border border-border bg-card shadow-lg"
+                          style={{ top: '100%', left: '50%', marginTop: px(6, scale, 4), padding: px(8, scale, 6) }}
+                        >
+                          <Button
+                            size="sm"
+                            onClick={async () => {
+                              setConfirmInstall(null);
+                              await doInstall(m);
+                            }}
+                            disabled={busy === m.id}
+                            style={{ height: px(28, scale, 24), fontSize: px(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                          >
+                            Confirmar
+                          </Button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 }
               />
             ))}
@@ -449,6 +495,38 @@ export default function ExtensionsPanel() {
         )}
       </section>
 
+      {confirmUpdate && (
+        <Dialog open onClose={() => setConfirmUpdate(null)} title="Actualizar extensión" hideDivider bodyClassName="p-5">
+          <p className="text-muted-foreground" style={{ fontSize: px(14, scale, 12) }}>
+            {confirmUpdate === 'all'
+              ? `¿Actualizar ${updates.length} extensiones instaladas?`
+              : `¿Actualizar «${confirmUpdate.name}» de v${confirmUpdate.from} a v${confirmUpdate.to}?`}
+          </p>
+          <div
+            className="flex justify-end"
+            style={{ gap: px(8, scale, 6), marginTop: px(20, scale, 14) }}
+          >
+            <Button
+              variant="secondary"
+              onClick={() => setConfirmUpdate(null)}
+              style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={async () => {
+                const target = confirmUpdate;
+                setConfirmUpdate(null);
+                if (target === 'all') await doUpdateAll();
+                else await doUpdateOne(target.id);
+              }}
+              style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+            >
+              Actualizar
+            </Button>
+          </div>
+        </Dialog>
+      )}
       {confirmRemove && (
         <Dialog open onClose={() => setConfirmRemove(null)} title="Desinstalar extensión" hideDivider bodyClassName="p-5">
           <p className="text-muted-foreground" style={{ fontSize: px(14, scale, 12) }}>

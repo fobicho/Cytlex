@@ -56,10 +56,14 @@ export const settings = {
       if (patch.theme) document.documentElement.setAttribute('data-theme', cache.theme);
       if (patch.mode) document.documentElement.setAttribute('data-mode', cache.mode);
     };
-    if (patch.mode && typeof document !== 'undefined' && typeof document.startViewTransition === 'function') {
+    const inTutorial = typeof document !== 'undefined' && document.body.classList.contains('tutorial-open');
+    if (patch.mode && !inTutorial && typeof document !== 'undefined' && typeof document.startViewTransition === 'function') {
       document.startViewTransition(() => { applyDom(); });
     } else {
       applyDom();
+    }
+    if ((patch.theme || patch.mode) && typeof window !== 'undefined' && window.cytlex?.saveTheme) {
+      window.cytlex.saveTheme({ theme: cache.theme, mode: cache.mode });
     }
     window.dispatchEvent(new CustomEvent('cytlex:settings', { detail: { ...cache } }));
     return { ...cache };

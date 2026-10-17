@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { THEMES, MODES } from '../lib/themes.js';
 import { settings } from '../lib/settings.js';
@@ -30,10 +30,24 @@ const STEPS = [
   }
 ];
 
-export default function Onboarding({ onDone }) {
+export default function Onboarding({ onDone, onExitStart }) {
   const [step, setStep] = useState(0);
   const [theme, setTheme] = useState(() => settings.get().theme);
   const [mode, setMode] = useState(() => settings.get().mode);
+  const [exiting, setExiting] = useState(false);
+
+  useEffect(() => {
+    document.body.classList.add('tutorial-open');
+    return () => document.body.classList.remove('tutorial-open');
+  }, []);
+
+  useEffect(() => {
+    if (!exiting) return;
+    const t = setTimeout(() => {
+      if (typeof onDone === 'function') onDone();
+    }, 800);
+    return () => clearTimeout(t);
+  }, [exiting, onDone]);
 
   const applyTheme = useCallback((t, m) => {
     setTheme(t);
@@ -43,8 +57,9 @@ export default function Onboarding({ onDone }) {
 
   const finish = useCallback(() => {
     settings.set({ tutorialSeen: true });
-    if (typeof onDone === 'function') onDone();
-  }, [onDone]);
+    if (typeof onExitStart === 'function') onExitStart();
+    setExiting(true);
+  }, [onExitStart]);
 
   const next = () => {
     if (step < STEPS.length - 1) setStep((s) => s + 1);
@@ -55,23 +70,15 @@ export default function Onboarding({ onDone }) {
   const isTheme = step === 2;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background p-4">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.25, ease: 'easeOut' }}
-            className="w-full max-w-2xl rounded-2xl border border-border bg-card text-card-foreground shadow-xl overflow-hidden"
-          >
-            <div className="px-6 py-4 border-b border-border flex items-center gap-3">
-              <div className="flex-1">
-                <p className="font-display text-xl font-semibold tracking-tight">Cytlex</p>
-                <p className="text-xs text-muted-foreground">Tutorial inicial · paso {step + 1} de {STEPS.length}</p>
-              </div>
-              <button onClick={finish} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
-                Saltar
-              </button>
-            </div>
-
+    <motion.div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-background p-4 transition-colors duration-300"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1, y: exiting ? '-100%' : 0 }}
+      transition={{ duration: exiting ? 0.8 : 0.25, ease: exiting ? [0.76, 0, 0.24, 1] : 'easeOut' }}
+    >
+      <div
+        className="w-full max-w-2xl rounded-2xl border border-border bg-card text-card-foreground shadow-xl overflow-hidden transition-colors duration-300"
+      >
             <div className="px-6 py-6 min-h-[260px]">
               <AnimatePresence mode="wait">
                 <motion.div
@@ -142,6 +149,9 @@ export default function Onboarding({ onDone }) {
             </div>
 
             <div className="px-6 py-4 border-t border-border flex items-center justify-between">
+              <button onClick={finish} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+                Saltar
+              </button>
               <div className="flex gap-1.5">
                 {STEPS.map((_, i) => (
                   <span
@@ -164,7 +174,7 @@ export default function Onboarding({ onDone }) {
                 </Button>
               </div>
             </div>
-          </motion.div>
-    </div>
+          </div>
+    </motion.div>
   );
 }

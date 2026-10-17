@@ -32,14 +32,17 @@ function Logo() {
   );
 }
 
-export default function Splash({ trigger = 0, onDone = null }) {
+export default function Splash({ trigger = 0, onDone = null, onExitStart = null }) {
   const [exiting, setExiting] = useState(false);
   const [gone, setGone] = useState(false);
 
   useEffect(() => {
     setExiting(false);
     setGone(false);
-    const toExit = setTimeout(() => setExiting(true), APPEAR + BEAT);
+    const toExit = setTimeout(() => {
+      setExiting(true);
+      if (typeof onExitStart === 'function') onExitStart();
+    }, APPEAR + BEAT);
     const toDone = setTimeout(() => {
       setGone(true);
       if (typeof onDone === 'function') onDone();
@@ -48,7 +51,7 @@ export default function Splash({ trigger = 0, onDone = null }) {
       clearTimeout(toExit);
       clearTimeout(toDone);
     };
-  }, [trigger, onDone]);
+  }, [trigger, onDone, onExitStart]);
 
   if (gone) return null;
 

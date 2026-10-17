@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, session, Menu, dialog, Notification, shell, screen } from 'electron';
 import path from 'node:path';
 import { writeFile, readFile } from 'node:fs/promises';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -41,6 +42,25 @@ async function ensureDevServer() {
   }
 }
 
+function themeBg() {
+  const map = {
+    default: { dark: '#09090b', light: '#ffffff' },
+    beige: { dark: '#241d14', light: '#f7f1e6' },
+    esmeralda: { dark: '#131b18', light: '#f2f8f5' },
+    violeta: { dark: '#16121c', light: '#f7f4fa' },
+    rosa: { dark: '#1b1317', light: '#fbf4f7' },
+    oceano: { dark: '#11191d', light: '#f0f7f9' }
+  };
+  try {
+    const t = JSON.parse(readFileSync(path.join(app.getPath('userData'), 'theme.json'), 'utf8'));
+    const theme = t?.theme || 'default';
+    const mode = t?.mode || 'dark';
+    return (map[theme] || map.default)[mode] || (mode === 'dark' ? '#09090b' : '#ffffff');
+  } catch {
+    return '#09090b';
+  }
+}
+
 function createWindow(startBounds = null, startMaximized = false) {
   const bounds = startBounds || {
     width: DEFAULT_WIDTH,
@@ -56,7 +76,7 @@ function createWindow(startBounds = null, startMaximized = false) {
     minHeight: MIN_HEIGHT,
     frame: false,
     show: !launchedInBackground,
-    backgroundColor: '#ffffff',
+    backgroundColor: themeBg(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -239,8 +259,10 @@ let pendingClick = null;
 
 ipcMain.handle('app:background', () => launchedInBackground);
 
-ipcMain.handle('app:exit', () => {
-  if (launchedInBackground) app.quit();
+ipcMain.handle('theme:save', (_e, mode) => {
+  try {
+    writeFileSync(path.join(app.getPath('userData'), 'theme.json'), JSON.stringify({ mode }));
+  } catch {}
   return true;
 });
 

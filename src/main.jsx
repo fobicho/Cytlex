@@ -14,20 +14,31 @@ migrateLegacyStorage();
 const boot = settings.get();
 document.documentElement.setAttribute('data-theme', boot.theme);
 document.documentElement.setAttribute('data-mode', boot.mode);
+if (window.cytlex?.saveTheme) window.cytlex.saveTheme({ theme: boot.theme, mode: boot.mode });
 
 function Root() {
   const [splashDone, setSplashDone] = useState(false);
   const [showTutorial, setShowTutorial] = useState(() => !settings.get().tutorialSeen);
-  const handleSplashDone = useCallback(() => setSplashDone(true), []);
+  const [appVisible, setAppVisible] = useState(false);
+  const handleSplashDone = useCallback(() => {
+    setSplashDone(true);
+    if (settings.get().tutorialSeen) setAppVisible(true);
+  }, []);
+  const handleSplashExitStart = useCallback(() => {
+    if (settings.get().tutorialSeen) setAppVisible(true);
+  }, []);
   const handleTutorialDone = useCallback(() => setShowTutorial(false), []);
+  const handleTutorialExitStart = useCallback(() => setAppVisible(true), []);
   return (
     <HashRouter>
       <ToastProvider>
-        <div style={{ visibility: showTutorial ? 'hidden' : 'visible' }}>
+        <div style={{ visibility: appVisible ? 'visible' : 'hidden' }}>
           <App />
         </div>
-        {!splashDone && <Splash onDone={handleSplashDone} />}
-        {splashDone && showTutorial && <Onboarding onDone={handleTutorialDone} />}
+        {!splashDone && <Splash onDone={handleSplashDone} onExitStart={handleSplashExitStart} />}
+        {splashDone && showTutorial && (
+          <Onboarding onDone={handleTutorialDone} onExitStart={handleTutorialExitStart} />
+        )}
       </ToastProvider>
     </HashRouter>
   );

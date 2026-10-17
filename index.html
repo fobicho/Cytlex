@@ -17,6 +17,17 @@
           if (mode !== 'dark' && mode !== 'light') mode = 'dark';
           document.documentElement.setAttribute('data-theme', theme);
           document.documentElement.setAttribute('data-mode', mode);
+          var bg = {
+            default: { dark: '#09090b', light: '#ffffff' },
+            beige: { dark: '#241d14', light: '#f7f1e6' },
+            esmeralda: { dark: '#131b18', light: '#f2f8f5' },
+            violeta: { dark: '#16121c', light: '#f7f4fa' },
+            rosa: { dark: '#1b1317', light: '#fbf4f7' },
+            oceano: { dark: '#11191d', light: '#f0f7f9' }
+          };
+          var color = (bg[theme] || bg.default)[mode] || (mode === 'dark' ? '#09090b' : '#ffffff');
+          document.documentElement.style.backgroundColor = color;
+          if (document.body) document.body.style.backgroundColor = color;
         } catch (e) {}
       })();
     </script>

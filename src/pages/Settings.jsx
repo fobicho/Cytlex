@@ -346,11 +346,14 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
               desc="Ajusta el tamaño manteniendo la proporción"
               right={
                 <div className="flex items-center gap-3">
-                  <Minus
-                    className="shrink-0 text-muted-foreground"
-                    style={{ width: px(14, scale, 12), height: px(14, scale, 12) }}
-                    aria-hidden="true"
-                  />
+                  <button
+                    type="button"
+                    onClick={() => set({ libraryCoverSize: Math.max(60, s.libraryCoverSize - 10) })}
+                    className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label="Reducir tamaño de portadas"
+                  >
+                    <Minus style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
+                  </button>
                   <input
                     type="range"
                     min={60}
@@ -362,11 +365,14 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
                     className="rounded-full bg-muted accent-primary cursor-pointer"
                     style={{ width: px(160, scale, 110), height: px(6, scale, 4) }}
                   />
-                  <Plus
-                    className="shrink-0 text-muted-foreground"
-                    style={{ width: px(14, scale, 12), height: px(14, scale, 12) }}
-                    aria-hidden="true"
-                  />
+                  <button
+                    type="button"
+                    onClick={() => set({ libraryCoverSize: Math.min(260, s.libraryCoverSize + 10) })}
+                    className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label="Aumentar tamaño de portadas"
+                  >
+                    <Plus style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
+                  </button>
                   <span
                     className="text-muted-foreground text-center"
                     style={{ fontSize: px(14, scale, 12), minWidth: px(46, scale, 38) }}

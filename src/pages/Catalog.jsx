@@ -20,7 +20,7 @@ const TABS = [
   { id: 'extensiones', label: 'Extensiones' }
 ];
 
-function SourceSection({ r, coverSize, scale = 1 }) {
+function SourceSection({ r, coverSize, scale = 1, first = false }) {
   const trackRef = useRef(null);
   const mainRef = useRef(null);
   const [canLeft, setCanLeft] = useState(false);
@@ -77,7 +77,10 @@ function SourceSection({ r, coverSize, scale = 1 }) {
   return (
     <motion.section
       className="mb-10"
-      style={{ marginBottom: `${Math.max(24, Math.round(40 * scale))}px` }}
+      style={{
+        marginBottom: `${Math.max(16, Math.round(24 * scale))}px`,
+        marginTop: first ? `${Math.max(8, Math.round(12 * scale))}px` : undefined
+      }}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: 'easeOut' }}
@@ -100,7 +103,7 @@ function SourceSection({ r, coverSize, scale = 1 }) {
           onScroll={measure}
           className="flex overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           style={{
-            gap: `${Math.max(12, Math.round(20 * scale))}px`,
+            gap: `${Math.max(8, Math.round(12 * scale))}px`,
             scrollSnapType: 'x proximity',
             paddingBottom: `${Math.max(6, Math.round(8 * scale))}px`
           }}
@@ -346,14 +349,22 @@ export default function Catalog() {
             {results && (
               <>
                 {searching && (
-                  <p className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Buscando en {sources.length} {sources.length === 1 ? 'extensión' : 'extensiones'}...
-                  </p>
+                  <div
+                    className="flex items-center gap-2.5"
+                    style={{
+                      marginTop: `${Math.max(8, Math.round(12 * scale))}px`,
+                      marginBottom: `${Math.max(10, Math.round(16 * scale))}px`
+                    }}
+                  >
+                    <Loader2 className="animate-spin text-muted-foreground" style={{ width: px(20, scale, 16), height: px(20, scale, 16) }} />
+                    <p className="text-sm text-muted-foreground">
+                      Buscando en {sources.length} {sources.length === 1 ? 'extensión' : 'extensiones'}...
+                    </p>
+                  </div>
                 )}
 
-                {withResults.map((r) => (
-                  <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} />
+                {withResults.map((r, i) => (
+                  <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} first={i === 0} />
                 ))}
 
                 {done && withResults.length === 0 && (
