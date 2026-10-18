@@ -64,9 +64,15 @@ export const extUpdates = {
 };
 
 export async function announceExtUpdates(onNew) {
-  const nuevos = await extUpdates.check();
+  const url = repoUrl();
+  if (!url) return [];
+  let nuevos = [];
+  try {
+    nuevos = await extensions.checkUpdates(url);
+  } catch {
+    return [];
+  }
   if (!nuevos.length) return [];
-  extUpdates.markSeen(nuevos);
   const titulo =
     nuevos.length === 1
       ? `${nuevos[0].name} tiene actualización`

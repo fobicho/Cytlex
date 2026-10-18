@@ -581,6 +581,28 @@
   animation: bars-out 300ms cubic-bezier(0.4, 0, 1, 1) both;
 }
 
+@keyframes cx-update-pulse {
+  0%, 100% {
+    border-color: hsl(var(--border));
+    box-shadow: 0 0 0 0 hsl(var(--primary) / 0);
+  }
+  50% {
+    border-color: hsl(var(--primary));
+    box-shadow: 0 0 0 3px hsl(var(--primary) / 0.18);
+  }
+}
+
+.cx-update-pulse {
+  animation: cx-update-pulse 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cx-update-pulse {
+    animation: none;
+    border-color: hsl(var(--primary));
+  }
+}
+
 :root {
   --vt-x: 50%;
   --vt-y: 50%;

@@ -4,21 +4,19 @@ import { extensions } from '../lib/extensions.js';
 import { extUpdates } from '../lib/extUpdates.js';
 import { settings } from '../lib/settings.js';
 import { Card } from './ui/card.jsx';
-import { Dialog } from './ui/dialog.jsx';
 import { Button } from './ui/button.jsx';
 import { EmptyState } from './ui/empty-state.jsx';
-import { Badge } from './ui/badge.jsx';
 import { useToast } from './Toast.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 
-function ExtensionCard({ m, action, badge, scale = 1 }) {
+function ExtensionCard({ m, action, updatable = false, scale = 1 }) {
   const [imgOk, setImgOk] = useState(true);
   const showImg = m.icon && imgOk;
   const iconSize = Number(px(40, scale, 32).replace('px', ''));
   return (
-    <Card className="hover:shadow-sm">
+    <Card className={cn('hover:shadow-sm', updatable && 'cx-update-pulse')}>
       <div
         className="flex items-center"
         style={{ padding: px(14, scale, 11), gap: px(12, scale, 9) }}
@@ -53,7 +51,7 @@ function ExtensionCard({ m, action, badge, scale = 1 }) {
             {m.name}
           </div>
           <div
-            className="flex items-center"
+            className="flex items-center min-w-0 overflow-hidden"
             style={{
               marginTop: px(2, scale, 1.5),
               gap: px(6, scale, 4),
@@ -62,13 +60,12 @@ function ExtensionCard({ m, action, badge, scale = 1 }) {
           >
             {m.version && (
               <span
-                className="text-muted-foreground leading-none"
+                className="text-muted-foreground leading-none truncate min-w-0"
                 style={{ fontSize: px(11, scale, 9) }}
               >
                 v{m.version}
               </span>
             )}
-            {badge}
           </div>
         </div>
         <div className="shrink-0">{action}</div>
@@ -94,10 +91,12 @@ export default function ExtensionsPanel() {
   const [confirmUpdate, setConfirmUpdate] = useState(null);
   const [updates, setUpdates] = useState(() => (cacheHit ? repoCache.updates || [] : []));
   const [updating, setUpdating] = useState('');
+  const [confirmAll, setConfirmAll] = useState(false);
   const [repoUrl, setRepoUrl] = useState(initialRepo);
   const confirmRef = useRef(null);
   const removeRef = useRef(null);
   const updateRef = useRef(null);
+  const allRef = useRef(null);
 
   useEffect(() => {
     if (!confirmInstall) return;
@@ -131,6 +130,17 @@ export default function ExtensionsPanel() {
     document.addEventListener('pointerdown', onDown);
     return () => document.removeEventListener('pointerdown', onDown);
   }, [confirmUpdate]);
+
+  useEffect(() => {
+    if (!confirmAll) return;
+    const onDown = (e) => {
+      if (allRef.current && !allRef.current.contains(e.target)) {
+        setConfirmAll(false);
+      }
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [confirmAll]);
 
   const refresh = () => setInstalled(extensions.installed());
 
@@ -306,30 +316,71 @@ export default function ExtensionsPanel() {
           </h3>
           {updates.length > 0 && (
             <Button
+              ref={allRef}
               variant="secondary"
               size="sm"
-              onClick={() => setConfirmUpdate('all')}
+              onClick={async () => {
+                if (!confirmAll) {
+                  setConfirmAll(true);
+                  return;
+                }
+                setConfirmAll(false);
+                await doUpdateAll();
+              }}
               disabled={updating !== ''}
+              className="whitespace-nowrap"
               style={{
                 height: px(36, scale, 30),
+                minWidth: px(176, scale, 140),
                 fontSize: px(14, scale, 12),
                 paddingLeft: px(12, scale, 9),
                 paddingRight: px(12, scale, 9)
               }}
             >
-              {updating === 'all' ? (
-                <Loader2
-                  className="mr-2 animate-spin"
-                  style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
-                />
-              ) : (
-                <ArrowUpCircle
-                  className="mr-2"
-                  style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
-                />
-              )}
-              Actualizar todo
-              <span className="opacity-70 ml-2">{updates.length}</span>
+              <AnimatePresence mode="wait" initial={false}>
+                {updating === 'all' ? (
+                  <motion.span
+                    key="loading"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="flex items-center"
+                  >
+                    <Loader2
+                      className="mr-2 animate-spin"
+                      style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
+                    />
+                    Actualizando...
+                  </motion.span>
+                ) : confirmAll ? (
+                  <motion.span
+                    key="confirm"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.15, ease: 'easeOut' }}
+                  >
+                    ¿Seguro?
+                  </motion.span>
+                ) : (
+                  <motion.span
+                    key="idle"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.15, ease: 'easeOut' }}
+                    className="flex items-center"
+                  >
+                    <ArrowUpCircle
+                      className="mr-2"
+                      style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
+                    />
+                    Actualizar todo
+                    <span className="opacity-70 ml-2">{updates.length}</span>
+                  </motion.span>
+                )}
+              </AnimatePresence>
             </Button>
           )}
         </div>
@@ -347,20 +398,8 @@ export default function ExtensionsPanel() {
                 <ExtensionCard
                   key={m.id}
                   scale={scale}
-                  m={upd ? { ...m, version: upd.to } : m}
-                  badge={upd ? (
-                    <Badge
-                      style={{
-                        fontSize: px(11, scale, 9),
-                        paddingLeft: px(8, scale, 6),
-                        paddingRight: px(8, scale, 6),
-                        lineHeight: px(16, scale, 13)
-                      }}
-                      title={`De v${upd.from} a v${upd.to}`}
-                    >
-                      Actualizable
-                    </Badge>
-                  ) : null}
+                  m={m}
+                  updatable={!!upd}
                   action={
                     <div className="flex items-center" style={{ gap: px(4, scale, 3) }}>
                       {upd && (
@@ -584,34 +623,6 @@ export default function ExtensionsPanel() {
         )}
       </section>
 
-      {confirmUpdate === 'all' && (
-        <Dialog open onClose={() => setConfirmUpdate(null)} title="Actualizar extensión" hideDivider bodyClassName="p-5">
-          <p className="text-muted-foreground" style={{ fontSize: px(14, scale, 12) }}>
-            ¿Actualizar {updates.length} extensiones instaladas?
-          </p>
-          <div
-            className="flex justify-end"
-            style={{ gap: px(8, scale, 6), marginTop: px(20, scale, 14) }}
-          >
-            <Button
-              variant="secondary"
-              onClick={() => setConfirmUpdate(null)}
-              style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={async () => {
-                setConfirmUpdate(null);
-                await doUpdateAll();
-              }}
-              style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
-            >
-              Actualizar
-            </Button>
-          </div>
-        </Dialog>
-      )}
     </div>
   );
 }
