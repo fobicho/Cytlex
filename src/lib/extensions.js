@@ -92,25 +92,22 @@ export const extensions = {
 
   async updateAll(indexUrl, ids) {
     const repo = await extensions.repoIndex(indexUrl);
-    const lista = ids || read().map((r) => r.manifest.id);
-    const pendientes = new Set(lista);
+    const pendientes = new Set(ids || read().map((r) => r.manifest.id));
 
-    const records = read().map((r) => {
-      const fresh = repo.find((m) => m.id === r.manifest.id);
-      return fresh ? { ...r, manifest: { ...r.manifest, ...fresh } } : r;
-    });
-
+    const records = read();
     let ok = 0;
     const fallos = [];
     await Promise.all(records.map(async (r) => {
       if (!pendientes.has(r.manifest.id)) return;
-      if (r.manifest.type !== 'module' || !r.manifest.main) return;
+      const fresh = repo.find((m) => m.id === r.manifest.id);
+      if (!fresh || fresh.type !== 'module' || !fresh.main) return;
       try {
-        const mainUrl = /^https?:/i.test(r.manifest.main)
-          ? r.manifest.main
-          : new URL(r.manifest.main, indexUrl).href;
+        const mainUrl = /^https?:/i.test(fresh.main)
+          ? fresh.main
+          : new URL(fresh.main, indexUrl).href;
         const code = await ctx().fetchText(mainUrl);
         r.code = code;
+        r.manifest = { ...r.manifest, ...fresh };
         cache.delete(r.manifest.id);
         ok += 1;
       } catch {

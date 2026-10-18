@@ -16,6 +16,7 @@ import { announceExtUpdates } from './lib/extUpdates.js';
 import { useToast } from './components/Toast.jsx';
 import { appWindow } from './lib/appWindow.js';
 import { useScale } from './lib/useScale.js';
+import { ArrowUpCircle } from 'lucide-react';
 
 class PageBoundary extends Component {
   constructor(props) {
@@ -96,10 +97,10 @@ export default function App() {
 
   useEffect(() => {
     const t = setTimeout(() => {
-      announceExtUpdates(({ titulo, cuerpo }) => {
+      announceExtUpdates(({ updates, count }) => {
         toast({
-          title: titulo,
-          description: cuerpo,
+          icon: ArrowUpCircle,
+          title: count === 1 ? updates[0].name : `${count} extensiones con actualización`,
           variant: 'info',
           duration: 9000,
           action: { label: 'Ver extensiones', onClick: goToExtensions }
