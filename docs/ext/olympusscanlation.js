@@ -39,17 +39,25 @@ export default function createSource({ fetchText }) {
 
   async function detail(mangaUrl) {
     const slug = String(mangaUrl).split('/').filter(Boolean).pop();
-    const chaptersUrl = (p) => `${panel}/api/series/${slug}/chapters?page=${p}&direction=desc&type=comic`;
+    const panelUrl = (p) => `${panel}/api/series/${slug}/chapters?page=${p}&direction=desc&type=comic`;
+    const baseUrl = (p) => `${base}/api/series/${slug}/chapters?page=${p}&direction=desc&type=comic`;
+    const chaptersFetch = async (p) => {
+      try {
+        return await getJson(panelUrl(p));
+      } catch {
+        return await getJson(baseUrl(p));
+      }
+    };
 
     const [data, first] = await Promise.all([
       getJson(`${base}/api/series/${slug}?type=comic`),
-      getJson(chaptersUrl(1))
+      chaptersFetch(1)
     ]);
     const s = data?.data || {};
 
     const lastPage = Math.min(first?.meta?.last_page || 1, LIMIT_PAGES);
     const rest = lastPage > 1
-      ? await Promise.all(Array.from({ length: lastPage - 1 }, (_, i) => getJson(chaptersUrl(i + 2))))
+      ? await Promise.all(Array.from({ length: lastPage - 1 }, (_, i) => chaptersFetch(i + 2)))
       : [];
 
     const chapters = [first, ...rest]

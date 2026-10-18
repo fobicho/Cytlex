@@ -97,16 +97,22 @@ export default function Results() {
       <Button
         variant="ghost"
         size="sm"
-        className="-mt-2 -ml-2 mb-1 self-start hover:bg-transparent hover:text-foreground"
+        className="self-start hover:bg-transparent hover:text-foreground"
         onClick={() => navigate('/explorar')}
+        style={{
+          marginTop: px(-8, scale, -6),
+          marginLeft: px(-8, scale, -6),
+          marginBottom: px(4, scale, 3),
+          fontSize: px(14, scale, 12)
+        }}
       >
-        <ArrowLeft className="w-4 h-4 mr-1.5" /> Volver
+        <ArrowLeft className="mr-1.5" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Volver
       </Button>
 
-      <div className="flex items-center gap-2.5 mb-6">
-        <SourceBadge m={manifest} className="w-9 h-9 text-sm" />
-        <h1 className="text-lg font-bold">{manifest.name}</h1>
-        <span className="text-sm text-muted-foreground">· {group.items.length}</span>
+      <div className="flex items-center" style={{ gap: px(10, scale, 8), marginBottom: `${Math.max(10, Math.round(16 * scale))}px` }}>
+        <SourceBadge m={manifest} style={{ width: px(28, scale, 22), height: px(28, scale, 22), fontSize: `${Math.round(12 * scale)}px` }} />
+        <h1 className="font-semibold" style={{ fontSize: `${Math.round(14 * scale)}px` }}>{manifest.name}</h1>
+        <span className="text-muted-foreground" style={{ fontSize: `${Math.round(12 * scale)}px` }}>· {group.items.length}</span>
       </div>
 
       <motion.div

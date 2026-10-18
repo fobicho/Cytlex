@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { cn } from '../lib/utils.js';
 
-export function SourceBadge({ m, className }) {
+export function SourceBadge({ m, className, style }) {
   const [ok, setOk] = useState(true);
   return (
     <div
@@ -9,6 +9,7 @@ export function SourceBadge({ m, className }) {
         'w-7 h-7 rounded-lg bg-secondary text-secondary-foreground grid place-items-center text-xs font-bold shrink-0 overflow-hidden',
         className
       )}
+      style={style}
     >
       {m.icon && ok ? (
         <img src={m.icon} alt="" loading="lazy" className="w-full h-full object-cover" onError={() => setOk(false)} />
