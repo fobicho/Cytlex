@@ -20,23 +20,6 @@ import { tracking } from '../lib/tracking.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
-function sameImage(a, b) {
-  if (!a || !b) return false;
-  try {
-    const key = (u) => {
-      const x = new URL(u);
-      for (const k of [...x.searchParams.keys()]) {
-        if (/^(w|width|size|h|height|quality|q|v|ver)$/i.test(k)) x.searchParams.delete(k);
-      }
-      x.pathname = x.pathname.replace(/-[a-z]{1,3}\.(jpe?g|png|webp|avif|gif)$/i, '.$1');
-      return x.toString();
-    };
-    return key(a) === key(b);
-  } catch {
-    return a === b;
-  }
-}
-
 const EXPAND_CTRL_H = 16;
 const COVER_BASE = 184;
 
@@ -134,17 +117,21 @@ export default function Detail() {
   const coverSrc = useMemo(() => {
     const local = lib.fav(mangaUrl, sourceId)?.coverLocal;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
-    if (!d?.cover) return knownCover;
-    if (knownCover && sameImage(knownCover, d.cover)) return knownCover;
-    return d.cover;
+    if (knownCover) return knownCover;
+    return d?.cover || '';
   }, [d?.cover, knownCover, mangaUrl, sourceId]);
+
+  const [coverError, setCoverError] = useState(false);
+  useEffect(() => { setCoverError(false); }, [coverSrc]);
+  const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
 
   const coverImg = (alt) => (
     <img
       className="w-full h-full object-cover"
-      src={coverSrc}
+      src={finalCover}
       alt={alt}
       referrerPolicy="no-referrer"
+      onError={() => { if (finalCover !== knownCover) setCoverError(true); }}
     />
   );
 

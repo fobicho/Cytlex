@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { extensions } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
-import { lastSearch, testCover, scrollMemory, rememberCover } from '../lib/searchState.js';
+import { lastSearch, scrollMemory, rememberCover, catalogScroll } from '../lib/searchState.js';
 import MangaCard from '../components/MangaCard.jsx';
 import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
@@ -45,6 +45,8 @@ function SourceSection({ r, coverSize, scale = 1, first = false }) {
     return () => main.removeEventListener('scroll', save);
   }, []);
 
+  const gap = Math.max(8, Math.round(12 * scale));
+
   const measure = () => {
     const el = trackRef.current;
     if (!el) return;
@@ -63,8 +65,18 @@ function SourceSection({ r, coverSize, scale = 1, first = false }) {
 
   useEffect(() => {
     const el = trackRef.current;
-    if (el) el.scrollLeft = 0;
+    if (!el) return;
+    el.scrollLeft = catalogScroll.get(r.id);
+    measure();
   }, [r.id, r.items.length]);
+
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el) return undefined;
+    const save = () => catalogScroll.set(r.id, el.scrollLeft);
+    el.addEventListener('scroll', save, { passive: true });
+    return () => el.removeEventListener('scroll', save);
+  }, [r.id]);
 
   const step = (dir) => {
     const el = trackRef.current;
@@ -75,15 +87,12 @@ function SourceSection({ r, coverSize, scale = 1, first = false }) {
   const visible = r.items.slice(0, 15);
 
   return (
-    <motion.section
+    <section
       className="mb-10"
       style={{
         marginBottom: `${Math.max(16, Math.round(24 * scale))}px`,
         marginTop: first ? `${Math.max(8, Math.round(12 * scale))}px` : undefined
       }}
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, ease: 'easeOut' }}
     >
       <div
         className="flex items-center gap-2.5 mb-4"
@@ -103,7 +112,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false }) {
           onScroll={measure}
           className="flex overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           style={{
-            gap: `${Math.max(8, Math.round(12 * scale))}px`,
+            gap: `${gap}px`,
             scrollSnapType: 'x proximity',
             paddingBottom: `${Math.max(6, Math.round(8 * scale))}px`
           }}
@@ -127,7 +136,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false }) {
             style={{
               width: `${Math.round(36 * scale)}px`,
               height: `${Math.round(36 * scale)}px`,
-              marginLeft: `${Math.round(-12 * scale)}px`
+              marginLeft: `${Math.round(2 * scale)}px`
             }}
           >
             <ChevronLeft style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
@@ -142,7 +151,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false }) {
             style={{
               width: `${Math.round(36 * scale)}px`,
               height: `${Math.round(36 * scale)}px`,
-              marginRight: `${Math.round(-12 * scale)}px`
+              marginRight: `${Math.round(2 * scale)}px`
             }}
           >
             <ChevronRight style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
@@ -161,7 +170,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false }) {
           </a>
         )}
       </div>
-    </motion.section>
+    </section>
   );
 }
 
@@ -200,6 +209,7 @@ export default function Catalog() {
   const runSearch = (query = q) => {
     const list = extensions.installed();
     if (!list.length) return;
+    catalogScroll.clear();
     lastSearch.q = query;
     lastSearch.genre = '';
     lastSearch.results = list
@@ -210,14 +220,11 @@ export default function Catalog() {
     list.forEach((s) => {
       api
         .catalog({ q: query, genre: '', page: 1 }, s.manifest.id)
-        .then(async (r) => {
+        .then((r) => {
           const items = r.items || [];
-          const okFlags = await Promise.all(items.map((m) => testCover(m.cover)));
-          const anyOk = okFlags.some(Boolean);
-          const good = anyOk ? items.filter((_, i) => okFlags[i]) : items;
-          good.forEach((m) => rememberCover(m.url, m.cover));
+          items.forEach((m) => rememberCover(m.url, m.cover));
           updateResults((prev) =>
-            prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'done', items: good } : x)) : prev
+            prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'done', items } : x)) : prev
           );
         })
         .catch((e) => {

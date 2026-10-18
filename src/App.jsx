@@ -10,7 +10,7 @@ import Reader from './pages/Reader.jsx';
 import Settings from './pages/Settings.jsx';
 import Tracking from './pages/Tracking.jsx';
 import { settings } from './lib/settings.js';
-import { lastSearch, resultsScroll } from './lib/searchState.js';
+import { lastSearch, resultsScroll, catalogScroll } from './lib/searchState.js';
 import { startNotifier, onNotifyClick } from './lib/notify.js';
 import { announceExtUpdates } from './lib/extUpdates.js';
 import { useToast } from './components/Toast.jsx';
@@ -70,6 +70,7 @@ export default function App() {
     lastSearch.genre = '';
     lastSearch.results = null;
     resultsScroll.clear();
+    catalogScroll.clear();
     const main = document.querySelector('main');
     if (main) main.scrollTop = 0;
   }, []);

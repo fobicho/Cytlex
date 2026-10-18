@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { cn } from '../lib/utils.js';
 import { api } from '../lib/api.js';
 
@@ -10,14 +10,22 @@ function prefetch(url, sourceId) {
   api.prefetchDetail(url, sourceId);
 }
 
-export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unavailable = false, minimal = false, from = 'biblioteca', coverSize, chapterCount }) {
+export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, minimal = false, from = 'biblioteca', coverSize, chapterCount }) {
   const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}`;
-  const status = m.status || m.lastChapter || (progress ? 'En progreso' : '');
   const linkCls = cn(unavailable && 'pointer-events-none');
   const linkA11y = unavailable ? { 'aria-disabled': true, tabIndex: -1 } : {};
 
   const localCover = m.coverLocal?.startsWith('data:') ? m.coverLocal : '';
   const [src, setSrc] = useState(localCover || m.cover);
+  const hoverTimer = useRef(null);
+
+  const schedulePrefetch = () => {
+    if (unavailable) return;
+    clearTimeout(hoverTimer.current);
+    hoverTimer.current = setTimeout(() => prefetch(m.url, sourceId), 180);
+  };
+  const cancelPrefetch = () => clearTimeout(hoverTimer.current);
+  useEffect(() => () => clearTimeout(hoverTimer.current), []);
   useEffect(() => {
     const local = m.coverLocal?.startsWith('data:') ? m.coverLocal : '';
     setSrc(local || m.cover);
@@ -29,19 +37,6 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
 
   const scale = coverSize ? coverSize / 160 : 1;
   const px = (n, min) => Math.max(min, Math.round(n * scale));
-  const statusStyle = coverSize
-    ? {
-        fontSize: `${px(11, 9)}px`,
-        left: `${px(8, 4)}px`,
-        bottom: `${px(8, 4)}px`,
-        gap: `${px(6, 4)}px`,
-        paddingLeft: `${px(10, 5)}px`,
-        paddingRight: `${px(10, 5)}px`,
-        paddingTop: `${px(4, 2)}px`,
-        paddingBottom: `${px(4, 2)}px`
-      }
-    : undefined;
-  const statusDotStyle = coverSize ? { width: `${px(6, 4)}px`, height: `${px(6, 4)}px` } : undefined;
   const titleStyle = coverSize
     ? { fontSize: `${px(13.5, 11)}px` }
     : { fontSize: '13.5px' };
@@ -66,14 +61,17 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
         aria-label={m.title}
         title={m.title}
         className={linkCls}
-        onMouseEnter={() => !unavailable && prefetch(m.url, sourceId)}
-        onFocus={() => !unavailable && prefetch(m.url, sourceId)}
+        onMouseEnter={schedulePrefetch}
+        onMouseLeave={cancelPrefetch}
+        onFocus={schedulePrefetch}
+        onBlur={cancelPrefetch}
         {...linkA11y}
       >
         <div className="relative rounded-xl overflow-hidden bg-muted/50 border border-border/50 shadow-sm aspect-[2/3]" style={box}>
           {src ? (
             <img
               loading="lazy"
+              decoding="async"
               src={src}
               alt={m.title}
               referrerPolicy="no-referrer"
@@ -86,22 +84,12 @@ export default function MangaCard({ m, progress, sourceId = 'leercapitulo', unav
           ) : (
             <div className={cn(ph, 'animate-pulse bg-muted/40')} />
           )}
-          {unavailable ? (
+          {unavailable && (
             <span className="absolute inset-0 grid place-items-center bg-black/60">
               <span className="rounded-full bg-black/80 px-2.5 py-1 text-[10px] font-semibold text-white">
                 Fuente no instalada
               </span>
             </span>
-          ) : (
-            !minimal && status && (
-              <span
-                style={statusStyle}
-                className="absolute inline-flex items-center max-w-[calc(100%-16px)] rounded-full bg-black/70 font-semibold text-white backdrop-blur-md"
-              >
-                <span style={statusDotStyle} className="rounded-full bg-emerald-400 shrink-0" />
-                <span className="truncate">{String(status).slice(0, 28)}</span>
-              </span>
-            )
           )}
           {chapterCount > 0 && !unavailable && (
             <span
