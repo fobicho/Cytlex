@@ -96,6 +96,8 @@ export default function ExtensionsPanel() {
   const [updating, setUpdating] = useState('');
   const [repoUrl, setRepoUrl] = useState(initialRepo);
   const confirmRef = useRef(null);
+  const removeRef = useRef(null);
+  const updateRef = useRef(null);
 
   useEffect(() => {
     if (!confirmInstall) return;
@@ -107,6 +109,28 @@ export default function ExtensionsPanel() {
     document.addEventListener('pointerdown', onDown);
     return () => document.removeEventListener('pointerdown', onDown);
   }, [confirmInstall]);
+
+  useEffect(() => {
+    if (!confirmRemove) return;
+    const onDown = (e) => {
+      if (removeRef.current && !removeRef.current.contains(e.target)) {
+        setConfirmRemove(null);
+      }
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [confirmRemove]);
+
+  useEffect(() => {
+    if (!confirmUpdate || confirmUpdate === 'all') return;
+    const onDown = (e) => {
+      if (updateRef.current && !updateRef.current.contains(e.target)) {
+        setConfirmUpdate(null);
+      }
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [confirmUpdate]);
 
   const refresh = () => setInstalled(extensions.installed());
 
@@ -340,35 +364,100 @@ export default function ExtensionsPanel() {
                   action={
                     <div className="flex items-center" style={{ gap: px(4, scale, 3) }}>
                       {upd && (
+                        <div
+                          ref={confirmUpdate?.id === m.id ? updateRef : null}
+                          className="relative flex items-center justify-center"
+                          style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
+                        >
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="hover:bg-transparent hover:text-foreground"
+                            title={`Actualizar a la v${upd.to}`}
+                            aria-label={`Actualizar ${m.name}`}
+                            disabled={updating !== ''}
+                            onClick={() => setConfirmUpdate(upd)}
+                            style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
+                          >
+                            {updating === m.id ? (
+                              <Loader2 className="animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                            ) : (
+                              <Download style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                            )}
+                          </Button>
+                          <AnimatePresence>
+                            {confirmUpdate && confirmUpdate !== 'all' && confirmUpdate.id === m.id && (
+                              <motion.div
+                                key="confirm-update"
+                                initial={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                                animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
+                                exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                                transition={{ duration: 0.14, ease: 'easeOut' }}
+                                className="absolute z-20 rounded-lg border border-border bg-card shadow-lg"
+                                style={{ top: '100%', left: '50%', marginTop: px(6, scale, 4), padding: px(8, scale, 6) }}
+                              >
+                                <Button
+                                  size="sm"
+                                  onClick={async () => {
+                                    const target = confirmUpdate;
+                                    setConfirmUpdate(null);
+                                    await doUpdateOne(target.id);
+                                  }}
+                                  disabled={updating !== ''}
+                                  style={{ height: px(28, scale, 24), fontSize: px(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                                >
+                                  Actualizar
+                                </Button>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      )}
+                      <div
+                        ref={confirmRemove?.id === m.id ? removeRef : null}
+                        className="relative flex items-center justify-center"
+                        style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
+                      >
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="hover:bg-transparent hover:text-foreground"
-                          title={`Actualizar a la v${upd.to}`}
-                          aria-label={`Actualizar ${m.name}`}
-                          disabled={updating !== ''}
-                          onClick={() => setConfirmUpdate(upd)}
+                          className="text-destructive hover:bg-transparent hover:text-destructive"
+                          title="Desinstalar"
+                          aria-label="Desinstalar"
+                          disabled={busy === m.id}
+                          onClick={() => setConfirmRemove(m)}
                           style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
                         >
-                          {updating === m.id ? (
-                            <Loader2 className="animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                          ) : (
-                            <Download style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                          )}
+                          <Trash2 style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                         </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-destructive hover:bg-transparent hover:text-destructive"
-                        title="Desinstalar"
-                        aria-label="Desinstalar"
-                        disabled={busy === m.id}
-                        onClick={() => setConfirmRemove(m)}
-                        style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
-                      >
-                        <Trash2 style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                      </Button>
+                        <AnimatePresence>
+                          {confirmRemove?.id === m.id && (
+                            <motion.div
+                              key="confirm-remove"
+                              initial={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                              animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
+                              exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                              transition={{ duration: 0.14, ease: 'easeOut' }}
+                              className="absolute z-20 rounded-lg border border-border bg-card shadow-lg"
+                              style={{ top: '100%', left: '50%', marginTop: px(6, scale, 4), padding: px(8, scale, 6) }}
+                            >
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={async () => {
+                                  const id = confirmRemove.id;
+                                  setConfirmRemove(null);
+                                  await doUninstall(id);
+                                }}
+                                disabled={busy === m.id}
+                                style={{ height: px(28, scale, 24), fontSize: px(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                              >
+                                Desinstalar
+                              </Button>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
                     </div>
                   }
                 />
@@ -389,7 +478,7 @@ export default function ExtensionsPanel() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={loadAvailable}
+            onClick={() => loadAvailable()}
             disabled={loading}
             style={{
               height: px(36, scale, 30),
@@ -481,8 +570,8 @@ export default function ExtensionsPanel() {
                             }}
                             disabled={busy === m.id}
                             style={{ height: px(28, scale, 24), fontSize: px(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
-                          >
-                            Confirmar
+                           >
+                            Instalar
                           </Button>
                         </motion.div>
                       )}
@@ -495,12 +584,10 @@ export default function ExtensionsPanel() {
         )}
       </section>
 
-      {confirmUpdate && (
+      {confirmUpdate === 'all' && (
         <Dialog open onClose={() => setConfirmUpdate(null)} title="Actualizar extensión" hideDivider bodyClassName="p-5">
           <p className="text-muted-foreground" style={{ fontSize: px(14, scale, 12) }}>
-            {confirmUpdate === 'all'
-              ? `¿Actualizar ${updates.length} extensiones instaladas?`
-              : `¿Actualizar «${confirmUpdate.name}» de v${confirmUpdate.from} a v${confirmUpdate.to}?`}
+            ¿Actualizar {updates.length} extensiones instaladas?
           </p>
           <div
             className="flex justify-end"
@@ -515,54 +602,12 @@ export default function ExtensionsPanel() {
             </Button>
             <Button
               onClick={async () => {
-                const target = confirmUpdate;
                 setConfirmUpdate(null);
-                if (target === 'all') await doUpdateAll();
-                else await doUpdateOne(target.id);
+                await doUpdateAll();
               }}
               style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
             >
               Actualizar
-            </Button>
-          </div>
-        </Dialog>
-      )}
-      {confirmRemove && (
-        <Dialog open onClose={() => setConfirmRemove(null)} title="Desinstalar extensión" hideDivider bodyClassName="p-5">
-          <p className="text-muted-foreground" style={{ fontSize: px(14, scale, 12) }}>
-            ¿Seguro que quieres desinstalar «{confirmRemove.name}»? Dejará de estar disponible en Cytlex.
-          </p>
-          <div
-            className="flex justify-end"
-            style={{ gap: px(8, scale, 6), marginTop: px(20, scale, 14) }}
-          >
-            <Button
-              variant="secondary"
-              onClick={() => setConfirmRemove(null)}
-              style={{
-                height: px(36, scale, 30),
-                fontSize: px(14, scale, 12),
-                paddingLeft: px(12, scale, 9),
-                paddingRight: px(12, scale, 9)
-              }}
-            >
-              Cancelar
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={async () => {
-                const id = confirmRemove.id;
-                setConfirmRemove(null);
-                await doUninstall(id);
-              }}
-              style={{
-                height: px(36, scale, 30),
-                fontSize: px(14, scale, 12),
-                paddingLeft: px(12, scale, 9),
-                paddingRight: px(12, scale, 9)
-              }}
-            >
-              Desinstalar
             </Button>
           </div>
         </Dialog>

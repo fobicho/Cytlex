@@ -27,7 +27,7 @@ function Root() {
   const handleSplashExitStart = useCallback(() => {
     if (settings.get().tutorialSeen) setAppVisible(true);
   }, []);
-  const handleTutorialDone = useCallback(() => setShowTutorial(false), []);
+  const handleTutorialDone = useCallback(() => { setAppVisible(true); setShowTutorial(false); }, []);
   const handleTutorialExitStart = useCallback(() => setAppVisible(true), []);
   return (
     <HashRouter>
@@ -37,7 +37,12 @@ function Root() {
         </div>
         {!splashDone && <Splash onDone={handleSplashDone} onExitStart={handleSplashExitStart} />}
         {splashDone && showTutorial && (
-          <Onboarding onDone={handleTutorialDone} onExitStart={handleTutorialExitStart} />
+          <Onboarding
+            onDone={handleTutorialDone}
+            onExitStart={handleTutorialExitStart}
+            onRevealApp={() => setAppVisible(true)}
+            onHideApp={() => {}}
+          />
         )}
       </ToastProvider>
     </HashRouter>
