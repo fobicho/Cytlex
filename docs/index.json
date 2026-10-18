@@ -36,7 +36,7 @@
     "id": "olympusscanlation",
     "name": "Olympus Scanlation",
     "lang": "es",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "type": "module",
     "main": "ext/olympusscanlation.js",
     "baseUrl": "https://olympusxyz.com",
