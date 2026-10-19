@@ -16,6 +16,7 @@ const defaults = {
   uiScale: 1,
   extIndexUrl: '',
   anilistSynopsisLang: 'romaji',
+  anilistCover: false,
   notifyEnabled: false,
   notifyHours: 6,
   notifyBackground: false,

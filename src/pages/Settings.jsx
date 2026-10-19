@@ -405,10 +405,25 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
             />
           }
         />
+        <Row
+          scale={scale}
+          last={s.libraryView !== 'grid'}
+          title="Capítulos por fila"
+          desc="Cantidad de capítulos por fila en la ficha del manga"
+          right={
+            <Segmented
+              scale={scale}
+              value={s.chaptersPerRow}
+              onChange={(v) => set({ chaptersPerRow: v })}
+              options={[[1, '1'], [2, '2'], [3, '3']]}
+            />
+          }
+        />
         {s.libraryView === 'grid' && (
           <>
             <Row
               scale={scale}
+              last
               title="Mostrar capítulos sin leer"
               desc="Muestra un contador en cada portada"
               right={
@@ -422,20 +437,6 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
             />
           </>
         )}
-        <Row
-          scale={scale}
-          last
-          title="Capítulos por fila"
-          desc="Cantidad de capítulos por fila en la ficha del manga"
-          right={
-            <Segmented
-              scale={scale}
-              value={s.chaptersPerRow}
-              onChange={(v) => set({ chaptersPerRow: v })}
-              options={[[1, '1'], [2, '2'], [3, '3']]}
-            />
-          }
-        />
       </div>
     );
   } else if (section === 'lector') {
@@ -676,10 +677,23 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         />
         <Row
           scale={scale}
-          title="Comprobar cada"
-          desc="Cada cuántas horas se revisa la biblioteca."
+          title="Avisar de actualizaciones de extensiones"
+          desc="Revisa el repositorio y avisa cuando una extensión tenga una versión nueva."
           right={
-            <div className={cn('flex items-center', !s.notifyEnabled && 'pointer-events-none opacity-50')} aria-disabled={!s.notifyEnabled}>
+            <Switch
+              scale={scale}
+              on={s.extUpdateNotify}
+              onChange={(v) => set({ extUpdateNotify: v })}
+              label="Avisar de actualizaciones de extensiones"
+            />
+          }
+        />
+        <Row
+          scale={scale}
+          title="Comprobar cada"
+          desc="Cada cuántas horas se revisan los capítulos nuevos y las actualizaciones de extensiones."
+          right={
+             <div className={cn('flex items-center', !s.notifyEnabled && !s.extUpdateNotify && 'pointer-events-none opacity-50')} aria-disabled={!s.notifyEnabled && !s.extUpdateNotify}>
               <Dropdown
                 scale={scale}
                 style={{ width: px(132, scale, 108) }}
@@ -698,48 +712,23 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         />
         <Row
           scale={scale}
-          title="Notificaciones en segundo plano"
-          right={
-            <Switch
-              scale={scale}
-              on={s.notifyBackground}
-              onChange={toggleBackground}
-              label="Notificaciones en segundo plano"
-            />
-          }
-        />
-        <Row
-          scale={scale}
-          title="Avisar de actualizaciones de extensiones"
-          desc="Revisa el repositorio y avisa cuando una extensión tenga versión nueva."
-          right={
-            <Switch
-              scale={scale}
-              on={s.extUpdateNotify}
-              onChange={(v) => set({ extUpdateNotify: v })}
-              label="Avisar de actualizaciones de extensiones"
-            />
-          }
-        />
-        <Row
-          scale={scale}
           last
-          title="Avisos de extensiones en segundo plano"
+          title="Notificaciones en segundo plano"
           desc={
-            s.extUpdateNotify
-              ? 'Comprueba con la app cerrada y avisa por el sistema. Al abrir Cytlex siempre te indica si hay novedades.'
-              : 'Activa el aviso anterior para poder comprobar con la app cerrada.'
+            s.notifyEnabled || s.extUpdateNotify
+              ? 'Comprueba si hay actualizaciones aún con Cytlex cerrado.'
+              : 'Activa algún aviso anterior para poder comprobar con Cytlex cerrado.'
           }
           right={
             <div
-              className={cn('flex items-center', !s.extUpdateNotify && 'pointer-events-none opacity-50')}
-              aria-disabled={!s.extUpdateNotify}
+              className={cn('flex items-center', !s.notifyEnabled && !s.extUpdateNotify && 'pointer-events-none opacity-50')}
+              aria-disabled={!s.notifyEnabled && !s.extUpdateNotify}
             >
               <Switch
                 scale={scale}
                 on={s.notifyBackground}
                 onChange={toggleBackground}
-                label="Avisos de extensiones en segundo plano"
+                label="Notificaciones en segundo plano"
               />
             </div>
           }
@@ -760,11 +749,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           title="Cuenta de AniList"
           desc={
             authState.connected
-              ? `Conectada${authViewer?.name ? ` como ${authViewer.name}` : ''}${
-                  authState.expiresAt
-                    ? ` · caduca el ${new Date(authState.expiresAt).toLocaleDateString('es-ES')}`
-                    : ''
-                }`
+              ? `Conectada${authViewer?.name ? ` como ${authViewer.name}` : ''}`
               : authState.expired
                 ? 'La sesión anterior caducó. Vuelve a conectarte.'
                 : 'Sin conectar.'
@@ -772,7 +757,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           right={
             authState.connected ? (
               <Button
-                variant="secondary"
+                variant="destructive"
                 size="sm"
                 onClick={async () => {
                   await session.logout();
@@ -821,6 +806,20 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
 
         <Row
           scale={scale}
+          title="Mostrar portada de AniList"
+          desc="Usa la portada de AniList en lugar de la del manga (solo vinculados)"
+          right={
+            <Switch
+              scale={scale}
+              on={s.anilistCover}
+              onChange={(v) => set({ anilistCover: v })}
+              label="Mostrar portada de AniList"
+            />
+          }
+        />
+        <Row
+          scale={scale}
+          last
           title="Mangas vinculados"
           desc={
             linkedCount
@@ -857,21 +856,6 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
                 Ver mi lista
               </Button>
             </div>
-          }
-        />
-
-        <Row
-          scale={scale}
-          last
-          title="Idioma de la sinopsis"
-          desc="AniList guarda el título original del manga"
-          right={
-            <Segmented
-              scale={scale}
-              value={s.anilistSynopsisLang}
-              onChange={(v) => set({ anilistSynopsisLang: v })}
-              options={[['romaji', 'Romaji'], ['english', 'Inglés']]}
-            />
           }
         />
       </div>

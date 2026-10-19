@@ -840,6 +840,13 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
         mangaTitle={title}
         onPick={(m) => {
           tracking.link(mangaUrl, sourceId, m.id, m.cover);
+          (async () => {
+            try {
+              const { makeCoverThumb } = await import('../lib/covers.js');
+              const thumb = await makeCoverThumb(m.cover);
+              if (thumb) tracking.updateCover(mangaUrl, sourceId, { coverLocal: thumb });
+            } catch {}
+          })();
           setPicking(false);
         }}
       />

@@ -109,26 +109,38 @@ export default function Detail() {
   const [expanded, setExpanded] = useState(false);
   const [overflow, setOverflow] = useState(false);
   const [progressTick, setProgressTick] = useState(0);
+  const [coverTick, setCoverTick] = useState(0);
   const [markBefore, setMarkBefore] = useState(null);
   const [aniListOpen, setAniListOpen] = useState(false);
   const [aniLinked, setAniLinked] = useState(() => !!tracking.get(mangaUrl, sourceId));
+  const [anilistCover, setAnilistCover] = useState(() => !!settings.get().anilistCover);
   const scale = useScale();
   const coverSize = Math.round(COVER_BASE * scale);
   const knownCover = useMemo(() => {
     const fav = lib.fav(mangaUrl, sourceId);
     const local = fav?.coverLocal;
+    const t = tracking.get(mangaUrl, sourceId);
+    const tLocal = t?.coverLocal;
+    const tCover = t?.cover;
+    if (anilistCover && tLocal) return tLocal;
+    if (anilistCover && tCover) return tCover;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
     return (
-      fav?.cover || tracking.get(mangaUrl, sourceId)?.cover || recallCover(mangaUrl) || ''
+      fav?.cover || tCover || recallCover(mangaUrl) || ''
     );
-  }, [mangaUrl, sourceId, progressTick]);
+  }, [mangaUrl, sourceId, progressTick, anilistCover, coverTick]);
 
   const coverSrc = useMemo(() => {
+    const t = tracking.get(mangaUrl, sourceId);
+    const tLocal = t?.coverLocal;
+    const tCover = t?.cover;
+    if (anilistCover && tLocal) return tLocal;
+    if (anilistCover && tCover) return tCover;
     const local = lib.fav(mangaUrl, sourceId)?.coverLocal;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
     if (knownCover) return knownCover;
     return d?.cover || '';
-  }, [d?.cover, knownCover, mangaUrl, sourceId]);
+  }, [d?.cover, knownCover, mangaUrl, sourceId, anilistCover, coverTick]);
 
   const [coverError, setCoverError] = useState(false);
   useEffect(() => { setCoverError(false); }, [coverSrc]);
@@ -145,6 +157,8 @@ export default function Detail() {
   );
 
   useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
+  useEffect(() => tracking.subscribe(() => { setAniLinked(!!tracking.get(mangaUrl, sourceId)); setCoverTick((t) => t + 1); }), []);
+  useEffect(() => settings.subscribe((s) => setAnilistCover(!!s.anilistCover)), []);
   useEffect(() => settings.subscribe((s) => {
     try {
       const map = JSON.parse(localStorage.getItem('cytlex:chaptersPerRowByManga') || '{}');

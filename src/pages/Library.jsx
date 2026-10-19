@@ -8,6 +8,7 @@ import { extensions } from '../lib/extensions.js';
 import { makeCoverThumb } from '../lib/covers.js';
 import { checkLibrary } from '../lib/notify.js';
 import { progress } from '../lib/progress.js';
+import { tracking } from '../lib/tracking.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { api } from '../lib/api.js';
 import { useToast } from '../components/Toast.jsx';
@@ -152,6 +153,34 @@ export default function Library() {
     })();
     return () => { cancelled = true; };
   }, [shown]);
+
+  useEffect(() => {
+    if (!settings.get().anilistCover) return undefined;
+    let cancelled = false;
+    (async () => {
+      const pending = shown.filter((f) => {
+        const t = tracking.get(f.url, f.sourceId || 'leercapitulo');
+        return t?.cover && !t?.coverLocal;
+      });
+      const thumbs = await Promise.all(
+        pending.map(async (f) => {
+          const sid = f.sourceId || 'leercapitulo';
+          const t = tracking.get(f.url, sid);
+          return [f, sid, t?.cover, await makeCoverThumb(t?.cover)];
+        })
+      );
+      if (cancelled) return;
+      let changed = false;
+      for (const [f, sid, url, local] of thumbs) {
+        if (local) {
+          tracking.updateCover(f.url, sid, { coverLocal: local });
+          changed = true;
+        }
+      }
+      if (changed) setFavs(lib.favs());
+    })();
+    return () => { cancelled = true; };
+  }, [shown, settings.get().anilistCover]);
 
   return (
     <div className="min-h-full flex flex-col">
