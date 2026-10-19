@@ -16,6 +16,7 @@ import { EmptyState } from '../components/ui/empty-state.jsx';
 import { Dialog } from '../components/ui/dialog.jsx';
 import { Skeleton } from '../components/ui/skeleton.jsx';
 import AniListPanel from '../components/AniListPanel.jsx';
+import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -89,6 +90,14 @@ export default function Detail() {
   const [err, setErr] = useState('');
   const [fav, setFav] = useState(false);
   const [asc, setAsc] = useState(() => chapterOrder.get(mangaUrl));
+  const [chaptersPerRow, setChaptersPerRow] = useState(() => {
+    try {
+      const map = JSON.parse(localStorage.getItem('cytlex:chaptersPerRowByManga') || '{}');
+      if (map[mangaUrl]) return map[mangaUrl];
+    } catch {}
+    const v = settings.get().chaptersPerRow;
+    return [1, 2, 3].includes(v) ? v : 1;
+  });
   const [dup, setDup] = useState(null);
   const [catPick, setCatPick] = useState(null);
   const catMenuRef = useRef(null);
@@ -136,6 +145,14 @@ export default function Detail() {
   );
 
   useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
+  useEffect(() => settings.subscribe((s) => {
+    try {
+      const map = JSON.parse(localStorage.getItem('cytlex:chaptersPerRowByManga') || '{}');
+      if (map[mangaUrl]) return; // per-manga override takes precedence
+    } catch {}
+    const v = s.chaptersPerRow;
+    setChaptersPerRow([1, 2, 3].includes(v) ? v : 1);
+  }), []);
 
   useEffect(() => {
     const main = document.querySelector('main');
@@ -436,6 +453,9 @@ export default function Detail() {
               Por {d.facts.autor}
             </div>
           )}
+          <div className="mt-1">
+            <SourceLine sourceId={sourceId} />
+          </div>
           <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(15 * scale)}px` }}>
             {d.altTitles?.slice(0, 160)}
           </div>
@@ -566,8 +586,8 @@ export default function Detail() {
           </Button>
 
           {catPick?.inline && (
-            <div className="absolute left-1/2 top-full z-40 mt-2 w-max min-w-full max-w-64 -translate-x-1/2 rounded-xl border border-border bg-card p-3 shadow-2xl">
-              <div className="flex flex-col gap-1.5">
+            <div className="absolute left-1/2 top-full z-40 mt-2 w-max min-w-full max-w-64 -translate-x-1/2 rounded-xl border border-border bg-card shadow-2xl" style={{ padding: px(12, scale, 9) }}>
+              <div className="flex flex-col" style={{ gap: px(6, scale, 4) }}>
                 {catPick.list.map((c) => {
                   const on = catPick.selected.includes(c.id);
                   return (
@@ -582,9 +602,16 @@ export default function Detail() {
                         }))
                       }
                       className={cn(
-                        'w-full min-w-0 truncate rounded-md px-2.5 py-1.5 text-xs font-medium text-center transition-colors',
+                        'w-full min-w-0 truncate rounded-md text-center transition-colors font-medium',
                         on ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent'
                       )}
+                      style={{
+                        paddingLeft: px(10, scale, 7),
+                        paddingRight: px(10, scale, 7),
+                        paddingTop: px(6, scale, 4),
+                        paddingBottom: px(6, scale, 4),
+                        fontSize: px(12, scale, 10)
+                      }}
                     >
                       {c.name}
                     </button>
@@ -595,6 +622,12 @@ export default function Detail() {
                 <Button
                   size="sm"
                   className="w-full"
+                  style={{
+                    height: px(32, scale, 27),
+                    fontSize: px(13, scale, 11),
+                    paddingLeft: px(12, scale, 9),
+                    paddingRight: px(12, scale, 9)
+                  }}
                   onClick={() => {
                     addToLibrary(catPick.pending, catPick.selected);
                     setCatPick(null);
@@ -634,7 +667,7 @@ export default function Detail() {
       />
 
       <div className="mt-6 border-t border-border pt-3">
-        <div className="mb-2">
+        <div className="mb-2 flex items-center gap-2">
           <button
             type="button"
             onClick={() => setAsc((v) => { chapterOrder.set(mangaUrl, !v); return !v; })}
@@ -660,10 +693,37 @@ export default function Detail() {
               />
             </span>
           </button>
+          <Button
+            size="sm"
+            variant="secondary"
+            title="Capítulos por fila"
+            className="rounded-lg"
+            onClick={() => {
+              const order = [1, 2, 3];
+              const next = order[(order.indexOf(chaptersPerRow) + 1) % order.length];
+              setChaptersPerRow(next);
+              try {
+                const map = JSON.parse(localStorage.getItem('cytlex:chaptersPerRowByManga') || '{}');
+                map[mangaUrl] = next;
+                localStorage.setItem('cytlex:chaptersPerRowByManga', JSON.stringify(map));
+              } catch {}
+            }}
+            style={{
+              height: px(32, scale, 27),
+              fontSize: px(13, scale, 11),
+              paddingLeft: px(10, scale, 8),
+              paddingRight: px(10, scale, 8)
+            }}
+          >
+            {chaptersPerRow} por fila
+          </Button>
         </div>
       </div>
 
-      <div className="flex flex-col gap-2">
+      <div
+        className={chaptersPerRow > 1 ? 'grid gap-2' : 'flex flex-col gap-2'}
+        style={chaptersPerRow > 1 ? { gridTemplateColumns: `repeat(${chaptersPerRow}, minmax(0, 1fr))` } : undefined}
+      >
         {chapters.map((c, i) => {
           const cap = progress.get(c.url, sourceId);
           const read = !!cap?.read;

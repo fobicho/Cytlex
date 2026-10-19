@@ -122,6 +122,16 @@ function createWindow(startBounds = null, startMaximized = false) {
     }
   });
 
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsed = validateUrl(url);
+      shell.openExternal(parsed.toString());
+    } catch {
+      // ignore invalid or disallowed URLs
+    }
+    return { action: 'deny' };
+  });
+
   return win;
 }
 
@@ -552,5 +562,17 @@ ipcMain.handle('window:is-maximized', (e) => {
 
 ipcMain.handle('window:close', (e) => {
   BrowserWindow.fromWebContents(e.sender)?.close();
+});
+
+ipcMain.handle('shell:open-external', (_e, url) => {
+  let parsed;
+  try {
+    parsed = validateUrl(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:') return false;
+  shell.openExternal(parsed.toString());
+  return true;
 });
 

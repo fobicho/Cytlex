@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon, Coffee } from 'lucide-react';
 import { THEMES, MODES } from '../lib/themes.js';
 import { settings } from '../lib/settings.js';
 import { cn } from '../lib/utils.js';
@@ -27,7 +27,7 @@ const STEPS = [
   },
   {
     title: 'Todo listo',
-    body: '¡Ya estás preparado para empezar con tus lecturas! Solo no olvides agregar el repositorio con las distintas extensiones en \'Ajustes\'.'
+    body: '¡Ya estás preparado para empezar con tus lecturas! Solo no olvides agregar el repositorio con las distintas extensiones en \'Ajustes\'.\n\nSi luego de usarla te gusta mi aplicación, por favor considera aportar la cantidad que desees, de manera totalmente voluntaria, para seguir dándole mantención. <3'
   }
 ];
 
@@ -89,6 +89,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const back = () => setStep((s) => Math.max(0, s - 1));
 
   const isTheme = step === 2;
+  const isReady = step === STEPS.length - 1;
   const progress = ((step + 1) / STEPS.length) * 100;
 
   return (
@@ -139,6 +140,22 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
 
                 {STEPS[step].body && (
                   <p className="text-base text-muted-foreground leading-relaxed whitespace-pre-line">{STEPS[step].body}</p>
+                )}
+
+                {isReady && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-5"
+                    onClick={() => {
+                      const url = 'https://ko-fi.com/fobicho';
+                      if (window.cytlex?.openExternal) window.cytlex.openExternal(url);
+                      else window.open(url, '_blank', 'noopener');
+                    }}
+                  >
+                    <Coffee className="h-4 w-4 mr-1.5" />
+                    Apoyar en Ko-fi
+                  </Button>
                 )}
 
                 {STEPS[step].bullets && (

@@ -1,7 +1,9 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../../lib/utils.js';
+import { useScale, px } from '../../lib/useScale.js';
 
-export function Dialog({ open, onClose, title, description, children, className, hideDivider, bodyClassName, scrollableBody = true }) {
+export function Dialog({ open, onClose, title, description, children, className, hideDivider, bodyClassName, scrollableBody = true, scale }) {
+  const sc = scale ?? 1;
   return (
     <AnimatePresence>
       {open && (
@@ -25,17 +27,17 @@ export function Dialog({ open, onClose, title, description, children, className,
             )}
           >
             {(title || description) && (
-              <div className={cn('px-6 py-4 shrink-0', !hideDivider && 'border-b border-border')}>
-                {title && <h2 className="text-lg font-semibold tracking-tight">{title}</h2>}
-                {description && <p className="text-sm text-muted-foreground mt-1">{description}</p>}
+              <div className={cn('shrink-0', !hideDivider && 'border-b border-border')} style={{ padding: `${px(24, sc, 18)} ${px(24, sc, 18)} ${px(12, sc, 9)}` }}>
+                {title && <h2 className="font-semibold tracking-tight" style={{ fontSize: px(18, sc, 15) }}>{title}</h2>}
+                {description && <p className="text-muted-foreground mt-1" style={{ fontSize: px(13, sc, 11), marginTop: px(4, sc, 3) }}>{description}</p>}
               </div>
             )}
             <div
               className={cn(
-                'px-6 pb-8',
                 scrollableBody ? 'overflow-y-auto' : 'overflow-hidden',
                 bodyClassName
               )}
+              style={{ padding: `${px(12, sc, 9)} ${px(24, sc, 18)} ${px(24, sc, 18)}` }}
             >
               {children}
             </div>

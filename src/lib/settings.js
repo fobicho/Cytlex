@@ -7,10 +7,13 @@ const defaults = {
   mode: 'light',
   readerMode: 'paginado',
   readerZoom: 100,
+  readerDoublePage: false,
   libraryView: 'grid',
   libraryCoverSize: 160,
   libraryShowUnread: true,
+  chaptersPerRow: 1,
   sidebarCollapsed: false,
+  uiScale: 1,
   extIndexUrl: '',
   anilistSynopsisLang: 'romaji',
   notifyEnabled: false,
@@ -18,7 +21,8 @@ const defaults = {
   notifyBackground: false,
   extUpdateNotify: false,
   notifyBaseline: {},
-  tutorialSeen: false
+  tutorialSeen: false,
+  donationSeen: false
 };
 
 function normalize(s) {

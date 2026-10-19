@@ -20,7 +20,7 @@ const TABS = [
   { id: 'extensiones', label: 'Extensiones' }
 ];
 
-function SourceSection({ r, coverSize, scale = 1, first = false }) {
+function SourceSection({ r, coverSize, scale = 1, first = false, animate = false }) {
   const trackRef = useRef(null);
   const mainRef = useRef(null);
   const [canLeft, setCanLeft] = useState(false);
@@ -87,12 +87,15 @@ function SourceSection({ r, coverSize, scale = 1, first = false }) {
   const visible = r.items.slice(0, 15);
 
   return (
-    <section
+    <motion.section
       className="mb-10"
       style={{
         marginBottom: `${Math.max(16, Math.round(24 * scale))}px`,
         marginTop: first ? `${Math.max(8, Math.round(12 * scale))}px` : undefined
       }}
+      initial={animate ? { opacity: 0, y: 8 } : false}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25, ease: 'easeOut' }}
     >
       <div
         className="flex items-center gap-2.5 mb-4"
@@ -170,11 +173,12 @@ function SourceSection({ r, coverSize, scale = 1, first = false }) {
           </a>
         )}
       </div>
-    </section>
+    </motion.section>
   );
 }
 
 let sessionTab = 'mangas';
+let animateSearch = false;
 
 export default function Catalog() {
   const loc = useLocation();
@@ -190,6 +194,7 @@ export default function Catalog() {
 
   useEffect(() => settings.subscribe((s) => setCoverSize(s.libraryCoverSize)), []);
   useEffect(() => { sessionTab = tab; }, [tab]);
+  useEffect(() => () => { animateSearch = false; }, []);
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
 
@@ -201,6 +206,8 @@ export default function Catalog() {
   const withResults = results ? results.filter((r) => r.items.length > 0) : [];
   const done = !!results && !searching;
 
+  useEffect(() => { if (done) animateSearch = false; }, [done]);
+
   const updateResults = (fn) => {
     lastSearch.results = fn(lastSearch.results);
     setResults(lastSearch.results);
@@ -210,6 +217,7 @@ export default function Catalog() {
     const list = extensions.installed();
     if (!list.length) return;
     catalogScroll.clear();
+    animateSearch = true;
     lastSearch.q = query;
     lastSearch.genre = '';
     lastSearch.results = list
@@ -371,7 +379,7 @@ export default function Catalog() {
                 )}
 
                 {withResults.map((r, i) => (
-                  <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} first={i === 0} />
+                  <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} first={i === 0} animate={animateSearch} />
                 ))}
 
                 {done && withResults.length === 0 && (

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, ArrowUpDown } from 'lucide-react';
 import { lib } from '../lib/library.js';
 import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
@@ -28,15 +28,16 @@ export default function Library() {
   const [view, setView] = useState(settings.get().libraryView);
   const [checking, setChecking] = useState(false);
   const { toast } = useToast();
-  const [coverSize, setCoverSize] = useState(() => settings.get().libraryCoverSize);
+  const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
   const [showUnread, setShowUnread] = useState(() => settings.get().libraryShowUnread);
+  const [sortBy, setSortBy] = useState(() => localStorage.getItem('cytlex:librarySort') || 'title-asc');
   const [unread, setUnread] = useState({});
   const scale = useScale();
   const [progressTick, setProgressTick] = useState(0);
   useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
   useEffect(
     () => settings.subscribe((s) => {
-      setCoverSize(s.libraryCoverSize);
+      setCoverSize(Math.round(160 * (s.uiScale || 1)));
       setShowUnread(s.libraryShowUnread);
     }),
     []
@@ -80,19 +81,30 @@ export default function Library() {
   };
 
   const shown = useMemo(
-    () =>
-      favs
-        .filter((f) => (f.cats || []).includes(sel))
-        .slice()
-        .sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'es', { sensitivity: 'base', numeric: true })),
-    [favs, sel]
+    () => {
+      const list = favs.filter((f) => (f.cats || []).includes(sel)).slice();
+      const cmp = (a, b) => {
+        switch (sortBy) {
+          case 'title-desc':
+            return String(b.title || '').localeCompare(String(a.title || ''), 'es', { sensitivity: 'base', numeric: true });
+          case 'unread-desc':
+            return (unread[`${b.sourceId || 'leercapitulo'}|${b.url}`] ?? 0) - (unread[`${a.sourceId || 'leercapitulo'}|${a.url}`] ?? 0);
+          case 'recent':
+            return (b.addedAt || 0) - (a.addedAt || 0);
+          default:
+            return String(a.title || '').localeCompare(String(b.title || ''), 'es', { sensitivity: 'base', numeric: true });
+        }
+      };
+      return list.sort(cmp);
+    },
+    [favs, sel, sortBy, unread, progressTick]
   );
 
   useEffect(() => {
     if (!showUnread) return undefined;
     let alive = true;
     (async () => {
-      const pending = shown.filter((f) => extensions.isInstalled(f.sourceId || 'leercapitulo'));
+      const pending = favs.filter((f) => (f.cats || []).includes(sel)).filter((f) => extensions.isInstalled(f.sourceId || 'leercapitulo'));
       const results = await Promise.all(
         pending.map(async (f) => {
           const sid = f.sourceId || 'leercapitulo';
@@ -113,13 +125,13 @@ export default function Library() {
       );
       if (!alive) return;
       setUnread((prev) => {
-        const next = {};
+        const next = { ...prev };
         for (const entry of results) if (entry) next[entry[0]] = entry[1];
         return next;
       });
     })();
     return () => { alive = false; };
-  }, [shown, progressTick, showUnread]);
+  }, [favs, sel, progressTick, showUnread]);
 
   useEffect(() => {
     let cancelled = false;
@@ -179,7 +191,31 @@ export default function Library() {
             </button>
           );
         })}
-        <div className="ml-auto self-center">
+        <div className="ml-auto self-center flex items-center" style={{ gap: px(8, scale, 6) }}>
+          <Button
+            size="sm"
+            variant="secondary"
+            title="Ordenar"
+            className="rounded-lg"
+            onClick={() => {
+              const order = ['title-asc', 'title-desc', 'unread-desc', 'recent'];
+              const next = order[(order.indexOf(sortBy) + 1) % order.length];
+              setSortBy(next);
+              try { localStorage.setItem('cytlex:librarySort', next); } catch {}
+            }}
+            style={{
+              height: px(36, scale, 30),
+              fontSize: `${Math.round(14 * scale)}px`,
+              paddingLeft: px(12, scale, 9),
+              paddingRight: px(12, scale, 9)
+            }}
+          >
+            <ArrowUpDown
+              className="mr-2"
+              style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }}
+            />
+            {sortBy === 'title-asc' ? 'A-Z' : sortBy === 'title-desc' ? 'Z-A' : sortBy === 'unread-desc' ? 'Sin leer' : 'Recientes'}
+          </Button>
           <Button
             size="sm"
             variant="secondary"
