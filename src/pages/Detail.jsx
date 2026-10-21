@@ -116,6 +116,7 @@ export default function Detail() {
   const [anilistCover, setAnilistCover] = useState(() => !!settings.get().anilistCover);
   const scale = useScale();
   const coverSize = Math.round(COVER_BASE * scale);
+
   const knownCover = useMemo(() => {
     const fav = lib.fav(mangaUrl, sourceId);
     const local = fav?.coverLocal;
@@ -276,6 +277,7 @@ export default function Detail() {
   }, [animate]);
 
   const addToLibrary = (manga, catIds) => {
+    if (!Array.isArray(catIds) || catIds.length === 0) return;
     lib.toggleFav(manga, catIds);
     setFav(true);
     makeCoverThumb(manga.cover).then((local) => {
@@ -283,9 +285,15 @@ export default function Detail() {
     });
   };
 
-  const openCatMenu = (manga) => {
+  const openCatMenu = (manga, selected) => {
     const allCats = lib.cats();
-    setCatPick({ list: allCats, selected: allCats[0] ? [allCats[0].id] : [], pending: manga, inline: true });
+    const initialSelection = selected ?? (allCats[0] ? [allCats[0].id] : []);
+    setCatPick({
+      list: allCats,
+      selected: initialSelection.filter((id) => allCats.some((category) => category.id === id)),
+      pending: manga,
+      inline: true
+    });
   };
 
   useEffect(() => {
@@ -301,6 +309,28 @@ export default function Detail() {
       window.removeEventListener('keydown', onKey);
     };
   }, [catPick?.inline]);
+
+  const saveCatPick = () => {
+    if (!catPick?.inline) return;
+    const { pending, selected } = catPick;
+    const alreadySaved = lib.isFav(pending.url, pending.sourceId);
+    if (selected.length) {
+      if (alreadySaved) {
+        lib.updateFavCats(pending.url, selected, pending.sourceId);
+        setFav(true);
+      } else {
+        addToLibrary(pending, selected);
+      }
+    } else if (alreadySaved) {
+      lib.toggleFav(pending);
+      setFav(false);
+    }
+    setCatPick(null);
+  };
+
+  const catPickRemoves = !!catPick?.inline
+    && catPick.selected.length === 0
+    && lib.isFav(catPick.pending.url, catPick.pending.sourceId);
 
   const onAddClick = () => {
     const manga = {
@@ -539,7 +569,7 @@ export default function Detail() {
       >
         {resume ? (
           <Button
-            className="shadow-lg shadow-primary/30"
+            className="shadow-none"
             onClick={() => {
               window.location.hash = `#/leer?u=${encodeURIComponent(resume.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
             }}
@@ -566,37 +596,54 @@ export default function Detail() {
         <div className="relative" ref={catMenuRef}>
           <Button
             variant="secondary"
+            className="active:scale-100"
             aria-expanded={!!catPick?.inline}
+            aria-label={fav ? 'Cambiar categorías de la biblioteca' : 'Añadir a la biblioteca'}
             onClick={() => {
-              if (fav) {
-                lib.toggleFav({ url: mangaUrl, sourceId });
-                setFav(false);
-                return;
-              }
               if (catPick?.inline) {
                 setCatPick(null);
+                return;
+              }
+              const manga = {
+                url: mangaUrl,
+                title: d.title,
+                cover: d.cover,
+                type: d.facts.tipo,
+                author: d.facts.autor,
+                sourceId
+              };
+              if (fav) {
+                const saved = lib.fav(mangaUrl, sourceId);
+                openCatMenu(manga, saved?.cats || []);
                 return;
               }
               onAddClick();
             }}
             style={{
+              transform: 'none',
               height: px(40, scale, 33),
               paddingLeft: px(16, scale, 13),
               paddingRight: px(16, scale, 13),
               fontSize: px(14, scale, 12)
             }}
           >
-            <Star
-              className={cn('mr-2 shrink-0', fav && 'fill-current text-amber-400')}
-              style={{ width: px(16, scale, 14), height: px(16, scale, 14) }}
+            <span className="inline-grid shrink-0">
+              <span aria-hidden="true" className="invisible col-start-1 row-start-1 inline-flex items-center whitespace-nowrap">
+                <Star className="mr-2" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+                {fav ? 'En biblioteca' : 'Añadir'}
+              </span>
+              <span aria-hidden="true" className="col-start-1 row-start-1 inline-flex items-center whitespace-nowrap">
+                <Star
+                  className={cn('mr-2 shrink-0', fav && 'fill-current text-amber-400')}
+                  style={{ width: px(16, scale, 14), height: px(16, scale, 14) }}
+                />
+                {fav ? 'En biblioteca' : 'Añadir'}
+              </span>
+            </span>
+            <ChevronDown
+              className={cn('ml-2 transition-transform duration-200', catPick?.inline && 'rotate-180')}
+              style={{ width: px(14, scale, 12), height: px(14, scale, 12) }}
             />
-            {fav ? 'En biblioteca' : 'Añadir'}
-            {!fav && (
-              <ChevronDown
-                className={cn('ml-2 transition-transform duration-200', catPick?.inline && 'rotate-180')}
-                style={{ width: px(14, scale, 12), height: px(14, scale, 12) }}
-              />
-            )}
           </Button>
 
           {catPick?.inline && (
@@ -615,9 +662,12 @@ export default function Detail() {
                           selected: on ? p.selected.filter((x) => x !== c.id) : [...p.selected, c.id]
                         }))
                       }
+                      aria-pressed={on}
                       className={cn(
-                        'w-full min-w-0 truncate rounded-md text-center transition-colors font-medium',
-                        on ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent'
+                        'relative w-full min-w-0 truncate rounded-md border text-center font-medium transition-colors',
+                        on
+                          ? 'border-primary/60 bg-card text-foreground'
+                          : 'border-transparent bg-muted text-muted-foreground hover:bg-accent'
                       )}
                       style={{
                         paddingLeft: px(10, scale, 7),
@@ -635,29 +685,33 @@ export default function Detail() {
               <div className="mt-3 w-full">
                 <Button
                   size="sm"
-                  className="w-full"
+                  variant={catPickRemoves ? 'destructive' : 'default'}
+                  className="w-full transition-colors duration-200 active:scale-100"
+                  aria-label={catPickRemoves ? 'Eliminar manga de la biblioteca' : 'Añadir manga a la biblioteca'}
+                  disabled={catPick.selected.length === 0 && !catPickRemoves}
                   style={{
+                    transform: 'none',
                     height: px(32, scale, 27),
                     fontSize: px(13, scale, 11),
                     paddingLeft: px(12, scale, 9),
                     paddingRight: px(12, scale, 9)
                   }}
-                  onClick={() => {
-                    addToLibrary(catPick.pending, catPick.selected);
-                    setCatPick(null);
-                  }}
+                  onClick={saveCatPick}
                 >
-                  Añadir
+                  {catPickRemoves ? 'Eliminar' : 'Añadir'}
                 </Button>
               </div>
             </div>
           )}
+
         </div>
         <Button
           variant="secondary"
+          className="active:scale-100"
           onClick={() => setAniListOpen(true)}
           title="Vincular con AniList"
           style={{
+            transform: 'none',
             height: px(40, scale, 33),
             paddingLeft: px(16, scale, 13),
             paddingRight: px(16, scale, 13),

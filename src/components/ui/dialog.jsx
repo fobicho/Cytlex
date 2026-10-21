@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../../lib/utils.js';
 import { useScale, px } from '../../lib/useScale.js';
 
-export function Dialog({ open, onClose, title, description, children, className, hideDivider, bodyClassName, scrollableBody = true, scale }) {
+export function Dialog({ open, onClose, title, description, children, className, hideDivider, bodyClassName, bodyPaddingTop = 12, scrollableBody = true, scale }) {
   const sc = scale ?? 1;
   return (
     <AnimatePresence>
@@ -37,7 +37,7 @@ export function Dialog({ open, onClose, title, description, children, className,
                 scrollableBody ? 'overflow-y-auto' : 'overflow-hidden',
                 bodyClassName
               )}
-              style={{ padding: `${px(12, sc, 9)} ${px(24, sc, 18)} ${px(24, sc, 18)}` }}
+              style={{ padding: `${px(bodyPaddingTop, sc, bodyPaddingTop * 0.75)} ${px(24, sc, 18)} ${px(24, sc, 18)}` }}
             >
               {children}
             </div>

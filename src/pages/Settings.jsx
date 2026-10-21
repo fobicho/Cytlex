@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { flushSync } from 'react-dom';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, Coffee, X } from 'lucide-react';
 import { settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
@@ -80,6 +81,33 @@ function Row({ title, desc, right, first, last, className, scale = 1 }) {
   );
 }
 
+function ConnectHint({ open, hintRef, scale, reduceMotion, className }) {
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          ref={hintRef}
+          role="status"
+          initial={{
+            opacity: 0,
+            transform: reduceMotion ? 'translateY(0) scale(1)' : 'translateY(-4px) scale(0.98)'
+          }}
+          animate={{ opacity: 1, transform: 'translateY(0) scale(1)' }}
+          exit={{
+            opacity: 0,
+            transform: reduceMotion ? 'translateY(0) scale(1)' : 'translateY(-4px) scale(0.98)'
+          }}
+          transition={{ duration: 0.18, ease: [0.23, 1, 0.32, 1] }}
+          className={cn('absolute right-0 top-full z-20 mt-2 rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground shadow-lg whitespace-nowrap', className)}
+          style={{ fontSize: px(12, scale, 10) }}
+        >
+          ¡Conecta tu cuenta primero!
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 function Segmented({ value, options, onChange, scale = 1 }) {
   return (
     <div className="flex" style={{ gap: px(8, scale, 5) }}>
@@ -151,6 +179,8 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   const [authViewer, setAuthViewer] = useState(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [authErr, setAuthErr] = useState('');
+  const [connectHintFor, setConnectHintFor] = useState(null);
+  const connectHintRef = useRef(null);
   const { toast } = useToast();
   const [bgErr, setBgErr] = useState('');
   const [confirmRemoveRepo, setConfirmRemoveRepo] = useState(false);
@@ -159,6 +189,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
     () => !document.body.classList.contains('tutorial-open') && !settings.get().donationSeen
   );
   const scale = useScale();
+  const reduceMotion = useReducedMotion();
 
   const toggleBackground = async (on) => {
     setBgErr('');
@@ -176,6 +207,18 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
 
   useEffect(() => settings.subscribe(setS), []);
   useEffect(() => tracking.subscribe(() => setLinkedCount(tracking.linkedCount())), []);
+  useEffect(() => {
+    if (!connectHintFor) return;
+    const timer = window.setTimeout(() => setConnectHintFor(null), 3000);
+    const dismissOutside = (event) => {
+      if (!connectHintRef.current?.contains(event.target)) setConnectHintFor(null);
+    };
+    document.addEventListener('pointerdown', dismissOutside);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('pointerdown', dismissOutside);
+    };
+  }, [connectHintFor]);
   useEffect(() => {
     if (!confirmRemoveRepo) return;
     const onDown = (e) => {
@@ -202,6 +245,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
       if (!r?.cancelled) {
         setAuthState({ connected: true });
         setAuthViewer(await session.viewer());
+        setConnectHintFor(null);
       }
     } catch (e) {
       setAuthErr(String(e?.message || e));
@@ -211,7 +255,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
 
   const set = (patch) => setS(settings.set(patch));
   const setAppearance = (patch) => {
-    const run = () => set(patch);
+    const run = () => flushSync(() => set(patch));
     if (typeof document !== 'undefined' && typeof document.startViewTransition === 'function') {
       document.startViewTransition(run);
     } else {
@@ -809,12 +853,28 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           title="Mostrar portada de AniList"
           desc="Usa la portada de AniList en lugar de la del manga (solo vinculados)"
           right={
-            <Switch
-              scale={scale}
-              on={s.anilistCover}
-              onChange={(v) => set({ anilistCover: v })}
-              label="Mostrar portada de AniList"
-            />
+            <div className="relative flex items-center">
+              <Switch
+                scale={scale}
+                on={s.anilistCover}
+                onChange={(v) => {
+                  if (!authState.connected) {
+                    setConnectHintFor('cover');
+                    return;
+                  }
+                  setConnectHintFor(null);
+                  set({ anilistCover: v });
+                }}
+                label="Mostrar portada de AniList"
+              />
+              <ConnectHint
+                open={connectHintFor === 'cover'}
+                hintRef={connectHintRef}
+                scale={scale}
+                reduceMotion={reduceMotion}
+                className="mt-2"
+              />
+            </div>
           }
         />
         <Row
@@ -828,33 +888,63 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           }
           right={
             <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => anilist.clearCache()}
-                style={{
-                  height: px(36, scale, 30),
-                  fontSize: px(14, scale, 12),
-                  paddingLeft: px(12, scale, 9),
-                  paddingRight: px(12, scale, 9)
-                }}
-              >
-                <RefreshCw className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                Refrescar caché
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => { window.location.hash = '#/seguimiento'; }}
-                style={{
-                  height: px(36, scale, 30),
-                  fontSize: px(14, scale, 12),
-                  paddingLeft: px(12, scale, 9),
-                  paddingRight: px(12, scale, 9)
-                }}
-              >
-                Ver mi lista
-              </Button>
+              <div className="relative">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    if (!authState.connected) {
+                      setConnectHintFor('refresh');
+                      return;
+                    }
+                    setConnectHintFor(null);
+                    anilist.clearCache();
+                  }}
+                  style={{
+                    height: px(36, scale, 30),
+                    fontSize: px(14, scale, 12),
+                    paddingLeft: px(12, scale, 9),
+                    paddingRight: px(12, scale, 9)
+                  }}
+                >
+                  <RefreshCw className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                  Refrescar caché
+                </Button>
+                <ConnectHint
+                  open={connectHintFor === 'refresh'}
+                  hintRef={connectHintRef}
+                  scale={scale}
+                  reduceMotion={reduceMotion}
+                />
+              </div>
+              <div className="relative">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    if (!authState.connected) {
+                      setConnectHintFor('list');
+                      return;
+                    }
+                    setConnectHintFor(null);
+                    window.location.hash = '#/seguimiento';
+                  }}
+                  style={{
+                    height: px(36, scale, 30),
+                    fontSize: px(14, scale, 12),
+                    paddingLeft: px(12, scale, 9),
+                    paddingRight: px(12, scale, 9)
+                  }}
+                >
+                  Ver mi lista
+                </Button>
+                <ConnectHint
+                  open={connectHintFor === 'list'}
+                  hintRef={connectHintRef}
+                  scale={scale}
+                  reduceMotion={reduceMotion}
+                />
+              </div>
             </div>
           }
         />

@@ -189,10 +189,10 @@ export default function Catalog() {
   const [sources, setSources] = useState(() => extensions.installed());
   const [q, setQ] = useState(() => lastSearch.q);
   const [results, setResults] = useState(() => lastSearch.results);
-  const [coverSize, setCoverSize] = useState(() => settings.get().libraryCoverSize);
+  const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
   const scale = useScale();
 
-  useEffect(() => settings.subscribe((s) => setCoverSize(s.libraryCoverSize)), []);
+  useEffect(() => settings.subscribe((s) => setCoverSize(Math.round(160 * (s.uiScale || 1)))), []);
   useEffect(() => { sessionTab = tab; }, [tab]);
   useEffect(() => () => { animateSearch = false; }, []);
 

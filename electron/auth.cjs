@@ -1,4 +1,4 @@
-const { BrowserWindow, safeStorage, ipcMain, app } = require('electron');
+const { BrowserWindow, safeStorage, ipcMain, app, session } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 
@@ -6,6 +6,7 @@ const CLIENT_ID = process.env.ANILIST_CLIENT_ID || '52189';
 const AUTH_URL = 'https://anilist.co/api/v2/oauth/authorize';
 const REDIRECT_URI = 'https://anilist.co/api/v2/oauth/authorize/callback';
 const TOKEN_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+const AUTH_PARTITION = 'cytlex-anilist-auth';
 
 const file = () => path.join(app.getPath('userData'), 'session.bin');
 
@@ -54,7 +55,7 @@ function login(parent) {
       modal: false,
       autoHideMenuBar: true,
       title: 'Conectar con AniList',
-      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, partition: AUTH_PARTITION }
     });
 
     let settled = false;
@@ -108,8 +109,11 @@ function register() {
     return r;
   });
 
-  ipcMain.handle('auth:logout', () => {
+  ipcMain.handle('auth:logout', async () => {
     clear();
+    const authSession = session.fromPartition(AUTH_PARTITION);
+    await authSession.clearStorageData();
+    await authSession.clearCache();
     return { connected: false };
   });
 

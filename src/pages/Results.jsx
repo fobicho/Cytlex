@@ -17,10 +17,10 @@ export default function Results() {
   const sourceId = new URLSearchParams(loc.search).get('s') || '';
   const group = lastSearch.results?.find((r) => r.id === sourceId);
   const manifest = group?.manifest || extensions.manifest(sourceId);
-  const [coverSize, setCoverSize] = useState(() => settings.get().libraryCoverSize);
+  const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
   const scale = useScale();
 
-  useEffect(() => settings.subscribe((s) => setCoverSize(s.libraryCoverSize)), []);
+  useEffect(() => settings.subscribe((s) => setCoverSize(Math.round(160 * (s.uiScale || 1)))), []);
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
 
