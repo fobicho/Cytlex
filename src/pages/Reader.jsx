@@ -17,6 +17,37 @@ import { useScale, px } from '../lib/useScale.js';
 function ReaderPanel({ id, src, alt, loading = 'eager', imageClassName, imageStyle, wrapperClassName, wrapperStyle, onContextMenu, onLoaded, onFailed }) {
   const [status, setStatus] = useState('loading');
   const [attempt, setAttempt] = useState(0);
+  const autoRetried = useRef(false);
+
+  useEffect(() => {
+    autoRetried.current = false;
+    setAttempt(0);
+    setStatus('loading');
+  }, [src]);
+
+  useEffect(() => {
+    if (status !== 'loading' || loading !== 'eager') return undefined;
+    const timeout = setTimeout(() => {
+      if (!autoRetried.current) {
+        autoRetried.current = true;
+        setAttempt((current) => current + 1);
+      } else {
+        setStatus('error');
+        onFailed?.();
+      }
+    }, 15_000);
+    return () => clearTimeout(timeout);
+  }, [attempt, loading, src, status]);
+
+  const retryOrShowError = () => {
+    if (!autoRetried.current) {
+      autoRetried.current = true;
+      setAttempt((current) => current + 1);
+      return;
+    }
+    setStatus('error');
+    onFailed?.();
+  };
 
   return (
     <div id={id} className={cn('relative grid place-items-center', wrapperClassName)} style={wrapperStyle}>
@@ -28,7 +59,7 @@ function ReaderPanel({ id, src, alt, loading = 'eager', imageClassName, imageSty
       {status === 'error' && (
         <div role="alert" className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/90 px-3 text-center text-sm text-muted-foreground">
           <span>No se pudo cargar {alt.toLowerCase()}.</span>
-          <Button size="sm" variant="secondary" onClick={() => { setStatus('loading'); setAttempt((n) => n + 1); }}>
+          <Button size="sm" variant="secondary" onClick={() => { autoRetried.current = false; setStatus('loading'); setAttempt((n) => n + 1); }}>
             Reintentar
           </Button>
         </div>
@@ -38,10 +69,12 @@ function ReaderPanel({ id, src, alt, loading = 'eager', imageClassName, imageSty
         src={src}
         alt={alt}
         loading={loading}
+        draggable={false}
         referrerPolicy="no-referrer"
+        onDragStart={(e) => e.preventDefault()}
         onContextMenu={onContextMenu}
         onLoad={(e) => { setStatus('loaded'); onLoaded?.(e); }}
-        onError={() => { setStatus('error'); onFailed?.(); }}
+        onError={retryOrShowError}
         className={cn(imageClassName, 'transition-opacity duration-150', status === 'loaded' ? 'opacity-100' : 'opacity-0')}
         style={imageStyle}
       />
@@ -100,12 +133,90 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const [menu, setMenu] = useState(null);
   const [toast, setToast] = useState('');
   const [wheelZoom, setWheelZoom] = useState(0);
+  const wheelZoomRef = useRef(0);
+  const zoomContentRef = useRef(null);
+  const [zoomOrigin, setZoomOrigin] = useState({ x: 50, y: 50 });
+  const zoomOriginRef = useRef({ x: 50, y: 50 });
+  const zoomOriginHistoryRef = useRef([]);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const panRef = useRef({ x: 0, y: 0 });
+  const dragRef = useRef(null);
+  const [dragging, setDragging] = useState(false);
+  const [instantZoomReset, setInstantZoomReset] = useState(false);
+  const zoomResetFrame = useRef(null);
+  const lastPanelPointerDownRef = useRef(null);
+  const ignoreNativeDoubleClickUntilRef = useRef(0);
   const [isRead, setIsRead] = useState(() => !!progress.get(chapterUrl, sourceId)?.read);
   const pendingScrollRef = useRef(null);
   const sizesRef = useRef(new Map());
   const areaRef = useRef(null);
 
   const scalePct = Math.min(Math.max(settings.get().readerZoom, 20), 200) / 2;
+
+  const toggleZoomAtPointer = (e) => {
+    const stage = areaRef.current;
+    const content = zoomContentRef.current;
+    if (!stage || !content) return;
+    e.preventDefault();
+    dragRef.current = null;
+    setDragging(false);
+
+    const stageRect = stage.getBoundingClientRect();
+    const style = getComputedStyle(content);
+    const matrix = new DOMMatrixReadOnly(style.transform);
+    const [originX = content.clientWidth / 2, originY = content.clientHeight / 2] = style.transformOrigin.split(' ').map(parseFloat);
+    const currentScale = matrix.a || 1;
+    const visibleZoom = Math.max(0, (currentScale - 1) * 100);
+    const x = e.clientX - stageRect.left;
+    const y = e.clientY - stageRect.top;
+    const returningToOriginal = wheelZoomRef.current >= 50;
+    const panels = [...stage.querySelectorAll('img[alt^="Página "]')].map((panel) => panel.getBoundingClientRect());
+    const panelWidth = panels.length ? Math.max(...panels.map((rect) => rect.right)) - Math.min(...panels.map((rect) => rect.left)) : 0;
+    const targetScale = returningToOriginal || !panelWidth ? 1 : currentScale * stageRect.width / panelWidth;
+    const targetZoom = returningToOriginal ? 0 : Math.max(0, (targetScale - 1) * 100);
+    const target = returningToOriginal
+      ? { x: 50, y: 50 }
+      : {
+          x: Math.min(100, Math.max(0, (x / stageRect.width) * 100)),
+          y: Math.min(100, Math.max(0, (y / stageRect.height) * 100))
+        };
+    const targetOriginX = (target.x / 100) * content.clientWidth;
+    const targetOriginY = (target.y / 100) * content.clientHeight;
+    const stagedPan = {
+      x: matrix.e + (currentScale - 1) * (targetOriginX - originX),
+      y: matrix.f + (currentScale - 1) * (targetOriginY - originY)
+    };
+    let targetPan = { x: 0, y: 0 };
+    if (!returningToOriginal) {
+      const sourceX = originX + (x - matrix.e - originX) / currentScale;
+      const sourceY = originY + (y - matrix.f - originY) / currentScale;
+      const targetOriginX = (target.x / 100) * content.clientWidth;
+      const targetOriginY = (target.y / 100) * content.clientHeight;
+      targetPan = {
+        x: x - targetScale * sourceX - (1 - targetScale) * targetOriginX,
+        y: y - targetScale * sourceY - (1 - targetScale) * targetOriginY
+      };
+    }
+
+    if (zoomResetFrame.current) cancelAnimationFrame(zoomResetFrame.current);
+    setInstantZoomReset(true);
+    panRef.current = stagedPan;
+    setPan(stagedPan);
+    setWheelZoom(visibleZoom);
+    zoomOriginRef.current = target;
+    setZoomOrigin(target);
+    wheelZoomRef.current = targetZoom;
+    zoomOriginHistoryRef.current = returningToOriginal ? [] : Array.from({ length: 14 }, () => target);
+    zoomResetFrame.current = requestAnimationFrame(() => {
+      zoomResetFrame.current = requestAnimationFrame(() => {
+        panRef.current = targetPan;
+        setPan(targetPan);
+        setWheelZoom(targetZoom);
+        setInstantZoomReset(false);
+        zoomResetFrame.current = null;
+      });
+    });
+  };
 
   const showBar = useCallback(() => {
     clearTimeout(hideTimer.current);
@@ -147,6 +258,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   useEffect(() => () => {
     clearTimeout(barTimer.current);
     clearTimeout(hideTimer.current);
+    if (zoomResetFrame.current) cancelAnimationFrame(zoomResetFrame.current);
   }, []);
 
   useEffect(() => () => {
@@ -169,7 +281,15 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     if (!chapterUrl) return;
     let active = true;
     setErr('');
+    wheelZoomRef.current = 0;
     setWheelZoom(0);
+    zoomOriginRef.current = { x: 50, y: 50 };
+    zoomOriginHistoryRef.current = [];
+    setZoomOrigin(zoomOriginRef.current);
+    panRef.current = { x: 0, y: 0 };
+    setPan(panRef.current);
+    dragRef.current = null;
+    setDragging(false);
     setIsRead(!!progress.get(chapterUrl, sourceId)?.read);
     setPgLoaded(false);
     setNat(null);
@@ -291,22 +411,59 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   }, [ch, mode]);
 
   useEffect(() => {
-    if (!ch || mode === 'vertical' || !pgLoaded) return;
-    const step = useDouble ? 2 : 1;
-    const nextStart = page + (rtl ? -step : step);
-    const nextPages = useDouble
-      ? (rtl ? [nextStart + 1, nextStart] : [nextStart, nextStart + 1])
-      : [nextStart];
-    nextPages.forEach((index) => {
-      if (index < 0 || index >= ch.pages.length) return;
+    if (!ch || mode === 'vertical' || chUrl !== chapterUrl) return;
+    const direction = rtl ? -1 : 1;
+    const start = page + (rtl ? -1 : useDouble ? 2 : 1);
+    const queue = [];
+    for (let index = start; index >= 0 && index < ch.pages.length; index += direction) {
       const src = ch.pages[index];
-      if (!src || sizesRef.current.has(src)) return;
-      const img = new Image();
-      img.referrerPolicy = 'no-referrer';
-      img.onload = () => remember(src, img);
-      img.src = src;
-    });
-  }, [ch, page, pgLoaded, mode, rtl, useDouble]);
+      if (src && !sizesRef.current.has(src)) queue.push(src);
+    }
+
+    let cancelled = false;
+    let cursor = 0;
+    const active = new Map();
+    const pump = () => {
+      while (!cancelled && active.size < 4 && cursor < queue.length) {
+        const src = queue[cursor++];
+        const img = new Image();
+        img.referrerPolicy = 'no-referrer';
+        img.fetchPriority = 'low';
+        let settled = false;
+        let timeout;
+        const finish = (loaded) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          active.delete(img);
+          if (loaded) remember(src, img);
+          pump();
+        };
+        timeout = setTimeout(() => {
+          img.onload = null;
+          img.onerror = null;
+          img.removeAttribute('src');
+          finish(false);
+        }, 15_000);
+        img.onload = () => finish(true);
+        img.onerror = () => finish(false);
+        active.set(img, timeout);
+        img.src = src;
+      }
+    };
+    pump();
+
+    return () => {
+      cancelled = true;
+      active.forEach((timeout, img) => {
+        clearTimeout(timeout);
+        img.onload = null;
+        img.onerror = null;
+        img.removeAttribute('src');
+      });
+      active.clear();
+    };
+  }, [ch, chUrl, chapterUrl, mode, rtl, useDouble]);
 
   useEffect(() => {
     const src = ch?.pages?.[page] ?? '';
@@ -342,6 +499,23 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     setPgLoaded(sizesRef.current.has(src));
     setNat(sizesRef.current.get(src) ?? null);
     setPage(p);
+    if (p !== page) {
+      setInstantZoomReset(true);
+      if (zoomResetFrame.current) cancelAnimationFrame(zoomResetFrame.current);
+      zoomResetFrame.current = requestAnimationFrame(() => {
+        zoomResetFrame.current = requestAnimationFrame(() => {
+          setInstantZoomReset(false);
+          zoomResetFrame.current = null;
+        });
+      });
+      wheelZoomRef.current = 0;
+      setWheelZoom(0);
+      zoomOriginRef.current = { x: 50, y: 50 };
+      zoomOriginHistoryRef.current = [];
+      setZoomOrigin(zoomOriginRef.current);
+      panRef.current = { x: 0, y: 0 };
+      setPan(panRef.current);
+    }
     if (mode === 'vertical') {
       requestAnimationFrame(() => document.getElementById(`pg-${p}`)?.scrollIntoView({ block: 'start' }));
     } else {
@@ -359,12 +533,58 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
 
     const onWheel = (e) => {
       if (e.deltaY === 0) return;
-      if (scrollable(e.target)) return;
       const zoomable = mode === 'paginado' || mode === 'paginado-rtl' || e.ctrlKey;
-      if (zoomable) e.preventDefault();
-      else return;
-      const fwd = e.deltaY > 0;
-      setWheelZoom((z) => (fwd ? Math.min(z + 10, 150) : z <= 0 ? 0 : Math.max(z - 10, 0)));
+      if (!zoomable) return;
+      const zoomIn = e.deltaY < 0;
+      if (zoomIn) {
+        if (scrollable(e.target)) return;
+        const image = e.target instanceof Element ? e.target.closest('img[alt^="Página "]') : null;
+        if (!image) return;
+      }
+      const currentZoom = wheelZoomRef.current;
+      const nextZoom = zoomIn
+        ? Math.min(currentZoom + 10, Math.max(currentZoom, 150))
+        : Math.max(currentZoom - 10, 0);
+      if (nextZoom === currentZoom) return;
+      e.preventDefault();
+      wheelZoomRef.current = nextZoom;
+      if (nextZoom === 0) {
+        panRef.current = { x: 0, y: 0 };
+        setPan(panRef.current);
+        zoomOriginRef.current = { x: 50, y: 50 };
+        zoomOriginHistoryRef.current = [];
+        setZoomOrigin(zoomOriginRef.current);
+      } else if (!zoomIn) {
+        const ratio = nextZoom / currentZoom;
+        panRef.current = { x: panRef.current.x * ratio, y: panRef.current.y * ratio };
+        setPan(panRef.current);
+        const previousOrigin = zoomOriginHistoryRef.current.pop();
+        if (previousOrigin) {
+          zoomOriginRef.current = previousOrigin;
+          setZoomOrigin(previousOrigin);
+        }
+      }
+      if (zoomIn && mode !== 'vertical' && areaRef.current) {
+        const rect = areaRef.current.getBoundingClientRect();
+        if (rect.width && rect.height) {
+          const target = {
+            x: Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100)),
+            y: Math.min(100, Math.max(0, ((e.clientY - rect.top) / rect.height) * 100))
+          };
+          const currentOrigin = zoomOriginRef.current;
+          const nextOrigin = currentZoom === 0
+            ? target
+            : {
+                x: currentOrigin.x + (target.x - currentOrigin.x) * 0.03,
+                y: currentOrigin.y + (target.y - currentOrigin.y) * 0.03
+              };
+          if (currentZoom > 0) zoomOriginHistoryRef.current.push(currentOrigin);
+          else zoomOriginHistoryRef.current = [];
+          zoomOriginRef.current = nextOrigin;
+          setZoomOrigin(nextOrigin);
+        }
+      }
+      setWheelZoom(nextZoom);
     };
     window.addEventListener('wheel', onWheel, { passive: false });
     return () => window.removeEventListener('wheel', onWheel);
@@ -465,7 +685,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const atEnd = paginated
     ? page >= ch.pages.length - 1
     : (lastSeen >= (ch?.pages?.length || 1) - 1);
-  const zoomPct = scalePct + (scalePct * wheelZoom) / 100;
+  const zoomPct = mode === 'vertical' ? scalePct + (scalePct * wheelZoom) / 100 : scalePct;
   let pageStyle = { width: `${zoomPct}%`, maxHeight: 'calc(100vh - 60px)' };
   if ((mode === 'paginado' || mode === 'paginado-rtl') && nat && area.w > 0 && nat.w > nat.h) {
     const aspect = nat.w / nat.h;
@@ -536,7 +756,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
 
               <Dropdown
                 scale={scale}
-                style={{ width: px(145, scale, 95) }}
+                style={{ width: px(doublePage ? 145 : 112, scale, doublePage ? 95 : 90) }}
                 value={page}
                 onChange={goPage}
                 ariaLabel="Página"
@@ -601,7 +821,99 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
           ))}
         </div>
       ) : (
-        <div ref={areaRef} className="relative h-full min-h-0 w-full overflow-hidden grid grid-rows-[minmax(0,1fr)] place-items-center">
+        <div
+          ref={areaRef}
+          className="relative h-full min-h-0 w-full overflow-hidden grid grid-rows-[minmax(0,1fr)] place-items-center"
+          onDoubleClick={(e) => {
+            if (performance.now() < ignoreNativeDoubleClickUntilRef.current) return;
+            if (wheelZoomRef.current >= 50) return;
+            const panel = document.elementFromPoint(e.clientX, e.clientY);
+            if (!(panel instanceof Element) || !panel.closest('img[alt^="Página "]')) return;
+            toggleZoomAtPointer(e);
+          }}
+          onPointerDown={(e) => {
+            const isPanel = e.target instanceof Element && e.target.closest('img[alt^="Página "]');
+            if (isPanel && wheelZoomRef.current >= 50 && e.pointerType === 'mouse' && e.button === 0) {
+              const now = performance.now();
+              const previous = lastPanelPointerDownRef.current;
+              const isDoubleClick = previous && now - previous.time <= 500
+                && Math.hypot(e.clientX - previous.x, e.clientY - previous.y) <= 8;
+              lastPanelPointerDownRef.current = isDoubleClick ? null : { time: now, x: e.clientX, y: e.clientY };
+              if (isDoubleClick) {
+                ignoreNativeDoubleClickUntilRef.current = now + 600;
+                toggleZoomAtPointer(e);
+                return;
+              }
+            }
+            if (wheelZoomRef.current <= 0 || e.pointerType !== 'mouse' || e.button !== 0) return;
+            if (!isPanel) return;
+            if (wheelZoomRef.current >= 50) e.preventDefault();
+            const content = zoomContentRef.current;
+            if (content) {
+              const style = getComputedStyle(content);
+              const matrix = new DOMMatrixReadOnly(style.transform);
+              const [originX = content.clientWidth / 2, originY = content.clientHeight / 2] = style.transformOrigin.split(' ').map(parseFloat);
+              const visibleZoom = Math.max(0, (matrix.a - 1) * 100);
+              wheelZoomRef.current = visibleZoom;
+              setWheelZoom(visibleZoom);
+              panRef.current = { x: matrix.e, y: matrix.f };
+              setPan(panRef.current);
+              zoomOriginRef.current = {
+                x: content.clientWidth ? (originX / content.clientWidth) * 100 : 50,
+                y: content.clientHeight ? (originY / content.clientHeight) * 100 : 50
+              };
+              setZoomOrigin(zoomOriginRef.current);
+            }
+            dragRef.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, pan: panRef.current };
+            e.currentTarget.setPointerCapture(e.pointerId);
+            setDragging(true);
+          }}
+          onPointerMove={(e) => {
+            const drag = dragRef.current;
+            const stage = areaRef.current;
+            if (!drag || drag.pointerId !== e.pointerId || !stage) return;
+            const bounds = [...stage.querySelectorAll('img[alt^="Página "]')].map((img) => img.getBoundingClientRect());
+            if (!bounds.length) return;
+            const viewport = stage.getBoundingClientRect();
+            const current = panRef.current;
+            const left = Math.min(...bounds.map((rect) => rect.left)) - current.x;
+            const right = Math.max(...bounds.map((rect) => rect.right)) - current.x;
+            const top = Math.min(...bounds.map((rect) => rect.top)) - current.y;
+            const bottom = Math.max(...bounds.map((rect) => rect.bottom)) - current.y;
+            const width = right - left;
+            const height = bottom - top;
+            const clampDrag = (candidate, currentPan, min, max) => {
+              if (currentPan > max) return Math.max(min, Math.min(currentPan, candidate));
+              if (currentPan < min) return Math.min(max, Math.max(currentPan, candidate));
+              return Math.max(min, Math.min(max, candidate));
+            };
+            const minX = width > viewport.width ? viewport.right - right : 0;
+            const maxX = width > viewport.width ? viewport.left - left : 0;
+            const minY = height > viewport.height ? viewport.bottom - bottom : viewport.top - top;
+            const maxY = height > viewport.height ? viewport.top - top : viewport.bottom - bottom;
+            const nextX = clampDrag(drag.pan.x + e.clientX - drag.x, current.x, minX, maxX);
+            const nextY = clampDrag(drag.pan.y + e.clientY - drag.y, current.y, minY, maxY);
+            panRef.current = { x: nextX, y: nextY };
+            setPan(panRef.current);
+          }}
+          onPointerUp={(e) => {
+            if (dragRef.current?.pointerId !== e.pointerId) return;
+            dragRef.current = null;
+            setDragging(false);
+            if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+          }}
+          onPointerCancel={() => { dragRef.current = null; setDragging(false); }}
+        >
+          <div
+            ref={zoomContentRef}
+            className="relative flex h-full w-full items-center justify-center gap-2"
+            style={{
+              transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${1 + wheelZoom / 100})`,
+              transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%`,
+              transition: dragging || instantZoomReset ? 'none' : 'transform 140ms ease-out, transform-origin 180ms ease-out',
+              willChange: wheelZoom ? 'transform' : 'auto'
+            }}
+          >
            {useDouble ? (
              <div className="flex min-h-0 items-center justify-center gap-2 h-full w-full overflow-hidden">
                {(() => {
@@ -625,7 +937,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                        }}
                        onFailed={() => { if (idx === page) setPgLoaded(true); }}
                        wrapperClassName="grid-rows-[minmax(0,1fr)] h-full min-h-0 min-w-0 flex-1"
-                       imageClassName="block object-contain max-w-full"
+                       imageClassName={cn('block object-contain max-w-full', mode !== 'vertical' && wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                        imageStyle={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto' }}
                      />
                    );
@@ -647,10 +959,11 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                 }}
                 onFailed={() => setPgLoaded(true)}
                 wrapperClassName="grid-rows-[minmax(0,1fr)] h-full min-h-0 w-full"
-                imageClassName="block max-w-full object-contain"
+                imageClassName={cn('block max-w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                 imageStyle={{ ...pageStyle, maxHeight: '100%', height: 'auto' }}
                />
-            )}
+           )}
+          </div>
            { (rtl ? (page + (useDouble ? 2 : 1) <= ch.pages.length - 1) : page > 0) && (
             <button
               type="button"
