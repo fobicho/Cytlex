@@ -370,7 +370,7 @@ function SearchDialog({ open, onClose, mangaTitle, onPick }) {
       </form>
 
       <div className="pt-3 flex-1 min-h-0 flex flex-col">
-        <div ref={listRef} className="max-h-full min-h-0 overflow-y-auto overscroll-contain pr-2">
+        <div ref={listRef} className="max-h-full min-h-0 overflow-y-auto overscroll-contain">
           {err && (
             <p className="flex items-center gap-2 text-sm text-destructive">
               <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -619,6 +619,7 @@ function CharactersDialog({ open, onClose, mediaId, connected }) {
       onClose={onClose}
       className="max-w-2xl max-h-[calc(100vh-3rem)] flex flex-col"
       bodyClassName="p-5 overflow-y-auto"
+      bodyPaddingTop={24}
     >
       {busy && (
         <div className="flex items-center justify-center py-10 text-muted-foreground">
@@ -840,6 +841,13 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
         mangaTitle={title}
         onPick={(m) => {
           tracking.link(mangaUrl, sourceId, m.id, m.cover);
+          (async () => {
+            try {
+              const { makeCoverThumb } = await import('../lib/covers.js');
+              const thumb = await makeCoverThumb(m.cover);
+              if (thumb) tracking.updateCover(mangaUrl, sourceId, { coverLocal: thumb });
+            } catch {}
+          })();
           setPicking(false);
         }}
       />
@@ -852,6 +860,7 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
       onClose={requestClose}
       className="max-w-2xl max-h-[calc(100vh-3rem)] flex flex-col"
       bodyClassName="p-5 overflow-y-auto"
+      bodyPaddingTop={24}
     >
       {loading && (
         <div className="flex items-center justify-center py-10 text-muted-foreground">

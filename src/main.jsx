@@ -18,6 +18,7 @@ if (window.cytlex?.saveTheme) window.cytlex.saveTheme({ theme: boot.theme, mode:
 
 function Root() {
   const [splashDone, setSplashDone] = useState(false);
+  const [splashExiting, setSplashExiting] = useState(false);
   const [showTutorial, setShowTutorial] = useState(() => !settings.get().tutorialSeen);
   const [appVisible, setAppVisible] = useState(false);
   const handleSplashDone = useCallback(() => {
@@ -25,6 +26,7 @@ function Root() {
     if (settings.get().tutorialSeen) setAppVisible(true);
   }, []);
   const handleSplashExitStart = useCallback(() => {
+    setSplashExiting(true);
     if (settings.get().tutorialSeen) setAppVisible(true);
   }, []);
   const handleTutorialDone = useCallback(() => { setAppVisible(true); setShowTutorial(false); }, []);
@@ -36,12 +38,13 @@ function Root() {
           <App />
         </div>
         {!splashDone && <Splash onDone={handleSplashDone} onExitStart={handleSplashExitStart} />}
-        {splashDone && showTutorial && (
+        {showTutorial && (splashExiting || splashDone) && (
           <Onboarding
             onDone={handleTutorialDone}
             onExitStart={handleTutorialExitStart}
             onRevealApp={() => setAppVisible(true)}
             onHideApp={() => {}}
+            enteringWithSplash={!splashDone}
           />
         )}
       </ToastProvider>

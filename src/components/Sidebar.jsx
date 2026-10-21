@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { NavLink, useLocation } from 'react-router-dom';
-import { BookOpen, Compass, Settings as SettingsIcon, ChevronsRight } from 'lucide-react';
+import { BookOpen, Compass, Settings as SettingsIcon, ChevronsRight, Coffee } from 'lucide-react';
 import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
 import { settings } from '../lib/settings.js';
@@ -55,8 +55,9 @@ export default function Sidebar() {
             >
               <div
                 className={cn(
-                  'flex items-center rounded-lg font-medium transition-colors relative',
-                  'transition-[gap] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
+                  'flex items-center rounded-lg font-medium',
+                  'transition-[gap,color,background-color,border-color,text-decoration-color,fill,stroke] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
+                  'relative',
                   isActive
                     ? 'text-sidebar-accent-foreground'
                     : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/50'
@@ -95,9 +96,11 @@ export default function Sidebar() {
                 <span
                   className={cn(
                     'relative z-10 whitespace-nowrap overflow-hidden transition-[max-width,opacity,transform] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
-                    collapsed ? 'max-w-0 opacity-0 translate-x-2' : 'opacity-100 translate-x-0'
+                    collapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'opacity-100 translate-x-0'
                   )}
-                  style={collapsed ? undefined : { maxWidth: `${Math.round(160 * scale)}px` }}
+                  style={{
+                    maxWidth: collapsed ? 0 : `${Math.round(160 * scale)}px`
+                  }}
                 >
                   {item.label}
                 </span>
@@ -105,6 +108,67 @@ export default function Sidebar() {
             </NavLink>
           );
         })}
+
+        <div
+          className="shrink-0 rounded-lg border border-primary/40 bg-primary/5"
+          style={{
+            marginTop: 'auto',
+            padding: '0px'
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              const url = 'https://ko-fi.com/fobicho';
+              if (window.cytlex?.openExternal) window.cytlex.openExternal(url);
+              else window.open(url, '_blank', 'noopener');
+            }}
+            title="Apoyar en Ko-fi"
+            aria-label="Apoyar en Ko-fi"
+            className={cn(
+              'w-full flex items-center rounded-md font-medium',
+              'transition-[gap,color,background-color,border-color,text-decoration-color,fill,stroke] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
+              'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/50'
+            )}
+            style={{
+              justifyContent: 'flex-start',
+              gap: collapsed ? 0 : `${Math.max(6, Math.round(8 * scale))}px`,
+              paddingTop: `${Math.max(7, Math.round(10 * scale))}px`,
+              paddingBottom: `${Math.max(7, Math.round(10 * scale))}px`,
+              paddingLeft: `${Math.max(6, Math.round(8 * scale))}px`,
+              paddingRight: `${Math.max(6, Math.round(8 * scale))}px`,
+              fontSize: `${Math.max(11, Math.round(14 * scale))}px`
+            }}
+          >
+            <div
+              className="shrink-0 grid place-items-center"
+              style={{
+                width: `${Math.max(16, Math.round(20 * scale))}px`,
+                height: `${Math.max(16, Math.round(20 * scale))}px`,
+                marginLeft: `${Math.round(6 * scale)}px`
+              }}
+            >
+              <Coffee
+                style={{
+                  width: `${Math.max(14, Math.round(20 * scale))}px`,
+                  height: `${Math.max(14, Math.round(20 * scale))}px`
+                }}
+              />
+            </div>
+            <span
+              className={cn(
+                'whitespace-nowrap overflow-hidden transition-[max-width,opacity,transform,margin-left] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
+                collapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'opacity-100 translate-x-0'
+              )}
+              style={{
+                maxWidth: collapsed ? 0 : `${Math.round(160 * scale)}px`,
+                marginLeft: collapsed ? 0 : `${Math.max(3, Math.round(5 * scale))}px`
+              }}
+            >
+              Apoyar en Ko-fi
+            </span>
+          </button>
+        </div>
       </nav>
 
       <div

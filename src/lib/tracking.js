@@ -23,14 +23,26 @@ export const tracking = {
     return read()[cap(mangaUrl, sourceId)] || null;
   },
 
-  link(mangaUrl, sourceId, anilistId, cover) {
+  link(mangaUrl, sourceId, anilistId, cover, coverLocal) {
     if (!mangaUrl || !anilistId) return;
     const data = read();
     data[cap(mangaUrl, sourceId)] = {
       id: anilistId,
       linkedAt: Date.now(),
-      ...(cover ? { cover } : {})
+      ...(cover ? { cover } : {}),
+      ...(coverLocal ? { coverLocal } : {})
     };
+    write(data);
+    notify();
+  },
+
+  updateCover(mangaUrl, sourceId, { cover, coverLocal } = {}) {
+    if (!mangaUrl) return;
+    const data = read();
+    const k = cap(mangaUrl, sourceId);
+    if (!data[k]) return;
+    if (cover) data[k].cover = cover;
+    if (coverLocal) data[k].coverLocal = coverLocal;
     write(data);
     notify();
   },

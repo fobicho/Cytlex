@@ -67,48 +67,54 @@ export function Dropdown({
 
   const menu = open && (
     <div
-      ref={listRef}
       role="listbox"
       style={{
         ...(portal && pos ? { top: pos.top, left: pos.left, minWidth: pos.width } : null),
         marginTop: px(4, scale, 3),
         maxHeight: px(256, scale, 200),
-        padding: px(4, scale, 3),
         fontSize: px(14, scale, 12)
       }}
       className={cn(
         portal ? 'fixed z-[60]' : 'absolute z-40',
-        'min-w-full overflow-y-auto rounded-lg border border-border bg-card shadow-2xl',
-        menuClassName
+        'min-w-full overflow-hidden rounded-lg border border-border bg-card shadow-2xl'
       )}
       data-scrollable
     >
-      {options.map((o) => {
-        const active = o.value === value;
-        return (
-          <button
-            key={String(o.value)}
-            type="button"
-            role="option"
-            aria-selected={active}
-            ref={active ? selectedRef : null}
-            onClick={() => { onChange(o.value); setOpen(false); }}
-            className={cn(
-              'block w-full truncate rounded-md text-left transition-colors',
-              active ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent'
-            )}
-            style={{
-              paddingLeft: px(10, scale, 8),
-              paddingRight: px(10, scale, 8),
-              paddingTop: px(6, scale, 4),
-              paddingBottom: px(6, scale, 4),
-              fontSize: px(14, scale, 12)
-            }}
-          >
-            {o.label}
-          </button>
-        );
-      })}
+      <div
+        ref={listRef}
+        className="dd-scroll overflow-y-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/40 [&::-webkit-scrollbar-thumb:hover]:bg-primary/60"
+        style={{
+          maxHeight: px(256, scale, 200),
+          padding: `${px(4, scale, 3)} ${px(4, scale, 3)} ${px(4, scale, 3)} ${px(4, scale, 3)}`
+        }}
+      >
+        {options.map((o) => {
+          const active = o.value === value;
+          return (
+            <button
+              key={String(o.value)}
+              type="button"
+              role="option"
+              aria-selected={active}
+              ref={active ? selectedRef : null}
+              onClick={() => { onChange(o.value); setOpen(false); }}
+              className={cn(
+                'block w-full truncate rounded-md text-left transition-colors',
+                active ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent'
+              )}
+              style={{
+                paddingLeft: px(10, scale, 8),
+                paddingRight: px(10, scale, 8),
+                paddingTop: px(6, scale, 4),
+                paddingBottom: px(6, scale, 4),
+                fontSize: px(14, scale, 12)
+              }}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 

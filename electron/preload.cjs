@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('cytlex', {
   toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
   isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
   close: () => ipcRenderer.invoke('window:close'),
+  openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
   onMaximizedChange: (cb) => {
     const handler = (_e, value) => cb(value);
     ipcRenderer.on('window:maximized-changed', handler);

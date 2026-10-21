@@ -73,13 +73,6 @@ export async function announceExtUpdates(onNew) {
     return [];
   }
   if (!nuevos.length) return [];
-  const titulo =
-    nuevos.length === 1
-      ? `${nuevos[0].name} tiene actualización`
-      : `${nuevos.length} extensiones tienen actualización`;
-  const cuerpo = nuevos.length === 1
-    ? `Ya puedes instalar la versión ${nuevos[0].to}.`
-    : 'Ya puedes instalarlas desde Extensiones.';
-  onNew({ titulo, cuerpo, count: nuevos.length });
+  onNew({ updates: nuevos, count: nuevos.length });
   return nuevos;
 }

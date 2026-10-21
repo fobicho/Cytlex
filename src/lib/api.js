@@ -17,9 +17,14 @@ async function resolveSource(sourceId) {
 }
 
 const DETAIL_TTL_MS = 10 * 60 * 1000;
+const CHAPTER_TTL_MS = 2 * 60 * 1000;
+const CHAPTER_CACHE_MAX = 40;
 
 const detailCache = new Map();
+const chapterCache = new Map();
+const chapterRequests = new Map();
 const detailKey = (url, sourceId) => `${sourceId}|${url}`;
+const chapterKey = (url, sourceId) => `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}|${url}`;
 
 const freshEntry = (key) => {
   const hit = detailCache.get(key);
@@ -54,8 +59,29 @@ export const api = {
   },
 
   async chapter(url, sourceId) {
-    const src = await resolveSource(sourceId);
-    return src.chapter(url);
+    if (!extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
+    const key = chapterKey(url, sourceId);
+    const hit = chapterCache.get(key);
+    if (hit && Date.now() - hit.at <= CHAPTER_TTL_MS) {
+      chapterCache.delete(key);
+      chapterCache.set(key, hit);
+      return hit.value;
+    }
+    if (hit) chapterCache.delete(key);
+    if (chapterRequests.has(key)) return chapterRequests.get(key);
+
+    const request = resolveSource(sourceId).then((src) => src.chapter(url));
+    chapterRequests.set(key, request);
+    try {
+      const value = await request;
+      chapterCache.set(key, { at: Date.now(), value });
+      while (chapterCache.size > CHAPTER_CACHE_MAX) {
+        chapterCache.delete(chapterCache.keys().next().value);
+      }
+      return value;
+    } finally {
+      if (chapterRequests.get(key) === request) chapterRequests.delete(key);
+    }
   },
 
   prefetchDetail(url, sourceId) {

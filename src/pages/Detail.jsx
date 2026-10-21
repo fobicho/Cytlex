@@ -16,26 +16,10 @@ import { EmptyState } from '../components/ui/empty-state.jsx';
 import { Dialog } from '../components/ui/dialog.jsx';
 import { Skeleton } from '../components/ui/skeleton.jsx';
 import AniListPanel from '../components/AniListPanel.jsx';
+import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
-
-function sameImage(a, b) {
-  if (!a || !b) return false;
-  try {
-    const key = (u) => {
-      const x = new URL(u);
-      for (const k of [...x.searchParams.keys()]) {
-        if (/^(w|width|size|h|height|quality|q|v|ver)$/i.test(k)) x.searchParams.delete(k);
-      }
-      x.pathname = x.pathname.replace(/-[a-z]{1,3}\.(jpe?g|png|webp|avif|gif)$/i, '.$1');
-      return x.toString();
-    };
-    return key(a) === key(b);
-  } catch {
-    return a === b;
-  }
-}
 
 const EXPAND_CTRL_H = 16;
 const COVER_BASE = 184;
@@ -106,6 +90,14 @@ export default function Detail() {
   const [err, setErr] = useState('');
   const [fav, setFav] = useState(false);
   const [asc, setAsc] = useState(() => chapterOrder.get(mangaUrl));
+  const [chaptersPerRow, setChaptersPerRow] = useState(() => {
+    try {
+      const map = JSON.parse(localStorage.getItem('cytlex:chaptersPerRowByManga') || '{}');
+      if (map[mangaUrl]) return map[mangaUrl];
+    } catch {}
+    const v = settings.get().chaptersPerRow;
+    return [1, 2, 3].includes(v) ? v : 1;
+  });
   const [dup, setDup] = useState(null);
   const [catPick, setCatPick] = useState(null);
   const catMenuRef = useRef(null);
@@ -117,38 +109,65 @@ export default function Detail() {
   const [expanded, setExpanded] = useState(false);
   const [overflow, setOverflow] = useState(false);
   const [progressTick, setProgressTick] = useState(0);
+  const [coverTick, setCoverTick] = useState(0);
   const [markBefore, setMarkBefore] = useState(null);
   const [aniListOpen, setAniListOpen] = useState(false);
   const [aniLinked, setAniLinked] = useState(() => !!tracking.get(mangaUrl, sourceId));
+  const [anilistCover, setAnilistCover] = useState(() => !!settings.get().anilistCover);
   const scale = useScale();
   const coverSize = Math.round(COVER_BASE * scale);
+
   const knownCover = useMemo(() => {
     const fav = lib.fav(mangaUrl, sourceId);
     const local = fav?.coverLocal;
+    const t = tracking.get(mangaUrl, sourceId);
+    const tLocal = t?.coverLocal;
+    const tCover = t?.cover;
+    if (anilistCover && tLocal) return tLocal;
+    if (anilistCover && tCover) return tCover;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
     return (
-      fav?.cover || tracking.get(mangaUrl, sourceId)?.cover || recallCover(mangaUrl) || ''
+      fav?.cover || tCover || recallCover(mangaUrl) || ''
     );
-  }, [mangaUrl, sourceId, progressTick]);
+  }, [mangaUrl, sourceId, progressTick, anilistCover, coverTick]);
 
   const coverSrc = useMemo(() => {
+    const t = tracking.get(mangaUrl, sourceId);
+    const tLocal = t?.coverLocal;
+    const tCover = t?.cover;
+    if (anilistCover && tLocal) return tLocal;
+    if (anilistCover && tCover) return tCover;
     const local = lib.fav(mangaUrl, sourceId)?.coverLocal;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
-    if (!d?.cover) return knownCover;
-    if (knownCover && sameImage(knownCover, d.cover)) return knownCover;
-    return d.cover;
-  }, [d?.cover, knownCover, mangaUrl, sourceId]);
+    if (knownCover) return knownCover;
+    return d?.cover || '';
+  }, [d?.cover, knownCover, mangaUrl, sourceId, anilistCover, coverTick]);
+
+  const [coverError, setCoverError] = useState(false);
+  useEffect(() => { setCoverError(false); }, [coverSrc]);
+  const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
 
   const coverImg = (alt) => (
     <img
       className="w-full h-full object-cover"
-      src={coverSrc}
+      src={finalCover}
       alt={alt}
       referrerPolicy="no-referrer"
+      onError={() => { if (finalCover !== knownCover) setCoverError(true); }}
     />
   );
 
   useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
+  useEffect(() => tracking.subscribe(() => { setAniLinked(!!tracking.get(mangaUrl, sourceId)); setCoverTick((t) => t + 1); }), []);
+  useEffect(() => settings.subscribe((s) => setAnilistCover(!!s.anilistCover)), []);
+  useEffect(() => settings.subscribe((s) => {
+    try {
+      const map = JSON.parse(localStorage.getItem('cytlex:chaptersPerRowByManga') || '{}');
+      if (map[mangaUrl]) return; // per-manga override takes precedence
+    } catch {}
+    const v = s.chaptersPerRow;
+    setChaptersPerRow([1, 2, 3].includes(v) ? v : 1);
+  }), []);
 
   useEffect(() => {
     const main = document.querySelector('main');
@@ -258,6 +277,7 @@ export default function Detail() {
   }, [animate]);
 
   const addToLibrary = (manga, catIds) => {
+    if (!Array.isArray(catIds) || catIds.length === 0) return;
     lib.toggleFav(manga, catIds);
     setFav(true);
     makeCoverThumb(manga.cover).then((local) => {
@@ -265,9 +285,15 @@ export default function Detail() {
     });
   };
 
-  const openCatMenu = (manga) => {
+  const openCatMenu = (manga, selected) => {
     const allCats = lib.cats();
-    setCatPick({ list: allCats, selected: allCats[0] ? [allCats[0].id] : [], pending: manga, inline: true });
+    const initialSelection = selected ?? (allCats[0] ? [allCats[0].id] : []);
+    setCatPick({
+      list: allCats,
+      selected: initialSelection.filter((id) => allCats.some((category) => category.id === id)),
+      pending: manga,
+      inline: true
+    });
   };
 
   useEffect(() => {
@@ -283,6 +309,28 @@ export default function Detail() {
       window.removeEventListener('keydown', onKey);
     };
   }, [catPick?.inline]);
+
+  const saveCatPick = () => {
+    if (!catPick?.inline) return;
+    const { pending, selected } = catPick;
+    const alreadySaved = lib.isFav(pending.url, pending.sourceId);
+    if (selected.length) {
+      if (alreadySaved) {
+        lib.updateFavCats(pending.url, selected, pending.sourceId);
+        setFav(true);
+      } else {
+        addToLibrary(pending, selected);
+      }
+    } else if (alreadySaved) {
+      lib.toggleFav(pending);
+      setFav(false);
+    }
+    setCatPick(null);
+  };
+
+  const catPickRemoves = !!catPick?.inline
+    && catPick.selected.length === 0
+    && lib.isFav(catPick.pending.url, catPick.pending.sourceId);
 
   const onAddClick = () => {
     const manga = {
@@ -449,6 +497,9 @@ export default function Detail() {
               Por {d.facts.autor}
             </div>
           )}
+          <div className="mt-1">
+            <SourceLine sourceId={sourceId} />
+          </div>
           <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(15 * scale)}px` }}>
             {d.altTitles?.slice(0, 160)}
           </div>
@@ -518,7 +569,7 @@ export default function Detail() {
       >
         {resume ? (
           <Button
-            className="shadow-lg shadow-primary/30"
+            className="shadow-none"
             onClick={() => {
               window.location.hash = `#/leer?u=${encodeURIComponent(resume.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
             }}
@@ -545,42 +596,59 @@ export default function Detail() {
         <div className="relative" ref={catMenuRef}>
           <Button
             variant="secondary"
+            className="active:scale-100"
             aria-expanded={!!catPick?.inline}
+            aria-label={fav ? 'Cambiar categorías de la biblioteca' : 'Añadir a la biblioteca'}
             onClick={() => {
-              if (fav) {
-                lib.toggleFav({ url: mangaUrl, sourceId });
-                setFav(false);
-                return;
-              }
               if (catPick?.inline) {
                 setCatPick(null);
+                return;
+              }
+              const manga = {
+                url: mangaUrl,
+                title: d.title,
+                cover: d.cover,
+                type: d.facts.tipo,
+                author: d.facts.autor,
+                sourceId
+              };
+              if (fav) {
+                const saved = lib.fav(mangaUrl, sourceId);
+                openCatMenu(manga, saved?.cats || []);
                 return;
               }
               onAddClick();
             }}
             style={{
+              transform: 'none',
               height: px(40, scale, 33),
               paddingLeft: px(16, scale, 13),
               paddingRight: px(16, scale, 13),
               fontSize: px(14, scale, 12)
             }}
           >
-            <Star
-              className={cn('mr-2 shrink-0', fav && 'fill-current text-amber-400')}
-              style={{ width: px(16, scale, 14), height: px(16, scale, 14) }}
+            <span className="inline-grid shrink-0">
+              <span aria-hidden="true" className="invisible col-start-1 row-start-1 inline-flex items-center whitespace-nowrap">
+                <Star className="mr-2" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+                {fav ? 'En biblioteca' : 'Añadir'}
+              </span>
+              <span aria-hidden="true" className="col-start-1 row-start-1 inline-flex items-center whitespace-nowrap">
+                <Star
+                  className={cn('mr-2 shrink-0', fav && 'fill-current text-amber-400')}
+                  style={{ width: px(16, scale, 14), height: px(16, scale, 14) }}
+                />
+                {fav ? 'En biblioteca' : 'Añadir'}
+              </span>
+            </span>
+            <ChevronDown
+              className={cn('ml-2 transition-transform duration-200', catPick?.inline && 'rotate-180')}
+              style={{ width: px(14, scale, 12), height: px(14, scale, 12) }}
             />
-            {fav ? 'En biblioteca' : 'Añadir'}
-            {!fav && (
-              <ChevronDown
-                className={cn('ml-2 transition-transform duration-200', catPick?.inline && 'rotate-180')}
-                style={{ width: px(14, scale, 12), height: px(14, scale, 12) }}
-              />
-            )}
           </Button>
 
           {catPick?.inline && (
-            <div className="absolute left-1/2 top-full z-40 mt-2 w-max min-w-full max-w-64 -translate-x-1/2 rounded-xl border border-border bg-card p-3 shadow-2xl">
-              <div className="flex flex-col gap-1.5">
+            <div className="absolute left-1/2 top-full z-40 mt-2 w-max min-w-full max-w-64 -translate-x-1/2 rounded-xl border border-border bg-card shadow-2xl" style={{ padding: px(12, scale, 9) }}>
+              <div className="flex flex-col" style={{ gap: px(6, scale, 4) }}>
                 {catPick.list.map((c) => {
                   const on = catPick.selected.includes(c.id);
                   return (
@@ -594,10 +662,20 @@ export default function Detail() {
                           selected: on ? p.selected.filter((x) => x !== c.id) : [...p.selected, c.id]
                         }))
                       }
+                      aria-pressed={on}
                       className={cn(
-                        'w-full min-w-0 truncate rounded-md px-2.5 py-1.5 text-xs font-medium text-center transition-colors',
-                        on ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent'
+                        'relative w-full min-w-0 truncate rounded-md border text-center font-medium transition-colors',
+                        on
+                          ? 'border-primary/60 bg-card text-foreground'
+                          : 'border-transparent bg-muted text-muted-foreground hover:bg-accent'
                       )}
+                      style={{
+                        paddingLeft: px(10, scale, 7),
+                        paddingRight: px(10, scale, 7),
+                        paddingTop: px(6, scale, 4),
+                        paddingBottom: px(6, scale, 4),
+                        fontSize: px(12, scale, 10)
+                      }}
                     >
                       {c.name}
                     </button>
@@ -607,23 +685,33 @@ export default function Detail() {
               <div className="mt-3 w-full">
                 <Button
                   size="sm"
-                  className="w-full"
-                  onClick={() => {
-                    addToLibrary(catPick.pending, catPick.selected);
-                    setCatPick(null);
+                  variant={catPickRemoves ? 'destructive' : 'default'}
+                  className="w-full transition-colors duration-200 active:scale-100"
+                  aria-label={catPickRemoves ? 'Eliminar manga de la biblioteca' : 'Añadir manga a la biblioteca'}
+                  disabled={catPick.selected.length === 0 && !catPickRemoves}
+                  style={{
+                    transform: 'none',
+                    height: px(32, scale, 27),
+                    fontSize: px(13, scale, 11),
+                    paddingLeft: px(12, scale, 9),
+                    paddingRight: px(12, scale, 9)
                   }}
+                  onClick={saveCatPick}
                 >
-                  Añadir
+                  {catPickRemoves ? 'Eliminar' : 'Añadir'}
                 </Button>
               </div>
             </div>
           )}
+
         </div>
         <Button
           variant="secondary"
+          className="active:scale-100"
           onClick={() => setAniListOpen(true)}
           title="Vincular con AniList"
           style={{
+            transform: 'none',
             height: px(40, scale, 33),
             paddingLeft: px(16, scale, 13),
             paddingRight: px(16, scale, 13),
@@ -647,7 +735,7 @@ export default function Detail() {
       />
 
       <div className="mt-6 border-t border-border pt-3">
-        <div className="mb-2">
+        <div className="mb-2 flex items-center gap-2">
           <button
             type="button"
             onClick={() => setAsc((v) => { chapterOrder.set(mangaUrl, !v); return !v; })}
@@ -673,10 +761,37 @@ export default function Detail() {
               />
             </span>
           </button>
+          <Button
+            size="sm"
+            variant="secondary"
+            title="Capítulos por fila"
+            className="rounded-lg"
+            onClick={() => {
+              const order = [1, 2, 3];
+              const next = order[(order.indexOf(chaptersPerRow) + 1) % order.length];
+              setChaptersPerRow(next);
+              try {
+                const map = JSON.parse(localStorage.getItem('cytlex:chaptersPerRowByManga') || '{}');
+                map[mangaUrl] = next;
+                localStorage.setItem('cytlex:chaptersPerRowByManga', JSON.stringify(map));
+              } catch {}
+            }}
+            style={{
+              height: px(32, scale, 27),
+              fontSize: px(13, scale, 11),
+              paddingLeft: px(10, scale, 8),
+              paddingRight: px(10, scale, 8)
+            }}
+          >
+            {chaptersPerRow} por fila
+          </Button>
         </div>
       </div>
 
-      <div className="flex flex-col gap-2">
+      <div
+        className={chaptersPerRow > 1 ? 'grid gap-2' : 'flex flex-col gap-2'}
+        style={chaptersPerRow > 1 ? { gridTemplateColumns: `repeat(${chaptersPerRow}, minmax(0, 1fr))` } : undefined}
+      >
         {chapters.map((c, i) => {
           const cap = progress.get(c.url, sourceId);
           const read = !!cap?.read;

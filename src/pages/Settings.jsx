@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { flushSync } from 'react-dom';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, Coffee, X } from 'lucide-react';
 import { settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
 import { anilist } from '../lib/anilist.js';
@@ -79,6 +81,33 @@ function Row({ title, desc, right, first, last, className, scale = 1 }) {
   );
 }
 
+function ConnectHint({ open, hintRef, scale, reduceMotion, className }) {
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          ref={hintRef}
+          role="status"
+          initial={{
+            opacity: 0,
+            transform: reduceMotion ? 'translateY(0) scale(1)' : 'translateY(-4px) scale(0.98)'
+          }}
+          animate={{ opacity: 1, transform: 'translateY(0) scale(1)' }}
+          exit={{
+            opacity: 0,
+            transform: reduceMotion ? 'translateY(0) scale(1)' : 'translateY(-4px) scale(0.98)'
+          }}
+          transition={{ duration: 0.18, ease: [0.23, 1, 0.32, 1] }}
+          className={cn('absolute right-0 top-full z-20 mt-2 rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground shadow-lg whitespace-nowrap', className)}
+          style={{ fontSize: px(12, scale, 10) }}
+        >
+          ¡Conecta tu cuenta primero!
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 function Segmented({ value, options, onChange, scale = 1 }) {
   return (
     <div className="flex" style={{ gap: px(8, scale, 5) }}>
@@ -92,7 +121,9 @@ function Segmented({ value, options, onChange, scale = 1 }) {
             height: px(36, scale, 30),
             fontSize: px(14, scale, 12),
             paddingLeft: px(12, scale, 9),
-            paddingRight: px(12, scale, 9)
+            paddingRight: px(12, scale, 9),
+            minWidth: px(40, scale, 32),
+            justifyContent: 'center'
           }}
         >
           {label}
@@ -142,15 +173,23 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   const [section, setSection] = useState(() => sessionSeccion || 'apariencia');
   const [cats, setCats] = useState(() => lib.cats());
   const [newCat, setNewCat] = useState('');
-  const [repoInput, setRepoInput] = useState(() => settings.get().extIndexUrl || '');
+  const [repoInput, setRepoInput] = useState('');
   const [linkedCount, setLinkedCount] = useState(() => tracking.linkedCount());
   const [authState, setAuthState] = useState({ connected: false });
   const [authViewer, setAuthViewer] = useState(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [authErr, setAuthErr] = useState('');
+  const [connectHintFor, setConnectHintFor] = useState(null);
+  const connectHintRef = useRef(null);
   const { toast } = useToast();
   const [bgErr, setBgErr] = useState('');
+  const [confirmRemoveRepo, setConfirmRemoveRepo] = useState(false);
+  const removeRepoRef = useRef(null);
+  const [showDonate, setShowDonate] = useState(
+    () => !document.body.classList.contains('tutorial-open') && !settings.get().donationSeen
+  );
   const scale = useScale();
+  const reduceMotion = useReducedMotion();
 
   const toggleBackground = async (on) => {
     setBgErr('');
@@ -169,6 +208,28 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   useEffect(() => settings.subscribe(setS), []);
   useEffect(() => tracking.subscribe(() => setLinkedCount(tracking.linkedCount())), []);
   useEffect(() => {
+    if (!connectHintFor) return;
+    const timer = window.setTimeout(() => setConnectHintFor(null), 3000);
+    const dismissOutside = (event) => {
+      if (!connectHintRef.current?.contains(event.target)) setConnectHintFor(null);
+    };
+    document.addEventListener('pointerdown', dismissOutside);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('pointerdown', dismissOutside);
+    };
+  }, [connectHintFor]);
+  useEffect(() => {
+    if (!confirmRemoveRepo) return;
+    const onDown = (e) => {
+      if (removeRepoRef.current && !removeRepoRef.current.contains(e.target)) {
+        setConfirmRemoveRepo(false);
+      }
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [confirmRemoveRepo]);
+  useEffect(() => {
     (async () => {
       const st = await session.status();
       setAuthState(st);
@@ -184,6 +245,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
       if (!r?.cancelled) {
         setAuthState({ connected: true });
         setAuthViewer(await session.viewer());
+        setConnectHintFor(null);
       }
     } catch (e) {
       setAuthErr(String(e?.message || e));
@@ -193,7 +255,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
 
   const set = (patch) => setS(settings.set(patch));
   const setAppearance = (patch) => {
-    const run = () => set(patch);
+    const run = () => flushSync(() => set(patch));
     if (typeof document !== 'undefined' && typeof document.startViewTransition === 'function') {
       document.startViewTransition(run);
     } else {
@@ -307,7 +369,6 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         <div className="border-t border-border" style={{ marginTop: px(16, scale, 11) }} />
         <Row
           scale={scale}
-          last
           title="Pantalla completa"
           desc="Oculta los bordes de la ventana"
           right={
@@ -326,6 +387,49 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
             </Button>
           }
         />
+        <Row
+          scale={scale}
+          last
+          title="Escala de la interfaz"
+          desc="Ajusta el tamaño general de la UI"
+          right={
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => set({ uiScale: Math.max(0.8, (s.uiScale || 1) - 0.05) })}
+                className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Reducir escala"
+              >
+                <Minus style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
+              </button>
+              <input
+                type="range"
+                min={0.8}
+                max={1.2}
+                step={0.05}
+                value={s.uiScale || 1}
+                onChange={(e) => set({ uiScale: Number(e.target.value) })}
+                aria-label="Escala de la interfaz"
+                className="rounded-full bg-muted accent-primary cursor-pointer"
+                style={{ width: px(160, scale, 110), height: px(6, scale, 4) }}
+              />
+              <button
+                type="button"
+                onClick={() => set({ uiScale: Math.min(1.2, (s.uiScale || 1) + 0.05) })}
+                className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Aumentar escala"
+              >
+                <Plus style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
+              </button>
+              <span
+                className="text-muted-foreground text-center"
+                style={{ fontSize: px(14, scale, 12), minWidth: px(46, scale, 38) }}
+              >
+                {Math.round((s.uiScale || 1) * 100)}%
+              </span>
+            </div>
+          }
+        />
       </div>
     );
   } else if (section === 'biblioteca') {
@@ -334,7 +438,6 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         <Row
           scale={scale}
           first
-          last={s.libraryView !== 'grid'}
           title="Vista"
           desc="Cuadrícula de portadas o lista compacta"
           right={
@@ -346,50 +449,22 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
             />
           }
         />
+        <Row
+          scale={scale}
+          last={s.libraryView !== 'grid'}
+          title="Capítulos por fila"
+          desc="Cantidad de capítulos por fila en la ficha del manga"
+          right={
+            <Segmented
+              scale={scale}
+              value={s.chaptersPerRow}
+              onChange={(v) => set({ chaptersPerRow: v })}
+              options={[[1, '1'], [2, '2'], [3, '3']]}
+            />
+          }
+        />
         {s.libraryView === 'grid' && (
           <>
-            <Row
-              scale={scale}
-              title="Tamaño de las portadas"
-              desc="Ajusta el tamaño manteniendo la proporción"
-              right={
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => set({ libraryCoverSize: Math.max(60, s.libraryCoverSize - 10) })}
-                    className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                    aria-label="Reducir tamaño de portadas"
-                  >
-                    <Minus style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
-                  </button>
-                  <input
-                    type="range"
-                    min={60}
-                    max={260}
-                    step={10}
-                    value={s.libraryCoverSize}
-                    onChange={(e) => set({ libraryCoverSize: Number(e.target.value) })}
-                    aria-label="Tamaño de las portadas"
-                    className="rounded-full bg-muted accent-primary cursor-pointer"
-                    style={{ width: px(160, scale, 110), height: px(6, scale, 4) }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => set({ libraryCoverSize: Math.min(260, s.libraryCoverSize + 10) })}
-                    className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                    aria-label="Aumentar tamaño de portadas"
-                  >
-                    <Plus style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
-                  </button>
-                  <span
-                    className="text-muted-foreground text-center"
-                    style={{ fontSize: px(14, scale, 12), minWidth: px(46, scale, 38) }}
-                  >
-                    {s.libraryCoverSize}px
-                  </span>
-                </div>
-              }
-            />
             <Row
               scale={scale}
               last
@@ -410,21 +485,36 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
     );
   } else if (section === 'lector') {
     content = (
-      <Row
-        scale={scale}
-        first
-        last
-        title="Modo por defecto"
-        desc="Vertical continuo o paginado"
-        right={
-          <Segmented
-            scale={scale}
-            value={s.readerMode}
-            onChange={(m) => set({ readerMode: m })}
-            options={[['vertical', 'Vertical'], ['paginado', 'Paginado']]}
-          />
-        }
-      />
+      <>
+        <Row
+          scale={scale}
+          first
+          title="Modo por defecto"
+          desc="Elige tu modo de lectura predeterminado"
+          right={
+            <Segmented
+              scale={scale}
+              value={s.readerMode}
+              onChange={(m) => set({ readerMode: m })}
+              options={[['vertical', 'Vertical'], ['paginado', 'Paginado (ID)'], ['paginado-rtl', 'Paginado (DI)']]}
+            />
+          }
+        />
+        <Row
+          scale={scale}
+          last
+          title="Doble página"
+          desc="Muestra dos páginas a la vez en modo paginado"
+          right={
+            <Switch
+              scale={scale}
+              on={s.readerDoublePage}
+              onChange={(v) => set({ readerDoublePage: v })}
+              label="Doble página"
+            />
+          }
+        />
+      </>
     );
   } else if (section === 'categorias') {
     const counts = new Map();
@@ -521,44 +611,8 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   } else if (section === 'extensiones') {
     content = (
       <div>
-        <Row
-          scale={scale}
-          first
-          title="Avisar de actualizaciones"
-          desc="Revisa el repositorio y avisa cuando una extensión tenga versión nueva."
-          right={
-            <Switch
-              scale={scale}
-              on={s.extUpdateNotify}
-              onChange={(v) => set({ extUpdateNotify: v })}
-              label="Avisar de actualizaciones de extensiones"
-            />
-          }
-        />
-        <Row
-          scale={scale}
-          title="Avisos en segundo plano"
-          desc={
-            s.extUpdateNotify
-              ? 'Comprueba con la app cerrada y avisa por el sistema. Al abrir Cytlex siempre te indica si hay novedades.'
-              : 'Activa el aviso anterior para poder comprobar con la app cerrada.'
-          }
-          right={
-            <div
-              className={cn('flex items-center', !s.extUpdateNotify && 'pointer-events-none opacity-50')}
-              aria-disabled={!s.extUpdateNotify}
-            >
-              <Switch
-                scale={scale}
-                on={s.notifyBackground}
-                onChange={toggleBackground}
-                label="Avisos de extensiones en segundo plano"
-              />
-            </div>
-          }
-        />
         <div
-          className="text-muted-foreground mt-4 mb-1.5"
+          className="text-muted-foreground mb-1.5"
           style={{ fontSize: px(12, scale, 10) }}
         >
           Repositorio de extensiones
@@ -602,17 +656,48 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
             >
               {s.extIndexUrl}
             </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              title="Quitar repositorio"
-              aria-label="Quitar repositorio"
-              onClick={() => set({ extIndexUrl: '' })}
-              className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
-              style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
+            <div
+              ref={removeRepoRef}
+              className="relative flex items-center justify-center shrink-0"
+              style={{ width: px(34, scale, 28), height: px(34, scale, 28) }}
             >
-              <Trash2 style={{ width: px(15, scale, 13), height: px(15, scale, 13) }} />
-            </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                title="Quitar repositorio"
+                aria-label="Quitar repositorio"
+                onClick={() => setConfirmRemoveRepo(true)}
+                className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
+                style={{ width: px(34, scale, 28), height: px(34, scale, 28) }}
+              >
+                <Trash2 style={{ width: px(15, scale, 13), height: px(15, scale, 13) }} />
+              </Button>
+              <AnimatePresence>
+                {confirmRemoveRepo && (
+                  <motion.div
+                    key="confirm-remove-repo"
+                    initial={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
+                    exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                    transition={{ duration: 0.14, ease: 'easeOut' }}
+                    className="absolute z-20 rounded-lg border border-border bg-card shadow-lg"
+                    style={{ top: '100%', left: '50%', marginTop: px(6, scale, 4), padding: px(8, scale, 6) }}
+                  >
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => {
+                        setConfirmRemoveRepo(false);
+                        set({ extIndexUrl: '' });
+                      }}
+                      style={{ height: px(28, scale, 24), fontSize: px(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                    >
+                      Quitar
+                    </Button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         )}
       </div>
@@ -636,10 +721,23 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         />
         <Row
           scale={scale}
-          title="Comprobar cada"
-          desc="Cada cuántas horas se revisa la biblioteca."
+          title="Avisar de actualizaciones de extensiones"
+          desc="Revisa el repositorio y avisa cuando una extensión tenga una versión nueva."
           right={
-            <div className={cn('flex items-center', !s.notifyEnabled && 'pointer-events-none opacity-50')} aria-disabled={!s.notifyEnabled}>
+            <Switch
+              scale={scale}
+              on={s.extUpdateNotify}
+              onChange={(v) => set({ extUpdateNotify: v })}
+              label="Avisar de actualizaciones de extensiones"
+            />
+          }
+        />
+        <Row
+          scale={scale}
+          title="Comprobar cada"
+          desc="Cada cuántas horas se revisan los capítulos nuevos y las actualizaciones de extensiones."
+          right={
+             <div className={cn('flex items-center', !s.notifyEnabled && !s.extUpdateNotify && 'pointer-events-none opacity-50')} aria-disabled={!s.notifyEnabled && !s.extUpdateNotify}>
               <Dropdown
                 scale={scale}
                 style={{ width: px(132, scale, 108) }}
@@ -660,13 +758,23 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           scale={scale}
           last
           title="Notificaciones en segundo plano"
+          desc={
+            s.notifyEnabled || s.extUpdateNotify
+              ? 'Comprueba si hay actualizaciones aún con Cytlex cerrado.'
+              : 'Activa algún aviso anterior para poder comprobar con Cytlex cerrado.'
+          }
           right={
-            <Switch
-              scale={scale}
-              on={s.notifyBackground}
-              onChange={toggleBackground}
-              label="Notificaciones en segundo plano"
-            />
+            <div
+              className={cn('flex items-center', !s.notifyEnabled && !s.extUpdateNotify && 'pointer-events-none opacity-50')}
+              aria-disabled={!s.notifyEnabled && !s.extUpdateNotify}
+            >
+              <Switch
+                scale={scale}
+                on={s.notifyBackground}
+                onChange={toggleBackground}
+                label="Notificaciones en segundo plano"
+              />
+            </div>
           }
         />
         {bgErr && (
@@ -685,11 +793,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           title="Cuenta de AniList"
           desc={
             authState.connected
-              ? `Conectada${authViewer?.name ? ` como ${authViewer.name}` : ''}${
-                  authState.expiresAt
-                    ? ` · caduca el ${new Date(authState.expiresAt).toLocaleDateString('es-ES')}`
-                    : ''
-                }`
+              ? `Conectada${authViewer?.name ? ` como ${authViewer.name}` : ''}`
               : authState.expired
                 ? 'La sesión anterior caducó. Vuelve a conectarte.'
                 : 'Sin conectar.'
@@ -697,7 +801,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           right={
             authState.connected ? (
               <Button
-                variant="secondary"
+                variant="destructive"
                 size="sm"
                 onClick={async () => {
                   await session.logout();
@@ -746,6 +850,36 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
 
         <Row
           scale={scale}
+          title="Mostrar portada de AniList"
+          desc="Usa la portada de AniList en lugar de la del manga (solo vinculados)"
+          right={
+            <div className="relative flex items-center">
+              <Switch
+                scale={scale}
+                on={s.anilistCover}
+                onChange={(v) => {
+                  if (!authState.connected) {
+                    setConnectHintFor('cover');
+                    return;
+                  }
+                  setConnectHintFor(null);
+                  set({ anilistCover: v });
+                }}
+                label="Mostrar portada de AniList"
+              />
+              <ConnectHint
+                open={connectHintFor === 'cover'}
+                hintRef={connectHintRef}
+                scale={scale}
+                reduceMotion={reduceMotion}
+                className="mt-2"
+              />
+            </div>
+          }
+        />
+        <Row
+          scale={scale}
+          last
           title="Mangas vinculados"
           desc={
             linkedCount
@@ -754,49 +888,64 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           }
           right={
             <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => anilist.clearCache()}
-                style={{
-                  height: px(36, scale, 30),
-                  fontSize: px(14, scale, 12),
-                  paddingLeft: px(12, scale, 9),
-                  paddingRight: px(12, scale, 9)
-                }}
-              >
-                <RefreshCw className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                Refrescar caché
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => { window.location.hash = '#/seguimiento'; }}
-                style={{
-                  height: px(36, scale, 30),
-                  fontSize: px(14, scale, 12),
-                  paddingLeft: px(12, scale, 9),
-                  paddingRight: px(12, scale, 9)
-                }}
-              >
-                Ver mi lista
-              </Button>
+              <div className="relative">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    if (!authState.connected) {
+                      setConnectHintFor('refresh');
+                      return;
+                    }
+                    setConnectHintFor(null);
+                    anilist.clearCache();
+                  }}
+                  style={{
+                    height: px(36, scale, 30),
+                    fontSize: px(14, scale, 12),
+                    paddingLeft: px(12, scale, 9),
+                    paddingRight: px(12, scale, 9)
+                  }}
+                >
+                  <RefreshCw className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                  Refrescar caché
+                </Button>
+                <ConnectHint
+                  open={connectHintFor === 'refresh'}
+                  hintRef={connectHintRef}
+                  scale={scale}
+                  reduceMotion={reduceMotion}
+                />
+              </div>
+              <div className="relative">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    if (!authState.connected) {
+                      setConnectHintFor('list');
+                      return;
+                    }
+                    setConnectHintFor(null);
+                    window.location.hash = '#/seguimiento';
+                  }}
+                  style={{
+                    height: px(36, scale, 30),
+                    fontSize: px(14, scale, 12),
+                    paddingLeft: px(12, scale, 9),
+                    paddingRight: px(12, scale, 9)
+                  }}
+                >
+                  Ver mi lista
+                </Button>
+                <ConnectHint
+                  open={connectHintFor === 'list'}
+                  hintRef={connectHintRef}
+                  scale={scale}
+                  reduceMotion={reduceMotion}
+                />
+              </div>
             </div>
-          }
-        />
-
-        <Row
-          scale={scale}
-          last
-          title="Idioma de la sinopsis"
-          desc="AniList guarda el título original del manga"
-          right={
-            <Segmented
-              scale={scale}
-              value={s.anilistSynopsisLang}
-              onChange={(v) => set({ anilistSynopsisLang: v })}
-              options={[['romaji', 'Romaji'], ['english', 'Inglés']]}
-            />
           }
         />
       </div>
@@ -834,6 +983,65 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
 
   return (
     <div className="min-h-full flex flex-col">
+      <AnimatePresence initial={false}>
+        {showDonate && (
+          <motion.div
+            initial={false}
+            exit={{ height: 0, opacity: 0, marginBottom: 0 }}
+            transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+            style={{ overflow: 'hidden', marginBottom: px(20, scale, 15) }}
+          >
+            <div
+              className="flex items-start rounded-xl border border-primary/25 bg-primary/5"
+              style={{ gap: px(12, scale, 9), padding: px(16, scale, 12) }}
+            >
+              <Heart
+                className="text-primary shrink-0"
+                style={{ width: px(20, scale, 16), height: px(20, scale, 16), marginTop: px(2, scale, 1.5) }}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
+                  ¿Te gusta Cytlex?
+                </div>
+                <div className="text-muted-foreground" style={{ fontSize: px(13, scale, 11), marginTop: px(4, scale, 3) }}>
+                  Si quieres, puedes apoyar su mantenimiento con una donación. Cada aporte ayuda a seguir mejorando la aplicación.
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    const url = 'https://ko-fi.com/fobicho';
+                    if (window.cytlex?.openExternal) window.cytlex.openExternal(url);
+                    else window.open(url, '_blank', 'noopener');
+                  }}
+                  style={{
+                    marginTop: px(12, scale, 9),
+                    height: px(34, scale, 28),
+                    fontSize: px(13, scale, 11),
+                    gap: px(8, scale, 6),
+                    paddingLeft: px(14, scale, 11),
+                    paddingRight: px(14, scale, 11)
+                  }}
+                >
+                  <Coffee style={{ width: px(15, scale, 13), height: px(15, scale, 13) }} />
+                  Apoyar en Ko-fi
+                </Button>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDonate(false);
+                  set({ donationSeen: true });
+                }}
+                aria-label="Cerrar"
+                className="shrink-0 grid place-items-center rounded-md text-muted-foreground hover:text-foreground transition-colors"
+                style={{ width: px(24, scale, 20), height: px(24, scale, 20) }}
+              >
+                <X style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div
         className="grid items-stretch flex-1"
         style={{
@@ -895,18 +1103,19 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         title="Eliminar categoría"
         description={
           pendingCat
-            ? `"${pendingCat.name}" contiene ${pendingCat.inside.length} ${pendingCat.inside.length === 1 ? 'manga' : 'mangas'}. Si continúas, se eliminarán de la biblioteca y se desvincularán del seguimiento.`
+            ? `"${pendingCat.name}" contiene ${pendingCat.inside.length} ${pendingCat.inside.length === 1 ? 'manga' : 'mangas'}. Se eliminarán de la biblioteca y se desvincularán del seguimiento.`
             : ''
         }
         hideDivider
         bodyClassName="pb-6"
         scrollableBody={false}
+        scale={scale}
       >
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => setPendingCat(null)}>
+        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button variant="outline" onClick={() => setPendingCat(null)} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}>
             Cancelar
           </Button>
-          <Button variant="destructive" onClick={confirmRemoveCat}>
+          <Button variant="destructive" onClick={confirmRemoveCat} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}>
             Eliminar
           </Button>
         </div>

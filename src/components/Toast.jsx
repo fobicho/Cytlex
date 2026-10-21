@@ -33,9 +33,9 @@ export function ToastProvider({ children }) {
   }, []);
 
   const toast = useCallback(
-    ({ title, description, variant = 'info', duration = 4500, action }) => {
+    ({ title, description, variant = 'info', duration = 4500, action, icon }) => {
       const id = ++seq;
-      setItems((list) => [...list.slice(-3), { id, title, description, variant, action }]);
+      setItems((list) => [...list.slice(-3), { id, title, description, variant, action, icon }]);
       timers.current.set(id, setTimeout(() => dismiss(id), duration));
       return id;
     },
@@ -50,7 +50,7 @@ export function ToastProvider({ children }) {
       <div className="pointer-events-none fixed bottom-4 right-4 z-[100] flex flex-col gap-2 w-[340px] max-w-[calc(100vw-2rem)]">
         <AnimatePresence initial={false}>
           {items.map((t) => {
-            const Icon = ICONS[t.variant] || Info;
+            const Icon = t.icon || ICONS[t.variant] || Info;
             return (
               <motion.div
                 key={t.id}

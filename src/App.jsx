@@ -10,12 +10,13 @@ import Reader from './pages/Reader.jsx';
 import Settings from './pages/Settings.jsx';
 import Tracking from './pages/Tracking.jsx';
 import { settings } from './lib/settings.js';
-import { lastSearch, resultsScroll } from './lib/searchState.js';
+import { lastSearch, resultsScroll, catalogScroll } from './lib/searchState.js';
 import { startNotifier, onNotifyClick } from './lib/notify.js';
 import { announceExtUpdates } from './lib/extUpdates.js';
 import { useToast } from './components/Toast.jsx';
 import { appWindow } from './lib/appWindow.js';
 import { useScale } from './lib/useScale.js';
+import { ArrowUpCircle } from 'lucide-react';
 
 class PageBoundary extends Component {
   constructor(props) {
@@ -69,6 +70,7 @@ export default function App() {
     lastSearch.genre = '';
     lastSearch.results = null;
     resultsScroll.clear();
+    catalogScroll.clear();
     const main = document.querySelector('main');
     if (main) main.scrollTop = 0;
   }, []);
@@ -96,10 +98,10 @@ export default function App() {
 
   useEffect(() => {
     const t = setTimeout(() => {
-      announceExtUpdates(({ titulo, cuerpo }) => {
+      announceExtUpdates(({ updates, count }) => {
         toast({
-          title: titulo,
-          description: cuerpo,
+          icon: ArrowUpCircle,
+          title: count === 1 ? updates[0].name : `${count} extensiones con actualización`,
           variant: 'info',
           duration: 9000,
           action: { label: 'Ver extensiones', onClick: goToExtensions }
@@ -145,7 +147,7 @@ export default function App() {
         {!isReader && <Sidebar />}
         <div className="flex-1 flex flex-col overflow-hidden">
           <main
-            className={isReader ? 'flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]' : 'flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]'}
+            className={isReader ? 'min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]' : 'flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]'}
             style={isReader ? undefined : { padding: `${Math.max(16, Math.round(24 * scale))}px` }}
           >
             <PageBoundary>

@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon } from 'lucide-react';
+import { flushSync } from 'react-dom';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon, Coffee } from 'lucide-react';
 import { THEMES, MODES } from '../lib/themes.js';
 import { settings } from '../lib/settings.js';
 import { cn } from '../lib/utils.js';
@@ -27,17 +28,18 @@ const STEPS = [
   },
   {
     title: 'Todo listo',
-    body: '¡Ya estás preparado para empezar con tus lecturas! Solo no olvides agregar el repositorio con las distintas extensiones en \'Ajustes\'.'
+    body: '¡Ya estás preparado para empezar con tus lecturas! Solo no olvides agregar el repositorio con las distintas extensiones en \'Ajustes\'.\n\nSi luego de usarla te gusta mi aplicación, por favor considera aportar la cantidad que desees, de manera totalmente voluntaria, para seguir dándole mantención. <3'
   }
 ];
 
-export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp }) {
+export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp, enteringWithSplash = false }) {
   const [step, setStep] = useState(0);
   const [theme, setTheme] = useState(() => settings.get().theme);
   const [mode, setMode] = useState(() => settings.get().mode);
   const [exiting, setExiting] = useState(false);
   const [walk, setWalk] = useState(0);
   const scale = useScale();
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     document.body.classList.add('tutorial-open');
@@ -64,9 +66,11 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
 
   const applyTheme = useCallback((t, m) => {
     const run = () => {
-      setTheme(t);
-      setMode(m);
-      settings.set({ theme: t, mode: m });
+      flushSync(() => {
+        setTheme(t);
+        setMode(m);
+        settings.set({ theme: t, mode: m });
+      });
     };
     if (typeof document !== 'undefined' && typeof document.startViewTransition === 'function') {
       document.startViewTransition(run);
@@ -89,6 +93,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const back = () => setStep((s) => Math.max(0, s - 1));
 
   const isTheme = step === 2;
+  const isReady = step === STEPS.length - 1;
   const progress = ((step + 1) / STEPS.length) * 100;
 
   return (
@@ -101,10 +106,16 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
       {step !== 1 && (
         <motion.div
           className="relative w-full max-w-3xl overflow-hidden rounded-3xl border border-border bg-card text-card-foreground transition-colors duration-300 pointer-events-auto"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-          style={{ transform: `scale(${scale})`, transformOrigin: 'center' }}
+          initial={{
+            opacity: 0,
+            transform: `translateY(${reduceMotion ? '0vh' : enteringWithSplash ? '100vh' : '24px'}) scale(${scale})`
+          }}
+          animate={{ opacity: 1, transform: `translateY(0vh) scale(${scale})` }}
+          transition={{
+            duration: enteringWithSplash && !reduceMotion ? 0.8 : 0.3,
+            ease: enteringWithSplash && !reduceMotion ? [0.76, 0, 0.24, 1] : [0.22, 1, 0.36, 1]
+          }}
+          style={{ transformOrigin: 'center' }}
         >
           <div className="px-6 py-8 sm:px-10 sm:py-10">
             <AnimatePresence mode="wait">
@@ -139,6 +150,22 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
 
                 {STEPS[step].body && (
                   <p className="text-base text-muted-foreground leading-relaxed whitespace-pre-line">{STEPS[step].body}</p>
+                )}
+
+                {isReady && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-5"
+                    onClick={() => {
+                      const url = 'https://ko-fi.com/fobicho';
+                      if (window.cytlex?.openExternal) window.cytlex.openExternal(url);
+                      else window.open(url, '_blank', 'noopener');
+                    }}
+                  >
+                    <Coffee className="h-4 w-4 mr-1.5" />
+                    Apoyar en Ko-fi
+                  </Button>
                 )}
 
                 {STEPS[step].bullets && (

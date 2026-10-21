@@ -5,11 +5,12 @@ export const SCALE_BASE_H = 860;
 export const SCALE_MIN = 0.78;
 export const SCALE_MAX = 1.35;
 
+import { settings } from './settings.js';
+
 export function computeScale(min = SCALE_MIN, max = SCALE_MAX) {
-  if (typeof window === 'undefined') return 1;
-  const w = window.innerWidth / SCALE_BASE_W;
-  const h = window.innerHeight / SCALE_BASE_H;
-  return Math.min(Math.max(Math.min(w, h), min), max);
+  if (typeof window === 'undefined') return 0.95;
+  const ui = settings.get().uiScale ?? 1;
+  return Math.min(Math.max(ui * 0.95, min), max);
 }
 
 export function useScale(min = SCALE_MIN, max = SCALE_MAX) {
@@ -18,8 +19,8 @@ export function useScale(min = SCALE_MIN, max = SCALE_MAX) {
   useEffect(() => {
     const update = () => setScale(computeScale(min, max));
     update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+    const unsub = settings.subscribe(() => setScale(computeScale(min, max)));
+    return () => unsub();
   }, [min, max]);
 
   return scale;

@@ -172,10 +172,26 @@ export default function createSource({ fetchText, parse, head }) {
     if (!pages.length) {
       const slug = slugOf(url);
       const id = chapterIdOf(url);
-      for (let n = 1; n <= MAX_PAGES; n++) {
-        const r = await head(pageUrl(slug, id, n));
-        if (!r?.ok) break;
-        pages.push(pageUrl(slug, id, n));
+      const pageExists = async (n) => {
+        try { return !!(await head(pageUrl(slug, id, n)))?.ok; } catch { return false; }
+      };
+      if (await pageExists(1)) {
+        let low = 1;
+        let high = 2;
+        while (high < MAX_PAGES && await pageExists(high)) {
+          low = high;
+          high = Math.min(high * 2, MAX_PAGES);
+        }
+        if (high === MAX_PAGES && await pageExists(high)) {
+          low = high;
+        } else {
+          while (high - low > 1) {
+            const middle = Math.floor((low + high) / 2);
+            if (await pageExists(middle)) low = middle;
+            else high = middle;
+          }
+        }
+        for (let n = 1; n <= low; n++) pages.push(pageUrl(slug, id, n));
       }
     }
 

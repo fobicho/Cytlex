@@ -12,6 +12,21 @@ export function recallCover(url) {
 
 export const scrollMemory = { catalog: 0 };
 
+const catalogScrollMap = new Map();
+
+export const catalogScroll = {
+  get(sourceId) {
+    return catalogScrollMap.get(sourceId || '') ?? 0;
+  },
+  set(sourceId, left) {
+    if (!sourceId || !Number.isFinite(left) || left < 0) return;
+    catalogScrollMap.set(sourceId, left);
+  },
+  clear() {
+    catalogScrollMap.clear();
+  }
+};
+
 const resultsScrollMap = new Map();
 
 export const resultsScroll = {

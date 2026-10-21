@@ -181,14 +181,21 @@ export default function createSource({ fetchText, parse, head }) {
     }
     marcarNodo(hostActual, false);
 
-    for (const host of nuevoHostDe(pages[0])) {
-      if (host === hostActual || estadoNodo(host) === 'muerto') continue;
-      if (await comprobarNodo(aNodo(pages[0], host))) {
-        marcarNodo(host, true);
-        ultimoNodoBueno = host;
-        return pages.map((p) => aNodo(p, host));
+    const candidatos = nuevoHostDe(pages[0])
+      .filter((host) => host !== hostActual && estadoNodo(host) !== 'muerto');
+    const inicioBusqueda = Date.now();
+    for (let i = 0; i < candidatos.length && Date.now() - inicioBusqueda < 15_000; i += 8) {
+      const grupo = candidatos.slice(i, i + 8);
+      const resultados = await Promise.all(grupo.map(async (host) => ({
+        host,
+        ok: await comprobarNodo(aNodo(pages[0], host))
+      })));
+      for (const { host, ok } of resultados) marcarNodo(host, ok);
+      const bueno = resultados.find((r) => r.ok);
+      if (bueno) {
+        ultimoNodoBueno = bueno.host;
+        return pages.map((p) => aNodo(p, bueno.host));
       }
-      marcarNodo(host, false);
     }
 
     return pages;

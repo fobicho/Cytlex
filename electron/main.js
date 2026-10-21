@@ -122,6 +122,16 @@ function createWindow(startBounds = null, startMaximized = false) {
     }
   });
 
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsed = validateUrl(url);
+      shell.openExternal(parsed.toString());
+    } catch {
+      // ignore invalid or disallowed URLs
+    }
+    return { action: 'deny' };
+  });
+
   return win;
 }
 
@@ -427,13 +437,17 @@ const refererFor = (url) => {
   try { return new URL(url).origin + '/'; } catch { return 'https://leercapitulo.co/'; }
 };
 
+const HTTP_GET_TIMEOUT_MS = 15_000;
+const HTTP_HEAD_TIMEOUT_MS = 5_000;
+
 ipcMain.handle('http:get', async (_e, url) => {
   const parsed = validateUrl(url);
   const res = await fetch(parsed.toString(), {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
       Referer: refererFor(parsed.toString())
-    }
+    },
+    signal: AbortSignal.timeout(HTTP_GET_TIMEOUT_MS)
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} al pedir ${parsed.toString()}`);
   return await res.text();
@@ -447,7 +461,8 @@ ipcMain.handle('http:head', async (_e, url) => {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
       Referer: refererFor(urlStr)
-    }
+    },
+    signal: AbortSignal.timeout(HTTP_HEAD_TIMEOUT_MS)
   });
   return { ok: res.ok, status: res.status, length: Number(res.headers.get('content-length')) || 0, type: res.headers.get('content-type') || '' };
 });
@@ -552,5 +567,17 @@ ipcMain.handle('window:is-maximized', (e) => {
 
 ipcMain.handle('window:close', (e) => {
   BrowserWindow.fromWebContents(e.sender)?.close();
+});
+
+ipcMain.handle('shell:open-external', (_e, url) => {
+  let parsed;
+  try {
+    parsed = validateUrl(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:') return false;
+  shell.openExternal(parsed.toString());
+  return true;
 });
 
