@@ -180,14 +180,8 @@ export default function ExtensionsPanel() {
       setLoading(false);
       return;
     }
-    if (cacheHit) {
-      setAvailable(repoCache.available);
-      setUpdates(repoCache.updates || []);
-      setLoading(false);
-      return;
-    }
+    setLoading(true);
     (async () => {
-      await checkUpdates();
       try { await extensions.sync(repoUrl); } catch {}
       refresh();
       await checkUpdates();
