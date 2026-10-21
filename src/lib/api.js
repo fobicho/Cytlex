@@ -43,6 +43,10 @@ export const api = {
     return freshEntry(detailKey(url, sourceId));
   },
 
+  peekStaleDetail(url, sourceId) {
+    return detailCache.get(detailKey(url, sourceId))?.value || null;
+  },
+
   async catalog(args, sourceId) {
     const src = await resolveSource(sourceId);
     return src.catalog(args);

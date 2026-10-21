@@ -222,7 +222,7 @@ export default function Detail() {
     setFav(!!lib.fav(mangaUrl, sourceId));
     setAniLinked(!!tracking.get(mangaUrl, sourceId));
 
-    const cached = api.peekDetail(mangaUrl, sourceId);
+    const cached = api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId);
     if (cached) setD(cached);
     else setD(null);
 
@@ -230,7 +230,7 @@ export default function Detail() {
     api
       .detail(mangaUrl, sourceId)
       .then((r) => { if (alive) setD(r); })
-      .catch((e) => { if (alive) setErr(String(e)); });
+      .catch((e) => { if (alive && !cached) setErr(String(e)); });
 
     return () => { alive = false; };
   }, [mangaUrl, sourceId]);
