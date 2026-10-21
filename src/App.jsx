@@ -147,7 +147,7 @@ export default function App() {
         {!isReader && <Sidebar />}
         <div className="flex-1 flex flex-col overflow-hidden">
           <main
-            className={isReader ? 'flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]' : 'flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]'}
+            className={isReader ? 'min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]' : 'flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]'}
             style={isReader ? undefined : { padding: `${Math.max(16, Math.round(24 * scale))}px` }}
           >
             <PageBoundary>

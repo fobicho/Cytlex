@@ -14,6 +14,41 @@ import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 
+function ReaderPanel({ id, src, alt, loading = 'eager', imageClassName, imageStyle, wrapperClassName, wrapperStyle, onContextMenu, onLoaded, onFailed }) {
+  const [status, setStatus] = useState('loading');
+  const [attempt, setAttempt] = useState(0);
+
+  return (
+    <div id={id} className={cn('relative grid place-items-center', wrapperClassName)} style={wrapperStyle}>
+      {status === 'loading' && (
+        <div role="status" aria-label={`Cargando ${alt.toLowerCase()}`} className="absolute inset-0 grid place-items-center text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
+      )}
+      {status === 'error' && (
+        <div role="alert" className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/90 px-3 text-center text-sm text-muted-foreground">
+          <span>No se pudo cargar {alt.toLowerCase()}.</span>
+          <Button size="sm" variant="secondary" onClick={() => { setStatus('loading'); setAttempt((n) => n + 1); }}>
+            Reintentar
+          </Button>
+        </div>
+      )}
+      <img
+        key={attempt}
+        src={src}
+        alt={alt}
+        loading={loading}
+        referrerPolicy="no-referrer"
+        onContextMenu={onContextMenu}
+        onLoad={(e) => { setStatus('loaded'); onLoaded?.(e); }}
+        onError={() => { setStatus('error'); onFailed?.(); }}
+        className={cn(imageClassName, 'transition-opacity duration-150', status === 'loaded' ? 'opacity-100' : 'opacity-0')}
+        style={imageStyle}
+      />
+    </div>
+  );
+}
+
 export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const loc = useLocation();
   const params = new URLSearchParams(loc.search);
@@ -66,7 +101,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const [toast, setToast] = useState('');
   const [wheelZoom, setWheelZoom] = useState(0);
   const [isRead, setIsRead] = useState(() => !!progress.get(chapterUrl, sourceId)?.read);
-  const preloadedRef = useRef(false);
   const pendingScrollRef = useRef(null);
   const sizesRef = useRef(new Map());
   const areaRef = useRef(null);
@@ -133,13 +167,19 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
 
   useEffect(() => {
     if (!chapterUrl) return;
+    let active = true;
+    setErr('');
     setWheelZoom(0);
     setIsRead(!!progress.get(chapterUrl, sourceId)?.read);
+    setPgLoaded(false);
+    setNat(null);
     setCh(null);
     setChUrl('');
+    pendingScrollRef.current = null;
     api
       .chapter(chapterUrl, sourceId)
       .then((r) => {
+        if (!active) return;
         setCh(r);
         setChUrl(chapterUrl);
         const total = r.pages?.length || 1;
@@ -152,8 +192,11 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
           setToast(`Continuando desde la página ${sp + 1}`);
         }
       })
-      .catch((e) => setErr(String(e)));
+      .catch((e) => {
+        if (active) setErr(String(e));
+      });
     scrollToTop();
+    return () => { active = false; };
   }, [chapterUrl, sourceId]);
 
   const [lastSeen, setLastSeen] = useState(0);
@@ -248,18 +291,22 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   }, [ch, mode]);
 
   useEffect(() => {
-    if (!ch) { preloadedRef.current = false; return; }
-    if (preloadedRef.current) return;
-    if (mode === 'paginado' || mode === 'paginado-rtl' && !pgLoaded) return;
-    preloadedRef.current = true;
-    ch.pages.slice(1).forEach((src) => {
-      if (sizesRef.current.has(src)) return;
+    if (!ch || mode === 'vertical' || !pgLoaded) return;
+    const step = useDouble ? 2 : 1;
+    const nextStart = page + (rtl ? -step : step);
+    const nextPages = useDouble
+      ? (rtl ? [nextStart + 1, nextStart] : [nextStart, nextStart + 1])
+      : [nextStart];
+    nextPages.forEach((index) => {
+      if (index < 0 || index >= ch.pages.length) return;
+      const src = ch.pages[index];
+      if (!src || sizesRef.current.has(src)) return;
       const img = new Image();
       img.referrerPolicy = 'no-referrer';
       img.onload = () => remember(src, img);
       img.src = src;
     });
-  }, [ch, pgLoaded, mode]);
+  }, [ch, page, pgLoaded, mode, rtl, useDouble]);
 
   useEffect(() => {
     const src = ch?.pages?.[page] ?? '';
@@ -427,7 +474,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   }
 
   return (
-    <div className="h-full p-3">
+    <div className="h-full min-h-0 p-3">
       {barsOpen ? (
             <div
               onMouseEnter={showBar}
@@ -540,27 +587,23 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       {mode === 'vertical' ? (
         <div className="mx-auto" style={{ width: `${scalePct}%` }}>
           {ch.pages.map((src, i) => (
-            <img
+            <ReaderPanel
               key={i}
               id={`pg-${i}`}
-              loading="lazy"
               src={src}
               alt={`Página ${i + 1}`}
-              referrerPolicy="no-referrer"
+              loading="lazy"
               onContextMenu={(e) => openPanelMenu(e, src, `Página ${i + 1}`)}
-              className="w-full block mx-auto mb-2.5"
+              onLoaded={(e) => remember(src, e.currentTarget)}
+              wrapperClassName="mb-2.5 w-full min-h-[120px]"
+              imageClassName="w-full block mx-auto"
             />
           ))}
         </div>
       ) : (
-        <div ref={areaRef} className="relative h-full w-full overflow-hidden grid place-items-center">
-          {!pgLoaded && (
-            <div className="absolute inset-0 grid place-items-center">
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-            </div>
-          )}
+        <div ref={areaRef} className="relative h-full min-h-0 w-full overflow-hidden grid grid-rows-[minmax(0,1fr)] place-items-center">
            {useDouble ? (
-             <div className="flex items-center justify-center gap-2 h-full w-full overflow-hidden">
+             <div className="flex min-h-0 items-center justify-center gap-2 h-full w-full overflow-hidden">
                {(() => {
                  const hasSecond = page + 1 < ch.pages.length;
                  const indices = hasSecond ? (rtl ? [page + 1, page] : [page, page + 1]) : [page];
@@ -568,44 +611,44 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                    const src = ch.pages[idx];
                    if (!src) return null;
                    return (
-                     <img
+                     <ReaderPanel
                        key={idx}
                        src={src}
                        alt={`Página ${idx + 1}`}
-                       referrerPolicy="no-referrer"
                        onContextMenu={(e) => openPanelMenu(e, src, `Página ${idx + 1}`)}
-                       onLoad={(e) => {
-                         if (idx === page) remember(src, e.currentTarget);
-                         if (e.currentTarget.naturalWidth) setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight });
-                         setPgLoaded(true);
+                       onLoaded={(e) => {
+                         remember(src, e.currentTarget);
+                         if (idx === page) {
+                           if (e.currentTarget.naturalWidth) setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight });
+                           setPgLoaded(true);
+                         }
                        }}
-                       onError={() => setPgLoaded(true)}
-                       className={cn('block object-contain', pgLoaded ? 'opacity-100' : 'opacity-0')}
-                       style={hasSecond
-                         ? { maxWidth: '48%', maxHeight: '100%', width: 'auto', height: 'auto' }
-                         : { maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto' }}
+                       onFailed={() => { if (idx === page) setPgLoaded(true); }}
+                       wrapperClassName="grid-rows-[minmax(0,1fr)] h-full min-h-0 min-w-0 flex-1"
+                       imageClassName="block object-contain max-w-full"
+                       imageStyle={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto' }}
                      />
                    );
                  });
                })()}
              </div>
            ) : (
-              <img
+              <ReaderPanel
                 key={page}
                 src={ch.pages[page]}
                 alt={`Página ${page + 1}`}
-                referrerPolicy="no-referrer"
                 onContextMenu={(e) => openPanelMenu(e, ch.pages[page], `Página ${page + 1}`)}
-                onLoad={(e) => {
+                onLoaded={(e) => {
                   remember(ch.pages[page], e.currentTarget);
                   if (e.currentTarget.naturalWidth) {
                     setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight });
                   }
                   setPgLoaded(true);
                 }}
-                 onError={() => setPgLoaded(true)}
-                 className={cn('block max-w-full object-contain transition-opacity duration-150', pgLoaded ? 'opacity-100' : 'opacity-0')}
-                 style={pageStyle}
+                onFailed={() => setPgLoaded(true)}
+                wrapperClassName="grid-rows-[minmax(0,1fr)] h-full min-h-0 w-full"
+                imageClassName="block max-w-full object-contain"
+                imageStyle={{ ...pageStyle, maxHeight: '100%', height: 'auto' }}
                />
             )}
            { (rtl ? (page + (useDouble ? 2 : 1) <= ch.pages.length - 1) : page > 0) && (
