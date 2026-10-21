@@ -6,6 +6,7 @@ import { api } from '../lib/api.js';
 import { extensions } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { lastSearch, scrollMemory, rememberCover, catalogScroll } from '../lib/searchState.js';
+import { clearSearchCoverCache, preloadSearchCover } from '../lib/covers.js';
 import MangaCard from '../components/MangaCard.jsx';
 import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
@@ -109,6 +110,11 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
           · {r.items.length}
         </span>
       </div>
+      {!r.items.length ? (
+        <p className="text-sm text-muted-foreground">
+          {r.status === 'error' ? 'No se pudo buscar en esta extensión.' : 'Sin resultados en esta extensión.'}
+        </p>
+      ) : (
       <div className="relative">
         <div
           ref={trackRef}
@@ -173,12 +179,14 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
           </a>
         )}
       </div>
+      )}
     </motion.section>
   );
 }
 
 let sessionTab = 'mangas';
 let animateSearch = false;
+let activeSearchRun = 0;
 
 export default function Catalog() {
   const loc = useLocation();
@@ -203,7 +211,7 @@ export default function Catalog() {
   }, [tab]);
 
   const searching = !!results && results.some((r) => r.status === 'loading');
-  const withResults = results ? results.filter((r) => r.items.length > 0) : [];
+  const completed = results ? results.filter((r) => r.status !== 'loading') : [];
   const done = !!results && !searching;
 
   useEffect(() => { if (done) animateSearch = false; }, [done]);
@@ -216,7 +224,9 @@ export default function Catalog() {
   const runSearch = (query = q) => {
     const list = extensions.installed();
     if (!list.length) return;
+    const runId = ++activeSearchRun;
     catalogScroll.clear();
+    clearSearchCoverCache();
     animateSearch = true;
     lastSearch.q = query;
     lastSearch.genre = '';
@@ -225,20 +235,23 @@ export default function Catalog() {
       .sort((a, b) => a.manifest.name.localeCompare(b.manifest.name, 'es', { sensitivity: 'base' }));
     setResults(lastSearch.results);
 
-    list.forEach((s) => {
-      api
-        .catalog({ q: query, genre: '', page: 1 }, s.manifest.id)
-        .then((r) => {
-          const items = r.items || [];
-          items.forEach((m) => rememberCover(m.url, m.cover));
-          updateResults((prev) =>
-            prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'done', items } : x)) : prev
-          );
-        })
-        .catch((e) => {
-          console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);
-          updateResults((prev) => (prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'error' } : x)) : prev));
-        });
+    list.forEach(async (s) => {
+      try {
+        const r = await api.catalog({ q: query, genre: '', page: 1 }, s.manifest.id);
+        const items = await Promise.all((r.items || []).map(async (m, index) => ({
+          ...m,
+          coverCached: index < 15 ? await preloadSearchCover(m.cover) : ''
+        })));
+        items.forEach((m) => rememberCover(m.url, m.cover));
+        if (runId !== activeSearchRun) return;
+        updateResults((prev) =>
+          prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'done', items } : x)) : prev
+        );
+      } catch (e) {
+        console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);
+        if (runId !== activeSearchRun) return;
+        updateResults((prev) => (prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'error' } : x)) : prev));
+      }
     });
   };
 
@@ -378,16 +391,9 @@ export default function Catalog() {
                   </div>
                 )}
 
-                {withResults.map((r, i) => (
+                {completed.map((r, i) => (
                   <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} first={i === 0} animate={animateSearch} />
                 ))}
-
-                {done && withResults.length === 0 && (
-                  <EmptyState
-                    face="（・_・）"
-                    title="Sin resultados"
-                  />
-                )}
               </>
             )}
           </>

@@ -5,7 +5,7 @@ import { api } from '../lib/api.js';
 import { lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { extensions } from '../lib/extensions.js';
-import { makeCoverThumb } from '../lib/covers.js';
+import { getSearchCover, makeCoverThumb } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { cn } from '../lib/utils.js';
@@ -126,9 +126,9 @@ export default function Detail() {
     if (anilistCover && tLocal) return tLocal;
     if (anilistCover && tCover) return tCover;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
-    return (
-      fav?.cover || tCover || recallCover(mangaUrl) || ''
-    );
+    const recalled = recallCover(mangaUrl);
+    const remoteCover = fav?.cover || tCover || recalled;
+    return getSearchCover(remoteCover) || remoteCover || '';
   }, [mangaUrl, sourceId, progressTick, anilistCover, coverTick]);
 
   const coverSrc = useMemo(() => {
