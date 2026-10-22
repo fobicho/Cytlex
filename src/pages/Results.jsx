@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { extensions } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
+import { isAdultManga } from '../lib/contentRating.js';
 import { lastSearch, resultsScroll } from '../lib/searchState.js';
 import MangaCard from '../components/MangaCard.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
@@ -18,11 +19,16 @@ export default function Results() {
   const group = lastSearch.results?.find((r) => r.id === sourceId);
   const manifest = group?.manifest || extensions.manifest(sourceId);
   const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
+  const [showAdult, setShowAdult] = useState(() => !!settings.get().showAdultManga);
   const scale = useScale();
 
-  useEffect(() => settings.subscribe((s) => setCoverSize(Math.round(160 * (s.uiScale || 1)))), []);
+  useEffect(() => settings.subscribe((s) => {
+    setCoverSize(Math.round(160 * (s.uiScale || 1)));
+    setShowAdult(!!s.showAdultManga);
+  }), []);
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
+  const items = group?.items.filter((m) => showAdult || !isAdultManga(m)) || [];
 
   useEffect(() => {
     const main = document.querySelector('main');
@@ -70,11 +76,11 @@ export default function Results() {
     };
   }, [sourceId, group?.items.length]);
 
-  if (!group || !group.items.length)
+  if (!group || !items.length)
     return (
       <EmptyState
         face="¯\\_(ツ)_/¯"
-        title="Sin resultados"
+        title={group?.items.length ? 'No hay resultados visibles con este filtro' : 'Sin resultados'}
         action={
           <Button
             variant="secondary"
@@ -112,7 +118,7 @@ export default function Results() {
       <div className="flex items-center" style={{ gap: px(10, scale, 8), marginBottom: `${Math.max(10, Math.round(16 * scale))}px` }}>
         <SourceBadge m={manifest} style={{ width: px(28, scale, 22), height: px(28, scale, 22), fontSize: `${Math.round(12 * scale)}px` }} />
         <h1 className="font-semibold" style={{ fontSize: `${Math.round(14 * scale)}px` }}>{manifest.name}</h1>
-        <span className="text-muted-foreground" style={{ fontSize: `${Math.round(12 * scale)}px` }}>· {group.items.length}</span>
+        <span className="text-muted-foreground" style={{ fontSize: `${Math.round(12 * scale)}px` }}>· {items.length}</span>
       </div>
 
       <motion.div
@@ -125,7 +131,7 @@ export default function Results() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease: 'easeOut' }}
       >
-        {group.items.map((m, i) => (
+        {items.map((m, i) => (
           <MangaCard key={i} m={m} sourceId={sourceId} from="resultados" coverSize={cs} />
         ))}
       </motion.div>

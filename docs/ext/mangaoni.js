@@ -14,6 +14,7 @@ const slugOf = (url) => (String(url || '').match(/\/lector\/([^/]+)\//) || [])[1
 const pageUrl = (slug, id, n) => `${FILES}/${slug}/${id}/${String(n).padStart(3, '0')}.webp`;
 
 export default function createSource({ fetchText, parse, head }) {
+  const adultLabel = (value) => /(^|[^a-z0-9])(?:\+18|18\+|adulto?|hentai|erotica|erotico|xxx)(?=$|[^a-z0-9])/i.test(String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
   function text(el, sel) {
     return (el.querySelector(sel)?.textContent || '').replace(/\s+/g, ' ').trim();
   }
@@ -29,7 +30,8 @@ export default function createSource({ fetchText, parse, head }) {
       title: (img?.getAttribute('alt') || '').replace(/\s+/g, ' ').trim(),
       cover: raw && !raw.includes('default.gif') ? abs(raw) : '',
       type: typeOf(href),
-      lastChapter: (text(el, 'span:last-of-type') || '').replace(/[^\d.]/g, '')
+      lastChapter: (text(el, 'span:last-of-type') || '').replace(/[^\d.]/g, ''),
+      adult: adultLabel(el.textContent)
     };
   }
 
@@ -132,6 +134,7 @@ export default function createSource({ fetchText, parse, head }) {
       cover: abs(doc.querySelector('a.portada img')?.getAttribute('src')),
       altTitles,
       genres,
+      adult: adultLabel(info?.textContent),
       facts: {
         estado,
         status: estado,

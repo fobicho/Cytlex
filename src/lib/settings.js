@@ -18,6 +18,7 @@ const defaults = {
   libraryView: 'grid',
   libraryCoverSize: 160,
   libraryShowUnread: true,
+  showAdultManga: false,
   chaptersPerRow: 1,
   sidebarCollapsed: false,
   uiScale: 1,

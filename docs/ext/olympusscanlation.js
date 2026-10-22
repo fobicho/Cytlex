@@ -1,4 +1,5 @@
 export default function createSource({ fetchText }) {
+  const adultLabel = (value) => /(^|[^a-z0-9])(?:\+18|18\+|adulto?|hentai|erotica|erotico|xxx)(?=$|[^a-z0-9])/i.test(String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
   const base = 'https://olympusxyz.com';
   const panel = 'https://panel.olympusxyz.com';
   const LIMIT_PAGES = 200;
@@ -12,7 +13,8 @@ export default function createSource({ fetchText }) {
     url: `${base}/series/${s.slug}`,
     title: s.name || '',
     cover: best(s.cover),
-    type: s.type || 'comic'
+    type: s.type || 'comic',
+    adult: s.is_adult === true || s.adult === true || s.adult_content === true || [...(s.genres || []), ...(s.tags || [])].some((g) => adultLabel(typeof g === 'string' ? g : g.name))
   });
 
   const comicsOf = (data) => {
@@ -74,6 +76,7 @@ export default function createSource({ fetchText }) {
       cover: best(s.cover),
       altTitles: '',
       genres: [...(s.genres || [])].map((g) => g.name).filter(Boolean),
+      adult: s.is_adult === true || s.adult === true || [...(s.genres || [])].some((g) => adultLabel(g.name)),
       facts: { estado: status, status, tipo: s.type || '', autor: s.team?.name || '', vistas: '' },
       sinopsis: (s.summary || '').trim(),
       chapters

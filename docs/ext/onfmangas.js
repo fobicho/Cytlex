@@ -1,4 +1,5 @@
 export default function createSource({ fetchText, parse }) {
+  const adultLabel = (value) => /(^|[^a-z0-9])(?:\+18|18\+|adulto?|hentai|erotica|erotico|xxx)(?=$|[^a-z0-9])/i.test(String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
   const base = 'https://onfmangas.com';
 
   const abs = (u) => {
@@ -17,7 +18,8 @@ export default function createSource({ fetchText, parse }) {
           url: abs(a?.getAttribute('href')),
           title: text(el, '.manga-title') || (img?.getAttribute('alt') || '').trim(),
           cover: abs(img?.getAttribute('src') || img?.getAttribute('data-src')),
-          type: text(el, '.card-badge')
+          type: text(el, '.card-badge'),
+          adult: adultLabel(el.textContent)
         };
       })
       .filter((x) => x.url && x.title);
@@ -55,11 +57,13 @@ export default function createSource({ fetchText, parse }) {
     const coverImg = doc.querySelector('img.manga-poster');
     const desc = doc.querySelector('meta[name="description"]')?.getAttribute('content') || '';
 
+    const genres = [...doc.querySelectorAll('.genre-tag')].map((e) => e.textContent.trim()).filter(Boolean);
     return {
       title: text(doc, 'h1.manga-title'),
       cover: abs(coverImg?.getAttribute('src')),
       altTitles: '',
-      genres: [...doc.querySelectorAll('.genre-tag')].map((e) => e.textContent.trim()).filter(Boolean),
+      genres,
+      adult: genres.some(adultLabel),
       facts: { estado: '', status: '', tipo: '', autor: '', vistas: '' },
       sinopsis: desc.trim(),
       chapters: decodeChapters(html)

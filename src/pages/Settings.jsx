@@ -451,7 +451,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         />
         <Row
           scale={scale}
-          last={s.libraryView !== 'grid'}
+          last={false}
           title="Capítulos por fila"
           desc="Cantidad de capítulos por fila en la ficha del manga"
           right={
@@ -467,7 +467,6 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           <>
             <Row
               scale={scale}
-              last
               title="Mostrar capítulos sin leer"
               desc="Muestra un contador en cada portada"
               right={
@@ -481,6 +480,20 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
             />
           </>
         )}
+        <Row
+          scale={scale}
+          last
+          title="Mostrar mangas para adultos"
+          desc="Desactivada, oculta las obras que su extensión marque como +18"
+          right={
+            <Switch
+              scale={scale}
+              on={s.showAdultManga}
+              onChange={(v) => set({ showAdultManga: v })}
+              label="Mostrar mangas para adultos"
+            />
+          }
+        />
       </div>
     );
   } else if (section === 'lector') {

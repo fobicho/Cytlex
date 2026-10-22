@@ -35,7 +35,7 @@ function Root() {
     <HashRouter>
       <ToastProvider>
         <div style={{ visibility: appVisible ? 'visible' : 'hidden' }}>
-          <App />
+          <App isVisible={appVisible} />
         </div>
         {!splashDone && <Splash onDone={handleSplashDone} onExitStart={handleSplashExitStart} />}
         {showTutorial && (splashExiting || splashDone) && (

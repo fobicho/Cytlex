@@ -52,6 +52,7 @@ function dedupeNames(value) {
 }
 
 export default function createSource({ fetchText, parse, head }) {
+  const adultLabel = (value) => /(^|[^a-z0-9])(?:\+18|18\+|adulto?|hentai|erotica|erotico|xxx)(?=$|[^a-z0-9])/i.test(String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
   const extractPages = (doc) =>
     [...doc.querySelectorAll('#lcPages img')]
       .map((img) => img.getAttribute('data-src') || img.getAttribute('src') || '')
@@ -67,7 +68,8 @@ export default function createSource({ fetchText, parse, head }) {
       cover: abs(img?.getAttribute('src')),
       type: text(el, '.lc-card-badge'),
       lastChapter: text(el, '.lc-chapter-link'),
-      status: text(el, '.lc-muted')
+      status: text(el, '.lc-muted'),
+      adult: adultLabel(el.textContent)
     };
   };
 
@@ -262,6 +264,7 @@ export default function createSource({ fetchText, parse, head }) {
       altTitles,
       genres,
       themes,
+      adult: [...genres, ...themes, ...Object.values(facts)].some(adultLabel),
       facts,
       sinopsis,
       chapters: preferWholeChapters(chapters),

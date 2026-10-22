@@ -4,6 +4,8 @@ import { ArrowLeft, Maximize2, Minimize2, ChevronLeft, ChevronRight, ChevronDown
 import { api } from '../lib/api.js';
 import { settings } from '../lib/settings.js';
 import { progress } from '../lib/progress.js';
+import { lib } from '../lib/library.js';
+import { isAdultManga } from '../lib/contentRating.js';
 import { tracking } from '../lib/tracking.js';
 import { detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
@@ -101,6 +103,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     return settings.get().readerMode;
   });
   const [doublePage, setDoublePage] = useState(() => !!settings.get().readerDoublePage);
+  const [showAdult, setShowAdult] = useState(() => !!settings.get().showAdultManga);
   const paginated = mode === 'paginado' || mode === 'paginado-rtl';
   const rtl = mode === 'paginado-rtl';
   const useDouble = paginated && doublePage;
@@ -116,6 +119,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     setMode(s.readerMode);
   }), []);
   useEffect(() => settings.subscribe((s) => setDoublePage(!!s.readerDoublePage)), []);
+  useEffect(() => settings.subscribe((s) => setShowAdult(!!s.showAdultManga)), []);
   const barH = Number(px(32, scale, 27).replace('px', ''));
   const barPad = Number(px(4, scale, 3).replace('px', ''));
   const arrowH = Number(px(24, scale, 20).replace('px', ''));
@@ -635,6 +639,11 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     window.location.hash = backHash;
   };
 
+  const savedManga = lib.fav(mangaUrl, sourceId);
+  const adultBlocked = !showAdult && (isAdultManga(savedManga) || isAdultManga(api.peekDetail(mangaUrl, sourceId)));
+
+  if (adultBlocked)
+    return <EmptyState face="(・_・)" title="Contenido para adultos oculto" description="Activa «Mostrar mangas para adultos» en Ajustes → Biblioteca para leer esta obra." />;
   if (!chapterUrl)
     return <EmptyState face="¯\\_(ツ)_/¯" title="Sin capítulo seleccionado." />;
   if (err)
