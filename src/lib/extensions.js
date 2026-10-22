@@ -1,4 +1,5 @@
 import { buildSelectorSource } from './selectorSource.js';
+import { isAdultManga } from './contentRating.js';
 
 const KEY = 'cytlex:extensions:v1';
 
@@ -11,6 +12,7 @@ const write = (v) => localStorage.setItem(KEY, JSON.stringify(v));
 
 function ctx() {
   return {
+    isAdultManga,
     fetchText: (url) => {
       if (typeof window === 'undefined' || !window.cytlex?.httpGet) {
         throw new Error('Sin puente Electron para hacer peticiones');
@@ -78,16 +80,41 @@ export const extensions = {
   async checkUpdates(indexUrl) {
     const repo = await extensions.repoIndex(indexUrl);
     const installed = read();
-    return installed
-      .map((r) => {
+    await Promise.all(installed.map(async (r) => {
         const remote = repo.find((m) => m.id === r.manifest.id);
-        if (!remote || !remote.version) return null;
-        const local = r.manifest.version || '0';
-        return isNewer(remote.version, local)
-          ? { id: r.manifest.id, name: remote.name || r.manifest.name, icon: remote.icon, from: local, to: remote.version }
-          : null;
-      })
-      .filter(Boolean);
+        if (!remote || !remote.version) return;
+
+        let local = r.installedVersion || r.manifest.version || '0';
+        if (!r.installedVersion && remote.type === 'module' && local === remote.version && remote.main) {
+          try {
+            const mainUrl = /^https?:/i.test(remote.main)
+              ? remote.main
+              : new URL(remote.main, indexUrl).href;
+            const remoteCode = await ctx().fetchText(mainUrl);
+            if (remoteCode === r.code) {
+              r.installedVersion = remote.version;
+              local = remote.version;
+            } else {
+              local = '0';
+            }
+          } catch {
+            local = '0';
+          }
+          r.installedVersion = local;
+          r.manifest = { ...r.manifest, version: local };
+        } else if (!r.installedVersion) {
+          r.installedVersion = local;
+        }
+      }));
+
+    write(installed);
+    return installed.flatMap((r) => {
+      const remote = repo.find((m) => m.id === r.manifest.id);
+      const local = r.installedVersion || r.manifest.version || '0';
+      return remote?.version && isNewer(remote.version, local)
+        ? [{ id: r.manifest.id, name: remote.name || r.manifest.name, icon: remote.icon, from: local, to: remote.version }]
+        : [];
+    });
   },
 
   async updateAll(indexUrl, ids) {
@@ -108,6 +135,7 @@ export const extensions = {
         const code = await ctx().fetchText(mainUrl);
         r.code = code;
         r.manifest = { ...r.manifest, ...fresh };
+        r.installedVersion = fresh.version || r.manifest.version || '0';
         cache.delete(r.manifest.id);
         ok += 1;
       } catch {
@@ -131,7 +159,15 @@ export const extensions = {
     const records = read().map((r) => {
       const fresh = byId.get(r.manifest.id);
       if (!fresh) return r;
-      return { ...r, manifest: { ...fresh, ...r.manifest } };
+      const installedVersion = r.installedVersion || r.manifest.version || '0';
+      return {
+        ...r,
+        manifest: {
+          ...fresh,
+          ...r.manifest,
+          version: installedVersion
+        }
+      };
     });
 
     write(records);
@@ -162,7 +198,7 @@ export const extensions = {
       code = await ctx().fetchText(mainUrl);
     }
     const list = read().filter((r) => r.manifest.id !== manifest.id);
-    list.push({ manifest, code, installedAt: Date.now() });
+    list.push({ manifest, code, installedVersion: manifest.version || '0', installedAt: Date.now() });
     write(list);
     cache.delete(manifest.id);
   },

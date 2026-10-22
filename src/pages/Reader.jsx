@@ -642,8 +642,13 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const savedManga = lib.fav(mangaUrl, sourceId);
   const adultBlocked = !showAdult && (isAdultManga(savedManga) || isAdultManga(api.peekDetail(mangaUrl, sourceId)));
 
-  if (adultBlocked)
-    return <EmptyState face="(・_・)" title="Contenido para adultos oculto" description="Activa «Mostrar mangas para adultos» en Ajustes → Biblioteca para leer esta obra." />;
+  useEffect(() => {
+    if (!adultBlocked) return;
+    detailScroll.requestRestore();
+    window.location.hash = backHash;
+  }, [adultBlocked, backHash]);
+
+  if (adultBlocked) return null;
   if (!chapterUrl)
     return <EmptyState face="¯\\_(ツ)_/¯" title="Sin capítulo seleccionado." />;
   if (err)

@@ -51,8 +51,9 @@ function dedupeNames(value) {
   return [...seen.values()].join(', ');
 }
 
-export default function createSource({ fetchText, parse, head }) {
-  const adultLabel = (value) => /(^|[^a-z0-9])(?:\+18|18\+|adulto?|hentai|erotica|erotico|xxx)(?=$|[^a-z0-9])/i.test(String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
+export default function createSource({ fetchText, parse, head, isAdultManga }) {
+
+  const adultLabel = (value) => typeof isAdultManga === 'function' && isAdultManga({ contentRating: value });
   const extractPages = (doc) =>
     [...doc.querySelectorAll('#lcPages img')]
       .map((img) => img.getAttribute('data-src') || img.getAttribute('src') || '')
@@ -69,7 +70,7 @@ export default function createSource({ fetchText, parse, head }) {
       type: text(el, '.lc-card-badge'),
       lastChapter: text(el, '.lc-chapter-link'),
       status: text(el, '.lc-muted'),
-      adult: adultLabel(el.textContent)
+      adult: adultLabel(text(el, '.lc-card-badge'))
     };
   };
 
@@ -264,7 +265,7 @@ export default function createSource({ fetchText, parse, head }) {
       altTitles,
       genres,
       themes,
-      adult: [...genres, ...themes, ...Object.values(facts)].some(adultLabel),
+      adult: [...genres, ...themes].some(adultLabel),
       facts,
       sinopsis,
       chapters: preferWholeChapters(chapters),
