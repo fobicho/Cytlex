@@ -125,6 +125,10 @@ export default function Detail() {
     || isAdultManga(knownSearchItem)
   );
 
+  useLayoutEffect(() => {
+    if (adultBlocked) navigate(backTo, { replace: true });
+  }, [adultBlocked, backTo, navigate]);
+
   const knownCover = useMemo(() => {
     const fav = lib.fav(mangaUrl, sourceId);
     const local = fav?.coverLocal;
@@ -241,7 +245,7 @@ export default function Detail() {
       .then((r) => {
         if (!alive) return;
         setD(r);
-        if (isAdultManga(r) && lib.isFav(mangaUrl, sourceId)) lib.updateFav(mangaUrl, { adult: true }, sourceId);
+        if (isAdultManga(r) && lib.isFav(mangaUrl, sourceId)) lib.updateFav(mangaUrl, { adult: true, adultClassification: 'adult' }, sourceId);
       })
       .catch((e) => { if (alive && !cached) setErr(String(e)); });
 
@@ -346,13 +350,15 @@ export default function Detail() {
     && lib.isFav(catPick.pending.url, catPick.pending.sourceId);
 
   const onAddClick = () => {
+    const adult = isAdultManga(d);
     const manga = {
       url: mangaUrl,
       title: d.title,
       cover: d.cover,
       type: d.facts.tipo,
       genres: d.genres,
-      adult: isAdultManga(d),
+      adult,
+      adultClassification: adult ? 'adult' : 'unknown',
       author: d.facts.autor,
       sourceId
     };
@@ -394,15 +400,7 @@ export default function Detail() {
         action={<Button variant="secondary" onClick={() => window.location.reload()}>Reintentar</Button>}
       />
     );
-  if (adultBlocked)
-    return (
-      <EmptyState
-        face="(・_・)"
-        title="Contenido para adultos oculto"
-        description="Activa «Mostrar mangas para adultos» en Ajustes → Biblioteca para ver esta obra."
-        action={<Button variant="secondary" onClick={() => navigate(backTo)}>Volver</Button>}
-      />
-    );
+  if (adultBlocked) return null;
   if (!d)
     return (
       <div className="min-h-full flex flex-col">

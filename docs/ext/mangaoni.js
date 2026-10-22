@@ -13,8 +13,9 @@ const chapterIdOf = (url) => (String(url || '').match(/\/lector\/[^/]+\/(\d+)/) 
 const slugOf = (url) => (String(url || '').match(/\/lector\/([^/]+)\//) || [])[1] || '';
 const pageUrl = (slug, id, n) => `${FILES}/${slug}/${id}/${String(n).padStart(3, '0')}.webp`;
 
-export default function createSource({ fetchText, parse, head }) {
-  const adultLabel = (value) => /(^|[^a-z0-9])(?:\+18|18\+|adulto?|hentai|erotica|erotico|xxx)(?=$|[^a-z0-9])/i.test(String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
+export default function createSource({ fetchText, parse, head, isAdultManga }) {
+
+  const adultLabel = (value) => typeof isAdultManga === 'function' && isAdultManga({ contentRating: value });
   function text(el, sel) {
     return (el.querySelector(sel)?.textContent || '').replace(/\s+/g, ' ').trim();
   }
@@ -31,7 +32,9 @@ export default function createSource({ fetchText, parse, head }) {
       cover: raw && !raw.includes('default.gif') ? abs(raw) : '',
       type: typeOf(href),
       lastChapter: (text(el, 'span:last-of-type') || '').replace(/[^\d.]/g, ''),
-      adult: adultLabel(el.textContent)
+      adult: adultLabel([...el.querySelectorAll('[class*="badge"], [class*="tag"], [class*="rating"], [data-rating], [data-content-rating]')]
+        .map((label) => label.textContent || label.getAttribute('data-rating') || label.getAttribute('data-content-rating') || '')
+        .join(' '))
     };
   }
 
@@ -134,7 +137,9 @@ export default function createSource({ fetchText, parse, head }) {
       cover: abs(doc.querySelector('a.portada img')?.getAttribute('src')),
       altTitles,
       genres,
-      adult: adultLabel(info?.textContent),
+      adult: [...(info?.querySelectorAll('strong') || [])]
+        .filter((strong) => /(?:edad|clasificaci[oó]n|rating|contenido)/i.test(strong.textContent || ''))
+        .some((strong) => adultLabel(`${strong.textContent} ${strong.nextElementSibling?.textContent || strong.nextSibling?.textContent || ''}`)),
       facts: {
         estado,
         status: estado,
