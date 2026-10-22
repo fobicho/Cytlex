@@ -11,6 +11,7 @@ import { progress } from '../lib/progress.js';
 import { tracking } from '../lib/tracking.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { api } from '../lib/api.js';
+import { isAdultManga } from '../lib/contentRating.js';
 import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
@@ -31,6 +32,7 @@ export default function Library() {
   const { toast } = useToast();
   const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
   const [showUnread, setShowUnread] = useState(() => settings.get().libraryShowUnread);
+  const [showAdult, setShowAdult] = useState(() => !!settings.get().showAdultManga);
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('cytlex:librarySort') || 'title-asc');
   const [unread, setUnread] = useState({});
   const scale = useScale();
@@ -40,6 +42,7 @@ export default function Library() {
     () => settings.subscribe((s) => {
       setCoverSize(Math.round(160 * (s.uiScale || 1)));
       setShowUnread(s.libraryShowUnread);
+      setShowAdult(!!s.showAdultManga);
     }),
     []
   );
@@ -83,7 +86,7 @@ export default function Library() {
 
   const shown = useMemo(
     () => {
-      const list = favs.filter((f) => (f.cats || []).includes(sel)).slice();
+      const list = favs.filter((f) => (f.cats || []).includes(sel) && (showAdult || !isAdultManga(f))).slice();
       const cmp = (a, b) => {
         switch (sortBy) {
           case 'title-desc':
@@ -98,14 +101,14 @@ export default function Library() {
       };
       return list.sort(cmp);
     },
-    [favs, sel, sortBy, unread, progressTick]
+    [favs, sel, sortBy, unread, progressTick, showAdult]
   );
 
   useEffect(() => {
     if (!showUnread) return undefined;
     let alive = true;
     (async () => {
-      const pending = favs.filter((f) => (f.cats || []).includes(sel)).filter((f) => extensions.isInstalled(f.sourceId || 'leercapitulo'));
+      const pending = favs.filter((f) => (f.cats || []).includes(sel) && (showAdult || !isAdultManga(f))).filter((f) => extensions.isInstalled(f.sourceId || 'leercapitulo'));
       const results = await Promise.all(
         pending.map(async (f) => {
           const sid = f.sourceId || 'leercapitulo';
@@ -279,7 +282,7 @@ export default function Library() {
         <EmptyState
           face="(っ-;)"
           tone="sad"
-          title="Tu biblioteca está vacía"
+          title={favs.some((f) => (f.cats || []).includes(sel)) ? 'No hay mangas visibles con este filtro' : 'Tu biblioteca está vacía'}
         />
       ) : view === 'grid' ? (
         <div

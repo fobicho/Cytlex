@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, Component } from 'react';
+import { useEffect, useState, useCallback, useRef, Component } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Sidebar from './components/Sidebar.jsx';
 import TitleBar from './components/TitleBar.jsx';
@@ -11,7 +11,7 @@ import Settings from './pages/Settings.jsx';
 import Tracking from './pages/Tracking.jsx';
 import { resolveMode, settings } from './lib/settings.js';
 import { lastSearch, resultsScroll, catalogScroll } from './lib/searchState.js';
-import { startNotifier, onNotifyClick } from './lib/notify.js';
+import { startNotifier, onNotifyClick, checkLibrary } from './lib/notify.js';
 import { announceExtUpdates } from './lib/extUpdates.js';
 import { useToast } from './components/Toast.jsx';
 import { appWindow } from './lib/appWindow.js';
@@ -55,13 +55,14 @@ function useResetPage(onReset) {
   }, [onReset]);
 }
 
-export default function App() {
+export default function App({ isVisible = true }) {
   const { toast } = useToast();
   const [theme, setTheme] = useState(() => settings.get().theme);
   const [mode, setMode] = useState(() => resolveMode(settings.get().mode));
   const [isFullscreen, setIsFullscreen] = useState(false);
   const scale = useScale();
   const [resetTick, setResetTick] = useState(0);
+  const initialLibraryCheck = useRef(false);
   const location = useLocation();
   const isReader = location.pathname.startsWith('/leer');
   const resetPage = useCallback(() => {
@@ -97,11 +98,34 @@ export default function App() {
   useEffect(() => startNotifier(), []);
 
   useEffect(() => {
+    if (!isVisible || initialLibraryCheck.current || !settings.get().notifyEnabled) return;
+    initialLibraryCheck.current = true;
+    let cancelled = false;
+    Promise.resolve(window.cytlex?.isBackground?.()).then((background) => {
+      if (background || cancelled) return;
+      checkLibrary({ silent: true, force: true, notifyFound: false }).then((found) => {
+        if (cancelled || !found.length) return;
+        const chapterCount = found.reduce((sum, item) => sum + item.count, 0);
+        toast({
+          title: found.length === 1 ? '1 obra actualizada' : `${found.length} obras actualizadas`,
+          description: `${chapterCount} ${chapterCount === 1 ? 'capítulo nuevo disponible' : 'capítulos nuevos disponibles'}.`,
+          variant: 'info'
+        });
+      }).catch(() => {});
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [isVisible, toast]);
+
+  useEffect(() => {
     const t = setTimeout(() => {
       announceExtUpdates(({ updates, count }) => {
+        const description = count === 1
+          ? `Ya puedes instalar la versión ${updates[0].to}.`
+          : `${updates.slice(0, 3).map((update) => `${update.name} ${update.to}`).join(' · ')}${count > 3 ? ` y ${count - 3} más` : ''}`;
         toast({
           icon: ArrowUpCircle,
-          title: count === 1 ? updates[0].name : `${count} extensiones con actualización`,
+          title: count === 1 ? `${updates[0].name} tiene una actualización` : `${count} extensiones tienen actualizaciones`,
+          description,
           variant: 'info',
           duration: 9000,
           action: { label: 'Ver extensiones', onClick: goToExtensions }

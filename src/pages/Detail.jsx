@@ -6,7 +6,7 @@ import { lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { extensions } from '../lib/extensions.js';
 import { getSearchCover, makeCoverThumb } from '../lib/covers.js';
-import { chapterOrder, detailScroll, recallCover } from '../lib/searchState.js';
+import { chapterOrder, detailScroll, lastSearch, recallCover } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
@@ -18,6 +18,7 @@ import { Skeleton } from '../components/ui/skeleton.jsx';
 import AniListPanel from '../components/AniListPanel.jsx';
 import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
+import { isAdultManga } from '../lib/contentRating.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -114,8 +115,15 @@ export default function Detail() {
   const [aniListOpen, setAniListOpen] = useState(false);
   const [aniLinked, setAniLinked] = useState(() => !!tracking.get(mangaUrl, sourceId));
   const [anilistCover, setAnilistCover] = useState(() => !!settings.get().anilistCover);
+  const [showAdult, setShowAdult] = useState(() => !!settings.get().showAdultManga);
   const scale = useScale();
   const coverSize = Math.round(COVER_BASE * scale);
+  const knownSearchItem = lastSearch.results?.find((group) => group.id === sourceId)?.items.find((item) => item.url === mangaUrl);
+  const adultBlocked = !showAdult && (
+    isAdultManga(d)
+    || isAdultManga(lib.fav(mangaUrl, sourceId))
+    || isAdultManga(knownSearchItem)
+  );
 
   const knownCover = useMemo(() => {
     const fav = lib.fav(mangaUrl, sourceId);
@@ -160,6 +168,7 @@ export default function Detail() {
   useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
   useEffect(() => tracking.subscribe(() => { setAniLinked(!!tracking.get(mangaUrl, sourceId)); setCoverTick((t) => t + 1); }), []);
   useEffect(() => settings.subscribe((s) => setAnilistCover(!!s.anilistCover)), []);
+  useEffect(() => settings.subscribe((s) => setShowAdult(!!s.showAdultManga)), []);
   useEffect(() => settings.subscribe((s) => {
     try {
       const map = JSON.parse(localStorage.getItem('cytlex:chaptersPerRowByManga') || '{}');
@@ -229,7 +238,11 @@ export default function Detail() {
     let alive = true;
     api
       .detail(mangaUrl, sourceId)
-      .then((r) => { if (alive) setD(r); })
+      .then((r) => {
+        if (!alive) return;
+        setD(r);
+        if (isAdultManga(r) && lib.isFav(mangaUrl, sourceId)) lib.updateFav(mangaUrl, { adult: true }, sourceId);
+      })
       .catch((e) => { if (alive && !cached) setErr(String(e)); });
 
     return () => { alive = false; };
@@ -338,6 +351,8 @@ export default function Detail() {
       title: d.title,
       cover: d.cover,
       type: d.facts.tipo,
+      genres: d.genres,
+      adult: isAdultManga(d),
       author: d.facts.autor,
       sourceId
     };
@@ -377,6 +392,15 @@ export default function Detail() {
         title="No se pudo cargar"
         description={err}
         action={<Button variant="secondary" onClick={() => window.location.reload()}>Reintentar</Button>}
+      />
+    );
+  if (adultBlocked)
+    return (
+      <EmptyState
+        face="(・_・)"
+        title="Contenido para adultos oculto"
+        description="Activa «Mostrar mangas para adultos» en Ajustes → Biblioteca para ver esta obra."
+        action={<Button variant="secondary" onClick={() => navigate(backTo)}>Volver</Button>}
       />
     );
   if (!d)

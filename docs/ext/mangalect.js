@@ -1,4 +1,5 @@
 export default function createSource({ fetchText, parse }) {
+  const adultLabel = (value) => /(^|[^a-z0-9])(?:\+18|18\+|adulto?|hentai|erotica|erotico|xxx)(?=$|[^a-z0-9])/i.test(String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
   const base = 'https://mangalect.org';
   const assets = 'https://images.mangalect.org/file/leermangaesp';
   const PAGE_SIZE = 20;
@@ -37,7 +38,8 @@ export default function createSource({ fetchText, parse }) {
         title: r.titulo || '',
         cover: coverUrl(r.portada),
         type: r.tipo || '',
-        lastChapter: r.ultimo_capitulo ? String(r.ultimo_capitulo) : ''
+        lastChapter: r.ultimo_capitulo ? String(r.ultimo_capitulo) : '',
+        adult: r.adulto === true || r.is_adult === true || r.adult === true || [r.tipo, r.rating, r.clasificacion, r.generos, r.genres, r.etiquetas].flat().some((x) => adultLabel(typeof x === 'string' ? x : x?.name))
       }))
       .filter((x) => x.url && x.title && x.lastChapter);
 
@@ -56,6 +58,7 @@ export default function createSource({ fetchText, parse }) {
     const coverImg = doc.querySelector('img.manga-cover') || doc.querySelector('.manga-cover img');
     const status = text(doc, '.status-text');
     const portadaRel = data.getAttribute('data-portada-rel') || '';
+    const genres = [...doc.querySelectorAll('.genero-item')].map((e) => e.textContent.trim()).filter(Boolean);
 
     const chapters = [];
     const seen = new Set();
@@ -79,7 +82,8 @@ export default function createSource({ fetchText, parse }) {
       title: text(doc, 'h1.manga-title') || doc.title.split('|')[0].trim(),
       cover: coverImg?.getAttribute('src') ? abs(coverImg.getAttribute('src')) : coverUrl(portadaRel),
       altTitles: text(doc, '.alternate-titles'),
-      genres: [...doc.querySelectorAll('.genero-item')].map((e) => e.textContent.trim()).filter(Boolean),
+      genres,
+      adult: [...genres, data.getAttribute('data-manga-tipo')].some(adultLabel),
       facts: {
         estado: status,
         status,

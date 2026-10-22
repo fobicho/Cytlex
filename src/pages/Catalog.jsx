@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { extensions } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
+import { isAdultManga } from '../lib/contentRating.js';
 import { lastSearch, scrollMemory, rememberCover, catalogScroll } from '../lib/searchState.js';
 import { clearSearchCoverCache, preloadSearchCover } from '../lib/covers.js';
 import MangaCard from '../components/MangaCard.jsx';
@@ -16,12 +17,34 @@ import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 
+function waitForCover(url) {
+  if (!url) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const image = new Image();
+    let settled = false;
+    const finish = (loaded) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(loaded);
+    };
+    const timer = setTimeout(() => finish(false), 15000);
+    image.referrerPolicy = 'no-referrer';
+    image.onload = () => {
+      if (!image.naturalWidth) return finish(false);
+      image.decode().then(() => finish(true)).catch(() => finish(image.naturalWidth > 0));
+    };
+    image.onerror = () => finish(false);
+    image.src = url;
+  });
+}
+
 const TABS = [
   { id: 'mangas', label: 'Mangas' },
   { id: 'extensiones', label: 'Extensiones' }
 ];
 
-function SourceSection({ r, coverSize, scale = 1, first = false, animate = false }) {
+function SourceSection({ r, coverSize, scale = 1, first = false, animate = false, showAdult = false }) {
   const trackRef = useRef(null);
   const mainRef = useRef(null);
   const [canLeft, setCanLeft] = useState(false);
@@ -85,7 +108,8 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
     el.scrollBy({ left: dir * (coverSize + 20) * 2, behavior: 'smooth' });
   };
 
-  const visible = r.items.slice(0, 15);
+  const filteredItems = showAdult ? r.items : r.items.filter((m) => !isAdultManga(m));
+  const visible = filteredItems.slice(0, 15);
 
   return (
     <motion.section
@@ -107,12 +131,12 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
           {r.manifest.name}
         </h3>
         <span className="text-muted-foreground" style={{ fontSize: `${Math.round(12 * scale)}px` }}>
-          · {r.items.length}
+          · {filteredItems.length}
         </span>
       </div>
-      {!r.items.length ? (
+      {!filteredItems.length ? (
         <p className="text-sm text-muted-foreground">
-          {r.status === 'error' ? 'No se pudo buscar en esta extensión.' : 'Sin resultados en esta extensión.'}
+          {r.status === 'error' ? 'No se pudo buscar en esta extensión.' : r.items.length ? 'No hay resultados visibles con este filtro.' : 'Sin resultados en esta extensión.'}
         </p>
       ) : (
       <div className="relative">
@@ -166,7 +190,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
             <ChevronRight style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
           </button>
         )}
-        {r.items.length > 15 && (
+        {filteredItems.length > 15 && (
           <a
             className={cn(
               buttonVariants({ variant: 'ghost', size: 'sm' }),
@@ -198,9 +222,13 @@ export default function Catalog() {
   const [q, setQ] = useState(() => lastSearch.q);
   const [results, setResults] = useState(() => lastSearch.results);
   const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
+  const [showAdult, setShowAdult] = useState(() => !!settings.get().showAdultManga);
   const scale = useScale();
 
-  useEffect(() => settings.subscribe((s) => setCoverSize(Math.round(160 * (s.uiScale || 1)))), []);
+  useEffect(() => settings.subscribe((s) => {
+    setCoverSize(Math.round(160 * (s.uiScale || 1)));
+    setShowAdult(!!s.showAdultManga);
+  }), []);
   useEffect(() => { sessionTab = tab; }, [tab]);
   useEffect(() => () => { animateSearch = false; }, []);
 
@@ -241,10 +269,12 @@ export default function Catalog() {
         const catalogItems = (r.items || []).filter((m) =>
           s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim()
         );
-        const items = await Promise.all(catalogItems.map(async (m, index) => ({
-          ...m,
-          coverCached: index < 15 ? await preloadSearchCover(m.cover) : ''
-        })));
+        const loadedItems = await Promise.all(catalogItems.map(async (m) => {
+          const coverCached = await preloadSearchCover(m.cover);
+          if (!coverCached && !await waitForCover(m.cover)) return null;
+          return { ...m, coverCached };
+        }));
+        const items = loadedItems.filter(Boolean);
         items.forEach((m) => rememberCover(m.url, m.cover));
         if (runId !== activeSearchRun) return;
         updateResults((prev) =>
@@ -395,7 +425,7 @@ export default function Catalog() {
                 )}
 
                 {completed.map((r, i) => (
-                  <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} first={i === 0} animate={animateSearch} />
+                  <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} first={i === 0} animate={animateSearch} showAdult={showAdult} />
                 ))}
               </>
             )}

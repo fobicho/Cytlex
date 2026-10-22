@@ -44,7 +44,7 @@ async function countChapters(manga) {
   return Array.isArray(d?.chapters) ? d.chapters.length : null;
 }
 
-export async function checkLibrary({ silent = false, force = false } = {}) {
+export async function checkLibrary({ silent = false, force = false, notifyFound = !silent } = {}) {
   if (running) return [];
   if (typeof window === 'undefined' || !window.cytlex?.notify) return [];
   const cfg = settings.get();
@@ -102,7 +102,7 @@ export async function checkLibrary({ silent = false, force = false } = {}) {
   }
 
   for (const f of found) {
-    if (silent) continue;
+    if (!notifyFound) continue;
     const n = f.count;
     try {
       await window.cytlex.notify({
@@ -148,7 +148,7 @@ function msToNextHour(hours) {
 }
 
 export function startNotifier() {
-  const run = async ({ silent = false } = {}) => {
+  const run = async ({ silent = false, notifyFound = !silent } = {}) => {
     const cfg = settings.get();
     const quiereLib = cfg.notifyEnabled;
     const quiereExt = cfg.extUpdateNotify;
@@ -156,7 +156,7 @@ export function startNotifier() {
       if (!silent) finishIfBackground();
       return;
     }
-    if (quiereLib) await checkLibrary({ silent }).catch(() => {});
+    if (quiereLib) await checkLibrary({ silent, notifyFound }).catch(() => {});
     const avisado = quiereExt ? await avisarExtensiones().catch(() => false) : false;
     if (!silent) {
       if (!avisado) {
@@ -194,7 +194,7 @@ export function startNotifier() {
         finishIfBackground();
       };
       const tope = setTimeout(cerrar, 90 * 1000);
-      run({ silent: true }).finally(() => {
+      run({ silent: true, notifyFound: true }).finally(() => {
         clearTimeout(tope);
         setTimeout(cerrar, 10 * 1000);
       });

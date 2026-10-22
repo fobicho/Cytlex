@@ -1,4 +1,5 @@
 export default function createSource({ fetchText, parse }) {
+  const adultLabel = (value) => /(^|[^a-z0-9])(?:\+18|18\+|adulto?|hentai|erotica|erotico|xxx)(?=$|[^a-z0-9])/i.test(String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
   const base = 'https://zonatmo.org';
 
   const abs = (u) => {
@@ -27,7 +28,8 @@ export default function createSource({ fetchText, parse }) {
           title: text(el, '.thumbnail-title h4'),
           cover: abs(cover),
           type: text(el, '.book-type'),
-          lastChapter: caps(el.querySelector('.book-meta-item'))
+          lastChapter: caps(el.querySelector('.book-meta-item')),
+          adult: adultLabel(el.textContent)
         };
       })
       .filter((x) => x && x.title);
@@ -95,6 +97,7 @@ export default function createSource({ fetchText, parse }) {
       cover: abs(doc.querySelector('img.book-thumbnail')?.getAttribute('src')),
       altTitles,
       genres,
+      adult: genres.some(adultLabel),
       facts: { estado: status, status, tipo: text(doc, 'h1.book-type'), autor: author, vistas: '' },
       sinopsis,
       chapters
