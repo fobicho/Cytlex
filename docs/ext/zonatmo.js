@@ -8,6 +8,11 @@ export default function createSource({ fetchText, parse, isAdultManga }) {
   };
 
   const text = (el, sel) => (el.querySelector(sel)?.textContent || '').replace(/\s+/g, ' ').trim();
+  const adultCard = (el, title) => typeof isAdultManga === 'function' && isAdultManga({
+    title,
+    contentRating: [el, ...el.querySelectorAll('[class*="badge"], [class*="tag"], [class*="rating"], [data-rating], [data-content-rating], [data-adult], [data-is-adult], [data-age-rating], [data-content-warning]')]
+      .map((node) => [node.textContent, node.getAttribute('class'), node.getAttribute('data-rating'), node.getAttribute('data-content-rating'), node.getAttribute('data-adult'), node.getAttribute('data-is-adult'), node.getAttribute('data-age-rating'), node.getAttribute('data-content-warning'), node.getAttribute('aria-label'), node.getAttribute('title')].filter(Boolean).join(' '))
+  });
 
   const typeOf = (url) => (String(url || '').match(/\/library\/([^/]+)\//) || [])[1] || '';
 
@@ -29,7 +34,7 @@ export default function createSource({ fetchText, parse, isAdultManga }) {
           cover: abs(cover),
           type: text(el, '.book-type'),
           lastChapter: caps(el.querySelector('.book-meta-item')),
-          adult: adultLabel(text(el, '.book-type'))
+          adult: adultCard(el, text(el, '.thumbnail-title h4'))
         };
       })
       .filter((x) => x && x.title);

@@ -11,9 +11,19 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 
+const ADULT_CONTENT_SOURCES = new Set([
+  'leercapitulo',
+  'mangalect',
+  'onfmangas',
+  'olympusscanlation',
+  'zonatmo',
+  'mangaoni'
+]);
+
 function ExtensionCard({ m, action, updatable = false, scale = 1 }) {
   const [imgOk, setImgOk] = useState(true);
   const showImg = m.icon && imgOk;
+  const hasAdultContent = m.adultContent || ADULT_CONTENT_SOURCES.has(m.id);
   const iconSize = Number(px(40, scale, 32).replace('px', ''));
   return (
     <Card className={cn('hover:shadow-sm', updatable && 'cx-update-pulse')}>
@@ -43,12 +53,14 @@ function ExtensionCard({ m, action, updatable = false, scale = 1 }) {
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <div
-            className="font-semibold truncate"
-            title={m.name}
-            style={{ fontSize: px(15, scale, 13) }}
-          >
-            {m.name}
+          <div className="flex items-center min-w-0" style={{ gap: px(6, scale, 4) }}>
+            <div
+              className="font-semibold truncate min-w-0"
+              title={m.name}
+              style={{ fontSize: px(15, scale, 13) }}
+            >
+              {m.name}
+            </div>
           </div>
           <div
             className="flex items-center min-w-0 overflow-hidden"
@@ -64,6 +76,16 @@ function ExtensionCard({ m, action, updatable = false, scale = 1 }) {
                 style={{ fontSize: px(11, scale, 9) }}
               >
                 v{m.version}
+              </span>
+            )}
+            {hasAdultContent && (
+              <span
+                className="shrink-0 font-semibold text-red-600 dark:text-red-400"
+                title="Esta extensión puede ofrecer mangas para adultos"
+                aria-label="Extensión con contenido para adultos, +18"
+                style={{ fontSize: px(11, scale, 9) }}
+              >
+                +18
               </span>
             )}
           </div>

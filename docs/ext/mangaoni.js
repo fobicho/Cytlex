@@ -33,7 +33,7 @@ export default function createSource({ fetchText, parse, head, isAdultManga }) {
       type: typeOf(href),
       lastChapter: (text(el, 'span:last-of-type') || '').replace(/[^\d.]/g, ''),
       adult: adultLabel([...el.querySelectorAll('[class*="badge"], [class*="tag"], [class*="rating"], [data-rating], [data-content-rating]')]
-        .map((label) => label.textContent || label.getAttribute('data-rating') || label.getAttribute('data-content-rating') || '')
+        .map((label) => [label.textContent, label.getAttribute('class'), label.getAttribute('data-rating'), label.getAttribute('data-content-rating'), label.getAttribute('data-adult'), label.getAttribute('data-age-rating')].filter(Boolean).join(' '))
         .join(' '))
     };
   }

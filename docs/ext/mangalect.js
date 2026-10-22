@@ -39,7 +39,13 @@ export default function createSource({ fetchText, parse, isAdultManga }) {
         cover: coverUrl(r.portada),
         type: r.tipo || '',
         lastChapter: r.ultimo_capitulo ? String(r.ultimo_capitulo) : '',
-        adult: (r.adulto === true || r.adulto === 1 || r.adulto === 'true' || r.adulto === '1') || (r.is_adult === true || r.is_adult === 1 || r.is_adult === 'true' || r.is_adult === '1') || (r.adult === true || r.adult === 1 || r.adult === 'true' || r.adult === '1') || [r.tipo, r.rating, r.clasificacion, r.generos, r.genres, r.etiquetas].flat().some((x) => adultLabel(typeof x === 'string' ? x : x?.name))
+        adult: typeof isAdultManga === 'function' && isAdultManga({
+          ...r,
+          title: r.titulo || '',
+          type: r.tipo || '',
+          genres: r.generos || r.genres,
+          tags: r.etiquetas || r.tags
+        })
       }))
       .filter((x) => x.url && x.title && x.lastChapter);
 

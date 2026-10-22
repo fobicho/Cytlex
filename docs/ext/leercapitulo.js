@@ -54,6 +54,11 @@ function dedupeNames(value) {
 export default function createSource({ fetchText, parse, head, isAdultManga }) {
 
   const adultLabel = (value) => typeof isAdultManga === 'function' && isAdultManga({ contentRating: value });
+  const adultCard = (el, title) => typeof isAdultManga === 'function' && isAdultManga({
+    title,
+    contentRating: [el, ...el.querySelectorAll('[class*="badge"], [class*="tag"], [class*="rating"], [data-rating], [data-content-rating], [data-adult], [data-is-adult], [data-age-rating], [data-content-warning]')]
+      .map((node) => [node.textContent, node.getAttribute('class'), node.getAttribute('data-rating'), node.getAttribute('data-content-rating'), node.getAttribute('data-adult'), node.getAttribute('data-is-adult'), node.getAttribute('data-age-rating'), node.getAttribute('data-content-warning'), node.getAttribute('aria-label'), node.getAttribute('title')].filter(Boolean).join(' '))
+  });
   const extractPages = (doc) =>
     [...doc.querySelectorAll('#lcPages img')]
       .map((img) => img.getAttribute('data-src') || img.getAttribute('src') || '')
@@ -70,7 +75,7 @@ export default function createSource({ fetchText, parse, head, isAdultManga }) {
       type: text(el, '.lc-card-badge'),
       lastChapter: text(el, '.lc-chapter-link'),
       status: text(el, '.lc-muted'),
-      adult: adultLabel(text(el, '.lc-card-badge'))
+      adult: adultCard(el, text(el, '.lc-card-name'))
     };
   };
 

@@ -1,5 +1,4 @@
 export default function createSource({ fetchText, isAdultManga }) {
-  const adultLabel = (value) => typeof isAdultManga === 'function' && isAdultManga({ contentRating: value });
   const base = 'https://olympusxyz.com';
   const panel = 'https://panel.olympusxyz.com';
   const LIMIT_PAGES = 200;
@@ -14,7 +13,7 @@ export default function createSource({ fetchText, isAdultManga }) {
     title: s.name || '',
     cover: best(s.cover),
     type: s.type || 'comic',
-    adult: (s.is_adult === true || s.is_adult === 1 || s.is_adult === 'true' || s.is_adult === '1') || (s.adult === true || s.adult === 1 || s.adult === 'true' || s.adult === '1') || (s.adult_content === true || s.adult_content === 1 || s.adult_content === 'true' || s.adult_content === '1') || [...(s.genres || []), ...(s.tags || [])].some((g) => adultLabel(typeof g === 'string' ? g : g.name))
+    adult: typeof isAdultManga === 'function' && isAdultManga(s)
   });
 
   const comicsOf = (data) => {
@@ -76,7 +75,7 @@ export default function createSource({ fetchText, isAdultManga }) {
       cover: best(s.cover),
       altTitles: '',
       genres: [...(s.genres || [])].map((g) => g.name).filter(Boolean),
-      adult: (s.is_adult === true || s.is_adult === 1 || s.is_adult === 'true' || s.is_adult === '1') || (s.adult === true || s.adult === 1 || s.adult === 'true' || s.adult === '1') || [...(s.genres || [])].some((g) => adultLabel(g.name)),
+      adult: typeof isAdultManga === 'function' && isAdultManga(s),
       facts: { estado: status, status, tipo: s.type || '', autor: s.team?.name || '', vistas: '' },
       sinopsis: (s.summary || '').trim(),
       chapters
