@@ -38,8 +38,9 @@ export const THEMES = [
 ];
 
 export const MODES = [
-  { id: 'dark', name: 'Oscuro' },
-  { id: 'light', name: 'Claro' }
+  { id: 'system', name: 'Sistema' },
+  { id: 'light', name: 'Claro' },
+  { id: 'dark', name: 'Oscuro' }
 ];
 
 export const THEME_IDS = THEMES.map((t) => t.id);

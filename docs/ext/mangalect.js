@@ -39,7 +39,7 @@ export default function createSource({ fetchText, parse }) {
         type: r.tipo || '',
         lastChapter: r.ultimo_capitulo ? String(r.ultimo_capitulo) : ''
       }))
-      .filter((x) => x.url && x.title);
+      .filter((x) => x.url && x.title && x.lastChapter);
 
     return {
       items,

@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon, Coffee } from 'lucide-react';
 import { THEMES, MODES } from '../lib/themes.js';
-import { settings } from '../lib/settings.js';
+import { resolveMode, settings } from '../lib/settings.js';
 import { cn } from '../lib/utils.js';
 import { useScale } from '../lib/useScale.js';
 import { Button } from './ui/button.jsx';
@@ -205,7 +205,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {THEMES.map((t) => {
-                        const sw = t.swatch[mode] || t.swatch.dark;
+                        const sw = t.swatch[resolveMode(mode)] || t.swatch.dark;
                         const selected = theme === t.id;
                         return (
                           <button

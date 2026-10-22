@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session, Menu, dialog, Notification, shell, screen } from 'electron';
+import { app, BrowserWindow, ipcMain, session, Menu, dialog, Notification, shell, screen, nativeTheme } from 'electron';
 import path from 'node:path';
 import { writeFile, readFile } from 'node:fs/promises';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -54,7 +54,9 @@ function themeBg() {
   try {
     const t = JSON.parse(readFileSync(path.join(app.getPath('userData'), 'theme.json'), 'utf8'));
     const theme = t?.theme || 'default';
-    const mode = t?.mode || 'dark';
+    const mode = t?.mode === 'system'
+      ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
+      : (t?.effectiveMode || t?.mode || 'dark');
     return (map[theme] || map.default)[mode] || (mode === 'dark' ? '#09090b' : '#ffffff');
   } catch {
     return '#09090b';
@@ -271,9 +273,9 @@ let pendingClick = null;
 
 ipcMain.handle('app:background', () => launchedInBackground);
 
-ipcMain.handle('theme:save', (_e, mode) => {
+ipcMain.handle('theme:save', (_e, theme) => {
   try {
-    writeFileSync(path.join(app.getPath('userData'), 'theme.json'), JSON.stringify({ mode }));
+    writeFileSync(path.join(app.getPath('userData'), 'theme.json'), JSON.stringify(theme));
   } catch {}
   return true;
 });

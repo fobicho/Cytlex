@@ -18,12 +18,13 @@ export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = 
   const linkA11y = unavailable ? { 'aria-disabled': true, tabIndex: -1 } : {};
 
   const localCover = m.coverLocal?.startsWith('data:') ? m.coverLocal : '';
+  const cachedCover = m.coverCached || '';
   const [anilistCoverOn, setAnilistCoverOn] = useState(() => !!settings.get().anilistCover);
   useEffect(() => settings.subscribe((s) => setAnilistCoverOn(!!s.anilistCover)), []);
   const t = tracking.get(m.url, sourceId);
   const aniLocal = anilistCoverOn ? (t?.coverLocal || '') : '';
   const aniCover = anilistCoverOn ? (t?.cover || '') : '';
-  const [src, setSrc] = useState(aniLocal || aniCover || localCover || m.cover);
+  const [src, setSrc] = useState(aniLocal || aniCover || cachedCover || localCover || m.cover);
   const hoverTimer = useRef(null);
 
   const schedulePrefetch = () => {
@@ -35,11 +36,12 @@ export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = 
   useEffect(() => () => clearTimeout(hoverTimer.current), []);
   useEffect(() => {
     const local = m.coverLocal?.startsWith('data:') ? m.coverLocal : '';
+    const cached = m.coverCached || '';
     const t2 = tracking.get(m.url, sourceId);
     const aniL = anilistCoverOn ? (t2?.coverLocal || '') : '';
     const aniC = anilistCoverOn ? (t2?.cover || '') : '';
-    setSrc(aniL || aniC || local || m.cover);
-  }, [m.coverLocal, m.cover, anilistCoverOn, sourceId, m.url]);
+    setSrc(aniL || aniC || cached || local || m.cover);
+  }, [m.coverCached, m.coverLocal, m.cover, anilistCoverOn, sourceId, m.url]);
 
   const box = coverSize ? { width: `${coverSize}px` } : { aspectRatio: '2 / 3' };
   const inner = coverSize ? 'h-full w-full object-cover block' : 'w-full h-full aspect-[2/3] object-cover block';
