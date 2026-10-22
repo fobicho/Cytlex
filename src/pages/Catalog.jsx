@@ -238,7 +238,10 @@ export default function Catalog() {
     list.forEach(async (s) => {
       try {
         const r = await api.catalog({ q: query, genre: '', page: 1 }, s.manifest.id);
-        const items = await Promise.all((r.items || []).map(async (m, index) => ({
+        const catalogItems = (r.items || []).filter((m) =>
+          s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim()
+        );
+        const items = await Promise.all(catalogItems.map(async (m, index) => ({
           ...m,
           coverCached: index < 15 ? await preloadSearchCover(m.cover) : ''
         })));

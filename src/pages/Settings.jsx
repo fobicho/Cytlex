@@ -2,12 +2,12 @@ import { useEffect, useState, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, Coffee, X } from 'lucide-react';
-import { settings } from '../lib/settings.js';
+import { resolveMode, settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
 import { anilist } from '../lib/anilist.js';
 import { session } from '../lib/session.js';
 import { tracking } from '../lib/tracking.js';
-import { THEMES } from '../lib/themes.js';
+import { MODES, THEMES } from '../lib/themes.js';
 import { notifyHours } from '../lib/notify.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { Button } from '../components/ui/button.jsx';
@@ -316,13 +316,13 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           scale={scale}
           first
           title="Modo"
-          desc="Claro u oscuro"
+          desc="Elige claro, oscuro o sigue el modo del sistema"
           right={
             <Segmented
               scale={scale}
               value={s.mode}
               onChange={(m) => setAppearance({ mode: m })}
-              options={[['dark', 'Oscuro'], ['light', 'Claro']]}
+              options={MODES.map(({ id, name }) => [id, name])}
             />
           }
         />
@@ -333,7 +333,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             {THEMES.map((t) => {
               const on = s.theme === t.id;
-              const sw = t.swatch[s.mode] || t.swatch.dark;
+              const sw = t.swatch[resolveMode(s.mode)] || t.swatch.dark;
               return (
                 <button
                   key={t.id}

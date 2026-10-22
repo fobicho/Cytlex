@@ -6,15 +6,15 @@ import Splash from './components/Splash.jsx';
 import Onboarding from './components/Onboarding.jsx';
 import { ToastProvider } from './components/Toast.jsx';
 import { migrateLegacyStorage } from './lib/migrate.js';
-import { settings } from './lib/settings.js';
+import { resolveMode, settings } from './lib/settings.js';
 import './index.css';
 
 migrateLegacyStorage();
 
 const boot = settings.get();
 document.documentElement.setAttribute('data-theme', boot.theme);
-document.documentElement.setAttribute('data-mode', boot.mode);
-if (window.cytlex?.saveTheme) window.cytlex.saveTheme({ theme: boot.theme, mode: boot.mode });
+document.documentElement.setAttribute('data-mode', resolveMode(boot.mode));
+if (window.cytlex?.saveTheme) window.cytlex.saveTheme({ theme: boot.theme, mode: boot.mode, effectiveMode: resolveMode(boot.mode) });
 
 function Root() {
   const [splashDone, setSplashDone] = useState(false);

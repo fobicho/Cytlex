@@ -9,7 +9,7 @@ import Detail from './pages/Detail.jsx';
 import Reader from './pages/Reader.jsx';
 import Settings from './pages/Settings.jsx';
 import Tracking from './pages/Tracking.jsx';
-import { settings } from './lib/settings.js';
+import { resolveMode, settings } from './lib/settings.js';
 import { lastSearch, resultsScroll, catalogScroll } from './lib/searchState.js';
 import { startNotifier, onNotifyClick } from './lib/notify.js';
 import { announceExtUpdates } from './lib/extUpdates.js';
@@ -58,7 +58,7 @@ function useResetPage(onReset) {
 export default function App() {
   const { toast } = useToast();
   const [theme, setTheme] = useState(() => settings.get().theme);
-  const [mode, setMode] = useState(() => settings.get().mode);
+  const [mode, setMode] = useState(() => resolveMode(settings.get().mode));
   const [isFullscreen, setIsFullscreen] = useState(false);
   const scale = useScale();
   const [resetTick, setResetTick] = useState(0);
@@ -85,7 +85,7 @@ export default function App() {
     () =>
       settings.subscribe((s) => {
         setTheme(s.theme);
-        setMode(s.mode);
+        setMode(resolveMode(s.mode));
       }),
     []
   );

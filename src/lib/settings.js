@@ -2,6 +2,13 @@ import { THEME_IDS, MODE_IDS } from './themes.js';
 
 const KEY = 'cytlex:settings:v1';
 
+export function resolveMode(mode) {
+  if (mode !== 'system') return mode;
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches
+    ? 'dark'
+    : 'light';
+}
+
 const defaults = {
   theme: 'default',
   mode: 'light',
@@ -59,11 +66,11 @@ export const settings = {
     try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch {}
     const applyDom = () => {
       if (patch.theme) document.documentElement.setAttribute('data-theme', cache.theme);
-      if (patch.mode) document.documentElement.setAttribute('data-mode', cache.mode);
+      if (patch.theme || patch.mode) document.documentElement.setAttribute('data-mode', resolveMode(cache.mode));
     };
     applyDom();
     if ((patch.theme || patch.mode) && typeof window !== 'undefined' && window.cytlex?.saveTheme) {
-      window.cytlex.saveTheme({ theme: cache.theme, mode: cache.mode });
+      window.cytlex.saveTheme({ theme: cache.theme, mode: cache.mode, effectiveMode: resolveMode(cache.mode) });
     }
     window.dispatchEvent(new CustomEvent('cytlex:settings', { detail: { ...cache } }));
     return { ...cache };
@@ -80,5 +87,13 @@ if (typeof window !== 'undefined') {
     document.documentElement.style.setProperty('--vt-x', `${e.clientX}px`);
     document.documentElement.style.setProperty('--vt-y', `${e.clientY}px`);
   }, { passive: true });
+
+  window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+    if (cache.mode !== 'system') return;
+    const mode = resolveMode(cache.mode);
+    document.documentElement.setAttribute('data-mode', mode);
+    window.cytlex?.saveTheme?.({ theme: cache.theme, mode: cache.mode, effectiveMode: mode });
+    window.dispatchEvent(new CustomEvent('cytlex:settings', { detail: { ...cache } }));
+  });
 }
 
