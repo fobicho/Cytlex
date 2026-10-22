@@ -8,11 +8,13 @@ export default function createSource({ fetchText, parse, isAdultManga }) {
   };
 
   const text = (el, sel) => (el.querySelector(sel)?.textContent || '').replace(/\s+/g, ' ').trim();
-  const adultCard = (el, title) => typeof isAdultManga === 'function' && isAdultManga({
-    title,
-    contentRating: [el, ...el.querySelectorAll('[class*="badge"], [class*="tag"], [class*="rating"], [data-rating], [data-content-rating], [data-adult], [data-is-adult], [data-age-rating], [data-content-warning]')]
-      .map((node) => [node.textContent, node.getAttribute('class'), node.getAttribute('data-rating'), node.getAttribute('data-content-rating'), node.getAttribute('data-adult'), node.getAttribute('data-is-adult'), node.getAttribute('data-age-rating'), node.getAttribute('data-content-warning'), node.getAttribute('aria-label'), node.getAttribute('title')].filter(Boolean).join(' '))
-  });
+  const adultCard = (el) => {
+    if (typeof isAdultManga !== 'function') return false;
+    const nodes = [el, ...el.querySelectorAll('[class*="badge"], [class*="tag"], [class*="rating"], [class*="genre"], [class*="adult"], [class*="age"], [data-rating], [data-content-rating], [data-adult], [data-is-adult], [data-age-rating], [data-content-warning], .book-meta-item')];
+    const adult = nodes.some((node) => ['data-adult', 'data-is-adult'].some((key) => node.hasAttribute(key) && !/^(?:false|0)$/i.test(node.getAttribute(key) || '')));
+    const contentRating = nodes.flatMap((node) => [node === el ? '' : node.textContent, ...['data-rating', 'data-content-rating', 'data-age-rating', 'data-content-warning'].map((key) => node.getAttribute(key))].filter(Boolean));
+    return isAdultManga({ adult, contentRating });
+  };
 
   const typeOf = (url) => (String(url || '').match(/\/library\/([^/]+)\//) || [])[1] || '';
 
@@ -34,7 +36,7 @@ export default function createSource({ fetchText, parse, isAdultManga }) {
           cover: abs(cover),
           type: text(el, '.book-type'),
           lastChapter: caps(el.querySelector('.book-meta-item')),
-          adult: adultCard(el, text(el, '.thumbnail-title h4'))
+          adult: adultCard(el)
         };
       })
       .filter((x) => x && x.title);
