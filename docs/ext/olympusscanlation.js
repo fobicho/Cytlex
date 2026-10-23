@@ -1,4 +1,4 @@
-export default function createSource({ fetchText, isAdultManga }) {
+export default function createSource({ fetchText }) {
   const base = 'https://olympusxyz.com';
   const panel = 'https://panel.olympusxyz.com';
   const LIMIT_PAGES = 200;
@@ -12,8 +12,7 @@ export default function createSource({ fetchText, isAdultManga }) {
     url: `${base}/series/${s.slug}`,
     title: s.name || '',
     cover: best(s.cover),
-    type: s.type || 'comic',
-    adult: typeof isAdultManga === 'function' && isAdultManga(s)
+    type: s.type || 'comic'
   });
 
   const comicsOf = (data) => {
@@ -75,7 +74,6 @@ export default function createSource({ fetchText, isAdultManga }) {
       cover: best(s.cover),
       altTitles: '',
       genres: [...(s.genres || [])].map((g) => g.name).filter(Boolean),
-      adult: typeof isAdultManga === 'function' && isAdultManga(s),
       facts: { estado: status, status, tipo: s.type || '', autor: s.team?.name || '', vistas: '' },
       sinopsis: (s.summary || '').trim(),
       chapters

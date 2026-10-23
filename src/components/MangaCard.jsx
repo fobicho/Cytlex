@@ -12,7 +12,7 @@ function prefetch(url, sourceId) {
   api.prefetchDetail(url, sourceId);
 }
 
-export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, minimal = false, from = 'biblioteca', coverSize, chapterCount }) {
+export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, from = 'biblioteca', coverSize, chapterCount }) {
   const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}`;
   const linkCls = cn(unavailable && 'pointer-events-none');
   const linkA11y = unavailable ? { 'aria-disabled': true, tabIndex: -1 } : {};
@@ -99,7 +99,7 @@ export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = 
           {unavailable && (
             <span className="absolute inset-0 grid place-items-center bg-black/60">
               <span className="rounded-full bg-black/80 px-2.5 py-1 text-[10px] font-semibold text-white">
-                Fuente no instalada
+                {unavailableLabel}
               </span>
             </span>
           )}
@@ -127,7 +127,7 @@ export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = 
         {!minimal && (
           <div className="text-muted-foreground mt-0.5 truncate" style={subStyle}>
             {unavailable
-              ? 'Fuente no instalada'
+              ? unavailableLabel
               : ([m.type, m.lastChapter].filter(Boolean).join(' · ') || '\u00a0')}
           </div>
         )}

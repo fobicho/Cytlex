@@ -18,7 +18,7 @@ const defaults = {
   libraryView: 'grid',
   libraryCoverSize: 160,
   libraryShowUnread: true,
-  showAdultManga: false,
+  showAdultExtensions: false,
   chaptersPerRow: 1,
   sidebarCollapsed: false,
   uiScale: 1,
@@ -36,11 +36,14 @@ const defaults = {
 
 function normalize(s) {
   let { theme, mode } = s;
+  const { showAdultManga, anilistClientSecret, anilistClientId, ...rest } = s;
+  if (rest.showAdultExtensions === undefined && showAdultManga !== undefined) {
+    rest.showAdultExtensions = showAdultManga;
+  }
   if (theme === 'dark') theme = 'default';
   else if (theme === 'light') { theme = 'default'; mode = 'light'; }
   if (!THEME_IDS.includes(theme)) theme = 'default';
   if (!MODE_IDS.includes(mode)) mode = 'dark';
-  const { anilistClientSecret, anilistClientId, ...rest } = s;
   return { ...rest, theme, mode };
 }
 
@@ -49,6 +52,10 @@ function read() {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...defaults };
     const stored = JSON.parse(raw);
+    if (stored.showAdultExtensions === undefined && stored.showAdultManga !== undefined) {
+      stored.showAdultExtensions = stored.showAdultManga;
+    }
+    delete stored.showAdultManga;
     if (stored.mode === undefined) {
       stored.mode = stored.theme === 'light' || stored.theme === 'beige' ? 'light' : 'dark';
     }
