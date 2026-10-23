@@ -7,11 +7,31 @@ export default function createSource({ fetchText }) {
   const languages = ['es'];
   const ratings = ['safe', 'suggestive', 'erotica', 'pornographic'];
   const types = { ja: 'Manga', ko: 'Manhwa', zh: 'Manhua', 'zh-hk': 'Manhua' };
+  let requestQueue = Promise.resolve();
+  let lastRequestAt = 0;
 
-  const json = async (url) => {
-    const data = JSON.parse(await fetchText(url));
-    if (data?.result !== 'ok') throw new Error('MangaDex devolvió una respuesta no válida.');
-    return data;
+  const json = (url) => {
+    const request = async () => {
+      const wait = Math.max(0, 300 - (Date.now() - lastRequestAt));
+      if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+      let response;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        lastRequestAt = Date.now();
+        try {
+          response = await fetchText(url);
+          break;
+        } catch (error) {
+          if (attempt || /HTTP \d{3}/.test(String(error?.message || error))) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 600));
+        }
+      }
+      const data = JSON.parse(response);
+      if (data?.result !== 'ok') throw new Error('MangaDex devolvió una respuesta no válida.');
+      return data;
+    };
+    const pending = requestQueue.then(request);
+    requestQueue = pending.catch(() => {});
+    return pending;
   };
 
   const requestUrl = (path, params) => {
