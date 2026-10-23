@@ -2,9 +2,8 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { extensions } from '../lib/extensions.js';
+import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
-import { isAdultManga } from '../lib/contentRating.js';
 import { lastSearch, resultsScroll } from '../lib/searchState.js';
 import MangaCard from '../components/MangaCard.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
@@ -19,16 +18,17 @@ export default function Results() {
   const group = lastSearch.results?.find((r) => r.id === sourceId);
   const manifest = group?.manifest || extensions.manifest(sourceId);
   const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
-  const [showAdult, setShowAdult] = useState(() => !!settings.get().showAdultManga);
+  const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const scale = useScale();
 
   useEffect(() => settings.subscribe((s) => {
     setCoverSize(Math.round(160 * (s.uiScale || 1)));
-    setShowAdult(!!s.showAdultManga);
+    setShowAdultExtensions(!!s.showAdultExtensions);
   }), []);
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
-  const items = group?.items.filter((m) => showAdult || !isAdultManga(m)) || [];
+  const adultExtensionHidden = !showAdultExtensions && isAdultExtension(manifest);
+  const items = group?.items || [];
 
   useEffect(() => {
     const main = document.querySelector('main');
@@ -76,11 +76,29 @@ export default function Results() {
     };
   }, [sourceId, group?.items.length]);
 
+  if (adultExtensionHidden)
+    return (
+      <EmptyState
+        face="（・_・）"
+        title="Extensión +18 oculta"
+        description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para ver sus resultados."
+        action={
+          <Button
+            variant="secondary"
+            onClick={() => navigate('/explorar')}
+            style={{ height: px(40, scale, 33), fontSize: px(14, scale, 12), paddingLeft: px(16, scale, 12), paddingRight: px(16, scale, 12) }}
+          >
+            Ir a Explorar
+          </Button>
+        }
+      />
+    );
+
   if (!group || !items.length)
     return (
       <EmptyState
         face="¯\\_(ツ)_/¯"
-        title={group?.items.length ? 'No hay resultados visibles con este filtro' : 'Sin resultados'}
+        title="Sin resultados"
         action={
           <Button
             variant="secondary"

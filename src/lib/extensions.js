@@ -1,7 +1,12 @@
 import { buildSelectorSource } from './selectorSource.js';
-import { isAdultManga } from './contentRating.js';
 
 const KEY = 'cytlex:extensions:v1';
+const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
+
+export function isAdultExtension(source) {
+  const manifest = source?.manifest || source;
+  return ADULT_CONTENT_WARNINGS.includes(String(manifest?.contentWarning || '').toUpperCase());
+}
 
 const read = () => {
   let list = [];
@@ -12,7 +17,6 @@ const write = (v) => localStorage.setItem(KEY, JSON.stringify(v));
 
 function ctx() {
   return {
-    isAdultManga,
     fetchText: (url) => {
       if (typeof window === 'undefined' || !window.cytlex?.httpGet) {
         throw new Error('Sin puente Electron para hacer peticiones');
@@ -128,6 +132,8 @@ export const extensions = {
       if (!pendientes.has(r.manifest.id)) return;
       const fresh = repo.find((m) => m.id === r.manifest.id);
       if (!fresh || fresh.type !== 'module' || !fresh.main) return;
+      const local = r.installedVersion || r.manifest.version || '0';
+      if (!fresh.version || !isNewer(fresh.version, local)) return;
       try {
         const mainUrl = /^https?:/i.test(fresh.main)
           ? fresh.main
@@ -135,6 +141,7 @@ export const extensions = {
         const code = await ctx().fetchText(mainUrl);
         r.code = code;
         r.manifest = { ...r.manifest, ...fresh };
+        delete r.manifest.adultContent;
         r.installedVersion = fresh.version || r.manifest.version || '0';
         cache.delete(r.manifest.id);
         ok += 1;
@@ -160,13 +167,15 @@ export const extensions = {
       const fresh = byId.get(r.manifest.id);
       if (!fresh) return r;
       const installedVersion = r.installedVersion || r.manifest.version || '0';
+      const manifest = {
+        ...r.manifest,
+        contentWarning: fresh.contentWarning,
+        version: installedVersion
+      };
+      delete manifest.adultContent;
       return {
         ...r,
-        manifest: {
-          ...fresh,
-          ...r.manifest,
-          version: installedVersion
-        }
+        manifest
       };
     });
 

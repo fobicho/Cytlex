@@ -1,5 +1,4 @@
-export default function createSource({ fetchText, parse, isAdultManga }) {
-  const adultLabel = (value) => typeof isAdultManga === 'function' && isAdultManga({ contentRating: value });
+export default function createSource({ fetchText, parse }) {
   const base = 'https://onfmangas.com';
 
   const abs = (u) => {
@@ -8,14 +7,6 @@ export default function createSource({ fetchText, parse, isAdultManga }) {
   };
 
   const text = (el, sel) => (el.querySelector(sel)?.textContent || '').replace(/\s+/g, ' ').trim();
-  const adultCard = (el) => {
-    if (typeof isAdultManga !== 'function') return false;
-    const nodes = [el, ...el.querySelectorAll('[class*="badge"], [class*="tag"], [class*="rating"], [class*="genre"], [class*="adult"], [class*="age"], [data-rating], [data-content-rating], [data-adult], [data-is-adult], [data-age-rating], [data-content-warning]')];
-    const adult = nodes.some((node) => ['data-adult', 'data-is-adult'].some((key) => node.hasAttribute(key) && !/^(?:false|0)$/i.test(node.getAttribute(key) || '')));
-    const contentRating = nodes.flatMap((node) => [node === el ? '' : node.textContent, ...['data-rating', 'data-content-rating', 'data-age-rating', 'data-content-warning'].map((key) => node.getAttribute(key))].filter(Boolean));
-    return isAdultManga({ adult, contentRating });
-  };
-
   function mapCards(doc) {
     return [...doc.querySelectorAll('.manga-card')]
       .map((el) => {
@@ -25,8 +16,7 @@ export default function createSource({ fetchText, parse, isAdultManga }) {
           url: abs(a?.getAttribute('href')),
           title: text(el, '.manga-title') || (img?.getAttribute('alt') || '').trim(),
           cover: abs(img?.getAttribute('src') || img?.getAttribute('data-src')),
-          type: text(el, '.card-badge'),
-          adult: adultCard(el)
+          type: text(el, '.card-badge')
         };
       })
       .filter((x) => x.url && x.title);
@@ -70,7 +60,6 @@ export default function createSource({ fetchText, parse, isAdultManga }) {
       cover: abs(coverImg?.getAttribute('src')),
       altTitles: '',
       genres,
-      adult: genres.some(adultLabel),
       facts: { estado: '', status: '', tipo: '', autor: '', vistas: '' },
       sinopsis: desc.trim(),
       chapters: decodeChapters(html)

@@ -3,9 +3,8 @@ import { useLocation } from 'react-router-dom';
 import { Search, Loader2, ChevronRight, ChevronLeft } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
-import { extensions } from '../lib/extensions.js';
+import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
-import { isAdultManga } from '../lib/contentRating.js';
 import { lastSearch, scrollMemory, rememberCover, catalogScroll } from '../lib/searchState.js';
 import { clearSearchCoverCache, preloadSearchCover } from '../lib/covers.js';
 import MangaCard from '../components/MangaCard.jsx';
@@ -44,7 +43,11 @@ const TABS = [
   { id: 'extensiones', label: 'Extensiones' }
 ];
 
-function SourceSection({ r, coverSize, scale = 1, first = false, animate = false, showAdult = false }) {
+const enabledSources = (showAdultExtensions) => extensions.installed().filter(({ manifest }) =>
+  showAdultExtensions || !isAdultExtension(manifest)
+);
+
+function SourceSection({ r, coverSize, scale = 1, first = false, animate = false }) {
   const trackRef = useRef(null);
   const mainRef = useRef(null);
   const [canLeft, setCanLeft] = useState(false);
@@ -108,8 +111,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
     el.scrollBy({ left: dir * (coverSize + 20) * 2, behavior: 'smooth' });
   };
 
-  const filteredItems = showAdult ? r.items : r.items.filter((m) => !isAdultManga(m));
-  const visible = filteredItems.slice(0, 15);
+  const visible = r.items.slice(0, 15);
 
   return (
     <motion.section
@@ -131,12 +133,12 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
           {r.manifest.name}
         </h3>
         <span className="text-muted-foreground" style={{ fontSize: `${Math.round(12 * scale)}px` }}>
-          · {filteredItems.length}
+          · {r.items.length}
         </span>
       </div>
-      {!filteredItems.length ? (
+      {!r.items.length ? (
         <p className="text-sm text-muted-foreground">
-          {r.status === 'error' ? 'No se pudo buscar en esta extensión.' : r.items.length ? 'No hay resultados visibles con este filtro.' : 'Sin resultados en esta extensión.'}
+          {r.status === 'error' ? 'No se pudo buscar en esta extensión.' : 'Sin resultados en esta extensión.'}
         </p>
       ) : (
       <div className="relative">
@@ -190,7 +192,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
             <ChevronRight style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
           </button>
         )}
-        {filteredItems.length > 15 && (
+        {r.items.length > 15 && (
           <a
             className={cn(
               buttonVariants({ variant: 'ghost', size: 'sm' }),
@@ -218,16 +220,17 @@ export default function Catalog() {
     const t = new URLSearchParams(loc.search).get('tab');
     return t === 'mangas' || t === 'extensiones' ? t : sessionTab;
   });
-  const [sources, setSources] = useState(() => extensions.installed());
+  const [sources, setSources] = useState(() => enabledSources(!!settings.get().showAdultExtensions));
   const [q, setQ] = useState(() => lastSearch.q);
   const [results, setResults] = useState(() => lastSearch.results);
   const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
-  const [showAdult, setShowAdult] = useState(() => !!settings.get().showAdultManga);
+  const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const scale = useScale();
 
   useEffect(() => settings.subscribe((s) => {
     setCoverSize(Math.round(160 * (s.uiScale || 1)));
-    setShowAdult(!!s.showAdultManga);
+    setShowAdultExtensions(!!s.showAdultExtensions);
+    setSources(enabledSources(!!s.showAdultExtensions));
   }), []);
   useEffect(() => { sessionTab = tab; }, [tab]);
   useEffect(() => () => { animateSearch = false; }, []);
@@ -235,11 +238,12 @@ export default function Catalog() {
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
 
   useEffect(() => {
-    setSources(extensions.installed());
+    setSources(enabledSources(!!settings.get().showAdultExtensions));
   }, [tab]);
 
   const searching = !!results && results.some((r) => r.status === 'loading');
   const completed = results ? results.filter((r) => r.status !== 'loading') : [];
+  const visibleCompleted = completed.filter((r) => showAdultExtensions || !isAdultExtension(r.manifest));
   const done = !!results && !searching;
 
   useEffect(() => { if (done) animateSearch = false; }, [done]);
@@ -250,7 +254,7 @@ export default function Catalog() {
   };
 
   const runSearch = (query = q) => {
-    const list = extensions.installed();
+    const list = enabledSources(!!settings.get().showAdultExtensions);
     if (!list.length) return;
     const runId = ++activeSearchRun;
     catalogScroll.clear();
@@ -424,8 +428,14 @@ export default function Catalog() {
                   </div>
                 )}
 
-                {completed.map((r, i) => (
-                  <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} first={i === 0} animate={animateSearch} showAdult={showAdult} />
+                {done && completed.length > 0 && visibleCompleted.length === 0 ? (
+                  <EmptyState
+                    face="（・_・）"
+                    title="No hay extensiones visibles"
+                    description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para mostrarlas."
+                  />
+                ) : visibleCompleted.map((r, i) => (
+                  <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} first={i === 0} animate={animateSearch} />
                 ))}
               </>
             )}

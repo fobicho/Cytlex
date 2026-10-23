@@ -451,7 +451,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         />
         <Row
           scale={scale}
-          last={false}
+          last={s.libraryView !== 'grid' || !s.libraryShowUnread}
           title="Capítulos por fila"
           desc="Cantidad de capítulos por fila en la ficha del manga"
           right={
@@ -467,6 +467,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           <>
             <Row
               scale={scale}
+              last
               title="Mostrar capítulos sin leer"
               desc="Muestra un contador en cada portada"
               right={
@@ -480,20 +481,6 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
             />
           </>
         )}
-        <Row
-          scale={scale}
-          last
-          title="Mostrar mangas para adultos"
-          desc="Desactivada, oculta las obras que su extensión marque como +18"
-          right={
-            <Switch
-              scale={scale}
-              on={s.showAdultManga}
-              onChange={(v) => set({ showAdultManga: v })}
-              label="Mostrar mangas para adultos"
-            />
-          }
-        />
       </div>
     );
   } else if (section === 'lector') {
@@ -624,13 +611,32 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   } else if (section === 'extensiones') {
     content = (
       <div>
-        <div
-          className="text-muted-foreground mb-1.5"
-          style={{ fontSize: px(12, scale, 10) }}
-        >
-          Repositorio de extensiones
+        <Row
+          scale={scale}
+          first
+          title="Mostrar extensiones +18"
+          desc="Muestra extensiones marcadas con contenido para adultos"
+          right={
+            <Switch
+              scale={scale}
+              on={s.showAdultExtensions}
+              onChange={(v) => set({ showAdultExtensions: v })}
+              label="Mostrar extensiones +18"
+            />
+          }
+        />
+        <div style={{ marginTop: px(18, scale, 12) }}>
+          <div className="font-medium leading-tight" style={{ fontSize: px(14, scale, 12) }}>
+            Repositorio de extensiones
+          </div>
+          <div
+            className="text-muted-foreground leading-snug"
+            style={{ fontSize: px(12, scale, 10), marginTop: px(4, scale, 3), marginBottom: px(10, scale, 7) }}
+          >
+            Añade el enlace desde el que se obtienen las extensiones.
+          </div>
         </div>
-        <div className="flex items-center" style={{ gap: px(6, scale, 4) }}>
+        <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
           <Input
             value={repoInput}
             onChange={(e) => setRepoInput(e.target.value)}

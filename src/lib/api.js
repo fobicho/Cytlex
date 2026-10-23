@@ -1,4 +1,5 @@
-import { extensions } from './extensions.js';
+import { extensions, isAdultExtension } from './extensions.js';
+import { settings } from './settings.js';
 
 function bridge() {
   if (typeof window !== 'undefined' && window.cytlex) return window.cytlex;
@@ -11,8 +12,15 @@ function notInstalledError(id) {
   );
 }
 
+function assertSourceEnabled(sourceId) {
+  if (!settings.get().showAdultExtensions && isAdultExtension(extensions.manifest(sourceId))) {
+    throw new Error('Esta extensión está desactivada. Activa «Mostrar extensiones +18» en Ajustes > Extensiones para usarla.');
+  }
+}
+
 async function resolveSource(sourceId) {
   if (!sourceId || !extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
+  assertSourceEnabled(sourceId);
   return extensions.source(sourceId);
 }
 
@@ -53,6 +61,8 @@ export const api = {
   },
 
   async detail(url, sourceId) {
+    if (!sourceId || !extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
+    assertSourceEnabled(sourceId);
     const key = detailKey(url, sourceId);
     const hit = freshEntry(key);
     if (hit) return hit;
@@ -64,6 +74,7 @@ export const api = {
 
   async chapter(url, sourceId) {
     if (!extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
+    assertSourceEnabled(sourceId);
     const key = chapterKey(url, sourceId);
     const hit = chapterCache.get(key);
     if (hit && Date.now() - hit.at <= CHAPTER_TTL_MS) {

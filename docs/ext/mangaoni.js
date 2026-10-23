@@ -13,9 +13,7 @@ const chapterIdOf = (url) => (String(url || '').match(/\/lector\/[^/]+\/(\d+)/) 
 const slugOf = (url) => (String(url || '').match(/\/lector\/([^/]+)\//) || [])[1] || '';
 const pageUrl = (slug, id, n) => `${FILES}/${slug}/${id}/${String(n).padStart(3, '0')}.webp`;
 
-export default function createSource({ fetchText, parse, head, isAdultManga }) {
-
-  const adultLabel = (value) => typeof isAdultManga === 'function' && isAdultManga({ contentRating: value });
+export default function createSource({ fetchText, parse, head }) {
   function text(el, sel) {
     return (el.querySelector(sel)?.textContent || '').replace(/\s+/g, ' ').trim();
   }
@@ -31,10 +29,7 @@ export default function createSource({ fetchText, parse, head, isAdultManga }) {
       title: (img?.getAttribute('alt') || '').replace(/\s+/g, ' ').trim(),
       cover: raw && !raw.includes('default.gif') ? abs(raw) : '',
       type: typeOf(href),
-      lastChapter: (text(el, 'span:last-of-type') || '').replace(/[^\d.]/g, ''),
-      adult: adultLabel([...el.querySelectorAll('[class*="badge"], [class*="tag"], [class*="rating"], [data-rating], [data-content-rating]')]
-        .map((label) => [label.textContent, label.getAttribute('class'), label.getAttribute('data-rating'), label.getAttribute('data-content-rating'), label.getAttribute('data-adult'), label.getAttribute('data-age-rating')].filter(Boolean).join(' '))
-        .join(' '))
+      lastChapter: (text(el, 'span:last-of-type') || '').replace(/[^\d.]/g, '')
     };
   }
 
@@ -137,9 +132,6 @@ export default function createSource({ fetchText, parse, head, isAdultManga }) {
       cover: abs(doc.querySelector('a.portada img')?.getAttribute('src')),
       altTitles,
       genres,
-      adult: [...(info?.querySelectorAll('strong') || [])]
-        .filter((strong) => /(?:edad|clasificaci[oó]n|rating|contenido)/i.test(strong.textContent || ''))
-        .some((strong) => adultLabel(`${strong.textContent} ${strong.nextElementSibling?.textContent || strong.nextSibling?.textContent || ''}`)),
       facts: {
         estado,
         status: estado,

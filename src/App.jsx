@@ -10,6 +10,7 @@ import Reader from './pages/Reader.jsx';
 import Settings from './pages/Settings.jsx';
 import Tracking from './pages/Tracking.jsx';
 import { resolveMode, settings } from './lib/settings.js';
+import { extensions } from './lib/extensions.js';
 import { lastSearch, resultsScroll, catalogScroll } from './lib/searchState.js';
 import { startNotifier, onNotifyClick, checkLibrary } from './lib/notify.js';
 import { announceExtUpdates } from './lib/extUpdates.js';
@@ -60,6 +61,7 @@ export default function App({ isVisible = true }) {
   const [theme, setTheme] = useState(() => settings.get().theme);
   const [mode, setMode] = useState(() => resolveMode(settings.get().mode));
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [extensionMetadataRevision, setExtensionMetadataRevision] = useState(0);
   const scale = useScale();
   const [resetTick, setResetTick] = useState(0);
   const initialLibraryCheck = useRef(false);
@@ -76,6 +78,12 @@ export default function App({ isVisible = true }) {
     if (main) main.scrollTop = 0;
   }, []);
   useResetPage(resetPage);
+
+  useEffect(() => {
+    const indexUrl = (settings.get().extIndexUrl || '').trim();
+    if (!indexUrl || !extensions.installed().length) return;
+    extensions.sync(indexUrl).then(() => setExtensionMetadataRevision((revision) => revision + 1)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -165,7 +173,7 @@ export default function App({ isVisible = true }) {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div className="flex flex-col h-screen overflow-hidden" data-extension-metadata-revision={extensionMetadataRevision}>
       {!isFullscreen && <TitleBar />}
       <div className="flex flex-1 overflow-hidden">
         {!isReader && <Sidebar />}

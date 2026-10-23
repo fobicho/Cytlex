@@ -1,5 +1,4 @@
-export default function createSource({ fetchText, parse, isAdultManga }) {
-  const adultLabel = (value) => typeof isAdultManga === 'function' && isAdultManga({ contentRating: value });
+export default function createSource({ fetchText, parse }) {
   const base = 'https://mangalect.org';
   const assets = 'https://images.mangalect.org/file/leermangaesp';
   const PAGE_SIZE = 20;
@@ -38,14 +37,7 @@ export default function createSource({ fetchText, parse, isAdultManga }) {
         title: r.titulo || '',
         cover: coverUrl(r.portada),
         type: r.tipo || '',
-        lastChapter: r.ultimo_capitulo ? String(r.ultimo_capitulo) : '',
-        adult: typeof isAdultManga === 'function' && isAdultManga({
-          ...r,
-          title: r.titulo || '',
-          type: r.tipo || '',
-          genres: r.generos || r.genres,
-          tags: r.etiquetas || r.tags
-        })
+        lastChapter: r.ultimo_capitulo ? String(r.ultimo_capitulo) : ''
       }))
       .filter((x) => x.url && x.title && x.lastChapter);
 
@@ -89,7 +81,6 @@ export default function createSource({ fetchText, parse, isAdultManga }) {
       cover: coverImg?.getAttribute('src') ? abs(coverImg.getAttribute('src')) : coverUrl(portadaRel),
       altTitles: text(doc, '.alternate-titles'),
       genres,
-      adult: [...genres, data.getAttribute('data-manga-tipo')].some(adultLabel),
       facts: {
         estado: status,
         status,

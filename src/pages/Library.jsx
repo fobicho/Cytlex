@@ -4,14 +4,13 @@ import { RefreshCw, ArrowUpDown } from 'lucide-react';
 import { lib } from '../lib/library.js';
 import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
-import { extensions } from '../lib/extensions.js';
+import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { makeCoverThumb } from '../lib/covers.js';
 import { checkLibrary } from '../lib/notify.js';
 import { progress } from '../lib/progress.js';
 import { tracking } from '../lib/tracking.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { api } from '../lib/api.js';
-import { isAdultManga } from '../lib/contentRating.js';
 import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
@@ -32,7 +31,7 @@ export default function Library() {
   const { toast } = useToast();
   const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
   const [showUnread, setShowUnread] = useState(() => settings.get().libraryShowUnread);
-  const [showAdult, setShowAdult] = useState(() => !!settings.get().showAdultManga);
+  const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('cytlex:librarySort') || 'title-asc');
   const [unread, setUnread] = useState({});
   const scale = useScale();
@@ -42,7 +41,7 @@ export default function Library() {
     () => settings.subscribe((s) => {
       setCoverSize(Math.round(160 * (s.uiScale || 1)));
       setShowUnread(s.libraryShowUnread);
-      setShowAdult(!!s.showAdultManga);
+      setShowAdultExtensions(!!s.showAdultExtensions);
     }),
     []
   );
@@ -86,7 +85,7 @@ export default function Library() {
 
   const shown = useMemo(
     () => {
-      const list = favs.filter((f) => (f.cats || []).includes(sel) && (showAdult || !isAdultManga(f))).slice();
+      const list = favs.filter((f) => (f.cats || []).includes(sel)).slice();
       const cmp = (a, b) => {
         switch (sortBy) {
           case 'title-desc':
@@ -101,14 +100,14 @@ export default function Library() {
       };
       return list.sort(cmp);
     },
-    [favs, sel, sortBy, unread, progressTick, showAdult]
+    [favs, sel, sortBy, unread, progressTick]
   );
 
   useEffect(() => {
     if (!showUnread) return undefined;
     let alive = true;
     (async () => {
-      const pending = favs.filter((f) => (f.cats || []).includes(sel) && (showAdult || !isAdultManga(f))).filter((f) => extensions.isInstalled(f.sourceId || 'leercapitulo'));
+      const pending = favs.filter((f) => (f.cats || []).includes(sel)).filter((f) => extensions.isInstalled(f.sourceId || 'leercapitulo'));
       const results = await Promise.all(
         pending.map(async (f) => {
           const sid = f.sourceId || 'leercapitulo';
@@ -294,12 +293,14 @@ export default function Library() {
         >
           {shown.map((m, i) => {
             const sid = m.sourceId || 'leercapitulo';
+            const adultBlocked = !showAdultExtensions && isAdultExtension(extensions.manifest(sid));
             return (
               <MangaCard
                 key={i}
                 m={m}
                 sourceId={sid}
-                unavailable={!extensions.isInstalled(sid)}
+                unavailable={!extensions.isInstalled(sid) || adultBlocked}
+                unavailableLabel={adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}
                 minimal
                 from="biblioteca"
                 coverSize={cs}
@@ -312,7 +313,8 @@ export default function Library() {
         <div className="flex flex-col gap-2">
           {shown.map((m, i) => {
             const sid = m.sourceId || 'leercapitulo';
-            const unavailable = !extensions.isInstalled(sid);
+            const adultBlocked = !showAdultExtensions && isAdultExtension(extensions.manifest(sid));
+            const unavailable = !extensions.isInstalled(sid) || adultBlocked;
             return (
               <div key={i} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5">
                 <a
@@ -321,14 +323,21 @@ export default function Library() {
                   aria-disabled={unavailable}
                   tabIndex={unavailable ? -1 : undefined}
                 >
-                  {m.cover && (
-                    <img
-                      src={m.cover}
-                      alt=""
-                      referrerPolicy="no-referrer"
-                      className="w-10 h-14 object-cover rounded-lg shrink-0 bg-black"
-                    />
-                  )}
+                  <span className="relative w-10 h-14 rounded-lg shrink-0 overflow-hidden bg-muted">
+                    {m.cover && (
+                      <img
+                        src={m.cover}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover bg-black"
+                      />
+                    )}
+                    {unavailable && (
+                      <span className="absolute inset-0 grid place-items-center bg-black/60 px-0.5 text-center text-[8px] font-semibold leading-tight text-white">
+                        {adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}
+                      </span>
+                    )}
+                  </span>
                   <span className="flex-1 min-w-0">
                     <span className="block font-semibold truncate">{m.title}</span>
                   </span>

@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { ArrowLeft, Maximize2, Minimize2, ChevronLeft, ChevronRight, ChevronDown, Download, Loader2 } from 'lucide-react';
 import { api } from '../lib/api.js';
+import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { progress } from '../lib/progress.js';
 import { lib } from '../lib/library.js';
-import { isAdultManga } from '../lib/contentRating.js';
 import { tracking } from '../lib/tracking.js';
 import { detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
@@ -90,6 +90,8 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const chapterUrl = params.get('u') || '';
   const mangaUrl = params.get('m') || '';
   const sourceId = params.get('s') || 'leercapitulo';
+  const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
+  const adultExtensionDisabled = !showAdultExtensions && isAdultExtension(extensions.manifest(sourceId));
   const fromParam = params.get('from') || '';
   const fromQS = fromParam ? `&from=${encodeURIComponent(fromParam)}` : '';
   const [ch, setCh] = useState(null);
@@ -103,7 +105,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     return settings.get().readerMode;
   });
   const [doublePage, setDoublePage] = useState(() => !!settings.get().readerDoublePage);
-  const [showAdult, setShowAdult] = useState(() => !!settings.get().showAdultManga);
   const paginated = mode === 'paginado' || mode === 'paginado-rtl';
   const rtl = mode === 'paginado-rtl';
   const useDouble = paginated && doublePage;
@@ -119,7 +120,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     setMode(s.readerMode);
   }), []);
   useEffect(() => settings.subscribe((s) => setDoublePage(!!s.readerDoublePage)), []);
-  useEffect(() => settings.subscribe((s) => setShowAdult(!!s.showAdultManga)), []);
+  useEffect(() => settings.subscribe((s) => setShowAdultExtensions(!!s.showAdultExtensions)), []);
   const barH = Number(px(32, scale, 27).replace('px', ''));
   const barPad = Number(px(4, scale, 3).replace('px', ''));
   const arrowH = Number(px(24, scale, 20).replace('px', ''));
@@ -321,7 +322,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       });
     scrollToTop();
     return () => { active = false; };
-  }, [chapterUrl, sourceId]);
+  }, [chapterUrl, sourceId, showAdultExtensions]);
 
   const [lastSeen, setLastSeen] = useState(0);
   useEffect(() => {
@@ -639,16 +640,16 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     window.location.hash = backHash;
   };
 
-  const savedManga = lib.fav(mangaUrl, sourceId);
-  const adultBlocked = !showAdult && (isAdultManga(savedManga) || isAdultManga(api.peekDetail(mangaUrl, sourceId)));
-
-  useEffect(() => {
-    if (!adultBlocked) return;
-    detailScroll.requestRestore();
-    window.location.hash = backHash;
-  }, [adultBlocked, backHash]);
-
-  if (adultBlocked) return null;
+  if (adultExtensionDisabled)
+    return (
+      <EmptyState
+        face="（・_・）"
+        tone="prompt"
+        title="Extensión desactivada"
+        description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para volver a usarla."
+        action={<Button onClick={() => { window.location.hash = '#/ajustes'; }}>Ir a Ajustes</Button>}
+      />
+    );
   if (!chapterUrl)
     return <EmptyState face="¯\\_(ツ)_/¯" title="Sin capítulo seleccionado." />;
   if (err)

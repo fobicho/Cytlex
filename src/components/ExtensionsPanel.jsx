@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
-import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle } from 'lucide-react';
-import { extensions } from '../lib/extensions.js';
+import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown } from 'lucide-react';
+import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { extUpdates } from '../lib/extUpdates.js';
 import { settings } from '../lib/settings.js';
 import { Card } from './ui/card.jsx';
@@ -11,22 +11,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 
-const ADULT_CONTENT_SOURCES = new Set([
-  'leercapitulo',
-  'mangalect',
-  'onfmangas',
-  'olympusscanlation',
-  'zonatmo',
-  'mangaoni'
-]);
-
-function ExtensionCard({ m, action, updatable = false, scale = 1 }) {
+function ExtensionCard({ m, action, updatable = false, disabled = false, scale = 1 }) {
   const [imgOk, setImgOk] = useState(true);
   const showImg = m.icon && imgOk;
-  const hasAdultContent = m.adultContent || ADULT_CONTENT_SOURCES.has(m.id);
+  const hasAdultContent = isAdultExtension(m);
   const iconSize = Number(px(40, scale, 32).replace('px', ''));
   return (
-    <Card className={cn('hover:shadow-sm', updatable && 'cx-update-pulse')}>
+    <Card className={cn('hover:shadow-sm', updatable && 'cx-update-pulse', disabled && 'opacity-50')}>
       <div
         className="flex items-center"
         style={{ padding: px(14, scale, 11), gap: px(12, scale, 9) }}
@@ -81,7 +72,7 @@ function ExtensionCard({ m, action, updatable = false, scale = 1 }) {
             {hasAdultContent && (
               <span
                 className="shrink-0 font-semibold text-red-600 dark:text-red-400"
-                title="Esta extensión puede ofrecer mangas para adultos"
+                title="La extensión declara contenido MIXED o NSFW"
                 aria-label="Extensión con contenido para adultos, +18"
                 style={{ fontSize: px(11, scale, 9) }}
               >
@@ -97,12 +88,18 @@ function ExtensionCard({ m, action, updatable = false, scale = 1 }) {
 }
 
 let repoCache = { url: '', available: null, updates: null };
+const extensionSortModes = ['title-asc', 'title-desc', 'added'];
+
+function sortLabel(sortBy) {
+  return sortBy === 'title-desc' ? 'Z-A' : sortBy === 'added' ? 'Adición' : 'A-Z';
+}
 
 export default function ExtensionsPanel() {
   const { toast } = useToast();
   const scale = useScale();
   const initialRepo = (settings.get().extIndexUrl || '').trim();
   const cacheHit = !!initialRepo && initialRepo === repoCache.url && repoCache.available !== null;
+  const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [installed, setInstalled] = useState(() => extensions.installed());
   const [available, setAvailable] = useState(() => (cacheHit ? repoCache.available : null));
   const [loading, setLoading] = useState(() => !cacheHit);
@@ -115,6 +112,27 @@ export default function ExtensionsPanel() {
   const [updating, setUpdating] = useState('');
   const [confirmAll, setConfirmAll] = useState(false);
   const [repoUrl, setRepoUrl] = useState(initialRepo);
+  const [sortBy, setSortBy] = useState(() => {
+    const stored = localStorage.getItem('cytlex:extensionsSort');
+    return extensionSortModes.includes(stored) ? stored : 'title-asc';
+  });
+  const visibleInstalled = installed;
+  const visibleAvailable = showAdultExtensions
+    ? available
+    : available?.filter((manifest) => !isAdultExtension(manifest));
+  const visibleUpdates = updates;
+  const sortedInstalled = [...visibleInstalled].sort((a, b) => {
+    if (sortBy === 'added') return (a.installedAt || 0) - (b.installedAt || 0);
+    const order = String(a.manifest.name || '').localeCompare(String(b.manifest.name || ''), 'es', { sensitivity: 'base', numeric: true });
+    return sortBy === 'title-desc' ? -order : order;
+  });
+  const sortedAvailable = [...(visibleAvailable || [])];
+  if (sortBy !== 'added') {
+    sortedAvailable.sort((a, b) => {
+      const order = String(a.name || '').localeCompare(String(b.name || ''), 'es', { sensitivity: 'base', numeric: true });
+      return sortBy === 'title-desc' ? -order : order;
+    });
+  }
   const confirmRef = useRef(null);
   const removeRef = useRef(null);
   const updateRef = useRef(null);
@@ -227,7 +245,10 @@ export default function ExtensionsPanel() {
     return () => window.removeEventListener('cytlex:go-extensions', onGo);
   }, [repoUrl]);
 
-  useEffect(() => settings.subscribe((s) => setRepoUrl((s.extIndexUrl || '').trim())), []);
+  useEffect(() => settings.subscribe((s) => {
+    setRepoUrl((s.extIndexUrl || '').trim());
+    setShowAdultExtensions(!!s.showAdultExtensions);
+  }), []);
 
   const doUpdateOne = async (id) => {
     setUpdating(id);
@@ -252,7 +273,7 @@ export default function ExtensionsPanel() {
     setUpdating('all');
     setErr('');
     try {
-      const r = await extensions.updateAll(repoUrl);
+      const r = await extensions.updateAll(repoUrl, visibleUpdates.map((update) => update.id));
       refresh();
       await checkUpdates();
       if (r.fallos.length) {
@@ -261,6 +282,8 @@ export default function ExtensionsPanel() {
           description: `${r.ok} actualizadas, ${r.fallos.length} fallaron.`,
           variant: 'error'
         });
+      } else if (r.ok === 0) {
+        toast({ title: 'No hay actualizaciones pendientes', variant: 'info' });
       } else {
         extUpdates.clear();
         toast({
@@ -330,75 +353,97 @@ export default function ExtensionsPanel() {
           <h3 className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
             Instaladas
           </h3>
-          {updates.length > 0 && (
+          <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
             <Button
-              ref={allRef}
               variant="secondary"
               size="sm"
-              onClick={async () => {
-                if (!confirmAll) {
-                  setConfirmAll(true);
-                  return;
-                }
-                setConfirmAll(false);
-                await doUpdateAll();
+              title="Ordenar extensiones"
+              aria-label={`Ordenar extensiones: ${sortLabel(sortBy)}`}
+              onClick={() => {
+                const next = extensionSortModes[(extensionSortModes.indexOf(sortBy) + 1) % extensionSortModes.length];
+                setSortBy(next);
+                try { localStorage.setItem('cytlex:extensionsSort', next); } catch {}
               }}
-              disabled={updating !== ''}
-              className="whitespace-nowrap"
               style={{
                 height: px(36, scale, 30),
-                minWidth: px(176, scale, 140),
                 fontSize: px(14, scale, 12),
                 paddingLeft: px(12, scale, 9),
                 paddingRight: px(12, scale, 9)
               }}
             >
-              <AnimatePresence mode="wait" initial={false}>
-                {updating === 'all' ? (
-                  <motion.span
-                    key="loading"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.15 }}
-                    className="flex items-center"
-                  >
-                    <Loader2
-                      className="mr-2 animate-spin"
-                      style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
-                    />
-                    Actualizando...
-                  </motion.span>
-                ) : confirmAll ? (
-                  <motion.span
-                    key="confirm"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{ duration: 0.15, ease: 'easeOut' }}
-                  >
-                    ¿Seguro?
-                  </motion.span>
-                ) : (
-                  <motion.span
-                    key="idle"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{ duration: 0.15, ease: 'easeOut' }}
-                    className="flex items-center"
-                  >
-                    <ArrowUpCircle
-                      className="mr-2"
-                      style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
-                    />
-                    Actualizar todo
-                    <span className="opacity-70 ml-2">{updates.length}</span>
-                  </motion.span>
-                )}
-              </AnimatePresence>
+              <ArrowUpDown className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+              {sortLabel(sortBy)}
             </Button>
-          )}
+            {visibleUpdates.length > 0 && (
+              <Button
+                ref={allRef}
+                variant="secondary"
+                size="sm"
+                onClick={async () => {
+                  if (!confirmAll) {
+                    setConfirmAll(true);
+                    return;
+                  }
+                  setConfirmAll(false);
+                  await doUpdateAll();
+                }}
+                disabled={updating !== ''}
+                className="whitespace-nowrap"
+                style={{
+                  height: px(36, scale, 30),
+                  minWidth: px(176, scale, 140),
+                  fontSize: px(14, scale, 12),
+                  paddingLeft: px(12, scale, 9),
+                  paddingRight: px(12, scale, 9)
+                }}
+              >
+                <AnimatePresence mode="wait" initial={false}>
+                  {updating === 'all' ? (
+                    <motion.span
+                      key="loading"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.15 }}
+                      className="flex items-center"
+                    >
+                      <Loader2
+                        className="mr-2 animate-spin"
+                        style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
+                      />
+                      Actualizando...
+                    </motion.span>
+                  ) : confirmAll ? (
+                    <motion.span
+                      key="confirm"
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.15, ease: 'easeOut' }}
+                    >
+                      ¿Seguro?
+                    </motion.span>
+                  ) : (
+                    <motion.span
+                      key="idle"
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.15, ease: 'easeOut' }}
+                      className="flex items-center"
+                    >
+                      <ArrowUpCircle
+                        className="mr-2"
+                        style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
+                      />
+                      Actualizar todo
+                      <span className="opacity-70 ml-2">{visibleUpdates.length}</span>
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+              </Button>
+            )}
+          </div>
         </div>
         {installed.length === 0 ? (
           <EmptyState
@@ -406,16 +451,17 @@ export default function ExtensionsPanel() {
             face="（・_・）"
             title="No hay extensiones instaladas"
           />
-        ) : (
+        ) : visibleInstalled.length > 0 ? (
           <div className="grid" style={grid}>
-            {installed.map(({ manifest: m }) => {
-              const upd = updates.find((u) => u.id === m.id);
+            {sortedInstalled.map(({ manifest: m }) => {
+              const upd = visibleUpdates.find((u) => u.id === m.id);
               return (
                 <ExtensionCard
                   key={m.id}
                   scale={scale}
                   m={m}
                   updatable={!!upd}
+                  disabled={!showAdultExtensions && isAdultExtension(m)}
                   action={
                     <div className="flex items-center" style={{ gap: px(4, scale, 3) }}>
                       {upd && (
@@ -519,7 +565,7 @@ export default function ExtensionsPanel() {
               );
             })}
           </div>
-        )}
+        ) : null}
       </section>
 
       <section>
@@ -575,15 +621,17 @@ export default function ExtensionsPanel() {
               action={<Button size="sm" onClick={loadAvailable}>Reintentar</Button>}
             />
           )
-        ) : available.length === 0 ? (
+        ) : sortedAvailable.length === 0 ? (
+          available.length === 0 ? (
           <EmptyState
             compact
             face="ヽ(・∀・)ﾉ"
             title="No quedan extensiones por instalar"
           />
+          ) : null
         ) : (
           <div className="grid" style={grid}>
-            {available.map((m) => (
+            {sortedAvailable.map((m) => (
               <ExtensionCard
                 key={m.id}
                 scale={scale}
