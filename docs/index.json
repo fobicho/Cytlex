@@ -67,5 +67,17 @@
     "baseUrl": "https://manga-oni.com",
     "icon": "https://fobicho.github.io/Cytlex/icons/mangaoni.png",
     "desc": "Manga, manhwa y manhua en español."
+  },
+  {
+    "id": "mangadex",
+    "name": "MangaDex",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "contentWarning": "MIXED",
+    "main": "ext/mangadex.js",
+    "baseUrl": "https://mangadex.org",
+    "icon": "https://mangadex.org/favicon.ico",
+    "desc": "Manga, manhwa, manhua y cómics en español."
   }
 ]
