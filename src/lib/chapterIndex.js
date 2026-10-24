@@ -48,5 +48,16 @@ export const chapterIndex = {
     write(data);
   },
 
+  dropSource(sourceId) {
+    if (!sourceId) return;
+    const data = read();
+    const prefix = `${sourceId}|`;
+    let changed = false;
+    for (const key of Object.keys(data)) {
+      if (key.startsWith(prefix)) { delete data[key]; changed = true; }
+    }
+    if (changed) write(data);
+  },
+
   clear() { write({}); }
 };

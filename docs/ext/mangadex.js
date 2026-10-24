@@ -4,7 +4,6 @@ export default function createSource({ fetchText }) {
   const coverBase = 'https://uploads.mangadex.org/covers';
   const pageSize = 20;
   const chapterPageSize = 100;
-  // es-la: MangaDex agrupa ahí el español latino; solo 'es' dejaba mangas sin capítulos
   const languages = ['es', 'es-la'];
   const ratings = ['safe', 'suggestive', 'erotica', 'pornographic'];
   const types = { ja: 'Manga', ko: 'Manhwa', zh: 'Manhua', 'zh-hk': 'Manhua' };

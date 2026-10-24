@@ -1,4 +1,5 @@
 import { buildSelectorSource } from './selectorSource.js';
+import { chapterIndex } from './chapterIndex.js';
 
 const KEY = 'cytlex:extensions:v1';
 const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
@@ -210,11 +211,13 @@ export const extensions = {
     list.push({ manifest, code, installedVersion: manifest.version || '0', installedAt: Date.now() });
     write(list);
     cache.delete(manifest.id);
+    chapterIndex.dropSource(manifest.id);
   },
 
   async uninstall(id) {
     write(read().filter((r) => r.manifest.id !== id));
     cache.delete(id);
+    chapterIndex.dropSource(id);
   },
 
   async source(id) {
