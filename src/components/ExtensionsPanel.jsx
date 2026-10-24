@@ -615,7 +615,10 @@ export default function ExtensionsPanel() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => loadAvailable()}
+            onClick={() => {
+              checkUpdates();
+              loadAvailable();
+            }}
             disabled={loading}
             style={{
               height: px(36, scale, 30),

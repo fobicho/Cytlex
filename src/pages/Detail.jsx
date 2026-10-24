@@ -15,6 +15,7 @@ import { Badge } from '../components/ui/badge.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { Dialog } from '../components/ui/dialog.jsx';
 import { Skeleton } from '../components/ui/skeleton.jsx';
+import { Dropdown } from '../components/ui/dropdown.jsx';
 import AniListPanel from '../components/AniListPanel.jsx';
 import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
@@ -92,6 +93,12 @@ export default function Detail() {
   const [err, setErr] = useState('');
   const [fav, setFav] = useState(false);
   const [asc, setAsc] = useState(() => chapterOrder.get(mangaUrl));
+  const [groupFilter, setGroupFilter] = useState(() => {
+    try {
+      const map = JSON.parse(localStorage.getItem('cytlex:groupFilterByManga') || '{}');
+      return map[`${sourceId}|${mangaUrl}`] || 'all';
+    } catch { return 'all'; }
+  });
   const [chaptersPerRow, setChaptersPerRow] = useState(() => {
     try {
       const map = JSON.parse(localStorage.getItem('cytlex:chaptersPerRowByManga') || '{}');
@@ -448,8 +455,20 @@ export default function Detail() {
       </div>
     );
 
+  const chapterGroups = [...new Set((d.chapters || []).map((c) => c.group).filter(Boolean))];
+
   let chapters = d.chapters;
+  if (groupFilter !== 'all') chapters = chapters.filter((c) => c.group === groupFilter);
   if (asc) chapters = [...chapters].reverse();
+
+  const changeGroupFilter = (v) => {
+    setGroupFilter(v);
+    try {
+      const map = JSON.parse(localStorage.getItem('cytlex:groupFilterByManga') || '{}');
+      map[`${sourceId}|${mangaUrl}`] = v;
+      localStorage.setItem('cytlex:groupFilterByManga', JSON.stringify(map));
+    } catch {}
+  };
 
   const ordered = [...d.chapters].reverse();
 
@@ -802,6 +821,19 @@ export default function Detail() {
           >
             {chaptersPerRow} por fila
           </Button>
+          {chapterGroups.length > 1 && (
+            <Dropdown
+              scale={scale}
+              value={groupFilter}
+              onChange={changeGroupFilter}
+              ariaLabel="Filtrar por scanlation"
+              options={[
+                { value: 'all', label: `Todos (${d.chapters.length})` },
+                ...chapterGroups.map((g) => ({ value: g, label: g }))
+              ]}
+              style={{ width: px(230, scale, 190) }}
+            />
+          )}
         </div>
       </div>
 

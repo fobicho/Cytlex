@@ -106,7 +106,7 @@ export default function createSource({ fetchText, id: baseId, config }) {
       const attributes = item?.attributes || {};
 
       const fetchChapters = async (mangaId) => {
-        const found = [];
+        const entries = [];
         let offset = 0;
         let total = Infinity;
         while (offset < total) {
@@ -122,22 +122,60 @@ export default function createSource({ fetchText, id: baseId, config }) {
           }));
           const records = (page.data || []).filter((chapter) => !chapter.attributes?.externalUrl);
           total = Number(page.total) || 0;
-          found.push(...records.map((chapter) => {
+          entries.push(...records.map((chapter) => {
             const a = chapter.attributes || {};
-            const number = a.chapter ? `Capítulo ${a.chapter}` : a.volume ? `Volumen ${a.volume}` : '';
-            const group = relationship(chapter, 'scanlation_group')?.attributes?.name || '';
-            const label = [number || a.title || 'Capítulo sin título', a.title && number ? a.title : '', group]
-              .filter(Boolean).join(' · ');
             return {
-              url: chapterUrl(chapter, id, label),
-              title: label,
-              date: a.publishAt ? new Date(a.publishAt).toLocaleDateString('es') : ''
+              a,
+              chapterId: chapter.id,
+              group: relationship(chapter, 'scanlation_group')?.attributes?.name || '',
+              number: a.chapter != null && a.chapter !== '' ? parseFloat(a.chapter) : NaN,
+              publishAt: a.publishAt || ''
             };
           }));
           if (!records.length) break;
           offset += records.length;
         }
-        return found;
+
+        // antología: la mayoría de los números de capítulo están duplicados entre grupos con historias distintas
+        // (en un manga normal solo se duplican algunos capítulos re-subidos; ahí no se agrupa)
+        const byNumber = new Map();
+        for (const e of entries) {
+          if (Number.isNaN(e.number)) continue;
+          if (!byNumber.has(e.number)) byNumber.set(e.number, []);
+          byNumber.get(e.number).push(e);
+        }
+        let duplicated = 0;
+        let distinctNumbers = 0;
+        for (const list of byNumber.values()) {
+          distinctNumbers += 1;
+          if (list.length > 1
+            && new Set(list.map((e) => e.group)).size > 1
+            && new Set(list.map((e) => e.a.title || '')).size > 1) {
+            duplicated += 1;
+          }
+        }
+        const anthology = distinctNumbers > 0 && duplicated / distinctNumbers >= 0.5;
+
+        const locale = (a, b) => String(a).localeCompare(String(b), 'es', { numeric: true });
+        const byNum = (a, b) => (Number.isNaN(a.number) ? 1 : Number.isNaN(b.number) ? -1 : a.number - b.number)
+          || locale(a.a.chapter, b.a.chapter)
+          || locale(a.publishAt, b.publishAt);
+        entries.sort(anthology
+          ? (a, b) => locale(a.group, b.group) || byNum(a, b)
+          : (a, b) => locale(a.a.volume, b.a.volume) || byNum(a, b));
+
+        return entries.map((e) => {
+          const a = e.a;
+          const number = a.chapter ? `Capítulo ${a.chapter}` : a.volume ? `Volumen ${a.volume}` : '';
+          const label = [number || a.title || 'Capítulo sin título', a.title && number ? a.title : '', e.group]
+            .filter(Boolean).join(' · ');
+          return {
+            url: chapterUrl({ id: e.chapterId }, mangaId, label),
+            title: label,
+            group: e.group,
+            date: a.publishAt ? new Date(a.publishAt).toLocaleDateString('es') : ''
+          };
+        });
       };
 
       const chapters = await fetchChapters(id);
