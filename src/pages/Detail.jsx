@@ -99,6 +99,12 @@ export default function Detail() {
       return map[`${sourceId}|${mangaUrl}`] || 'all';
     } catch { return 'all'; }
   });
+  const [chapterSort, setChapterSort] = useState(() => {
+    try {
+      const map = JSON.parse(localStorage.getItem('cytlex:chapterSortByManga') || '{}');
+      return map[`${sourceId}|${mangaUrl}`] === 'scanlation' ? 'scanlation' : 'chapter';
+    } catch { return 'chapter'; }
+  });
   const [chaptersPerRow, setChaptersPerRow] = useState(() => {
     try {
       const map = JSON.parse(localStorage.getItem('cytlex:chaptersPerRowByManga') || '{}');
@@ -457,8 +463,26 @@ export default function Detail() {
 
   const chapterGroups = [...new Set((d.chapters || []).map((c) => c.group).filter(Boolean))];
 
+  const chapterNum = (c) => {
+    const m = String(c?.title || '').match(/[\d.]+/);
+    return m ? parseFloat(m[0]) : NaN;
+  };
+
   let chapters = d.chapters;
   if (groupFilter !== 'all') chapters = chapters.filter((c) => c.group === groupFilter);
+  if (chapterSort === 'scanlation') {
+    chapters = [...chapters].sort((a, b) => {
+      const ga = a.group || '';
+      const gb = b.group || '';
+      if (ga !== gb) return ga.localeCompare(gb, 'es', { sensitivity: 'base', numeric: true });
+      const na = chapterNum(a);
+      const nb = chapterNum(b);
+      if (Number.isNaN(na)) return 1;
+      if (Number.isNaN(nb)) return -1;
+      if (na !== nb) return na - nb;
+      return String(a.date).localeCompare(String(b.date), 'es', { numeric: true });
+    });
+  }
   if (asc) chapters = [...chapters].reverse();
 
   const changeGroupFilter = (v) => {
@@ -467,6 +491,15 @@ export default function Detail() {
       const map = JSON.parse(localStorage.getItem('cytlex:groupFilterByManga') || '{}');
       map[`${sourceId}|${mangaUrl}`] = v;
       localStorage.setItem('cytlex:groupFilterByManga', JSON.stringify(map));
+    } catch {}
+  };
+
+  const changeChapterSort = (v) => {
+    setChapterSort(v);
+    try {
+      const map = JSON.parse(localStorage.getItem('cytlex:chapterSortByManga') || '{}');
+      map[`${sourceId}|${mangaUrl}`] = v;
+      localStorage.setItem('cytlex:chapterSortByManga', JSON.stringify(map));
     } catch {}
   };
 
@@ -821,6 +854,23 @@ export default function Detail() {
           >
             {chaptersPerRow} por fila
           </Button>
+          {chapterGroups.length > 1 && (
+            <Button
+              size="sm"
+              variant="secondary"
+              title="Orden de los capítulos"
+              className="rounded-lg"
+              onClick={() => changeChapterSort(chapterSort === 'chapter' ? 'scanlation' : 'chapter')}
+              style={{
+                height: px(32, scale, 27),
+                fontSize: px(13, scale, 11),
+                paddingLeft: px(10, scale, 8),
+                paddingRight: px(10, scale, 8)
+              }}
+            >
+              {chapterSort === 'chapter' ? 'Por capítulo' : 'Por scanlation'}
+            </Button>
+          )}
           {chapterGroups.length > 1 && (
             <Dropdown
               scale={scale}

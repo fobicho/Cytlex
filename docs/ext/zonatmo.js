@@ -85,9 +85,18 @@ export default function createSource({ fetchText, parse }) {
         if (!url || seenUrls.has(url)) return null;
         seenUrls.add(url);
         const date = text(el, '.chapter-detail .fa-calendar') || text(el, '.chapter-row-date');
-        return { url, title: text(el, '.chapter-number'), date };
+        const title = text(el, '.chapter-number');
+        const numMatch = String(title).match(/[\d.]+/);
+        return {
+          url,
+          title,
+          date,
+          group: text(el, '.chapter-detail a[href*="/groups/"]'),
+          num: numMatch ? parseFloat(numMatch[0]) : NaN
+        };
       })
-      .filter(Boolean);
+      .filter(Boolean)
+      .sort((x, y) => (Number.isNaN(x.num) ? 1 : Number.isNaN(y.num) ? -1 : x.num - y.num));
 
     return {
       title,

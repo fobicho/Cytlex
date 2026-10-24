@@ -136,33 +136,11 @@ export default function createSource({ fetchText, id: baseId, config }) {
           offset += records.length;
         }
 
-        // antología: la mayoría de los números de capítulo están duplicados entre grupos con historias distintas
-        // (en un manga normal solo se duplican algunos capítulos re-subidos; ahí no se agrupa)
-        const byNumber = new Map();
-        for (const e of entries) {
-          if (Number.isNaN(e.number)) continue;
-          if (!byNumber.has(e.number)) byNumber.set(e.number, []);
-          byNumber.get(e.number).push(e);
-        }
-        let duplicated = 0;
-        let distinctNumbers = 0;
-        for (const list of byNumber.values()) {
-          distinctNumbers += 1;
-          if (list.length > 1
-            && new Set(list.map((e) => e.group)).size > 1
-            && new Set(list.map((e) => e.a.title || '')).size > 1) {
-            duplicated += 1;
-          }
-        }
-        const anthology = distinctNumbers > 0 && duplicated / distinctNumbers >= 0.5;
-
         const locale = (a, b) => String(a).localeCompare(String(b), 'es', { numeric: true });
-        const byNum = (a, b) => (Number.isNaN(a.number) ? 1 : Number.isNaN(b.number) ? -1 : a.number - b.number)
+        entries.sort((a, b) => (Number.isNaN(a.number) ? 1 : Number.isNaN(b.number) ? -1 : a.number - b.number)
           || locale(a.a.chapter, b.a.chapter)
-          || locale(a.publishAt, b.publishAt);
-        entries.sort(anthology
-          ? (a, b) => locale(a.group, b.group) || byNum(a, b)
-          : (a, b) => locale(a.a.volume, b.a.volume) || byNum(a, b));
+          || locale(a.publishAt, b.publishAt)
+          || locale(a.a.volume, b.a.volume));
 
         return entries.map((e) => {
           const a = e.a;
