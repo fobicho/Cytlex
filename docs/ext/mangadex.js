@@ -115,6 +115,7 @@ export default function createSource({ fetchText, id: baseId, config }) {
             limit: chapterPageSize,
             offset,
             'translatedLanguage[]': getLanguages(),
+            'contentRating[]': ratings,
             'includes[]': ['scanlation_group'],
             'order[volume]': 'asc',
             'order[chapter]': 'asc'

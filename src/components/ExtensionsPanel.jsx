@@ -1,17 +1,18 @@
 import { useEffect, useState, useRef } from 'react';
-import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown } from 'lucide-react';
+import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown, Settings as SettingsIcon } from 'lucide-react';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { extUpdates } from '../lib/extUpdates.js';
 import { settings } from '../lib/settings.js';
 import { Card } from './ui/card.jsx';
 import { Button } from './ui/button.jsx';
 import { EmptyState } from './ui/empty-state.jsx';
+import { Dialog } from './ui/dialog.jsx';
 import { useToast } from './Toast.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 
-function ExtensionCard({ m, action, footer, updatable = false, disabled = false, scale = 1 }) {
+function ExtensionCard({ m, action, updatable = false, disabled = false, scale = 1 }) {
   const [imgOk, setImgOk] = useState(true);
   const showImg = m.icon && imgOk;
   const hasAdultContent = isAdultExtension(m);
@@ -83,7 +84,6 @@ function ExtensionCard({ m, action, footer, updatable = false, disabled = false,
         </div>
         <div className="shrink-0">{action}</div>
       </div>
-      {footer}
     </Card>
   );
 }
@@ -127,6 +127,7 @@ export default function ExtensionsPanel() {
     return extensionSortModes.includes(stored) ? stored : 'title-asc';
   });
   const [langConfig, setLangConfig] = useState(() => readExtConfig());
+  const [configExt, setConfigExt] = useState(null);
 
   const toggleLang = (subId, code, options) => {
     const cfg = readExtConfig();
@@ -478,64 +479,27 @@ export default function ExtensionsPanel() {
           <div className="grid" style={grid}>
             {sortedInstalled.map(({ manifest: m }) => {
               const upd = visibleUpdates.find((u) => u.id === m.id);
-              const langSources = Array.isArray(m.config?.sources) ? m.config.sources : null;
-              const footer = langSources ? (
-                <div
-                  className="flex flex-col border-t border-border"
-                  style={{ gap: px(6, scale, 5), padding: `${px(10, scale, 8)} ${px(14, scale, 11)} ${px(12, scale, 9)}` }}
-                >
-                  {langSources.map((sub) => {
-                    if (!Array.isArray(sub.languages) || sub.languages.length < 2) return null;
-                    const defaults = Array.isArray(sub.default) && sub.default.length
-                      ? sub.default
-                      : sub.languages.map((x) => x.code);
-                    const cur = langConfig[sub.id]?.languages;
-                    const active = Array.isArray(cur) && cur.length ? cur : defaults;
-                    return (
-                      <div key={sub.id} className="flex flex-wrap items-center" style={{ gap: px(4, scale, 3) }}>
-                        <span
-                          className="text-muted-foreground shrink-0"
-                          style={{ fontSize: px(11, scale, 9), marginRight: px(4, scale, 3) }}
-                        >
-                          {sub.name}:
-                        </span>
-                        {sub.languages.map((l) => (
-                          <button
-                            key={l.code}
-                            type="button"
-                            title={`Idioma ${l.label}`}
-                            aria-pressed={active.includes(l.code)}
-                            onClick={() => toggleLang(sub.id, l.code, sub.languages)}
-                            className={cn(
-                              'rounded-full border transition-colors',
-                              active.includes(l.code)
-                                ? 'border-primary bg-primary text-primary-foreground'
-                                : 'border-border text-muted-foreground hover:text-foreground'
-                            )}
-                            style={{
-                              fontSize: px(11, scale, 9),
-                              lineHeight: 1,
-                              padding: `${px(4, scale, 3)}px ${px(9, scale, 7)}px`
-                            }}
-                          >
-                            {l.label}
-                          </button>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null;
               return (
                 <ExtensionCard
                   key={m.id}
                   scale={scale}
                   m={m}
-                  footer={footer}
                   updatable={!!upd}
                   disabled={!showAdultExtensions && isAdultExtension(m)}
                   action={
                     <div className="flex items-center" style={{ gap: px(4, scale, 3) }}>
+                      {Array.isArray(m.config?.sources) && m.config.sources.length > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title={`Configuración de ${m.name}`}
+                          aria-label={`Configuración de ${m.name}`}
+                          onClick={() => setConfigExt(m)}
+                          style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
+                        >
+                          <SettingsIcon style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                        </Button>
+                      )}
                       {upd && (
                         <div
                           ref={confirmUpdate?.id === m.id ? updateRef : null}
@@ -759,6 +723,52 @@ export default function ExtensionsPanel() {
         )}
       </section>
 
+      <Dialog
+        open={!!configExt}
+        onClose={() => setConfigExt(null)}
+        title={`Configuración de ${configExt?.name || ''}`}
+        description="Elige los idiomas que muestra cada fuente."
+        scale={scale}
+      >
+        {(configExt?.config?.sources || []).map((sub) => {
+          const defaults = Array.isArray(sub.default) && sub.default.length
+            ? sub.default
+            : (sub.languages || []).map((x) => x.code);
+          const cur = langConfig[sub.id]?.languages;
+          const active = Array.isArray(cur) && cur.length ? cur : defaults;
+          return (
+            <div key={sub.id} style={{ marginBottom: px(16, scale, 12) }}>
+              <div className="font-medium" style={{ fontSize: px(14, scale, 12), marginBottom: px(8, scale, 6) }}>
+                {sub.name}
+              </div>
+              <div className="flex flex-wrap" style={{ gap: px(6, scale, 5) }}>
+                {(sub.languages || []).map((l) => (
+                  <button
+                    key={l.code}
+                    type="button"
+                    title={`Idioma ${l.label}`}
+                    aria-pressed={active.includes(l.code)}
+                    onClick={() => toggleLang(sub.id, l.code, sub.languages)}
+                    className={cn(
+                      'rounded-full border transition-colors',
+                      active.includes(l.code)
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border text-muted-foreground hover:text-foreground'
+                    )}
+                    style={{
+                      fontSize: px(12, scale, 10),
+                      lineHeight: 1,
+                      padding: `${px(6, scale, 5)}px ${px(11, scale, 9)}px`
+                    }}
+                  >
+                    {l.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </Dialog>
     </div>
   );
 }

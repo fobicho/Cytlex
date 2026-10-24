@@ -47,6 +47,20 @@ const enabledSources = (showAdultExtensions) => extensions.sources().filter(({ m
   showAdultExtensions || !isAdultExtension(manifest)
 );
 
+const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
+
+const sourceLangSubtitle = (manifest) => {
+  const options = Array.isArray(manifest.config?.languages) ? manifest.config.languages : null;
+  if (!options || !options.length) return '';
+  const defaults = Array.isArray(manifest.config.default) && manifest.config.default.length
+    ? manifest.config.default
+    : options.map((l) => l.code);
+  let cur = null;
+  try { cur = JSON.parse(localStorage.getItem(EXT_CONFIG_KEY))?.[manifest.id]?.languages; } catch {}
+  const codes = Array.isArray(cur) && cur.length ? cur : defaults;
+  return codes.map((c) => options.find((l) => l.code === c)?.label || c).join(' · ');
+};
+
 function SourceSection({ r, coverSize, scale = 1, first = false, animate = false }) {
   const trackRef = useRef(null);
   const mainRef = useRef(null);
@@ -129,10 +143,21 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
         style={{ marginBottom: `${Math.max(10, Math.round(16 * scale))}px` }}
       >
         <SourceBadge m={r.manifest} />
-        <h3 className="font-semibold" style={{ fontSize: `${Math.round(14 * scale)}px` }}>
-          {r.manifest.name}
-        </h3>
-        <span className="text-muted-foreground" style={{ fontSize: `${Math.round(12 * scale)}px` }}>
+        <div className="min-w-0">
+          <h3 className="font-semibold" style={{ fontSize: `${Math.round(14 * scale)}px` }}>
+            {r.manifest.name}
+          </h3>
+          {(() => {
+            const langs = sourceLangSubtitle(r.manifest);
+            if (!langs) return null;
+            return (
+              <div className="text-muted-foreground truncate" style={{ fontSize: `${Math.round(11 * scale)}px` }}>
+                {langs}
+              </div>
+            );
+          })()}
+        </div>
+        <span className="text-muted-foreground shrink-0" style={{ fontSize: `${Math.round(12 * scale)}px` }}>
           · {r.items.length}
         </span>
       </div>
