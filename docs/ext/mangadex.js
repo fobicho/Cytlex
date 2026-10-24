@@ -4,7 +4,8 @@ export default function createSource({ fetchText }) {
   const coverBase = 'https://uploads.mangadex.org/covers';
   const pageSize = 20;
   const chapterPageSize = 100;
-  const languages = ['es'];
+  // es-la: MangaDex agrupa ahí el español latino; solo 'es' dejaba mangas sin capítulos
+  const languages = ['es', 'es-la'];
   const ratings = ['safe', 'suggestive', 'erotica', 'pornographic'];
   const types = { ja: 'Manga', ko: 'Manhwa', zh: 'Manhua', 'zh-hk': 'Manhua' };
   let requestQueue = Promise.resolve();
@@ -105,7 +106,7 @@ export default function createSource({ fetchText }) {
         'order[volume]': 'asc',
         'order[chapter]': 'asc'
       }));
-      const records = page.data || [];
+      const records = (page.data || []).filter((chapter) => !chapter.attributes?.externalUrl);
       total = Number(page.total) || 0;
       chapters.push(...records.map((chapter) => {
         const a = chapter.attributes || {};

@@ -615,7 +615,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           scale={scale}
           first
           title="Mostrar extensiones +18"
-          desc="Muestra extensiones marcadas con contenido para adultos"
+          desc="Algunas extensiones podrían  no mostrarse sin esta opción activa"
           right={
             <Switch
               scale={scale}
@@ -626,14 +626,8 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
           }
         />
         <div style={{ marginTop: px(18, scale, 12) }}>
-          <div className="font-medium leading-tight" style={{ fontSize: px(14, scale, 12) }}>
+          <div className="font-medium leading-tight mb-2" style={{ fontSize: px(14, scale, 12) }}>
             Repositorio de extensiones
-          </div>
-          <div
-            className="text-muted-foreground leading-snug"
-            style={{ fontSize: px(12, scale, 10), marginTop: px(4, scale, 3), marginBottom: px(10, scale, 7) }}
-          >
-            Añade el enlace desde el que se obtienen las extensiones.
           </div>
         </div>
         <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
