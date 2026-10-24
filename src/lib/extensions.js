@@ -2,6 +2,7 @@ import { buildSelectorSource } from './selectorSource.js';
 import { chapterIndex } from './chapterIndex.js';
 
 const KEY = 'cytlex:extensions:v1';
+const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
 const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
 
 export function isAdultExtension(source) {
@@ -17,9 +18,16 @@ const read = () => {
 const write = (v) => localStorage.setItem(KEY, JSON.stringify(v));
 
 function ctx(manifest = {}) {
+  let storedConfig = {};
+  try { storedConfig = JSON.parse(localStorage.getItem(EXT_CONFIG_KEY)) || {}; } catch {}
+  const languageSelections = Object.fromEntries(Object.entries(storedConfig).map(([id, value]) => [
+    id,
+    { languages: Array.isArray(value?.languages) ? value.languages.filter((x) => typeof x === 'string') : [] }
+  ]));
   return {
     id: manifest.id,
     config: manifest.config,
+    languageSelections,
     fetchText: (url) => {
       if (typeof window === 'undefined' || !window.cytlex?.httpGet) {
         throw new Error('Sin puente Electron para hacer peticiones');
@@ -34,22 +42,173 @@ function ctx(manifest = {}) {
   };
 }
 
-async function loadModule(code, manifest) {
-  const blob = new Blob([code], { type: 'text/javascript' });
-  const blobUrl = URL.createObjectURL(blob);
-  try {
-    const mod = await import(/* @vite-ignore */ blobUrl);
-    const factory = mod.default || mod.createSource;
-    if (typeof factory !== 'function') {
-      throw new Error('La extensión no exporta una función (default o createSource)');
+const MODULE_BOOTSTRAP = `
+const channel = 'cytlex-extension';
+const pending = new Map();
+let nextId = 0;
+let source = null;
+const callHost = (method, args) => new Promise((resolve, reject) => {
+  const id = 'host-' + (++nextId);
+  pending.set(id, { resolve, reject });
+  parent.postMessage({ channel, kind: 'host-call', id, method, args }, '*');
+});
+const describe = (value) => {
+  if (typeof value === 'function') return { kind: 'function' };
+  if (Array.isArray(value)) return { kind: 'array', items: value.map(describe) };
+  if (value && typeof value === 'object') {
+    return { kind: 'object', entries: Object.entries(value).map(([key, item]) => [key, describe(item)]) };
+  }
+  return { kind: 'value', value };
+};
+addEventListener('message', async (event) => {
+  const message = event.data;
+  if (message?.channel !== channel) return;
+  if (message.kind === 'host-result') {
+    const item = pending.get(message.id);
+    if (!item) return;
+    pending.delete(message.id);
+    if (message.error) item.reject(new Error(message.error));
+    else item.resolve(message.value);
+    return;
+  }
+  if (message.kind === 'init') {
+    try {
+      const url = URL.createObjectURL(new Blob([message.code], { type: 'text/javascript' }));
+      let mod;
+      try { mod = await import(url); } finally { URL.revokeObjectURL(url); }
+      const factory = mod.default || mod.createSource;
+      if (typeof factory !== 'function') throw new Error('La extensión no exporta una función (default o createSource)');
+      source = await factory({
+        id: message.context.id,
+        config: message.context.config,
+        languageSelections: message.context.languageSelections,
+        fetchText: (url) => callHost('fetchText', [url]),
+        head: (url) => callHost('head', [url]),
+        parse: (html) => new DOMParser().parseFromString(html, 'text/html')
+      });
+      parent.postMessage({ channel, kind: 'ready', description: describe(source) }, '*');
+    } catch (error) {
+      parent.postMessage({ channel, kind: 'init-error', error: String(error?.message || error) }, '*');
     }
-    return await factory(ctx(manifest));
-  } finally {
-    URL.revokeObjectURL(blobUrl);
+    return;
+  }
+  if (message.kind === 'call') {
+    try {
+      let owner = null;
+      let value = source;
+      for (const key of message.path) {
+        owner = value;
+        value = value?.[key];
+      }
+      if (typeof value !== 'function') throw new Error('La extensión no ofrece esta operación');
+      const result = await value.apply(owner, message.args || []);
+      parent.postMessage({ channel, kind: 'result', id: message.id, value: result }, '*');
+    } catch (error) {
+      parent.postMessage({ channel, kind: 'result', id: message.id, error: String(error?.message || error) }, '*');
+    }
+  }
+});`;
+
+const moduleDisposers = new Map();
+
+async function loadModule(code, manifest) {
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('sandbox', 'allow-scripts');
+  iframe.setAttribute('aria-hidden', 'true');
+  iframe.tabIndex = -1;
+  iframe.style.cssText = 'position:fixed;width:0;height:0;border:0;left:-10000px;top:-10000px';
+  iframe.srcdoc = `<!doctype html><meta charset="utf-8"><script>${MODULE_BOOTSTRAP}<\/script>`;
+  const pending = new Map();
+  let nextId = 0;
+  let disposed = false;
+  let readyResolve;
+  let readyReject;
+  const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    window.removeEventListener('message', onMessage);
+    iframe.remove();
+    for (const item of pending.values()) item.reject(new Error('La extensión se cerró'));
+    pending.clear();
+  };
+  const post = (message) => {
+    if (!iframe.contentWindow || disposed) throw new Error('No se pudo iniciar la extensión');
+    iframe.contentWindow.postMessage({ channel: 'cytlex-extension', ...message }, '*');
+  };
+  const call = (path, args) => new Promise((resolve, reject) => {
+    if (disposed) { reject(new Error('La extensión se cerró')); return; }
+    const id = 'app-' + (++nextId);
+    pending.set(id, { resolve, reject });
+    try { post({ kind: 'call', id, path, args }); }
+    catch (error) { pending.delete(id); reject(error); }
+  });
+  const buildProxy = (description, path = []) => {
+    if (description?.kind === 'function') return (...args) => call(path, args);
+    if (description?.kind === 'array') return description.items.map((item, index) => buildProxy(item, [...path, String(index)]));
+    if (description?.kind === 'object') return Object.fromEntries(
+      description.entries.map(([key, item]) => [key, buildProxy(item, [...path, key])])
+    );
+    return description?.value;
+  };
+  const onMessage = (event) => {
+    if (event.source !== iframe.contentWindow || event.data?.channel !== 'cytlex-extension') return;
+    const message = event.data;
+    if (message.kind === 'ready') { readyResolve(buildProxy(message.description)); return; }
+    if (message.kind === 'init-error') { readyReject(new Error(message.error)); return; }
+    if (message.kind === 'result') {
+      const item = pending.get(message.id);
+      if (!item) return;
+      pending.delete(message.id);
+      if (message.error) item.reject(new Error(message.error));
+      else item.resolve(message.value);
+      return;
+    }
+    if (message.kind === 'host-call') {
+      const action = message.method === 'fetchText'
+        ? (url) => window.cytlex.httpGet(url)
+        : message.method === 'head'
+          ? (url) => window.cytlex.httpHead(url)
+          : null;
+      Promise.resolve().then(() => {
+        if (!action) throw new Error('Operación de extensión no permitida');
+        return action(...(message.args || []));
+      }).then(
+        (value) => { if (!disposed) post({ kind: 'host-result', id: message.id, value }); },
+        (error) => { if (!disposed) post({ kind: 'host-result', id: message.id, error: String(error?.message || error) }); }
+      );
+    }
+  };
+
+  window.addEventListener('message', onMessage);
+  const loaded = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('La extensión tardó demasiado en iniciar')), 10000);
+    iframe.addEventListener('load', () => { clearTimeout(timeout); resolve(); }, { once: true });
+    iframe.addEventListener('error', () => { clearTimeout(timeout); reject(new Error('No se pudo iniciar la extensión')); }, { once: true });
+  });
+  (document.body || document.documentElement).append(iframe);
+  try {
+    await loaded;
+    post({ kind: 'init', code, context: { id: manifest.id, config: manifest.config, languageSelections: ctx(manifest).languageSelections } });
+    const source = await Promise.race([
+      ready,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('La extensión tardó demasiado en iniciar')), 10000))
+    ]);
+    moduleDisposers.set(manifest.id, dispose);
+    return source;
+  } catch (error) {
+    dispose();
+    throw error;
   }
 }
 
 const cache = new Map();
+
+function clearModule(id) {
+  cache.delete(id);
+  moduleDisposers.get(id)?.();
+  moduleDisposers.delete(id);
+}
 
 const parts = (v) => String(v || '0').split('.').map((n) => parseInt(n, 10) || 0);
 
@@ -170,7 +329,7 @@ export const extensions = {
         r.manifest = { ...r.manifest, ...fresh };
         delete r.manifest.adultContent;
         r.installedVersion = fresh.version || r.manifest.version || '0';
-        cache.delete(r.manifest.id);
+        clearModule(r.manifest.id);
         ok += 1;
       } catch {
         fallos.push(r.manifest.id);
@@ -236,7 +395,7 @@ export const extensions = {
     const list = read().filter((r) => r.manifest.id !== manifest.id);
     list.push({ manifest, code, installedVersion: manifest.version || '0', installedAt: Date.now() });
     write(list);
-    cache.delete(manifest.id);
+    clearModule(manifest.id);
     for (const sid of [manifest.id, ...(subSources(manifest)?.map((s) => s.id) || [])]) {
       chapterIndex.dropSource(sid);
     }
@@ -244,14 +403,14 @@ export const extensions = {
 
   async uninstall(id) {
     write(read().filter((r) => r.manifest.id !== id));
-    cache.delete(id);
+    clearModule(id);
     for (const sid of [id, ...(subSources(read().find((r) => r.manifest.id === id)?.manifest)?.map((s) => s.id) || [])]) {
       chapterIndex.dropSource(sid);
     }
   },
 
   invalidate(id) {
-    cache.delete(findRecord(id)?.manifest.id || id);
+    clearModule(findRecord(id)?.manifest.id || id);
   },
 
   async source(id) {

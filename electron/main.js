@@ -6,6 +6,10 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
+import http from 'node:http';
+import https from 'node:https';
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -162,12 +166,118 @@ function validateUrl(url) {
   if (!ALLOWED_PROTOCOLS.includes(parsed.protocol)) {
     throw new Error(`Disallowed protocol: ${parsed.protocol}`);
   }
-  if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-    if (!isDev) {
-      throw new Error('Localhost access is not allowed in production');
-    }
-  }
+  if (parsed.username || parsed.password) throw new Error('URL credentials are not allowed');
   return parsed;
+}
+
+function isPublicAddress(address) {
+  const family = isIP(address);
+  if (family === 4) {
+    const octets = address.split('.').map(Number);
+    const [a, b] = octets;
+    return !(a === 0 || a === 10 || a === 127 || a >= 224
+      || (a === 100 && b >= 64 && b <= 127)
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && (b === 168 || (b === 0 && (octets[2] === 0 || octets[2] === 2))))
+      || (a === 198 && ((b === 18 || b === 19) || (b === 51 && octets[2] === 100)))
+      || (a === 203 && b === 0 && octets[2] === 113));
+  }
+  if (family !== 6) return false;
+  const normalized = address.toLowerCase().split('%')[0];
+  if (normalized.startsWith('::') || normalized.startsWith('fc')
+    || normalized.startsWith('fd') || /^fe[89ab]/.test(normalized)
+    || normalized.startsWith('ff') || normalized.startsWith('2001:db8:')
+    || normalized.startsWith('2001:0:')) return false;
+  return !normalized.startsWith('::ffff:');
+}
+
+async function resolvePublicAddress(hostname) {
+  const host = hostname.replace(/^\[|\]$/g, '');
+  if (isIP(host)) {
+    if (!isPublicAddress(host)) throw new Error('Las direcciones de red privada no están permitidas');
+    return { address: host, family: isIP(host) };
+  }
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) {
+    throw new Error('Los dominios locales no están permitidos');
+  }
+  const addresses = await lookup(host, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) {
+    throw new Error('El destino no resuelve exclusivamente a direcciones públicas');
+  }
+  return addresses[0];
+}
+
+function requestOnce(parsed, options, address) {
+  return new Promise((resolve, reject) => {
+    const transport = parsed.protocol === 'https:' ? https : http;
+    const request = transport.request(parsed, {
+      method: options.method,
+      headers: options.headers,
+      lookup: (_hostname, lookupOptions, callback) => {
+        if (typeof lookupOptions === 'function') callback = lookupOptions;
+        if (lookupOptions?.all) callback(null, [{ address: address.address, family: address.family }]);
+        else callback(null, address.address, address.family);
+      }
+    }, resolve);
+    const timer = setTimeout(() => request.destroy(new Error('La petición excedió el tiempo límite')), options.timeout);
+    request.on('error', reject);
+    request.on('close', () => clearTimeout(timer));
+    if (options.body != null) request.write(options.body);
+    request.end();
+  });
+}
+
+async function requestPublic(url, options = {}, redirects = 0) {
+  const parsed = validateUrl(url);
+  const address = await withTimeout(resolvePublicAddress(parsed.hostname), options.timeout);
+  const response = await requestOnce(parsed, options, address);
+  const status = response.statusCode || 0;
+  const location = response.headers.location;
+  if ([301, 302, 303, 307, 308].includes(status) && location) {
+    response.resume();
+    if (redirects >= 5) throw new Error('Demasiadas redirecciones');
+    const target = new URL(location, parsed);
+    if (parsed.protocol === 'https:' && target.protocol !== 'https:') throw new Error('No se permiten redirecciones a HTTP');
+    const headers = { ...options.headers };
+    if (target.origin !== parsed.origin) {
+      for (const key of Object.keys(headers)) {
+        if (['authorization', 'cookie', 'proxy-authorization'].includes(key.toLowerCase())) delete headers[key];
+      }
+    }
+    const rewrite = status === 303 || ((status === 301 || status === 302) && options.method === 'POST');
+    if (rewrite) {
+      delete headers['Content-Type'];
+      delete headers['content-type'];
+      delete headers['Content-Length'];
+      delete headers['content-length'];
+    }
+    return requestPublic(target.toString(), {
+      ...options,
+      method: rewrite ? 'GET' : options.method,
+      headers,
+      body: rewrite ? null : options.body
+    }, redirects + 1);
+  }
+  return response;
+}
+
+function readResponse(response) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    response.on('data', (chunk) => chunks.push(chunk));
+    response.on('end', () => resolve(Buffer.concat(chunks)));
+    response.on('error', reject);
+    response.on('aborted', () => reject(new Error('La respuesta se interrumpió')));
+  });
+}
+
+function withTimeout(promise, timeout) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('La petición excedió el tiempo límite')), timeout); })
+  ]).finally(() => clearTimeout(timer));
 }
 
 function hookImageHeaders() {
@@ -444,29 +554,31 @@ const HTTP_HEAD_TIMEOUT_MS = 5_000;
 
 ipcMain.handle('http:get', async (_e, url) => {
   const parsed = validateUrl(url);
-  const res = await fetch(parsed.toString(), {
+  const res = await requestPublic(parsed.toString(), {
+    method: 'GET',
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
       Referer: refererFor(parsed.toString())
     },
-    signal: AbortSignal.timeout(HTTP_GET_TIMEOUT_MS)
+    timeout: HTTP_GET_TIMEOUT_MS
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} al pedir ${parsed.toString()}`);
-  return await res.text();
+  if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`HTTP ${res.statusCode} al pedir ${parsed.toString()}`);
+  return (await readResponse(res)).toString('utf8');
 });
 
 ipcMain.handle('http:head', async (_e, url) => {
   const parsed = validateUrl(url);
   const urlStr = parsed.toString();
-  const res = await fetch(urlStr, {
+  const res = await requestPublic(urlStr, {
     method: 'HEAD',
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
       Referer: refererFor(urlStr)
     },
-    signal: AbortSignal.timeout(HTTP_HEAD_TIMEOUT_MS)
+    timeout: HTTP_HEAD_TIMEOUT_MS
   });
-  return { ok: res.ok, status: res.status, length: Number(res.headers.get('content-length')) || 0, type: res.headers.get('content-type') || '' };
+  res.resume();
+  return { ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, length: Number(res.headers['content-length']) || 0, type: res.headers['content-type'] || '' };
 });
 
 ipcMain.handle('http:post', async (_e, payload = {}) => {
@@ -474,17 +586,18 @@ ipcMain.handle('http:post', async (_e, payload = {}) => {
   if (!url) throw new Error('Falta la URL de la petición POST');
   const parsed = validateUrl(url);
   const urlStr = parsed.toString();
-  const res = await fetch(urlStr, {
+  const res = await requestPublic(urlStr, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
       ...headers
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    timeout: HTTP_GET_TIMEOUT_MS
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} al pedir ${urlStr}`);
-  return await res.json();
+  if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`HTTP ${res.statusCode} al pedir ${urlStr}`);
+  return JSON.parse((await readResponse(res)).toString('utf8'));
 });
 
 ipcMain.handle('image:fetch', async (_e, url) => {
@@ -492,15 +605,17 @@ ipcMain.handle('image:fetch', async (_e, url) => {
   try {
     const parsed = validateUrl(url);
     const urlStr = parsed.toString();
-    const res = await fetch(urlStr, {
+    const res = await requestPublic(urlStr, {
+      method: 'GET',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
         Referer: parsed.origin + '/'
-      }
+      },
+      timeout: HTTP_GET_TIMEOUT_MS
     });
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    return { mime: res.headers.get('content-type') || 'application/octet-stream', base64: buf.toString('base64') };
+    if (res.statusCode < 200 || res.statusCode >= 300) return null;
+    const buf = await readResponse(res);
+    return { mime: res.headers['content-type'] || 'application/octet-stream', base64: buf.toString('base64') };
   } catch {
     return null;
   }
@@ -512,14 +627,16 @@ ipcMain.handle('image:download', async (e, payload = {}) => {
   try {
     const parsed = validateUrl(url);
     const urlStr = parsed.toString();
-    const res = await fetch(urlStr, {
+    const res = await requestPublic(urlStr, {
+      method: 'GET',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
         Referer: parsed.origin + '/'
-      }
+      },
+      timeout: HTTP_GET_TIMEOUT_MS
     });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    const buf = Buffer.from(await res.arrayBuffer());
+    if (res.statusCode < 200 || res.statusCode >= 300) return { ok: false, error: `HTTP ${res.statusCode}` };
+    const buf = await readResponse(res);
 
     const ext = (parsed.pathname.match(/\.(jpe?g|png|webp|gif|avif)$/i)?.[1] || 'jpg').toLowerCase();
     const safe = String(suggested || '').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'panel';

@@ -1,10 +1,9 @@
-export default function createSource({ fetchText, id: baseId, config }) {
+export default function createSource({ fetchText, id: baseId, config, languageSelections }) {
   const api = 'https://api.mangadex.org';
   const site = 'https://mangadex.org';
   const coverBase = 'https://uploads.mangadex.org/covers';
   const pageSize = 20;
   const chapterPageSize = 100;
-  const CONFIG_KEY = 'cytlex:ext-config:v1';
   const ratings = ['safe', 'suggestive', 'erotica', 'pornographic'];
   const types = { ja: 'Manga', ko: 'Manhwa', zh: 'Manhua', 'zh-hk': 'Manhua' };
   let requestQueue = Promise.resolve();
@@ -61,10 +60,8 @@ export default function createSource({ fetchText, id: baseId, config }) {
       : (sourceConfig?.languages || []).map((l) => l.code);
 
     const getLanguages = () => {
-      try {
-        const sel = JSON.parse(localStorage.getItem(CONFIG_KEY))?.[sourceId]?.languages;
-        if (Array.isArray(sel) && sel.length) return sel;
-      } catch {}
+      const selected = languageSelections?.[sourceId]?.languages;
+      if (Array.isArray(selected) && selected.length) return selected;
       return defaultLanguages.length ? defaultLanguages : ['es', 'es-la'];
     };
 
@@ -120,7 +117,8 @@ export default function createSource({ fetchText, id: baseId, config }) {
             'order[volume]': 'asc',
             'order[chapter]': 'asc'
           }));
-          const records = (page.data || []).filter((chapter) => !chapter.attributes?.externalUrl);
+          const pageData = Array.isArray(page.data) ? page.data : [];
+          const records = pageData.filter((chapter) => !chapter.attributes?.externalUrl);
           total = Number(page.total) || 0;
           entries.push(...records.map((chapter) => {
             const a = chapter.attributes || {};
@@ -132,8 +130,8 @@ export default function createSource({ fetchText, id: baseId, config }) {
               publishAt: a.publishAt || ''
             };
           }));
-          if (!records.length) break;
-          offset += records.length;
+          if (!pageData.length) break;
+          offset += pageData.length;
         }
 
         const locale = (a, b) => String(a).localeCompare(String(b), 'es', { numeric: true });
