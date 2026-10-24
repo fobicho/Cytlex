@@ -34,11 +34,18 @@ export default function createSource({ fetchText, parse }) {
     }
     if (!Array.isArray(list)) return [];
     return list
-      .map((c) => ({
-        url: abs(c.url),
-        title: c.titulo || c.titulo_str || '',
-        date: c.fecha_str || c.fecha_subida || ''
-      }))
+      .map((c) => {
+        const num = c.numero != null && c.numero !== '' ? String(parseFloat(c.numero)) : '';
+        const group = c.grupo_cap_nombres
+          || (c.grupos_list || []).map((g) => g.nombre).filter(Boolean).join(', ')
+          || '';
+        return {
+          url: abs(c.url),
+          title: num ? `Capítulo ${num}` : (c.titulo || c.titulo_str || ''),
+          group,
+          date: c.fecha_str || c.fecha_subida || ''
+        };
+      })
       .filter((x) => x.url);
   }
 
