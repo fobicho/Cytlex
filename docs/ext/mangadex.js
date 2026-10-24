@@ -167,7 +167,7 @@ export default function createSource({ fetchText, id: baseId, config }) {
         return entries.map((e) => {
           const a = e.a;
           const number = a.chapter ? `Capítulo ${a.chapter}` : a.volume ? `Volumen ${a.volume}` : '';
-          const label = [number || a.title || 'Capítulo sin título', a.title && number ? a.title : '', e.group]
+          const label = [number || a.title || 'Capítulo sin título', a.title && number ? a.title : '']
             .filter(Boolean).join(' · ');
           return {
             url: chapterUrl({ id: e.chapterId }, mangaId, label),

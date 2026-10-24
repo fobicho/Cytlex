@@ -867,6 +867,7 @@ export default function Detail() {
                   style={{ fontSize: `${Math.round(13 * scale)}px` }}
                 >
                   {c.date}
+                  {c.group ? ` · ${c.group}` : ''}
                   {inCourse && Number.isInteger(cap.total) && cap.total > 0
                     ? ` · en página ${cap.page + 1} de ${cap.total}`
                     : ''}
