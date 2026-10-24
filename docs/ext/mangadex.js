@@ -161,7 +161,7 @@ export default function createSource({ fetchText }) {
     const label = parsed.searchParams.get('label') || 'Capítulo';
     const data = await json(`${api}/at-home/server/${id}`);
     const chapter = data.chapter || {};
-    const pages = (chapter.data || []).map((file) => `${data.baseUrl}/data/${chapter.hash}/${file}`);
+    const pages = (chapter.data || []).map((file) => `https://uploads.mangadex.org/data/${chapter.hash}/${file}`);
 
     return {
       label,

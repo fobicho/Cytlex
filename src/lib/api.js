@@ -72,18 +72,20 @@ export const api = {
     return result;
   },
 
-  async chapter(url, sourceId) {
+  async chapter(url, sourceId, { fresh = false } = {}) {
     if (!extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
     assertSourceEnabled(sourceId);
     const key = chapterKey(url, sourceId);
-    const hit = chapterCache.get(key);
-    if (hit && Date.now() - hit.at <= CHAPTER_TTL_MS) {
-      chapterCache.delete(key);
-      chapterCache.set(key, hit);
-      return hit.value;
+    if (!fresh) {
+      const hit = chapterCache.get(key);
+      if (hit && Date.now() - hit.at <= CHAPTER_TTL_MS) {
+        chapterCache.delete(key);
+        chapterCache.set(key, hit);
+        return hit.value;
+      }
+      if (hit) chapterCache.delete(key);
+      if (chapterRequests.has(key)) return chapterRequests.get(key);
     }
-    if (hit) chapterCache.delete(key);
-    if (chapterRequests.has(key)) return chapterRequests.get(key);
 
     const request = resolveSource(sourceId).then((src) => src.chapter(url));
     chapterRequests.set(key, request);

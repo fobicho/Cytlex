@@ -201,7 +201,7 @@ const TASK_NAME = 'Cytlex';
 const MIN_WIDTH = 860;
 const MIN_HEIGHT = 560;
 const DEFAULT_WIDTH = 1200;
-const DEFAULT_HEIGHT = 680;
+const DEFAULT_HEIGHT = 740;
 
 let saveStateTimer = null;
 
