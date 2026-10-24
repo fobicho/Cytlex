@@ -145,7 +145,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const zoomContentRef = useRef(null);
   const [zoomOrigin, setZoomOrigin] = useState({ x: 50, y: 50 });
   const zoomOriginRef = useRef({ x: 50, y: 50 });
-  const zoomOriginHistoryRef = useRef([]);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const panRef = useRef({ x: 0, y: 0 });
   const dragRef = useRef(null);
@@ -214,7 +213,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     zoomOriginRef.current = target;
     setZoomOrigin(target);
     wheelZoomRef.current = targetZoom;
-    zoomOriginHistoryRef.current = returningToOriginal ? [] : Array.from({ length: 14 }, () => target);
     zoomResetFrame.current = requestAnimationFrame(() => {
       zoomResetFrame.current = requestAnimationFrame(() => {
         panRef.current = targetPan;
@@ -312,7 +310,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     wheelZoomRef.current = 0;
     setWheelZoom(0);
     zoomOriginRef.current = { x: 50, y: 50 };
-    zoomOriginHistoryRef.current = [];
     setZoomOrigin(zoomOriginRef.current);
     panRef.current = { x: 0, y: 0 };
     setPan(panRef.current);
@@ -542,8 +539,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       wheelZoomRef.current = 0;
       setWheelZoom(0);
       zoomOriginRef.current = { x: 50, y: 50 };
-      zoomOriginHistoryRef.current = [];
-      setZoomOrigin(zoomOriginRef.current);
+        setZoomOrigin(zoomOriginRef.current);
       panRef.current = { x: 0, y: 0 };
       setPan(panRef.current);
     }
@@ -579,38 +575,34 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       if (nextZoom === currentZoom) return;
       e.preventDefault();
       wheelZoomRef.current = nextZoom;
+      const stage = areaRef.current;
+      const content = zoomContentRef.current;
       if (nextZoom === 0) {
         panRef.current = { x: 0, y: 0 };
         setPan(panRef.current);
         zoomOriginRef.current = { x: 50, y: 50 };
-        zoomOriginHistoryRef.current = [];
         setZoomOrigin(zoomOriginRef.current);
-      } else if (!zoomIn) {
-        const ratio = nextZoom / currentZoom;
-        panRef.current = { x: panRef.current.x * ratio, y: panRef.current.y * ratio };
-        setPan(panRef.current);
-        const previousOrigin = zoomOriginHistoryRef.current.pop();
-        if (previousOrigin) {
-          zoomOriginRef.current = previousOrigin;
-          setZoomOrigin(previousOrigin);
-        }
-      }
-      if (zoomIn && mode !== 'vertical' && areaRef.current) {
-        const rect = areaRef.current.getBoundingClientRect();
+      } else if (stage && content && mode !== 'vertical') {
+        const rect = stage.getBoundingClientRect();
         if (rect.width && rect.height) {
-          const target = {
-            x: Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100)),
-            y: Math.min(100, Math.max(0, ((e.clientY - rect.top) / rect.height) * 100))
+          const qy = e.clientY - rect.top;
+          const s0 = 1 + currentZoom / 100;
+          const s1 = 1 + nextZoom / 100;
+          const o0x = (zoomOriginRef.current.x / 100) * rect.width;
+          const o0y = (zoomOriginRef.current.y / 100) * rect.height;
+          const pContentX = (rect.width / 2 - panRef.current.x - o0x) / s0 + o0x;
+          const pContentY = (qy - panRef.current.y - o0y) / s0 + o0y;
+          const o1y = Math.min(100, Math.max(0, (qy / rect.height) * 100)) / 100 * rect.height;
+          const nextPan = {
+            x: -s1 * (pContentX - rect.width / 2),
+            y: qy - o1y - s1 * (pContentY - o1y)
           };
-          const currentOrigin = zoomOriginRef.current;
-          const nextOrigin = currentZoom === 0
-            ? target
-            : {
-                x: currentOrigin.x + (target.x - currentOrigin.x) * 0.03,
-                y: currentOrigin.y + (target.y - currentOrigin.y) * 0.03
-              };
-          if (currentZoom > 0) zoomOriginHistoryRef.current.push(currentOrigin);
-          else zoomOriginHistoryRef.current = [];
+          panRef.current = nextPan;
+          setPan(nextPan);
+          const nextOrigin = {
+            x: 50,
+            y: Math.min(100, Math.max(0, (qy / rect.height) * 100))
+          };
           zoomOriginRef.current = nextOrigin;
           setZoomOrigin(nextOrigin);
         }

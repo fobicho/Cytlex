@@ -71,13 +71,50 @@
   {
     "id": "mangadex",
     "name": "MangaDex",
-    "lang": "es",
-    "version": "1.0.3",
+    "lang": "multi",
+    "version": "1.2.0",
     "type": "module",
     "contentWarning": "MIXED",
     "main": "ext/mangadex.js",
     "baseUrl": "https://mangadex.org",
     "icon": "https://mangadex.org/favicon.ico",
-    "desc": "Manga, manhwa, manhua y cómics en español."
+    "desc": "Manga, manhwa, manhua y cómics. Incluye fuentes en español e inglés configurables.",
+    "config": {
+      "sources": [
+        {
+          "id": "mangadex",
+          "name": "MangaDex",
+          "languages": [
+            {
+              "code": "es",
+              "label": "Español"
+            },
+            {
+              "code": "es-la",
+              "label": "Español latino"
+            }
+          ],
+          "default": [
+            "es",
+            "es-la"
+          ],
+          "lang": "es"
+        },
+        {
+          "id": "mangadex-en",
+          "name": "MangaDex English",
+          "languages": [
+            {
+              "code": "en",
+              "label": "Inglés"
+            }
+          ],
+          "default": [
+            "en"
+          ],
+          "lang": "en"
+        }
+      ]
+    }
   }
 ]

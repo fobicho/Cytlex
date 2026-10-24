@@ -16,8 +16,10 @@ const read = () => {
 };
 const write = (v) => localStorage.setItem(KEY, JSON.stringify(v));
 
-function ctx() {
+function ctx(manifest = {}) {
   return {
+    id: manifest.id,
+    config: manifest.config,
     fetchText: (url) => {
       if (typeof window === 'undefined' || !window.cytlex?.httpGet) {
         throw new Error('Sin puente Electron para hacer peticiones');
@@ -32,7 +34,7 @@ function ctx() {
   };
 }
 
-async function loadModule(code) {
+async function loadModule(code, manifest) {
   const blob = new Blob([code], { type: 'text/javascript' });
   const blobUrl = URL.createObjectURL(blob);
   try {
@@ -41,7 +43,7 @@ async function loadModule(code) {
     if (typeof factory !== 'function') {
       throw new Error('La extensión no exporta una función (default o createSource)');
     }
-    return await factory(ctx());
+    return await factory(ctx(manifest));
   } finally {
     URL.revokeObjectURL(blobUrl);
   }
@@ -63,16 +65,40 @@ export function isNewer(remote, local) {
   return false;
 }
 
+const subSources = (manifest) => {
+  const subs = manifest?.config?.sources;
+  return Array.isArray(subs) && subs.length ? subs : null;
+};
+
+const findRecord = (id) => read().find((r) => r.manifest.id === id
+  || (r.manifest.config?.sources || []).some((s) => s.id === id));
+
 export const extensions = {
   installed() {
     return read().map((r) => ({ manifest: r.manifest }));
   },
+  sources() {
+    const out = [];
+    for (const r of read()) {
+      const subs = subSources(r.manifest);
+      if (subs) {
+        for (const s of subs) {
+          out.push({ manifest: { ...r.manifest, ...s, config: { languages: s.languages, default: s.default } } });
+        }
+      } else {
+        out.push({ manifest: r.manifest });
+      }
+    }
+    return out;
+  },
   manifest(id) {
-    const rec = read().find((r) => r.manifest.id === id);
-    return rec?.manifest || { id, name: id || 'Fuente' };
+    const rec = findRecord(id);
+    if (!rec) return { id, name: id || 'Fuente' };
+    const sub = subSources(rec.manifest)?.find((s) => s.id === id);
+    return sub ? { ...rec.manifest, ...sub } : rec.manifest;
   },
   isInstalled(id) {
-    return read().some((r) => r.manifest.id === id);
+    return !!findRecord(id);
   },
 
   async repoIndex(indexUrl) {
@@ -211,26 +237,44 @@ export const extensions = {
     list.push({ manifest, code, installedVersion: manifest.version || '0', installedAt: Date.now() });
     write(list);
     cache.delete(manifest.id);
-    chapterIndex.dropSource(manifest.id);
+    for (const sid of [manifest.id, ...(subSources(manifest)?.map((s) => s.id) || [])]) {
+      chapterIndex.dropSource(sid);
+    }
   },
 
   async uninstall(id) {
     write(read().filter((r) => r.manifest.id !== id));
     cache.delete(id);
-    chapterIndex.dropSource(id);
+    for (const sid of [id, ...(subSources(read().find((r) => r.manifest.id === id)?.manifest)?.map((s) => s.id) || [])]) {
+      chapterIndex.dropSource(sid);
+    }
+  },
+
+  invalidate(id) {
+    cache.delete(findRecord(id)?.manifest.id || id);
   },
 
   async source(id) {
-    if (cache.has(id)) return cache.get(id);
-
-    const rec = read().find((r) => r.manifest.id === id);
+    const rec = findRecord(id);
     if (!rec) throw new Error('Extensión no instalada: ' + id);
+    const baseId = rec.manifest.id;
+    if (cache.has(baseId)) return pickSource(cache.get(baseId), id, baseId);
     const src = rec.manifest.type === 'module'
-      ? await loadModule(rec.code)
-      : buildSelectorSource(rec.manifest, ctx());
+      ? await loadModule(rec.code, rec.manifest)
+      : buildSelectorSource(rec.manifest, ctx(rec.manifest));
 
-    cache.set(id, src);
-    return src;
+    cache.set(baseId, src);
+    return pickSource(src, id, baseId);
   }
 };
+
+function pickSource(src, id, baseId) {
+  if (id === baseId) {
+    if (src && typeof src === 'object' && !src.catalog && src[baseId]) return src[baseId];
+    return src;
+  }
+  const pick = src?.[id];
+  if (!pick) throw new Error('Fuente no encontrada en la extensión: ' + id);
+  return pick;
+}
 

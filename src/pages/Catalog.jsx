@@ -43,7 +43,7 @@ const TABS = [
   { id: 'extensiones', label: 'Extensiones' }
 ];
 
-const enabledSources = (showAdultExtensions) => extensions.installed().filter(({ manifest }) =>
+const enabledSources = (showAdultExtensions) => extensions.sources().filter(({ manifest }) =>
   showAdultExtensions || !isAdultExtension(manifest)
 );
 
