@@ -25,13 +25,14 @@ async function resolveSource(sourceId) {
 }
 
 const DETAIL_TTL_MS = 10 * 60 * 1000;
+const DETAIL_CACHE_MAX = 40;
 const CHAPTER_TTL_MS = 2 * 60 * 1000;
 const CHAPTER_CACHE_MAX = 40;
 
 const detailCache = new Map();
 const chapterCache = new Map();
 const chapterRequests = new Map();
-const detailKey = (url, sourceId) => `${sourceId}|${url}`;
+const detailKey = (url, sourceId) => `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}|${url}`;
 const chapterKey = (url, sourceId) => `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}|${url}`;
 
 const freshEntry = (key) => {
@@ -41,7 +42,15 @@ const freshEntry = (key) => {
     detailCache.delete(key);
     return null;
   }
+  detailCache.delete(key);
+  detailCache.set(key, hit);
   return hit.value;
+};
+
+const storeDetail = (key, value) => {
+  detailCache.delete(key);
+  detailCache.set(key, { at: Date.now(), value });
+  while (detailCache.size > DETAIL_CACHE_MAX) detailCache.delete(detailCache.keys().next().value);
 };
 
 export const api = {
@@ -68,7 +77,7 @@ export const api = {
     if (hit) return hit;
     const src = await resolveSource(sourceId);
     const result = await src.detail(url);
-    detailCache.set(key, { at: Date.now(), value: result });
+    storeDetail(key, result);
     return result;
   },
 
@@ -107,7 +116,7 @@ export const api = {
     try {
       resolveSource(sourceId)
         .then((src) => src.detail(url))
-        .then((r) => detailCache.set(key, { at: Date.now(), value: r }))
+        .then((r) => storeDetail(key, r))
         .catch(() => {});
     } catch {}
   },

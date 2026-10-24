@@ -262,13 +262,40 @@ async function requestPublic(url, options = {}, redirects = 0) {
   return response;
 }
 
-function readResponse(response) {
+function readResponse(response, maxBytes) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    response.on('data', (chunk) => chunks.push(chunk));
-    response.on('end', () => resolve(Buffer.concat(chunks)));
-    response.on('error', reject);
-    response.on('aborted', () => reject(new Error('La respuesta se interrumpió')));
+    let size = 0;
+    let settled = false;
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      response.destroy();
+      reject(error);
+    };
+    response.on('data', (chunk) => {
+      if (settled) return;
+      size += chunk.length;
+      if (size > maxBytes) {
+        fail(new Error('La respuesta excede el tamaño permitido'));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    response.on('end', () => {
+      if (settled) return;
+      settled = true;
+      resolve(Buffer.concat(chunks));
+    });
+    response.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+    response.on('aborted', () => fail(new Error('La respuesta se interrumpió')));
+    if (Number(response.headers['content-length']) > maxBytes) {
+      fail(new Error('La respuesta excede el tamaño permitido'));
+    }
   });
 }
 
@@ -551,6 +578,8 @@ const refererFor = (url) => {
 
 const HTTP_GET_TIMEOUT_MS = 15_000;
 const HTTP_HEAD_TIMEOUT_MS = 5_000;
+const HTTP_BODY_MAX_BYTES = 10 * 1024 * 1024;
+const IMAGE_BODY_MAX_BYTES = 50 * 1024 * 1024;
 
 ipcMain.handle('http:get', async (_e, url) => {
   const parsed = validateUrl(url);
@@ -563,7 +592,7 @@ ipcMain.handle('http:get', async (_e, url) => {
     timeout: HTTP_GET_TIMEOUT_MS
   });
   if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`HTTP ${res.statusCode} al pedir ${parsed.toString()}`);
-  return (await readResponse(res)).toString('utf8');
+  return (await readResponse(res, HTTP_BODY_MAX_BYTES)).toString('utf8');
 });
 
 ipcMain.handle('http:head', async (_e, url) => {
@@ -597,7 +626,7 @@ ipcMain.handle('http:post', async (_e, payload = {}) => {
     timeout: HTTP_GET_TIMEOUT_MS
   });
   if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`HTTP ${res.statusCode} al pedir ${urlStr}`);
-  return JSON.parse((await readResponse(res)).toString('utf8'));
+  return JSON.parse((await readResponse(res, HTTP_BODY_MAX_BYTES)).toString('utf8'));
 });
 
 ipcMain.handle('image:fetch', async (_e, url) => {
@@ -614,7 +643,7 @@ ipcMain.handle('image:fetch', async (_e, url) => {
       timeout: HTTP_GET_TIMEOUT_MS
     });
     if (res.statusCode < 200 || res.statusCode >= 300) return null;
-    const buf = await readResponse(res);
+    const buf = await readResponse(res, IMAGE_BODY_MAX_BYTES);
     return { mime: res.headers['content-type'] || 'application/octet-stream', base64: buf.toString('base64') };
   } catch {
     return null;
@@ -636,7 +665,7 @@ ipcMain.handle('image:download', async (e, payload = {}) => {
       timeout: HTTP_GET_TIMEOUT_MS
     });
     if (res.statusCode < 200 || res.statusCode >= 300) return { ok: false, error: `HTTP ${res.statusCode}` };
-    const buf = await readResponse(res);
+    const buf = await readResponse(res, IMAGE_BODY_MAX_BYTES);
 
     const ext = (parsed.pathname.match(/\.(jpe?g|png|webp|gif|avif)$/i)?.[1] || 'jpg').toLowerCase();
     const safe = String(suggested || '').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'panel';

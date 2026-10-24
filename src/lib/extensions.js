@@ -110,6 +110,7 @@ addEventListener('message', async (event) => {
 });`;
 
 const moduleDisposers = new Map();
+const moduleLoads = new Map();
 
 async function loadModule(code, manifest) {
   const iframe = document.createElement('iframe');
@@ -402,9 +403,11 @@ export const extensions = {
   },
 
   async uninstall(id) {
-    write(read().filter((r) => r.manifest.id !== id));
-    clearModule(id);
-    for (const sid of [id, ...(subSources(read().find((r) => r.manifest.id === id)?.manifest)?.map((s) => s.id) || [])]) {
+    const record = findRecord(id);
+    const baseId = record?.manifest.id || id;
+    write(read().filter((r) => r.manifest.id !== baseId));
+    clearModule(baseId);
+    for (const sid of [baseId, ...(subSources(record?.manifest)?.map((s) => s.id) || [])]) {
       chapterIndex.dropSource(sid);
     }
   },
@@ -418,12 +421,20 @@ export const extensions = {
     if (!rec) throw new Error('Extensión no instalada: ' + id);
     const baseId = rec.manifest.id;
     if (cache.has(baseId)) return pickSource(cache.get(baseId), id, baseId);
-    const src = rec.manifest.type === 'module'
-      ? await loadModule(rec.code, rec.manifest)
-      : buildSelectorSource(rec.manifest, ctx(rec.manifest));
-
-    cache.set(baseId, src);
-    return pickSource(src, id, baseId);
+    let pending = moduleLoads.get(baseId);
+    if (!pending) {
+      pending = Promise.resolve().then(() => rec.manifest.type === 'module'
+        ? loadModule(rec.code, rec.manifest)
+        : buildSelectorSource(rec.manifest, ctx(rec.manifest)));
+      moduleLoads.set(baseId, pending);
+    }
+    try {
+      const src = await pending;
+      if (!cache.has(baseId)) cache.set(baseId, src);
+      return pickSource(cache.get(baseId), id, baseId);
+    } finally {
+      if (moduleLoads.get(baseId) === pending) moduleLoads.delete(baseId);
+    }
   }
 };
 

@@ -33,32 +33,51 @@ export default function createSource({ fetchText, parse, head }) {
     };
   }
 
-  const LAST_PAGE = 339;
+  const LISTING_BATCH_SIZE = 8;
+  let lastPage = 1;
+  const listingCache = new Map();
+
+  function pageCount(doc) {
+    const pages = [...doc.querySelectorAll('a[href]')].map((a) => {
+      try {
+        const url = new URL(a.getAttribute('href'), `${BASE}/directorio/`);
+        return /^\/directorio\/?$/.test(url.pathname) ? Number(url.searchParams.get('p')) || 1 : 0;
+      } catch {
+        return 0;
+      }
+    });
+    return Math.max(1, ...pages);
+  }
 
   async function listing(p) {
-    const doc = parse(await fetchText(`${BASE}/directorio?filtro=nombre&orden=asc&p=${p}`));
-    return [...doc.querySelectorAll('div._135yj')]
-      .map((el) => mapCard(el))
-      .filter((x) => x && x.title);
+    if (listingCache.has(p)) return listingCache.get(p);
+    const pending = (async () => {
+      const doc = parse(await fetchText(`${BASE}/directorio?filtro=nombre&orden=asc&p=${p}`));
+      lastPage = Math.max(lastPage, pageCount(doc));
+      return [...doc.querySelectorAll('div._135yj')]
+        .map((el) => mapCard(el))
+        .filter((x) => x && x.title);
+    })();
+    listingCache.set(p, pending);
+    try {
+      return await pending;
+    } catch (error) {
+      listingCache.delete(p);
+      throw error;
+    }
   }
 
   async function search(term) {
     const needle = term.toLowerCase();
-
-    let lo = 1;
-    let hi = LAST_PAGE;
-    while (lo < hi) {
-      const mid = Math.ceil((lo + hi) / 2);
-      const items = await listing(mid);
-      if (!items.length) { hi = mid - 1; continue; }
-      if (items[0].title.toLowerCase() > needle) hi = mid - 1;
-      else lo = mid + 1;
-    }
-
     const found = new Map();
-    for (let p = Math.max(1, lo - 1); p <= lo + 1 && p <= LAST_PAGE; p++) {
-      for (const it of await listing(p)) {
-        if (it.title.toLowerCase().includes(needle)) found.set(it.url, it);
+    await listing(1);
+    for (let start = 1; start <= lastPage; start += LISTING_BATCH_SIZE) {
+      const count = Math.min(LISTING_BATCH_SIZE, lastPage - start + 1);
+      const batch = await Promise.all(Array.from({ length: count }, (_, i) => listing(start + i)));
+      for (const items of batch) {
+        for (const item of items) {
+          if (item.title.toLowerCase().includes(needle)) found.set(item.url, item);
+        }
       }
     }
     return [...found.values()];
@@ -68,6 +87,7 @@ export default function createSource({ fetchText, parse, head }) {
     if (q) return { items: await search(q), totalPages: 1, totalText: '' };
 
     const doc = parse(await fetchText(`${BASE}/directorio?p=${page}`));
+    lastPage = Math.max(lastPage, pageCount(doc));
     const seen = new Set();
     const items = [];
     for (const el of doc.querySelectorAll('div._135yj')) {
@@ -76,7 +96,7 @@ export default function createSource({ fetchText, parse, head }) {
       seen.add(item.url);
       items.push(item);
     }
-    return { items, totalPages: LAST_PAGE, totalText: '' };
+    return { items, totalPages: lastPage, totalText: '' };
   }
 
   async function detail(mangaUrl) {

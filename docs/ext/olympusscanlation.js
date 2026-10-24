@@ -42,10 +42,22 @@ export default function createSource({ fetchText }) {
     const panelUrl = (p) => `${panel}/api/series/${slug}/chapters?page=${p}&direction=desc&type=comic`;
     const baseUrl = (p) => `${base}/api/series/${slug}/chapters?page=${p}&direction=desc&type=comic`;
     const chaptersFetch = async (p) => {
+      const request = async (url) => {
+        let error;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            return await getJson(url);
+          } catch (e) {
+            error = e;
+            if (!attempt) await new Promise((resolve) => setTimeout(resolve, 350));
+          }
+        }
+        throw error;
+      };
       try {
-        return await getJson(panelUrl(p));
+        return await request(panelUrl(p));
       } catch {
-        return await getJson(baseUrl(p));
+        return await request(baseUrl(p));
       }
     };
 
@@ -56,9 +68,12 @@ export default function createSource({ fetchText }) {
     const s = data?.data || {};
 
     const lastPage = Math.min(first?.meta?.last_page || 1, LIMIT_PAGES);
-    const rest = lastPage > 1
-      ? await Promise.all(Array.from({ length: lastPage - 1 }, (_, i) => chaptersFetch(i + 2)))
-      : [];
+    const rest = [];
+    for (let start = 2; start <= lastPage; start += 6) {
+      const count = Math.min(6, lastPage - start + 1);
+      const batch = await Promise.all(Array.from({ length: count }, (_, i) => chaptersFetch(start + i)));
+      rest.push(...batch);
+    }
 
     const chapters = [first, ...rest]
       .flatMap((res) => res?.data || [])

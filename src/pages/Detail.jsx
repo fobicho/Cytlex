@@ -465,23 +465,24 @@ export default function Detail() {
 
   let chapters = d.chapters;
   if (groupFilter !== 'all') chapters = chapters.filter((c) => c.group === groupFilter);
-  const byNumber = (a, b) => {
+  const byNumber = (a, b, direction = 1) => {
     const na = chapterNum(a);
     const nb = chapterNum(b);
-    if (Number.isNaN(na)) return 1;
-    if (Number.isNaN(nb)) return -1;
-    if (na !== nb) return na - nb;
-    return String(a.date).localeCompare(String(b.date), 'es', { numeric: true });
+    if (Number.isNaN(na) !== Number.isNaN(nb)) return (Number.isNaN(na) ? 1 : -1) * direction;
+    if (!Number.isNaN(na) && na !== nb) return (na - nb) * direction;
+    const groupOrder = String(a.group || '').localeCompare(String(b.group || ''), 'es', { sensitivity: 'base', numeric: true });
+    if (groupOrder) return groupOrder;
+    return String(a.date).localeCompare(String(b.date), 'es', { numeric: true }) * direction;
   };
   if (chapterSort === 'scanlation') {
     chapters = [...chapters].sort((a, b) => {
       const ga = a.group || '';
       const gb = b.group || '';
       if (ga !== gb) return ga.localeCompare(gb, 'es', { sensitivity: 'base', numeric: true });
-      return asc ? byNumber(a, b) : byNumber(b, a);
+      return byNumber(a, b, asc ? 1 : -1);
     });
   } else {
-    chapters = [...chapters].sort(asc ? byNumber : (a, b) => byNumber(b, a));
+    chapters = [...chapters].sort((a, b) => byNumber(a, b, asc ? 1 : -1));
   }
 
   const changeGroupFilter = (v) => {
