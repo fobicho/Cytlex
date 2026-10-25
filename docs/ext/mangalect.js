@@ -32,13 +32,20 @@ export default function createSource({ fetchText, parse }) {
     if (!data) return { items: [], totalPages: 1, totalText: '' };
 
     const items = (data.resultados || [])
-      .map((r) => ({
-        url: abs(`/info/${r.slug}/`),
-        title: r.titulo || '',
-        cover: coverUrl(r.portada),
-        type: r.tipo || '',
-        lastChapter: r.ultimo_capitulo ? String(r.ultimo_capitulo) : ''
-      }))
+      .map((r) => {
+        const authors = [r.autor, r.autores, r.author, r.authors]
+          .flatMap((value) => Array.isArray(value) ? value : [value])
+          .map((value) => typeof value === 'string' ? value : value?.nombre || value?.name || '')
+          .filter(Boolean);
+        return {
+          url: abs(`/info/${r.slug}/`),
+          title: r.titulo || '',
+          cover: coverUrl(r.portada),
+          author: [...new Set(authors)].join(', '),
+          type: r.tipo || '',
+          lastChapter: r.ultimo_capitulo ? String(r.ultimo_capitulo) : ''
+        };
+      })
       .filter((x) => x.url && x.title && x.lastChapter);
 
     return {

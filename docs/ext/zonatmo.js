@@ -25,6 +25,7 @@ export default function createSource({ fetchText, parse }) {
           url,
           title: text(el, '.thumbnail-title h4'),
           cover: abs(cover),
+          author: text(el, 'a[href*="filter_by=author"]'),
           type: text(el, '.book-type'),
           lastChapter: caps(el.querySelector('.book-meta-item'))
         };

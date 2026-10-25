@@ -28,6 +28,7 @@ export default function createSource({ fetchText, parse, head }) {
       url: href,
       title: (img?.getAttribute('alt') || '').replace(/\s+/g, ' ').trim(),
       cover: raw && !raw.includes('default.gif') ? abs(raw) : '',
+      author: text(el, '.author, .manga-author, [class*="author"]'),
       type: typeOf(href),
       lastChapter: (text(el, 'span:last-of-type') || '').replace(/[^\d.]/g, '')
     };
@@ -80,6 +81,7 @@ export default function createSource({ fetchText, parse, head }) {
       url: href,
       title,
       cover: raw && !raw.includes('default.gif') ? abs(raw) : '',
+      author: text(el, '.author, .manga-author, [class*="author"]'),
       type: typeOf(href),
       lastChapter: (text(el, 'span:last-of-type') || '').replace(/[^\d.]/g, '')
     };

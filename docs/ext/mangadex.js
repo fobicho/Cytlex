@@ -72,17 +72,22 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
         offset: (Math.max(1, Number(page) || 1) - 1) * pageSize,
         'availableTranslatedLanguage[]': getLanguages(),
         'contentRating[]': ratings,
-        'includes[]': ['cover_art'],
+        'includes[]': ['cover_art', 'author', 'artist'],
         'order[relevance]': 'desc'
       }));
 
       return {
         items: (data.data || []).map((item) => {
           const attributes = item.attributes || {};
+          const authors = (item.relationships || [])
+            .filter((rel) => rel.type === 'author' || rel.type === 'artist')
+            .map((rel) => rel.attributes?.name)
+            .filter(Boolean);
           return {
             url: mangaUrl(item.id),
             title: localized(attributes.title),
             cover: coverUrl(item),
+            author: [...new Set(authors)].join(', '),
             type: types[attributes.originalLanguage] || 'Manga',
             lastChapter: ''
           };

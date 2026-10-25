@@ -65,6 +65,7 @@ export default function createSource({ fetchText, parse, head }) {
       title: text(el, '.lc-card-name'),
       url: abs(link?.getAttribute('href')),
       cover: abs(img?.getAttribute('src')),
+      author: text(el, '.lc-card-author, .lc-author, [class*="author"]'),
       type: text(el, '.lc-card-badge'),
       lastChapter: text(el, '.lc-chapter-link'),
       status: text(el, '.lc-muted')

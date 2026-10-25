@@ -13,6 +13,11 @@ export default function createSource({ fetchText }) {
     url: `${base}/series/${s.slug}`,
     title: s.name || '',
     cover: best(s.cover),
+    author: [s.author, s.artist]
+      .flatMap((value) => Array.isArray(value) ? value : [value])
+      .map((value) => typeof value === 'string' ? value : value?.name || '')
+      .filter(Boolean)
+      .join(', '),
     type: s.type || 'comic'
   });
 

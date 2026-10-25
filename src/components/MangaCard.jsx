@@ -137,7 +137,7 @@ export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = 
           <div className="text-muted-foreground mt-0.5 truncate" style={subStyle}>
             {unavailable
               ? unavailableLabel
-              : ([m.type, m.lastChapter].filter(Boolean).join(' · ') || '\u00a0')}
+              : (m.author || m.autor || '\u00a0')}
           </div>
         )}
       </div>

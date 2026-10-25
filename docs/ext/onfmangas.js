@@ -16,6 +16,7 @@ export default function createSource({ fetchText, parse }) {
           url: abs(a?.getAttribute('href')),
           title: text(el, '.manga-title') || (img?.getAttribute('alt') || '').trim(),
           cover: abs(img?.getAttribute('src') || img?.getAttribute('data-src')),
+          author: text(el, '.manga-author, .card-author, .author'),
           type: text(el, '.card-badge')
         };
       })
