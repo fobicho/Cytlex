@@ -85,30 +85,19 @@ export default function createSource({ fetchText, parse, head }) {
     };
   }
 
-  async function search(term) {
-    const key = term.trim().toLocaleLowerCase();
+  async function search(term, page = 1) {
+    const key = `${term.trim().toLocaleLowerCase()}|${page}`;
     if (searchCache.has(key)) return searchCache.get(key);
 
     const pending = (async () => {
-      const searchPage = async (page) => {
-        const url = `${BASE}/buscar?q=${encodeURIComponent(term)}&p=${page}`;
-        const doc = parse(await fetchText(url));
-        const items = [...doc.querySelectorAll('#article-div > div')]
-          .map((el) => mapSearchCard(el))
-          .filter((item) => item?.title);
-        return { items, totalPages: pageCount(doc) };
-      };
-
-      const first = await searchPage(1);
-      const found = new Map(first.items.map((item) => [item.url, item]));
-      for (let start = 2; start <= first.totalPages; start += LISTING_BATCH_SIZE) {
-        const count = Math.min(LISTING_BATCH_SIZE, first.totalPages - start + 1);
-        const batch = await Promise.all(Array.from({ length: count }, (_, i) => searchPage(start + i)));
-        for (const page of batch) {
-          for (const item of page.items) found.set(item.url, item);
-        }
-      }
-      return [...found.values()];
+      const url = `${BASE}/buscar?q=${encodeURIComponent(term)}&p=${page}`;
+      const doc = parse(await fetchText(url));
+      const items = [...doc.querySelectorAll('#article-div > div')]
+        .map((el) => mapSearchCard(el))
+        .filter((item) => item?.title);
+      const totalPages = pageCount(doc);
+      const hasMore = !!doc.querySelector('ul.pagination a[rel="next"]') || page < totalPages;
+      return { items, totalPages, hasMore, totalText: '' };
     })();
 
     searchCache.set(key, pending);
@@ -122,7 +111,7 @@ export default function createSource({ fetchText, parse, head }) {
   }
 
   async function catalog({ q = '', page = 1 } = {}) {
-    if (q) return { items: await search(q), totalPages: 1, totalText: '' };
+    if (q) return search(q, page);
 
     const doc = parse(await fetchText(`${BASE}/directorio?p=${page}`));
     lastPage = Math.max(lastPage, pageCount(doc));

@@ -61,7 +61,7 @@
     "id": "mangaoni",
     "name": "MangaOni",
     "lang": "es",
-    "version": "1.0.7",
+    "version": "1.0.8",
     "type": "module",
     "main": "ext/mangaoni.js",
     "baseUrl": "https://manga-oni.com",

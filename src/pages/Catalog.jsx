@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
-import { lastSearch, scrollMemory, rememberCover, catalogScroll } from '../lib/searchState.js';
+import { lastSearch, scrollMemory, rememberCover, catalogScroll, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import { clearSearchCoverCache, preloadSearchCover } from '../lib/covers.js';
 import MangaCard from '../components/MangaCard.jsx';
 import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
@@ -195,7 +195,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
             <ChevronRight style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
           </button>
         )}
-        {r.items.length > 15 && (
+        {(r.items.length > 15 || r.hasMore) && (
           <a
             className={cn(
               buttonVariants({ variant: 'ghost', size: 'sm' }),
@@ -266,7 +266,7 @@ export default function Catalog({ tutorialPreview = false }) {
     lastSearch.q = query;
     lastSearch.genre = '';
     lastSearch.results = list
-      .map((s) => ({ id: s.manifest.id, manifest: s.manifest, status: 'loading', items: [] }))
+      .map((s) => ({ id: s.manifest.id, manifest: s.manifest, status: 'loading', items: [], page: 1, totalPages: 1, hasMore: false }))
       .sort((a, b) => a.manifest.name.localeCompare(b.manifest.name, 'es', { sensitivity: 'base' }));
     setResults(lastSearch.results);
 
@@ -275,7 +275,7 @@ export default function Catalog({ tutorialPreview = false }) {
         const r = await api.catalog({ q: query, genre: '', page: 1 }, s.manifest.id);
         const items = (r.items || []).filter((m) =>
           s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim()
-        );
+        ).slice(0, MAX_SEARCH_RESULTS);
         const visibleCovers = await Promise.all(items.slice(0, 10).map(async (m) => [
           m.url,
           await preloadSearchCover(m.cover)
@@ -287,7 +287,17 @@ export default function Catalog({ tutorialPreview = false }) {
         items.forEach((m) => rememberCover(m.url, m.cover));
         if (runId !== activeSearchRun) return;
         updateResults((prev) =>
-          prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'done', items: loadedItems } : x)) : prev
+          prev ? prev.map((x) => (x.id === s.manifest.id
+            ? {
+                ...x,
+                status: 'done',
+                items: loadedItems,
+                page: 1,
+                totalPages: r.totalPages || 1,
+                hasMore: items.length < MAX_SEARCH_RESULTS && (r.hasMore ?? (r.totalPages > 1)),
+                totalText: r.totalText || ''
+              }
+            : x)) : prev
         );
       } catch (e) {
         console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);

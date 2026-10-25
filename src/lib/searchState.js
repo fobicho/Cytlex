@@ -1,4 +1,5 @@
 export const lastSearch = { q: '', genre: '', results: null };
+export const MAX_SEARCH_RESULTS = 30;
 
 const seenCovers = new Map();
 

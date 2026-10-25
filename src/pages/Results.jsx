@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
-import { lastSearch, resultsScroll } from '../lib/searchState.js';
+import { api } from '../lib/api.js';
+import { lastSearch, resultsScroll, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import MangaCard from '../components/MangaCard.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
 import { Button } from '../components/ui/button.jsx';
@@ -17,6 +18,9 @@ export default function Results() {
   const sourceId = new URLSearchParams(loc.search).get('s') || '';
   const group = lastSearch.results?.find((r) => r.id === sourceId);
   const manifest = group?.manifest || extensions.manifest(sourceId);
+  const [groupOverride, setGroupOverride] = useState(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const scale = useScale();
@@ -28,7 +32,40 @@ export default function Results() {
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
   const adultExtensionHidden = !showAdultExtensions && isAdultExtension(manifest);
-  const items = group?.items || [];
+  const currentGroup = groupOverride?.id === sourceId ? groupOverride : group;
+  const items = currentGroup?.items || [];
+
+  useEffect(() => {
+    setGroupOverride(null);
+    setLoadError('');
+  }, [sourceId]);
+
+  const loadNextPage = async () => {
+    if (loadingMore || !currentGroup || !currentGroup.hasMore) return;
+    setLoadingMore(true);
+    setLoadError('');
+    try {
+      const page = currentGroup.page + 1;
+      const result = await api.catalog({ q: lastSearch.q, genre: '', page }, sourceId);
+      const seen = new Set(items.map((item) => item.url));
+      const remaining = Math.max(0, MAX_SEARCH_RESULTS - items.length);
+      const nextItems = [...items, ...(result.items || []).filter((item) => !seen.has(item.url)).slice(0, remaining)];
+      const totalPages = result.totalPages || currentGroup.totalPages;
+      const updated = {
+        ...currentGroup,
+        items: nextItems,
+        page,
+        totalPages,
+        hasMore: nextItems.length < MAX_SEARCH_RESULTS && (result.hasMore ?? (page < totalPages))
+      };
+      lastSearch.results = lastSearch.results?.map((item) => item.id === sourceId ? updated : item) || [];
+      setGroupOverride(updated);
+    } catch {
+      setLoadError('No se pudieron cargar más resultados.');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     const main = document.querySelector('main');
@@ -153,6 +190,16 @@ export default function Results() {
           <MangaCard key={i} m={m} sourceId={sourceId} from="resultados" coverSize={cs} />
         ))}
       </motion.div>
+
+      {currentGroup?.hasMore && (
+        <div className="flex flex-col items-center gap-2" style={{ marginTop: px(24, scale, 18) }}>
+          <Button variant="secondary" onClick={loadNextPage} disabled={loadingMore}>
+            {loadingMore && <Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />}
+            {loadingMore ? 'Cargando…' : 'Cargar más resultados'}
+          </Button>
+          {loadError && <p className="text-sm text-destructive">{loadError}</p>}
+        </div>
+      )}
     </div>
   );
 }
