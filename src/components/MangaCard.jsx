@@ -14,7 +14,7 @@ function prefetch(url, sourceId) {
   api.prefetchDetail(url, sourceId);
 }
 
-export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, from = 'biblioteca', coverSize, chapterCount }) {
+export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', coverSize, chapterCount }) {
   const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}`;
   const sourceManifest = extensions.manifest(sourceId);
   const sourceInfo = {
@@ -133,7 +133,7 @@ export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = 
         >
           {m.title}
         </a>
-        {!minimal && (
+        {!minimal && showAuthor && (
           <div className="text-muted-foreground mt-0.5 truncate" style={subStyle}>
             {unavailable
               ? unavailableLabel

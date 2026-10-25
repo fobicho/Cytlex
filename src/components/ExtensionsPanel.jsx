@@ -12,7 +12,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 
-function ExtensionCard({ m, action, updatable = false, disabled = false, scale = 1, selected = false, onSelectionChange, selectionLabel, selectionDisabled = false }) {
+function ExtensionCard({ m, action, updatable = false, disabled = false, scale = 1, selected = false, confirmationOpen = false, onSelectionChange, selectionLabel, selectionDisabled = false }) {
   const [imgOk, setImgOk] = useState(true);
   const showImg = m.icon && imgOk;
   const hasAdultContent = isAdultExtension(m);
@@ -84,6 +84,7 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
     <Card
       className={cn(
         'hover:shadow-sm',
+        confirmationOpen && 'relative z-30',
         selected && 'border-primary ring-2 ring-primary/30 shadow-md shadow-primary/10',
         updatable && 'cx-update-pulse',
         disabled && 'opacity-50'
@@ -665,20 +666,22 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
           <div className="grid" style={grid}>
             {sortedInstalled.map(({ manifest: m }) => {
               const upd = visibleUpdates.find((u) => u.id === m.id);
+              const blocked = !showAdultExtensions && isAdultExtension(m);
               return (
                 <ExtensionCard
                   key={m.id}
                   scale={scale}
                   m={m}
                   updatable={!!upd}
-                  disabled={!showAdultExtensions && isAdultExtension(m)}
+                  disabled={blocked}
+                  confirmationOpen={confirmRemove?.id === m.id || (confirmUpdate && confirmUpdate !== 'all' && confirmUpdate.id === m.id)}
                   selected={selectedInstalledIds.has(m.id)}
                   onSelectionChange={tutorialPreview ? undefined : (selected) => toggleSelection(setSelectedInstalledIds, m.id, selected)}
                   selectionLabel={`Seleccionar ${m.name} para desinstalar`}
                   selectionDisabled={busy !== ''}
                   action={
                     <div className="flex items-center" style={{ gap: px(4, scale, 3) }}>
-                      {Array.isArray(m.config?.sources) && m.config.sources.length > 0 && (
+                      {!blocked && Array.isArray(m.config?.sources) && m.config.sources.length > 0 && (
                         <Button
                           variant="ghost"
                           size="icon"
@@ -690,7 +693,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                           <SettingsIcon style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                         </Button>
                       )}
-                      {upd && (
+                      {upd && !blocked && (
                         <div
                           ref={confirmUpdate?.id === m.id ? updateRef : null}
                           className="relative flex items-center justify-center"
@@ -912,13 +915,11 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             />
           )
         ) : sortedAvailable.length === 0 ? (
-          available.length === 0 ? (
           <EmptyState
             compact
             face="ヽ(・∀・)ﾉ"
             title="No quedan extensiones por instalar"
           />
-          ) : null
         ) : (
           <>
           <div className="grid" style={grid}>
@@ -927,6 +928,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                 key={m.id}
                 scale={scale}
                 m={m}
+                confirmationOpen={confirmInstall?.id === m.id}
                 selected={selectedAvailableIds.has(m.id)}
                 onSelectionChange={tutorialPreview ? undefined : (selected) => toggleSelection(setSelectedAvailableIds, m.id, selected)}
                 selectionLabel={`Seleccionar ${m.name} para instalar`}

@@ -106,7 +106,7 @@ export default function createSource({ fetchText, parse, head }) {
   }
 
   const nodeEstado = new Map();
-  const NODE_TTL_MS = 30 * 60 * 1000;
+  const NODE_TTL_MS = 2 * 60 * 1000;
   let ultimoNodoBueno = null;
 
   function estadoNodo(host) {
@@ -143,7 +143,7 @@ export default function createSource({ fetchText, parse, head }) {
     try {
       const r = await head(url);
       if (!r || !r.status) return false;
-      return r.ok || r.status < 500;
+      return r.ok;
     } catch {
       return false;
     }
@@ -163,19 +163,23 @@ export default function createSource({ fetchText, parse, head }) {
     return out;
   }
 
-  async function pagesEnNodoBueno(pages) {
+  async function pagesEnNodoBueno(pages, failedPage) {
     if (!pages.length || typeof head !== 'function') return pages;
     const hostActual = hostDe(pages[0]);
     if (!hostActual) return pages;
+    const hostFallido = hostDe(failedPage);
+    if (hostFallido) marcarNodo(hostFallido, false);
 
-    if (estadoNodo(hostActual) === 'ok') {
+    if (hostActual !== hostFallido && estadoNodo(hostActual) === 'ok') {
       ultimoNodoBueno = hostActual;
       return pages;
     }
 
-    if (ultimoNodoBueno) return pages.map((p) => aNodo(p, ultimoNodoBueno));
+    if (ultimoNodoBueno && ultimoNodoBueno !== hostFallido && estadoNodo(ultimoNodoBueno) === 'ok') {
+      return pages.map((p) => aNodo(p, ultimoNodoBueno));
+    }
 
-    if (await comprobarNodo(pages[0])) {
+    if (hostActual !== hostFallido && await comprobarNodo(pages[0])) {
       marcarNodo(hostActual, true);
       ultimoNodoBueno = hostActual;
       return pages;
@@ -183,7 +187,7 @@ export default function createSource({ fetchText, parse, head }) {
     marcarNodo(hostActual, false);
 
     const candidatos = nuevoHostDe(pages[0])
-      .filter((host) => host !== hostActual && estadoNodo(host) !== 'muerto');
+      .filter((host) => host !== hostActual && host !== hostFallido && estadoNodo(host) !== 'muerto');
     const inicioBusqueda = Date.now();
     for (let i = 0; i < candidatos.length && Date.now() - inicioBusqueda < 15_000; i += 8) {
       const grupo = candidatos.slice(i, i + 8);
@@ -271,7 +275,7 @@ export default function createSource({ fetchText, parse, head }) {
     };
   }
 
-  async function chapter(chapterUrl) {
+  async function chapter(chapterUrl, { failedPage } = {}) {
     const full = abs(chapterUrl);
 
     for (let ronda = 0; ronda < 3; ronda++) {
@@ -282,7 +286,7 @@ export default function createSource({ fetchText, parse, head }) {
       const raw = extractPages(doc);
       if (!raw.length) continue;
 
-      const pages = await pagesEnNodoBueno(raw);
+      const pages = await pagesEnNodoBueno(raw, failedPage);
       const hostFinal = hostDe(pages[0]);
       if (hostFinal && estadoNodo(hostFinal) === 'muerto') continue;
 

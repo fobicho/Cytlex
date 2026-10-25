@@ -187,7 +187,7 @@ export default function Results() {
         transition={{ duration: 0.25, ease: 'easeOut' }}
       >
         {items.map((m, i) => (
-          <MangaCard key={i} m={m} sourceId={sourceId} from="resultados" coverSize={cs} />
+          <MangaCard key={i} m={m} sourceId={sourceId} from="resultados" coverSize={cs} showAuthor={false} />
         ))}
       </motion.div>
 

@@ -81,7 +81,7 @@ export const api = {
     return result;
   },
 
-  async chapter(url, sourceId, { fresh = false } = {}) {
+  async chapter(url, sourceId, { fresh = false, failedPage } = {}) {
     if (!extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
     assertSourceEnabled(sourceId);
     const key = chapterKey(url, sourceId);
@@ -96,7 +96,7 @@ export const api = {
       if (chapterRequests.has(key)) return chapterRequests.get(key);
     }
 
-    const request = resolveSource(sourceId).then((src) => src.chapter(url));
+    const request = resolveSource(sourceId).then((src) => src.chapter(url, { failedPage }));
     chapterRequests.set(key, request);
     try {
       const value = await request;

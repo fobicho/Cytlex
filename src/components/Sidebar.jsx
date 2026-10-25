@@ -52,13 +52,18 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                 : tutorialNavOnly && item.to === '/ajustes'
                   ? '/ajustes?tutorial=1&section=apariencia'
                   : item.to}
-              onClick={() => {
+              onClick={(event) => {
                 if (tutorialNavOnly) return;
                 if (location.pathname === item.to) {
                   if (item.to === '/explorar' || item.to === '/biblioteca') {
                     const main = document.querySelector('main');
+                    if (item.to === '/explorar' && main?.querySelector('[data-explore-start="true"]')) {
+                      event.preventDefault();
+                      return;
+                    }
                     if (main?.scrollTop > 1) {
                       main.scrollTo({ top: 0, behavior: 'smooth' });
+                      event.preventDefault();
                       return;
                     }
                     if (item.to === '/biblioteca') return;

@@ -161,7 +161,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
               className="shrink-0"
               style={{ scrollSnapAlign: 'start', width: coverSize || 150 }}
             >
-              <MangaCard m={m} sourceId={r.id} from="explorar" coverSize={coverSize} />
+              <MangaCard m={m} sourceId={r.id} from="explorar" coverSize={coverSize} showAuthor={false} />
             </div>
           ))}
         </div>
@@ -327,7 +327,10 @@ export default function Catalog({ tutorialPreview = false }) {
   }, [loc.search]);
 
   return (
-    <div className="min-h-full flex flex-col">
+    <div
+      className="min-h-full flex flex-col"
+      data-explore-start={tab === 'extensiones' || (!q.trim() && !results) ? 'true' : 'false'}
+    >
       <div
         className="-mt-1 flex flex-wrap items-center mb-3"
         style={{

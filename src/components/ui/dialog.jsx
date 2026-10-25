@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../../lib/utils.js';
 import { useScale, px } from '../../lib/useScale.js';
 
-export function Dialog({ open, onClose, title, description, children, className, hideDivider, bodyClassName, bodyPaddingTop = 12, scrollableBody = true, scale }) {
+export function Dialog({ open, onClose, title, description, children, className, dialogStyle, hideDivider, bodyClassName, bodyPaddingTop = 12, scrollableBody = true, scale }) {
   const sc = scale ?? 1;
   return (
     <AnimatePresence>
@@ -25,6 +25,7 @@ export function Dialog({ open, onClose, title, description, children, className,
               'relative bg-card border border-border/50 rounded-2xl shadow-sm w-full max-w-lg max-h-[90vh] overflow-hidden',
               className
             )}
+            style={dialogStyle}
           >
             {(title || description) && (
               <div className={cn('shrink-0', !hideDivider && 'border-b border-border')} style={{ padding: `${px(24, sc, 18)} ${px(24, sc, 18)} ${px(12, sc, 9)}` }}>

@@ -25,36 +25,36 @@ const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 const EXPAND_CTRL_H = 16;
 const COVER_BASE = 184;
 
-function SourceLine({ sourceId }) {
+function SourceLine({ sourceId, scale }) {
   const m = extensions.manifest(sourceId);
   const [ok, setOk] = useState(true);
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-      <span className="w-4 h-4 rounded bg-secondary text-secondary-foreground grid place-items-center overflow-hidden shrink-0">
+    <span className="inline-flex items-center leading-none text-muted-foreground" style={{ gap: px(6, scale, 4), fontSize: px(12, scale, 10) }}>
+      <span className="rounded bg-secondary text-secondary-foreground grid place-items-center overflow-hidden shrink-0" style={{ width: px(20, scale, 16), height: px(20, scale, 16) }}>
         {m.icon && ok ? (
           <img src={m.icon} alt="" className="w-full h-full object-cover" onError={() => setOk(false)} />
         ) : (
-          <span className="text-[9px] font-bold">{(m.name?.[0] || '?').toUpperCase()}</span>
+          <span className="font-bold" style={{ fontSize: px(9, scale, 8) }}>{(m.name?.[0] || '?').toUpperCase()}</span>
         )}
       </span>
-      {m.name}
+      <span className="flex items-center self-stretch">{m.name}</span>
     </span>
   );
 }
 
-function DuplicateRow({ cover, title, author, sourceId }) {
+function DuplicateRow({ cover, title, author, sourceId, scale }) {
   return (
-    <div className="flex items-end gap-4 py-4 border-b border-border">
+    <div className="flex items-end border-b border-border" style={{ gap: px(16, scale, 12), paddingTop: px(16, scale, 12), paddingBottom: px(16, scale, 12) }}>
       {cover ? (
-        <img src={cover} alt="" referrerPolicy="no-referrer" className="w-32 aspect-[5/7] object-cover rounded-xl shrink-0 bg-black" />
+        <img src={cover} alt="" referrerPolicy="no-referrer" className="aspect-[5/7] object-cover shrink-0 bg-black" style={{ width: px(128, scale, 100), borderRadius: px(12, scale, 9) }} />
       ) : (
-        <div className="w-32 aspect-[5/7] rounded-xl shrink-0 bg-secondary" />
+        <div className="aspect-[5/7] shrink-0 bg-secondary" style={{ width: px(128, scale, 100), borderRadius: px(12, scale, 9) }} />
       )}
       <div className="flex-1 min-w-0">
-        <div className="font-semibold text-lg leading-snug line-clamp-2">{title}</div>
-        {author && <div className="mt-2 text-xs text-muted-foreground truncate">{author}</div>}
-        <div className="mt-1">
-          <SourceLine sourceId={sourceId} />
+        <div className="font-semibold leading-snug line-clamp-2" style={{ fontSize: px(18, scale, 15) }}>{title}</div>
+        {author && <div className="text-muted-foreground truncate" style={{ marginTop: px(8, scale, 6), fontSize: px(12, scale, 10) }}>{author}</div>}
+        <div style={{ marginTop: px(4, scale, 3) }}>
+          <SourceLine sourceId={sourceId} scale={scale} />
         </div>
       </div>
     </div>
@@ -579,7 +579,7 @@ export default function Detail() {
             </div>
           )}
           <div className="mt-1">
-            <SourceLine sourceId={sourceId} />
+            <SourceLine sourceId={sourceId} scale={scale} />
           </div>
           <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(15 * scale)}px` }}>
             {d.altTitles?.slice(0, 160)}
@@ -1048,6 +1048,8 @@ export default function Detail() {
       <Dialog
         open={!!dup}
         onClose={() => setDup(null)}
+        scale={scale}
+        dialogStyle={{ maxWidth: px(512, scale, 400) }}
         title="Posible duplicado"
         description="Ya tienes un manga con este título en la biblioteca."
       >
@@ -1055,14 +1057,15 @@ export default function Detail() {
           <>
             <div>
               {dup.list.map((f, i) => (
-                <DuplicateRow key={i} cover={f.cover} title={f.title} author={f.author} sourceId={f.sourceId} />
+                <DuplicateRow key={i} cover={f.cover} title={f.title} author={f.author} sourceId={f.sourceId} scale={scale} />
               ))}
             </div>
-            <div className="flex justify-end gap-2 pt-5">
-              <Button variant="secondary" onClick={() => setDup(null)}>
+            <div className="flex justify-end" style={{ gap: px(8, scale, 6), paddingTop: px(20, scale, 15) }}>
+              <Button variant="secondary" onClick={() => setDup(null)} style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: px(14, scale, 12) }}>
                 Cancelar
               </Button>
               <Button
+                style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: px(14, scale, 12) }}
                 onClick={() => {
                   const manga = dup.pending;
                   setDup(null);
