@@ -21,6 +21,8 @@ if (process.isMainFrame) contextBridge.exposeInMainWorld('cytlex', {
   authGql: (payload) => ipcRenderer.invoke('auth:gql', payload),
   fetchImage: (url) => ipcRenderer.invoke('image:fetch', url),
   downloadImage: (payload) => ipcRenderer.invoke('image:download', payload),
+  saveBackup: (payload) => ipcRenderer.invoke('backup:save', payload),
+  openBackup: () => ipcRenderer.invoke('backup:open'),
   toggleFullscreen: () => ipcRenderer.invoke('window:toggle-fullscreen'),
   saveTheme: (payload) => ipcRenderer.invoke('theme:save', payload),
   isFullscreen: () => ipcRenderer.invoke('window:is-fullscreen'),

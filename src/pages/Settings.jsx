@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, X } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
+import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, X, Database, Download, Upload } from 'lucide-react';
 import { resolveMode, settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
 import { anilist } from '../lib/anilist.js';
@@ -10,6 +11,7 @@ import { tracking } from '../lib/tracking.js';
 import { MODES, THEMES } from '../lib/themes.js';
 import { notifyHours } from '../lib/notify.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
+import { compressBackup, createBackup, parseBackup, readBackupFile, restoreBackup } from '../lib/backup.js';
 import { Button } from '../components/ui/button.jsx';
 import { Card } from '../components/ui/card.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
@@ -158,6 +160,7 @@ const SECTIONS = [
   { id: 'extensiones', label: 'Extensiones', icon: Puzzle },
   { id: 'notificaciones', label: 'Notificaciones', icon: Bell },
   { id: 'seguimiento', label: 'Seguimiento', icon: Link2 },
+  { id: 'respaldo', label: 'Respaldo', icon: Database },
   { id: 'atajos', label: 'Atajos', icon: Keyboard }
 ];
 
@@ -168,7 +171,8 @@ const SHORTCUTS = [
 
 let sessionSeccion = '';
 
-export default function Settings({ isFullscreen, onToggleFullscreen }) {
+export default function Settings() {
+  const location = useLocation();
   const [s, setS] = useState(settings.get());
   const [section, setSection] = useState(() => sessionSeccion || 'apariencia');
   const [cats, setCats] = useState(() => lib.cats());
@@ -183,8 +187,14 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   const connectHintRef = useRef(null);
   const { toast } = useToast();
   const [bgErr, setBgErr] = useState('');
+  const [confirmAdultExtensions, setConfirmAdultExtensions] = useState(false);
   const [confirmRemoveRepo, setConfirmRemoveRepo] = useState(false);
+  const [backupCandidate, setBackupCandidate] = useState(null);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const backupFileInputRef = useRef(null);
   const removeRepoRef = useRef(null);
+  const settingsRootRef = useRef(null);
+  const scaleTransitionTimeoutRef = useRef(null);
   const [showDonate, setShowDonate] = useState(
     () => !document.body.classList.contains('tutorial-open') && !settings.get().donationSeen
   );
@@ -206,6 +216,17 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   };
 
   useEffect(() => settings.subscribe(setS), []);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const nextSection = params.get('tutorial') === '1' ? params.get('section') : null;
+    if (!SECTIONS.some(({ id }) => id === nextSection)) return;
+    setSection(nextSection);
+    sessionSeccion = nextSection;
+  }, [location.search]);
+  useEffect(() => () => {
+    window.clearTimeout(scaleTransitionTimeoutRef.current);
+    settingsRootRef.current?.classList.remove('ui-scale-transition');
+  }, []);
   useEffect(() => tracking.subscribe(() => setLinkedCount(tracking.linkedCount())), []);
   useEffect(() => {
     if (!connectHintFor) return;
@@ -254,6 +275,17 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   };
 
   const set = (patch) => setS(settings.set(patch));
+  const setUiScale = (value) => {
+    const root = settingsRootRef.current;
+    if (!reduceMotion && root) {
+      root.classList.add('ui-scale-transition');
+      window.clearTimeout(scaleTransitionTimeoutRef.current);
+      scaleTransitionTimeoutRef.current = window.setTimeout(() => {
+        root.classList.remove('ui-scale-transition');
+      }, 240);
+    }
+    set({ uiScale: value });
+  };
   const setAppearance = (patch) => {
     const run = () => flushSync(() => set(patch));
     if (typeof document !== 'undefined' && typeof document.startViewTransition === 'function') {
@@ -306,6 +338,73 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
     if (!v) return;
     setCats(lib.addCat(v));
     setNewCat('');
+  };
+
+  const backupFileName = () => `cytlex-respaldo-${new Date().toISOString().replace(/[:.]/g, '-')}.json.gz`;
+
+  const exportBackup = async () => {
+    setBackupBusy(true);
+    try {
+      const content = JSON.stringify(createBackup());
+      if (window.cytlex?.saveBackup) {
+        const result = await window.cytlex.saveBackup({ content, fileName: backupFileName() });
+        if (result?.canceled) return;
+        if (!result?.ok) throw new Error(result?.error || 'No se pudo guardar el respaldo.');
+      } else {
+        const compressed = await compressBackup(content);
+        const blob = new Blob([compressed], { type: 'application/gzip' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = backupFileName();
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      toast({ title: 'Respaldo exportado', description: 'El archivo se guardó correctamente.', variant: 'success' });
+    } catch (error) {
+      toast({ title: 'No se pudo exportar el respaldo', description: error.message, variant: 'error' });
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const loadBackupContent = (content, fileName) => {
+    try {
+      const backup = parseBackup(content);
+      setBackupCandidate({ ...backup, fileName });
+    } catch (error) {
+      toast({ title: 'Respaldo no válido', description: error.message, variant: 'error' });
+    }
+  };
+
+  const importBackup = async () => {
+    if (!window.cytlex?.openBackup) {
+      backupFileInputRef.current?.click();
+      return;
+    }
+    setBackupBusy(true);
+    try {
+      const result = await window.cytlex.openBackup();
+      if (result?.canceled) return;
+      if (!result?.ok) throw new Error(result?.error || 'No se pudo abrir el archivo.');
+      loadBackupContent(result.content, result.fileName);
+    } catch (error) {
+      toast({ title: 'No se pudo importar el respaldo', description: error.message, variant: 'error' });
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const confirmBackupImport = () => {
+    if (!backupCandidate) return;
+    try {
+      restoreBackup(backupCandidate.data);
+      setBackupCandidate(null);
+      toast({ title: 'Respaldo restaurado', description: 'Cytlex se recargará para aplicar los datos.', variant: 'success' });
+      window.setTimeout(() => window.location.reload(), 800);
+    } catch (error) {
+      toast({ title: 'No se pudo restaurar el respaldo', description: error.message, variant: 'error' });
+    }
   };
 
   let content;
@@ -369,34 +468,14 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         <div className="border-t border-border" style={{ marginTop: px(16, scale, 11) }} />
         <Row
           scale={scale}
-          title="Pantalla completa"
-          desc="Oculta los bordes de la ventana"
-          right={
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={onToggleFullscreen}
-              style={{
-                height: px(36, scale, 30),
-                fontSize: px(14, scale, 12),
-                paddingLeft: px(12, scale, 9),
-                paddingRight: px(12, scale, 9)
-              }}
-            >
-              {isFullscreen ? 'Salir' : 'Activar'}
-            </Button>
-          }
-        />
-        <Row
-          scale={scale}
           last
-          title="Escala de la interfaz"
+          title="Tamaño de la interfaz"
           desc="Ajusta el tamaño general de la UI"
           right={
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => set({ uiScale: Math.max(0.8, (s.uiScale || 1) - 0.05) })}
+                onClick={() => setUiScale(Math.max(0.8, (s.uiScale || 1) - 0.05))}
                 className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
                 aria-label="Reducir escala"
               >
@@ -408,14 +487,14 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
                 max={1.2}
                 step={0.05}
                 value={s.uiScale || 1}
-                onChange={(e) => set({ uiScale: Number(e.target.value) })}
-                aria-label="Escala de la interfaz"
+                onChange={(e) => setUiScale(Number(e.target.value))}
+                aria-label="Tamaño de la interfaz"
                 className="rounded-full bg-muted accent-primary cursor-pointer"
                 style={{ width: px(160, scale, 110), height: px(6, scale, 4) }}
               />
               <button
                 type="button"
-                onClick={() => set({ uiScale: Math.min(1.2, (s.uiScale || 1) + 0.05) })}
+                onClick={() => setUiScale(Math.min(1.2, (s.uiScale || 1) + 0.05))}
                 className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
                 aria-label="Aumentar escala"
               >
@@ -620,7 +699,10 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
             <Switch
               scale={scale}
               on={s.showAdultExtensions}
-              onChange={(v) => set({ showAdultExtensions: v })}
+              onChange={(v) => {
+                if (v) setConfirmAdultExtensions(true);
+                else set({ showAdultExtensions: false });
+              }}
               label="Mostrar extensiones +18"
             />
           }
@@ -963,6 +1045,66 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         />
       </div>
     );
+  } else if (section === 'respaldo') {
+    content = (
+      <div className="flex flex-col">
+        <input
+          ref={backupFileInputRef}
+          type="file"
+          accept=".json,.gz,application/json,application/gzip"
+          className="hidden"
+          onChange={async (event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (!file) return;
+            if (file.size > 100 * 1024 * 1024) {
+              toast({ title: 'Respaldo demasiado grande', description: 'El límite de importación es 100 MB.', variant: 'error' });
+              return;
+            }
+            try {
+              loadBackupContent(await readBackupFile(file), file.name);
+            } catch (error) {
+              toast({ title: 'No se pudo leer el respaldo', description: error.message, variant: 'error' });
+            }
+          }}
+        />
+        <Row
+          scale={scale}
+          first
+          title="Exportar respaldo"
+          desc="Guarda una copia comprimida de tus datos. Las extensiones instaladas no se incluyen."
+          right={
+            <Button
+              size="sm"
+              onClick={exportBackup}
+              disabled={backupBusy}
+              style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+            >
+              <Download className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+              Exportar
+            </Button>
+          }
+        />
+        <Row
+          scale={scale}
+          last
+          title="Importar respaldo"
+          desc="Restaura tus datos desde un respaldo creado en Cytlex. Tendrás que volver a conectar AniList."
+          right={
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={importBackup}
+              disabled={backupBusy}
+              style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+            >
+              <Upload className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+              Importar
+            </Button>
+          }
+        />
+      </div>
+    );
   } else {
     content = (
       <div className="flex flex-col">
@@ -995,7 +1137,7 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
   }
 
   return (
-    <div className="min-h-full flex flex-col">
+    <div ref={settingsRootRef} className="min-h-full flex flex-col">
       <AnimatePresence initial={false}>
         {showDonate && (
           <motion.div
@@ -1112,6 +1254,57 @@ export default function Settings({ isFullscreen, onToggleFullscreen }) {
         </Card>
       </div>
 
+      <Dialog
+        open={!!backupCandidate}
+        onClose={() => setBackupCandidate(null)}
+        title="Restaurar respaldo"
+        description={`El archivo ${backupCandidate?.fileName || ''} reemplazará tus datos actuales de Cytlex, incluidas la biblioteca, el progreso y los ajustes. Las extensiones instaladas se conservarán. La aplicación se recargará.`}
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+        scale={scale}
+      >
+        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button
+            variant="outline"
+            onClick={() => setBackupCandidate(null)}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={confirmBackupImport}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Restaurar
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={confirmAdultExtensions}
+        onClose={() => setConfirmAdultExtensions(false)}
+        title="Confirmación de edad"
+        description="¿Confirmas que tienes 18 años o más para mostrar extensiones con contenido para adultos?"
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+        scale={scale}
+      >
+        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button variant="outline" onClick={() => setConfirmAdultExtensions(false)} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={() => {
+              set({ showAdultExtensions: true });
+              setConfirmAdultExtensions(false);
+            }}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Tengo 18 años o más
+          </Button>
+        </div>
+      </Dialog>
       <Dialog
         open={!!pendingCat}
         onClose={() => setPendingCat(null)}

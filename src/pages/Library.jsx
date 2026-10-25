@@ -4,6 +4,7 @@ import { RefreshCw, ArrowUpDown } from 'lucide-react';
 import { lib } from '../lib/library.js';
 import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
+import { SourceBadge } from '../components/SourceBadge.jsx';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { makeCoverThumb } from '../lib/covers.js';
 import { checkLibrary } from '../lib/notify.js';
@@ -45,6 +46,20 @@ export default function Library() {
     }),
     []
   );
+  useEffect(() => {
+    let changed = false;
+    favs.forEach((m) => {
+      const manifest = extensions.manifest(m.sourceId || 'leercapitulo');
+      const patch = {};
+      if (!m.sourceName && manifest.name) patch.sourceName = manifest.name;
+      if (!m.sourceIcon && manifest.icon) patch.sourceIcon = manifest.icon;
+      if (Object.keys(patch).length) {
+        lib.updateFav(m.url, patch, m.sourceId || 'leercapitulo');
+        changed = true;
+      }
+    });
+    if (changed) setFavs(lib.favs());
+  }, []);
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
 
@@ -313,7 +328,13 @@ export default function Library() {
         <div className="flex flex-col gap-2">
           {shown.map((m, i) => {
             const sid = m.sourceId || 'leercapitulo';
-            const adultBlocked = !showAdultExtensions && isAdultExtension(extensions.manifest(sid));
+            const sourceManifest = extensions.manifest(sid);
+            const sourceInfo = {
+              ...sourceManifest,
+              name: m.sourceName || sourceManifest.name || sid,
+              icon: sourceManifest.icon || m.sourceIcon
+            };
+            const adultBlocked = !showAdultExtensions && isAdultExtension(sourceManifest);
             const unavailable = !extensions.isInstalled(sid) || adultBlocked;
             return (
               <div key={i} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5">
@@ -333,8 +354,9 @@ export default function Library() {
                       />
                     )}
                     {unavailable && (
-                      <span className="absolute inset-0 grid place-items-center bg-black/60 px-0.5 text-center text-[8px] font-semibold leading-tight text-white">
-                        {adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}
+                      <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 px-0.5 text-center text-[8px] font-semibold leading-tight text-white">
+                        <span>{adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}</span>
+                        <SourceBadge m={sourceInfo} className="!h-5 !w-5 rounded bg-white shadow-sm" />
                       </span>
                     )}
                   </span>

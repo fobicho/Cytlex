@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, session, Menu, dialog, Notification, shell, screen, nativeTheme } from 'electron';
 import path from 'node:path';
-import { writeFile, readFile } from 'node:fs/promises';
+import { writeFile, readFile, stat } from 'node:fs/promises';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import http from 'node:http';
 import https from 'node:https';
 
@@ -501,10 +502,10 @@ $t = New-ScheduledTaskTrigger -Daily -At '${hh}:00'
 Register-ScheduledTask -TaskName ${psQuote(taskName(hh))} -Action $a -Trigger $t -Settings $s -Principal $p -Force | Out-Null
 `;
 
-ipcMain.handle('notify:background', async (_e, on, hours = 6) => {
+ipcMain.handle('notify:background', async (_e, on, hours = 12) => {
   if (process.platform !== 'win32') return { ok: false, error: 'Solo disponible en Windows' };
   const arg = isDev ? `"${app.getAppPath()}" --background` : '--background';
-  const list = TASK_HOURS[hours] || TASK_HOURS[6];
+  const list = TASK_HOURS[hours] || TASK_HOURS[12];
   try {
     if (!on) {
       await removeTasks();
@@ -680,6 +681,43 @@ ipcMain.handle('image:download', async (e, payload = {}) => {
     return { ok: true, path: filePath };
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('backup:save', async (e, payload = {}) => {
+  const content = payload.content;
+  if (typeof content !== 'string' || Buffer.byteLength(content, 'utf8') > 100 * 1024 * 1024) {
+    return { ok: false, error: 'El respaldo supera el tamaño permitido.' };
+  }
+  try {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const defaultPath = String(payload.fileName || 'cytlex-respaldo.json.gz').replace(/[\\/:*?"<>|]+/g, '_');
+    const options = { defaultPath, filters: [{ name: 'Respaldo de Cytlex', extensions: ['gz', 'json'] }] };
+    const { canceled, filePath } = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    await writeFile(filePath, gzipSync(Buffer.from(content, 'utf8')));
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error) };
+  }
+});
+
+ipcMain.handle('backup:open', async (e) => {
+  try {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const options = { properties: ['openFile'] };
+    const { canceled, filePaths } = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    if (canceled || !filePaths?.[0]) return { ok: false, canceled: true };
+    const filePath = filePaths[0];
+    const fileInfo = await stat(filePath);
+    if (fileInfo.size > 100 * 1024 * 1024) return { ok: false, error: 'El archivo supera el tamaño permitido.' };
+    const bytes = await readFile(filePath);
+    const content = bytes[0] === 0x1f && bytes[1] === 0x8b
+      ? gunzipSync(bytes, { maxOutputLength: 100 * 1024 * 1024 }).toString('utf8')
+      : bytes.toString('utf8');
+    return { ok: true, content, fileName: path.basename(filePath) };
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error) };
   }
 });
 

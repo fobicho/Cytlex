@@ -5,6 +5,7 @@ export default function createSource({ fetchText }) {
 
   const getJson = async (url) => JSON.parse(await fetchText(url));
   const isComic = (s) => (s.type || 'comic').toLowerCase() === 'comic';
+  let seriesListRequest;
 
   const best = (u) => (u || '').replace(/-[a-z]{1,3}\.(jpe?g|png|webp|avif)$/i, '-xl.$1');
 
@@ -23,7 +24,11 @@ export default function createSource({ fetchText }) {
 
   async function catalog({ q = '', page = 1 } = {}) {
     if (q) {
-      const data = await getJson(`${base}/api/series/list`);
+      seriesListRequest ||= getJson(`${base}/api/series/list`).catch((error) => {
+        seriesListRequest = null;
+        throw error;
+      });
+      const data = await seriesListRequest;
       const items = comicsOf(data)
         .filter((s) => (s.name || '').toLowerCase().includes(q.toLowerCase()))
         .map(toItem);

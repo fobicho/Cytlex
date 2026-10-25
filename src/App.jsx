@@ -56,7 +56,7 @@ function useResetPage(onReset) {
   }, [onReset]);
 }
 
-export default function App({ isVisible = true }) {
+export default function App({ isVisible = true, tutorialMode = false }) {
   const { toast } = useToast();
   const [theme, setTheme] = useState(() => settings.get().theme);
   const [mode, setMode] = useState(() => resolveMode(settings.get().mode));
@@ -174,11 +174,12 @@ export default function App({ isVisible = true }) {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden" data-extension-metadata-revision={extensionMetadataRevision}>
-      {!isFullscreen && <TitleBar />}
+      {!isFullscreen && <div inert={tutorialMode}><TitleBar /></div>}
       <div className="flex flex-1 overflow-hidden">
-        {!isReader && <Sidebar />}
+        {!isReader && <Sidebar tutorialNavOnly={tutorialMode} />}
         <div className="flex-1 flex flex-col overflow-hidden">
           <main
+            inert={tutorialMode}
             className={isReader ? 'min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]' : 'flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]'}
             style={isReader ? undefined : { padding: `${Math.max(16, Math.round(24 * scale))}px` }}
           >
@@ -186,12 +187,12 @@ export default function App({ isVisible = true }) {
               <Routes>
                 <Route path="/" element={<Navigate to="/biblioteca" replace />} />
                 <Route path="/biblioteca" element={<Library key={`lib-${resetTick}`} />} />
-                <Route path="/explorar" element={<Catalog key={`cat-${resetTick}`} />} />
+                <Route path="/explorar" element={<Catalog key={`cat-${resetTick}`} tutorialPreview={tutorialMode} />} />
                 <Route path="/resultados" element={<Results />} />
                 <Route path="/catalogo" element={<Navigate to="/explorar" replace />} />
                 <Route
                   path="/ajustes"
-                  element={<Settings key={`set-${resetTick}`} isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} />}
+                  element={<Settings key={`set-${resetTick}`} />}
                 />
                 <Route path="/seguimiento" element={<Tracking />} />
                 <Route path="/manga/*" element={<Detail />} />

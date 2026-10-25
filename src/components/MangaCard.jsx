@@ -3,6 +3,8 @@ import { cn } from '../lib/utils.js';
 import { api } from '../lib/api.js';
 import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
+import { extensions } from '../lib/extensions.js';
+import { SourceBadge } from './SourceBadge.jsx';
 
 const prefetched = new Set();
 function prefetch(url, sourceId) {
@@ -14,6 +16,12 @@ function prefetch(url, sourceId) {
 
 export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, from = 'biblioteca', coverSize, chapterCount }) {
   const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}`;
+  const sourceManifest = extensions.manifest(sourceId);
+  const sourceInfo = {
+    ...sourceManifest,
+    name: m.sourceName || sourceManifest.name || sourceId,
+    icon: sourceManifest.icon || m.sourceIcon
+  };
   const linkCls = cn(unavailable && 'pointer-events-none');
   const linkA11y = unavailable ? { 'aria-disabled': true, tabIndex: -1 } : {};
 
@@ -97,10 +105,11 @@ export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = 
             <div className={cn(ph, 'animate-pulse bg-muted/40')} />
           )}
           {unavailable && (
-            <span className="absolute inset-0 grid place-items-center bg-black/60">
+            <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60">
               <span className="rounded-full bg-black/80 px-2.5 py-1 text-[10px] font-semibold text-white">
                 {unavailableLabel}
               </span>
+              <SourceBadge m={sourceInfo} className="border border-white/50 bg-white shadow-sm" />
             </span>
           )}
           {chapterCount > 0 && !unavailable && (

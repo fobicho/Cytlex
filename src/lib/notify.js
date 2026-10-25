@@ -130,11 +130,11 @@ const TARGET_HOURS = {
 
 export function notifyHours() {
   const h = Number(settings.get().notifyHours);
-  return HOURS.includes(h) ? h : 6;
+  return HOURS.includes(h) ? h : 12;
 }
 
 function msToNextHour(hours) {
-  const list = TARGET_HOURS[hours] || TARGET_HOURS[6];
+  const list = TARGET_HOURS[hours] || TARGET_HOURS[12];
   const now = new Date();
   for (const h of list) {
     const t = new Date(now);

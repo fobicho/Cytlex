@@ -36,12 +36,13 @@ export default function createSource({ fetchText, parse, head }) {
   const LISTING_BATCH_SIZE = 8;
   let lastPage = 1;
   const listingCache = new Map();
+  const searchCache = new Map();
 
   function pageCount(doc) {
     const pages = [...doc.querySelectorAll('a[href]')].map((a) => {
       try {
         const url = new URL(a.getAttribute('href'), `${BASE}/directorio/`);
-        return /^\/directorio\/?$/.test(url.pathname) ? Number(url.searchParams.get('p')) || 1 : 0;
+        return /^\/(?:directorio|buscar)\/?$/.test(url.pathname) ? Number(url.searchParams.get('p')) || 1 : 0;
       } catch {
         return 0;
       }
@@ -67,20 +68,57 @@ export default function createSource({ fetchText, parse, head }) {
     }
   }
 
+  function mapSearchCard(el) {
+    const links = [...el.querySelectorAll('a[href]')];
+    const a = links.find((link) => (link.textContent || '').trim()) || links[0];
+    const href = abs(a?.getAttribute('href'));
+    if (!href || !READABLE.has(typeOf(href))) return null;
+    const img = el.querySelector('img');
+    const raw = img?.getAttribute('data-src') || img?.getAttribute('src') || '';
+    const title = (a?.textContent || img?.getAttribute('alt') || '').replace(/\s+/g, ' ').trim();
+    return {
+      url: href,
+      title,
+      cover: raw && !raw.includes('default.gif') ? abs(raw) : '',
+      type: typeOf(href),
+      lastChapter: (text(el, 'span:last-of-type') || '').replace(/[^\d.]/g, '')
+    };
+  }
+
   async function search(term) {
-    const needle = term.toLowerCase();
-    const found = new Map();
-    await listing(1);
-    for (let start = 1; start <= lastPage; start += LISTING_BATCH_SIZE) {
-      const count = Math.min(LISTING_BATCH_SIZE, lastPage - start + 1);
-      const batch = await Promise.all(Array.from({ length: count }, (_, i) => listing(start + i)));
-      for (const items of batch) {
-        for (const item of items) {
-          if (item.title.toLowerCase().includes(needle)) found.set(item.url, item);
+    const key = term.trim().toLocaleLowerCase();
+    if (searchCache.has(key)) return searchCache.get(key);
+
+    const pending = (async () => {
+      const searchPage = async (page) => {
+        const url = `${BASE}/buscar?q=${encodeURIComponent(term)}&p=${page}`;
+        const doc = parse(await fetchText(url));
+        const items = [...doc.querySelectorAll('#article-div > div')]
+          .map((el) => mapSearchCard(el))
+          .filter((item) => item?.title);
+        return { items, totalPages: pageCount(doc) };
+      };
+
+      const first = await searchPage(1);
+      const found = new Map(first.items.map((item) => [item.url, item]));
+      for (let start = 2; start <= first.totalPages; start += LISTING_BATCH_SIZE) {
+        const count = Math.min(LISTING_BATCH_SIZE, first.totalPages - start + 1);
+        const batch = await Promise.all(Array.from({ length: count }, (_, i) => searchPage(start + i)));
+        for (const page of batch) {
+          for (const item of page.items) found.set(item.url, item);
         }
       }
+      return [...found.values()];
+    })();
+
+    searchCache.set(key, pending);
+    if (searchCache.size > 20) searchCache.delete(searchCache.keys().next().value);
+    try {
+      return await pending;
+    } catch (error) {
+      searchCache.delete(key);
+      throw error;
     }
-    return [...found.values()];
   }
 
   async function catalog({ q = '', page = 1 } = {}) {

@@ -12,76 +12,104 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 
-function ExtensionCard({ m, action, updatable = false, disabled = false, scale = 1 }) {
+function ExtensionCard({ m, action, updatable = false, disabled = false, scale = 1, selected = false, onSelectionChange, selectionLabel, selectionDisabled = false }) {
   const [imgOk, setImgOk] = useState(true);
   const showImg = m.icon && imgOk;
   const hasAdultContent = isAdultExtension(m);
   const iconSize = Number(px(40, scale, 32).replace('px', ''));
+  const identity = (
+    <>
+      <div
+        className="rounded-xl bg-secondary text-secondary-foreground grid place-items-center font-bold shrink-0 overflow-hidden"
+        style={{
+          width: `${iconSize}px`,
+          height: `${iconSize}px`,
+          fontSize: px(16, scale, 13),
+          borderRadius: px(12, scale, 9)
+        }}
+      >
+        {showImg ? (
+          <img
+            src={m.icon}
+            alt=""
+            loading="lazy"
+            className="w-full h-full object-cover"
+            onError={() => setImgOk(false)}
+          />
+        ) : (
+          (m.name?.[0] || '?').toUpperCase()
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center min-w-0" style={{ gap: px(6, scale, 4) }}>
+          <div
+            className="font-semibold truncate min-w-0"
+            title={m.name}
+            style={{ fontSize: px(15, scale, 13) }}
+          >
+            {m.name}
+          </div>
+        </div>
+        <div
+          className="flex items-center min-w-0 overflow-hidden"
+          style={{
+            marginTop: px(2, scale, 1.5),
+            gap: px(6, scale, 4),
+            height: px(20, scale, 16)
+          }}
+        >
+          {m.version && (
+            <span
+              className="text-muted-foreground leading-none truncate min-w-0"
+              style={{ fontSize: px(11, scale, 9) }}
+            >
+              v{m.version}
+            </span>
+          )}
+          {hasAdultContent && (
+            <span
+              className="shrink-0 font-semibold text-red-600 dark:text-red-400"
+              title="La extensión declara contenido MIXED o NSFW"
+              aria-label="Extensión con contenido para adultos, +18"
+              style={{ fontSize: px(11, scale, 9) }}
+            >
+              +18
+            </span>
+          )}
+        </div>
+      </div>
+    </>
+  );
   return (
-    <Card className={cn('hover:shadow-sm', updatable && 'cx-update-pulse', disabled && 'opacity-50')}>
+    <Card
+      className={cn(
+        'hover:shadow-sm',
+        selected && 'border-primary ring-2 ring-primary/30 shadow-md shadow-primary/10',
+        updatable && 'cx-update-pulse',
+        disabled && 'opacity-50'
+      )}
+    >
       <div
         className="flex items-center"
         style={{ padding: px(14, scale, 11), gap: px(12, scale, 9) }}
       >
-        <div
-          className="rounded-xl bg-secondary text-secondary-foreground grid place-items-center font-bold shrink-0 overflow-hidden"
-          style={{
-            width: `${iconSize}px`,
-            height: `${iconSize}px`,
-            fontSize: px(16, scale, 13),
-            borderRadius: px(12, scale, 9)
-          }}
-        >
-          {showImg ? (
-            <img
-              src={m.icon}
-              alt=""
-              loading="lazy"
-              className="w-full h-full object-cover"
-              onError={() => setImgOk(false)}
-            />
-          ) : (
-            (m.name?.[0] || '?').toUpperCase()
-          )}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center min-w-0" style={{ gap: px(6, scale, 4) }}>
-            <div
-              className="font-semibold truncate min-w-0"
-              title={m.name}
-              style={{ fontSize: px(15, scale, 13) }}
-            >
-              {m.name}
-            </div>
-          </div>
-          <div
-            className="flex items-center min-w-0 overflow-hidden"
-            style={{
-              marginTop: px(2, scale, 1.5),
-              gap: px(6, scale, 4),
-              height: px(20, scale, 16)
-            }}
+        {onSelectionChange ? (
+          <button
+            type="button"
+            onClick={() => onSelectionChange(!selected)}
+            aria-label={selectionLabel}
+            aria-pressed={selected}
+            disabled={selectionDisabled}
+            className="flex flex-1 min-w-0 items-center text-left disabled:cursor-default"
+            style={{ gap: px(12, scale, 9) }}
           >
-            {m.version && (
-              <span
-                className="text-muted-foreground leading-none truncate min-w-0"
-                style={{ fontSize: px(11, scale, 9) }}
-              >
-                v{m.version}
-              </span>
-            )}
-            {hasAdultContent && (
-              <span
-                className="shrink-0 font-semibold text-red-600 dark:text-red-400"
-                title="La extensión declara contenido MIXED o NSFW"
-                aria-label="Extensión con contenido para adultos, +18"
-                style={{ fontSize: px(11, scale, 9) }}
-              >
-                +18
-              </span>
-            )}
+            {identity}
+          </button>
+        ) : (
+          <div className="flex flex-1 min-w-0 items-center" style={{ gap: px(12, scale, 9) }}>
+            {identity}
           </div>
-        </div>
+        )}
         <div className="shrink-0">{action}</div>
       </div>
     </Card>
@@ -90,6 +118,7 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
 
 let repoCache = { url: '', available: null, updates: null };
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
+const DEFAULT_EXTENSION_REPOSITORY = 'https://fobicho.github.io/Cytlex/index.json';
 
 const readExtConfig = () => {
   try { return JSON.parse(localStorage.getItem(EXT_CONFIG_KEY)) || {}; } catch { return {}; }
@@ -104,10 +133,11 @@ function sortLabel(sortBy) {
   return sortBy === 'title-desc' ? 'Z-A' : sortBy === 'added' ? 'Adición' : 'A-Z';
 }
 
-export default function ExtensionsPanel() {
+export default function ExtensionsPanel({ tutorialPreview = false }) {
   const { toast } = useToast();
   const scale = useScale();
-  const initialRepo = (settings.get().extIndexUrl || '').trim();
+  const configuredRepo = (settings.get().extIndexUrl || '').trim();
+  const initialRepo = configuredRepo || (tutorialPreview ? DEFAULT_EXTENSION_REPOSITORY : '');
   const cacheHit = !!initialRepo && initialRepo === repoCache.url && repoCache.available !== null;
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [installed, setInstalled] = useState(() => extensions.installed());
@@ -121,6 +151,9 @@ export default function ExtensionsPanel() {
   const [updates, setUpdates] = useState(() => (cacheHit ? repoCache.updates || [] : []));
   const [updating, setUpdating] = useState('');
   const [confirmAll, setConfirmAll] = useState(false);
+  const [selectedInstalledIds, setSelectedInstalledIds] = useState(() => new Set());
+  const [selectedAvailableIds, setSelectedAvailableIds] = useState(() => new Set());
+  const [confirmBulk, setConfirmBulk] = useState(null);
   const [repoUrl, setRepoUrl] = useState(initialRepo);
   const [sortBy, setSortBy] = useState(() => {
     const stored = localStorage.getItem('cytlex:extensionsSort');
@@ -141,7 +174,7 @@ export default function ExtensionsPanel() {
     extensions.invalidate(subId);
   };
   const visibleInstalled = installed;
-  const visibleAvailable = showAdultExtensions
+  const visibleAvailable = tutorialPreview || showAdultExtensions
     ? available
     : available?.filter((manifest) => !isAdultExtension(manifest));
   const visibleUpdates = updates;
@@ -161,6 +194,8 @@ export default function ExtensionsPanel() {
   const removeRef = useRef(null);
   const updateRef = useRef(null);
   const allRef = useRef(null);
+  const bulkInstallRef = useRef(null);
+  const bulkUninstallRef = useRef(null);
 
   useEffect(() => {
     if (!confirmInstall) return;
@@ -206,6 +241,16 @@ export default function ExtensionsPanel() {
     return () => document.removeEventListener('pointerdown', onDown);
   }, [confirmAll]);
 
+  useEffect(() => {
+    if (!confirmBulk) return;
+    const ref = confirmBulk === 'install' ? bulkInstallRef : bulkUninstallRef;
+    const onDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setConfirmBulk(null);
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [confirmBulk]);
+
   const refresh = () => setInstalled(extensions.installed());
 
   const checkUpdates = async (url = repoUrl) => {
@@ -246,12 +291,14 @@ export default function ExtensionsPanel() {
     }
     setLoading(true);
     (async () => {
-      try { await extensions.sync(repoUrl); } catch {}
-      refresh();
-      await checkUpdates();
+      if (!tutorialPreview) {
+        try { await extensions.sync(repoUrl); } catch {}
+        refresh();
+        await checkUpdates();
+      }
       await loadAvailable();
     })();
-  }, [repoUrl]);
+  }, [repoUrl, tutorialPreview]);
 
   useEffect(() => {
     if (repoUrl && available !== null) {
@@ -270,9 +317,18 @@ export default function ExtensionsPanel() {
   }, [repoUrl]);
 
   useEffect(() => settings.subscribe((s) => {
-    setRepoUrl((s.extIndexUrl || '').trim());
+    const nextRepo = (s.extIndexUrl || '').trim();
+    setRepoUrl(nextRepo || (tutorialPreview ? DEFAULT_EXTENSION_REPOSITORY : ''));
     setShowAdultExtensions(!!s.showAdultExtensions);
-  }), []);
+  }), [tutorialPreview]);
+  useEffect(() => {
+    const installedIds = new Set(installed.map(({ manifest }) => manifest.id));
+    setSelectedInstalledIds((current) => new Set([...current].filter((id) => installedIds.has(id))));
+  }, [installed]);
+  useEffect(() => {
+    const availableIds = new Set((visibleAvailable || []).map((manifest) => manifest.id));
+    setSelectedAvailableIds((current) => new Set([...current].filter((id) => availableIds.has(id))));
+  }, [available, showAdultExtensions]);
 
   const doUpdateOne = async (id) => {
     setUpdating(id);
@@ -347,6 +403,74 @@ export default function ExtensionsPanel() {
     setBusy('');
   };
 
+  const toggleSelection = (setter, id, selected) => {
+    setter((current) => {
+      const next = new Set(current);
+      if (selected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const runBulkAction = async (action) => {
+    const isInstall = action === 'install';
+    const selectedItems = isInstall
+      ? sortedAvailable.filter((manifest) => selectedAvailableIds.has(manifest.id))
+      : sortedInstalled.filter(({ manifest }) => selectedInstalledIds.has(manifest.id)).map(({ manifest }) => manifest);
+    if (!selectedItems.length) {
+      setConfirmBulk(null);
+      return;
+    }
+
+    setBusy(isInstall ? 'bulk-install' : 'bulk-uninstall');
+    setErr('');
+    const succeeded = [];
+    const failed = [];
+    for (const item of selectedItems) {
+      const id = item.id;
+      try {
+        if (isInstall) await extensions.install(item, repoUrl);
+        else await extensions.uninstall(id);
+        succeeded.push(id);
+      } catch {
+        failed.push(id);
+      }
+    }
+
+    const succeededIds = new Set(succeeded);
+    if (isInstall) {
+      refresh();
+      setAvailable((current) => current?.filter((manifest) => !succeededIds.has(manifest.id)) ?? current);
+      setSelectedAvailableIds(new Set(failed));
+    } else {
+      refresh();
+      await loadAvailable();
+      setSelectedInstalledIds(new Set(failed));
+    }
+
+    setBusy('');
+    setConfirmBulk(null);
+    if (failed.length) {
+      setErr(`No se pudieron ${isInstall ? 'instalar' : 'desinstalar'} ${failed.length} ${failed.length === 1 ? 'extensión' : 'extensiones'}.`);
+    } else if (succeeded.length) {
+      toast({
+        title: isInstall
+          ? `${succeeded.length} ${succeeded.length === 1 ? 'extensión instalada' : 'extensiones instaladas'}`
+          : `${succeeded.length} ${succeeded.length === 1 ? 'extensión desinstalada' : 'extensiones desinstaladas'}`,
+        variant: 'success'
+      });
+    }
+  };
+
+  const handleBulkAction = (action) => {
+    if (confirmBulk !== action) {
+      setConfirmBulk(action);
+      return;
+    }
+    setConfirmBulk(null);
+    runBulkAction(action);
+  };
+
   const grid = {
     gridTemplateColumns: `repeat(auto-fill, minmax(${px(240, scale, 200).replace('px', '')}px, 1fr))`,
     gap: px(12, scale, 9)
@@ -374,10 +498,71 @@ export default function ExtensionsPanel() {
           className="flex items-center justify-between"
           style={{ gap: px(16, scale, 11), marginBottom: px(12, scale, 9), height: px(36, scale, 30) }}
         >
-          <h3 className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
-            Instaladas
-          </h3>
+          <div className="flex items-center" style={{ gap: px(12, scale, 8) }}>
+            <h3 className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
+              Instaladas
+            </h3>
+          </div>
           <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
+            <AnimatePresence initial={false}>
+              {!tutorialPreview && selectedInstalledIds.size > 0 && (
+                <motion.div
+                  key="bulk-uninstall-button"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="flex"
+                  ref={bulkUninstallRef}
+                >
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => handleBulkAction('uninstall')}
+                    disabled={busy !== '' || updating !== ''}
+                    style={{
+                      height: px(36, scale, 30),
+                      fontSize: px(14, scale, 12),
+                      paddingLeft: px(12, scale, 9),
+                      paddingRight: px(12, scale, 9)
+                    }}
+                  >
+                    <span className="grid">
+                      <span className="invisible col-start-1 row-start-1 flex items-center" aria-hidden="true">
+                        <Trash2 className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                        Desinstalar seleccionadas
+                      </span>
+                      <AnimatePresence mode="wait" initial={false}>
+                        {confirmBulk === 'uninstall' ? (
+                          <motion.span
+                            key="confirm"
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -6 }}
+                            transition={{ duration: 0.15, ease: 'easeOut' }}
+                            className="col-start-1 row-start-1 justify-self-center"
+                          >
+                            ¿Seguro?
+                          </motion.span>
+                        ) : (
+                          <motion.span
+                            key="idle"
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -6 }}
+                            transition={{ duration: 0.15, ease: 'easeOut' }}
+                            className="col-start-1 row-start-1 flex items-center justify-self-center"
+                          >
+                            <Trash2 className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                            Desinstalar seleccionadas
+                          </motion.span>
+                        )}
+                      </AnimatePresence>
+                    </span>
+                  </Button>
+                </motion.div>
+              )}
+            </AnimatePresence>
             <Button
               variant="secondary"
               size="sm"
@@ -476,6 +661,7 @@ export default function ExtensionsPanel() {
             title="No hay extensiones instaladas"
           />
         ) : visibleInstalled.length > 0 ? (
+          <>
           <div className="grid" style={grid}>
             {sortedInstalled.map(({ manifest: m }) => {
               const upd = visibleUpdates.find((u) => u.id === m.id);
@@ -486,6 +672,10 @@ export default function ExtensionsPanel() {
                   m={m}
                   updatable={!!upd}
                   disabled={!showAdultExtensions && isAdultExtension(m)}
+                  selected={selectedInstalledIds.has(m.id)}
+                  onSelectionChange={tutorialPreview ? undefined : (selected) => toggleSelection(setSelectedInstalledIds, m.id, selected)}
+                  selectionLabel={`Seleccionar ${m.name} para desinstalar`}
+                  selectionDisabled={busy !== ''}
                   action={
                     <div className="flex items-center" style={{ gap: px(4, scale, 3) }}>
                       {Array.isArray(m.config?.sources) && m.config.sources.length > 0 && (
@@ -561,7 +751,7 @@ export default function ExtensionsPanel() {
                           className="text-destructive hover:bg-transparent hover:text-destructive"
                           title="Desinstalar"
                           aria-label="Desinstalar"
-                          disabled={busy === m.id}
+                          disabled={busy !== ''}
                           onClick={() => setConfirmRemove(m)}
                           style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
                         >
@@ -586,7 +776,7 @@ export default function ExtensionsPanel() {
                                   setConfirmRemove(null);
                                   await doUninstall(id);
                                 }}
-                                disabled={busy === m.id}
+                                disabled={busy !== ''}
                                 style={{ height: px(28, scale, 24), fontSize: px(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                               >
                                 Desinstalar
@@ -601,6 +791,7 @@ export default function ExtensionsPanel() {
               );
             })}
           </div>
+          </>
         ) : null}
       </section>
 
@@ -612,27 +803,87 @@ export default function ExtensionsPanel() {
           <h3 className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
             Disponibles
           </h3>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => {
-              checkUpdates();
-              loadAvailable();
-            }}
-            disabled={loading}
-            style={{
-              height: px(36, scale, 30),
-              fontSize: px(14, scale, 12),
-              paddingLeft: px(12, scale, 9),
-              paddingRight: px(12, scale, 9)
-            }}
-          >
-            <RefreshCw
-              className={cn('mr-2', loading && 'animate-spin')}
-              style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
-            />
-            Recargar
-          </Button>
+          <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
+            <AnimatePresence initial={false}>
+              {!tutorialPreview && selectedAvailableIds.size > 0 && (
+                <motion.div
+                  key="bulk-install-button"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="flex"
+                  ref={bulkInstallRef}
+                >
+                  <Button
+                    size="sm"
+                    onClick={() => handleBulkAction('install')}
+                    disabled={busy !== '' || loading || updating !== ''}
+                    style={{
+                      height: px(36, scale, 30),
+                      fontSize: px(14, scale, 12),
+                      paddingLeft: px(12, scale, 9),
+                      paddingRight: px(12, scale, 9)
+                    }}
+                  >
+                    <span className="grid">
+                      <span className="invisible col-start-1 row-start-1 flex items-center" aria-hidden="true">
+                        <Download className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                        Instalar seleccionadas
+                      </span>
+                      <AnimatePresence mode="wait" initial={false}>
+                        {confirmBulk === 'install' ? (
+                          <motion.span
+                            key="confirm"
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -6 }}
+                            transition={{ duration: 0.15, ease: 'easeOut' }}
+                            className="col-start-1 row-start-1 justify-self-center"
+                          >
+                            ¿Seguro?
+                          </motion.span>
+                        ) : (
+                          <motion.span
+                            key="idle"
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -6 }}
+                            transition={{ duration: 0.15, ease: 'easeOut' }}
+                            className="col-start-1 row-start-1 flex items-center justify-self-center"
+                          >
+                            <Download className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                            Instalar seleccionadas
+                          </motion.span>
+                        )}
+                      </AnimatePresence>
+                    </span>
+                  </Button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                checkUpdates();
+                loadAvailable();
+              }}
+              disabled={loading}
+              style={{
+                height: px(36, scale, 30),
+                fontSize: px(14, scale, 12),
+                paddingLeft: px(12, scale, 9),
+                paddingRight: px(12, scale, 9)
+              }}
+            >
+              <RefreshCw
+                className={cn('mr-2', loading && 'animate-spin')}
+                style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
+              />
+              Recargar
+            </Button>
+          </div>
         </div>
 
         {!repoUrl ? (
@@ -669,12 +920,17 @@ export default function ExtensionsPanel() {
           />
           ) : null
         ) : (
+          <>
           <div className="grid" style={grid}>
             {sortedAvailable.map((m) => (
               <ExtensionCard
                 key={m.id}
                 scale={scale}
                 m={m}
+                selected={selectedAvailableIds.has(m.id)}
+                onSelectionChange={tutorialPreview ? undefined : (selected) => toggleSelection(setSelectedAvailableIds, m.id, selected)}
+                selectionLabel={`Seleccionar ${m.name} para instalar`}
+                selectionDisabled={busy !== '' || loading}
                 action={
                   <div
                     ref={confirmInstall?.id === m.id ? confirmRef : null}
@@ -687,7 +943,7 @@ export default function ExtensionsPanel() {
                       className="hover:bg-transparent hover:text-foreground"
                       title="Instalar"
                       aria-label="Instalar"
-                      disabled={busy === m.id}
+                      disabled={busy !== ''}
                       onClick={() => setConfirmInstall(m)}
                       style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
                     >
@@ -710,7 +966,7 @@ export default function ExtensionsPanel() {
                               setConfirmInstall(null);
                               await doInstall(m);
                             }}
-                            disabled={busy === m.id}
+                            disabled={busy !== ''}
                             style={{ height: px(28, scale, 24), fontSize: px(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                            >
                             Instalar
@@ -723,6 +979,7 @@ export default function ExtensionsPanel() {
               />
             ))}
           </div>
+          </>
         )}
       </section>
 

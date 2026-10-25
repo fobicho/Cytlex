@@ -1,5 +1,6 @@
 import { buildSelectorSource } from './selectorSource.js';
 import { chapterIndex } from './chapterIndex.js';
+import defaultExtensionIndex from '../../docs/index.json';
 
 const KEY = 'cytlex:extensions:v1';
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
@@ -253,7 +254,13 @@ export const extensions = {
   },
   manifest(id) {
     const rec = findRecord(id);
-    if (!rec) return { id, name: id || 'Fuente' };
+    if (!rec) {
+      const fallback = defaultExtensionIndex.find((manifest) => manifest.id === id
+        || subSources(manifest)?.some((source) => source.id === id));
+      if (!fallback) return { id, name: id || 'Fuente' };
+      const sub = subSources(fallback)?.find((source) => source.id === id);
+      return sub ? { ...fallback, ...sub } : fallback;
+    }
     const sub = subSources(rec.manifest)?.find((s) => s.id === id);
     return sub ? { ...rec.manifest, ...sub } : rec.manifest;
   },
@@ -405,6 +412,25 @@ export const extensions = {
   async uninstall(id) {
     const record = findRecord(id);
     const baseId = record?.manifest.id || id;
+    if (record?.manifest) {
+      try {
+        const sourceManifests = new Map([
+          [baseId, record.manifest],
+          ...(subSources(record.manifest) || []).map((source) => [source.id, { ...record.manifest, ...source }])
+        ]);
+        const favs = JSON.parse(localStorage.getItem('cytlex:favs') || '[]');
+        const enrichedFavs = favs.map((fav) => {
+          const source = sourceManifests.get(fav.sourceId || 'leercapitulo');
+          if (!source) return fav;
+          return {
+            ...fav,
+            sourceName: fav.sourceName || source.name || baseId,
+            sourceIcon: source.icon || record.manifest.icon || fav.sourceIcon || ''
+          };
+        });
+        localStorage.setItem('cytlex:favs', JSON.stringify(enrichedFavs));
+      } catch {}
+    }
     write(read().filter((r) => r.manifest.id !== baseId));
     clearModule(baseId);
     for (const sid of [baseId, ...(subSources(record?.manifest)?.map((s) => s.id) || [])]) {

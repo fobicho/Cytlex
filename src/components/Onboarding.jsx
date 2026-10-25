@@ -1,7 +1,7 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon } from 'lucide-react';
+import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
+import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon, Minus, Plus, Check, LoaderCircle } from 'lucide-react';
 import { THEMES, MODES } from '../lib/themes.js';
 import { resolveMode, settings } from '../lib/settings.js';
 import { cn } from '../lib/utils.js';
@@ -11,35 +11,62 @@ import { Button } from './ui/button.jsx';
 const STEPS = [
   {
     title: 'Bienvenido a Cytlex',
-    body: '¡Buenas, lector! Es un gusto verte por aquí, espero que este mini tutorial te sirva para entender el funcionamiento de mi aplicación, aunque tampoco es tan difícil de usar..\n\nSiempre puedes saltar este tutorial presionando el botón \'Saltar tutorial\' abajo a la izquierda.'
+    body: '¡Bienvenido lector, que gusto tenerte por aquí! Espero que este mini tutorial introductorio te sirva para entender el funcionamiento de Cytlex, aunque tampoco es tan difícil de usar..\n\nSi es tu primera vez entrando, te recomiendo completarlo, ya que te ayudará a familiarizarte con la aplicación. Siempre podrás saltar este tutorial presionando el botón **Saltar tutorial** abajo a la izquierda.'
   },
   {
-    title: 'Un paseo por la app',
-    body: 'Toca cada sección para ver qué puedes hacer en ella.',
-    walkthrough: [
-      { id: 'biblioteca', label: 'Biblioteca', icon: Library, desc: 'Organiza tus mangas favoritos en base a las categorías que estimes convenientes.' },
-      { id: 'explorar', label: 'Explorar', icon: Compass, desc: 'Busca tus mangas preferidos y administra tus extensiones.' },
-      { id: 'ajustes', label: 'Ajustes', icon: SettingsIcon, desc: 'Configura la aplicación a tu gusto, con una amplia gama de modificaciones distintas.' }
-    ]
+    title: 'Un paseo por la app'
   },
   {
-    title: 'Elige tu tema',
-    body: 'Selecciona tus colores favoritos. Puedes cambiarlo cuando quieras en \'Ajustes\'.'
+    title: 'Configura la apariencia',
+    body: 'Selecciona tus colores favoritos y la escala a la que quieras ver todo. Puedes cambiarlo cuando quieras en **Ajustes**.'
+  },
+  {
+    title: 'Repositorio de extensiones',
+    body: 'Agrega el repositorio oficial para instalar extensiones desde **Explorar**. También puedes omitir este paso y agregar otro repositorio compatible más adelante, aunque en lo personal recomiendo instalar este.\n\nAlgunas extensiones pueden ofrecer contenido para adultos **(+18)**. Para mostrarlas, tendrás que confirmar que eres mayor de edad en **Ajustes -> Extensiones**.'
   },
   {
     title: 'Todo listo',
-    body: '¡Ya estás preparado para empezar con tus lecturas! Solo no olvides agregar el repositorio con las distintas extensiones en \'Ajustes\'.\n\nSi luego de usarla te gusta mi aplicación, por favor considera aportar la cantidad que desees, de manera totalmente voluntaria, para seguir dándole mantención. <3'
+    body: '¡Ya estás preparado para empezar con tus lecturas! Instala las extensiones que quieras usar, explora el catálogo y descubre los próximos mangas que quieras leer.\n\nCytlex nace como un proyecto pasional, sin fines de lucro y 100% por y para la comunidad. Si luego de usarla consideras que es una buena aplicación, puedes aportar de manera voluntaria la cantidad que desees, con el fin de seguir dándole mantención. <3'
   }
 ];
+
+const DEFAULT_EXTENSION_REPOSITORY = 'https://fobicho.github.io/Cytlex/index.json';
+const WALKTHROUGH_VIEWS = [
+  { id: 'biblioteca', label: 'Biblioteca', icon: Library, desc: 'Organiza tus mangas de manera sencilla en distintas categorías.' },
+  { id: 'explorar', label: 'Explorar', icon: Compass, desc: 'Busca tus mangas preferidos y administra tus extensiones.' },
+  { id: 'ajustes', label: 'Ajustes', icon: SettingsIcon, desc: 'Configura la aplicación a tu gusto, con una amplia gama de modificaciones distintas.' }
+];
+const SETTINGS_SECTION_IDS = ['apariencia', 'biblioteca', 'lector', 'categorias', 'extensiones', 'notificaciones', 'seguimiento', 'respaldo', 'atajos'];
+const STEP_CONTENT_VARIANTS = {
+  enter: (direction) => ({ opacity: 0, x: direction === 0 ? 0 : direction > 0 ? 24 : -24 }),
+  center: { opacity: 1, x: 0 },
+  exit: (direction) => ({ opacity: 0, x: direction === 0 ? 0 : direction > 0 ? -24 : 24 })
+};
 
 export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp, enteringWithSplash = false }) {
   const [step, setStep] = useState(0);
   const [theme, setTheme] = useState(() => settings.get().theme);
   const [mode, setMode] = useState(() => settings.get().mode);
   const [exiting, setExiting] = useState(false);
-  const [walk, setWalk] = useState(0);
+  const [walkthroughView, setWalkthroughView] = useState('biblioteca');
+  const [repoUrl, setRepoUrl] = useState(() => (settings.get().extIndexUrl || '').trim());
+  const [addingRepository, setAddingRepository] = useState(false);
+  const previousStep = useRef(step);
+  const hasMounted = useRef(false);
   const scale = useScale();
   const reduceMotion = useReducedMotion();
+  const skipDotAnimation = Math.abs(step - previousStep.current) === 1 && Math.max(step, previousStep.current) <= 2;
+  const stepDirection = step < previousStep.current ? -1 : 1;
+  const motionDirection = reduceMotion ? 0 : stepDirection;
+  const firstCardEntrance = enteringWithSplash && !hasMounted.current;
+
+  useEffect(() => {
+    hasMounted.current = true;
+  }, []);
+
+  useEffect(() => {
+    previousStep.current = step;
+  }, [step]);
 
   useEffect(() => {
     document.body.classList.add('tutorial-open');
@@ -57,12 +84,43 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   useEffect(() => {
     if (step === 1) {
       if (typeof onRevealApp === 'function') onRevealApp();
-      const pages = ['/biblioteca', '/explorar', '/ajustes'];
-      window.location.hash = `#${pages[walk] || pages[0]}`;
+      const routes = {
+        biblioteca: '#/biblioteca',
+        explorar: '#/explorar?tab=mangas',
+        ajustes: `#/ajustes?tutorial=1&section=${SETTINGS_SECTION_IDS[0]}`
+      };
+      window.location.hash = routes[walkthroughView];
     } else {
       if (typeof onHideApp === 'function') onHideApp();
     }
-  }, [step, walk, onRevealApp, onHideApp]);
+  }, [step, walkthroughView, onRevealApp, onHideApp]);
+
+  useEffect(() => {
+    const syncWalkthroughView = () => {
+      const path = window.location.hash.slice(1).split('?')[0];
+      if (path === '/biblioteca') setWalkthroughView('biblioteca');
+      else if (path === '/explorar') setWalkthroughView('explorar');
+      else if (path === '/ajustes') setWalkthroughView('ajustes');
+    };
+    window.addEventListener('hashchange', syncWalkthroughView);
+    return () => window.removeEventListener('hashchange', syncWalkthroughView);
+  }, []);
+
+  useEffect(() => {
+    if (step !== 1 || walkthroughView === 'biblioteca') return;
+    let tab = 'mangas';
+    let sectionIndex = 0;
+    const timer = window.setInterval(() => {
+      if (walkthroughView === 'explorar') {
+        tab = tab === 'mangas' ? 'extensiones' : 'mangas';
+        window.location.hash = `#/explorar?tab=${tab}`;
+      } else {
+        sectionIndex = (sectionIndex + 1) % SETTINGS_SECTION_IDS.length;
+        window.location.hash = `#/ajustes?tutorial=1&section=${SETTINGS_SECTION_IDS[sectionIndex]}`;
+      }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [step, walkthroughView]);
 
   const applyTheme = useCallback((t, m) => {
     const run = () => {
@@ -93,39 +151,58 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const back = () => setStep((s) => Math.max(0, s - 1));
 
   const isTheme = step === 2;
+  const isRepository = step === 3;
   const isReady = step === STEPS.length - 1;
   const progress = ((step + 1) / STEPS.length) * 100;
+  const uiScale = settings.get().uiScale || 1;
+  const hasOfficialRepository = repoUrl === DEFAULT_EXTENSION_REPOSITORY;
+  const hasOtherRepository = !!repoUrl && !hasOfficialRepository;
 
   return (
     <motion.div
-      className={`fixed inset-0 z-[60] p-4 transition-colors duration-300 ${step === 1 ? 'bg-transparent' : 'bg-background flex items-center justify-center'}`}
+      className={`fixed inset-0 z-[60] p-4 transition-colors duration-300 ${step === 1 ? 'pointer-events-none bg-transparent' : 'pointer-events-auto bg-background flex items-center justify-center'}`}
       initial={{ y: '0%' }}
       animate={{ y: exiting ? '-100%' : '0%' }}
       transition={{ duration: exiting ? 0.8 : 0, ease: exiting ? [0.76, 0, 0.24, 1] : 'linear' }}
     >
-      {step !== 1 && (
-        <motion.div
-          className="relative w-full max-w-3xl overflow-hidden rounded-3xl border border-border bg-card text-card-foreground transition-colors duration-300 pointer-events-auto"
-          initial={{
-            opacity: 0,
-            transform: `translateY(${reduceMotion ? '0vh' : enteringWithSplash ? '100vh' : '24px'}) scale(${scale})`
-          }}
-          animate={{ opacity: 1, transform: `translateY(0vh) scale(${scale})` }}
-          transition={{
-            duration: enteringWithSplash && !reduceMotion ? 0.8 : 0.3,
-            ease: enteringWithSplash && !reduceMotion ? [0.76, 0, 0.24, 1] : [0.22, 1, 0.36, 1]
-          }}
-          style={{ transformOrigin: 'center' }}
-        >
+      <LayoutGroup id="onboarding-surfaces">
+        <AnimatePresence mode="wait">
+          {step !== 1 && (
+            <motion.div
+              key="step-card"
+              layoutId="onboarding-container"
+              layout="position"
+              className="relative w-full max-w-3xl pointer-events-auto"
+              initial={{
+                opacity: 0,
+                transform: `translateY(${reduceMotion ? '0px' : firstCardEntrance ? '100vh' : '0px'})`
+              }}
+              animate={{ opacity: 1, transform: 'translateY(0px)' }}
+              exit={{ opacity: 0 }}
+              transition={{
+                duration: firstCardEntrance && !reduceMotion ? 0.8 : 0.3,
+                ease: firstCardEntrance && !reduceMotion ? [0.76, 0, 0.24, 1] : [0.22, 1, 0.36, 1],
+                layout: { duration: 0.3, ease: [0.22, 1, 0.36, 1] }
+              }}
+              style={{ transformOrigin: 'center' }}
+            >
+              <motion.div
+                animate={{ transform: `scale(${scale})` }}
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                className="relative w-full overflow-hidden rounded-3xl border border-border bg-card text-card-foreground transition-colors duration-300"
+                style={{ transformOrigin: 'center' }}
+              >
           <div className="px-6 py-8 sm:px-10 sm:py-10">
-            <AnimatePresence mode="wait">
+            <AnimatePresence mode="wait" custom={motionDirection}>
               <motion.div
                 key={step}
-                initial={{ opacity: 0, x: 24 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -24 }}
+                custom={motionDirection}
+                variants={STEP_CONTENT_VARIANTS}
+                initial="enter"
+                animate="center"
+                exit="exit"
                 transition={{ duration: 0.25, ease: 'easeOut' }}
-                className="min-h-[320px]"
+                className="h-[320px]"
               >
                 {step === 0 ? (
                   <div className="mb-6 flex items-center gap-3">
@@ -143,18 +220,24 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                     </motion.div>
                   </div>
                 ) : (
-                  <div className="mb-6">
+                  <div className={cn('mb-6', step >= 2 && 'mb-2')}>
                     <h2 className="text-2xl font-semibold tracking-tight font-display">{STEPS[step].title}</h2>
                   </div>
                 )}
 
                 {STEPS[step].body && (
-                  <p className="text-base text-muted-foreground leading-relaxed whitespace-pre-line">{STEPS[step].body}</p>
+                  <p className="text-base text-muted-foreground leading-relaxed whitespace-pre-line">
+                    {STEPS[step].body.split(/(\*\*[^*]+\*\*|Cytlex)/g).map((part, i) => {
+                      if (part.startsWith('**') && part.endsWith('**')) {
+                        return <strong key={i}>{part.slice(2, -2)}</strong>;
+                      }
+                      return part === 'Cytlex' ? <span key={i} className="font-display font-semibold">{part}</span> : part;
+                    })}
+                  </p>
                 )}
 
                 {isReady && (
                   <Button
-                    variant="outline"
                     size="sm"
                     className="mt-5"
                     onClick={() => {
@@ -188,14 +271,14 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 )}
 
                 {isTheme && (
-                  <div className="mt-6 space-y-5">
+                  <div className="mt-4 space-y-3">
                     <div className="flex gap-2">
                       {MODES.map((m) => (
                         <button
                           key={m.id}
                           onClick={() => applyTheme(theme, m.id)}
                           className={cn(
-                            'flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium transition-all',
+                            'flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
                             mode === m.id
                               ? 'border-primary bg-primary/5 text-foreground'
                               : 'border-border text-muted-foreground hover:bg-muted/40'
@@ -214,13 +297,13 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                             key={t.id}
                             onClick={() => applyTheme(t.id, mode)}
                             className={cn(
-                              'group flex items-center gap-3 rounded-xl border px-3 py-3 text-left transition-all',
+                              'group flex items-center gap-3 rounded-xl border px-3 py-1.5 text-left transition-all',
                               selected
                                 ? 'border-primary bg-primary/5'
                                 : 'border-border hover:bg-muted/40'
                             )}
                           >
-                            <div className="h-10 w-10 rounded-full overflow-hidden shrink-0 flex">
+                            <div className="h-7 w-7 rounded-full overflow-hidden shrink-0 flex">
                               <span className="flex-1" style={{ background: sw[0] }} />
                               <span className="flex-1" style={{ background: sw[1] }} />
                             </div>
@@ -232,6 +315,83 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                         );
                       })}
                     </div>
+                  </div>
+                )}
+
+                {isTheme && (
+                  <div className="mt-4 flex items-center gap-2 rounded-xl border border-border bg-muted/30 px-4 py-2">
+                    <span className="shrink-0 text-sm font-medium">Tamaño de la interfaz</span>
+                    <button
+                      type="button"
+                      onClick={() => settings.set({ uiScale: Math.max(0.8, uiScale - 0.05) })}
+                      className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                      aria-label="Reducir escala"
+                    >
+                      <Minus className="h-4 w-4" />
+                    </button>
+                    <input
+                      type="range"
+                      min={0.8}
+                      max={1.2}
+                      step={0.05}
+                      value={uiScale}
+                      onChange={(e) => settings.set({ uiScale: Number(e.target.value) })}
+                      aria-label="Tamaño de la interfaz"
+                      className="h-1.5 min-w-0 flex-1 cursor-pointer rounded-full bg-muted accent-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => settings.set({ uiScale: Math.min(1.2, uiScale + 0.05) })}
+                      className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                      aria-label="Aumentar escala"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                    <span className="min-w-10 text-right text-sm text-muted-foreground">
+                      {Math.round(uiScale * 100)}%
+                    </span>
+                  </div>
+                )}
+
+                {isRepository && (
+                  <div className="mt-6 rounded-xl border border-border bg-muted/30 p-5">
+                      <div className="flex items-center gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">
+                            Repositorio oficial de{' '}
+                            <span className="inline-flex items-center gap-1 align-middle">
+                              <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="" className="h-4 w-4 rounded-[4px]" />
+                              <span className="font-display font-semibold tracking-tight">Cytlex</span>
+                            </span>
+                          </p>
+                          <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                            {DEFAULT_EXTENSION_REPOSITORY}
+                          </p>
+                          {hasOtherRepository && (
+                            <p className="mt-2 text-xs text-muted-foreground">
+                              Ya hay otro repositorio configurado; al continuar con este se reemplazará.
+                            </p>
+                          )}
+                        </div>
+                        <Button
+                          className="shrink-0"
+                          disabled={hasOfficialRepository || addingRepository}
+                          onClick={() => {
+                            setAddingRepository(true);
+                            setTimeout(() => {
+                              settings.set({ extIndexUrl: DEFAULT_EXTENSION_REPOSITORY });
+                              setRepoUrl(DEFAULT_EXTENSION_REPOSITORY);
+                              setAddingRepository(false);
+                            }, 800);
+                          }}
+                        >
+                          {addingRepository ? (
+                            <><LoaderCircle className="mr-2 h-4 w-4 animate-spin" />Agregando…</>
+                          ) : hasOfficialRepository ? (
+                            <><Check className="mr-2 h-4 w-4" />Repositorio agregado</>
+                          ) : hasOtherRepository ? 'Usar repositorio oficial' : 'Agregar repositorio oficial'}
+                        </Button>
+                      </div>
                   </div>
                 )}
               </motion.div>
@@ -250,7 +410,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 <motion.span
                   key={i}
                   animate={{ width: i === step ? 28 : 8 }}
-                  transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                  transition={{ duration: skipDotAnimation ? 0 : 0.3, ease: [0.22, 1, 0.36, 1] }}
                   className={cn(
                     'h-2 rounded-full',
                     i === step ? 'bg-primary' : i < step ? 'bg-primary/40' : 'bg-muted-foreground/30'
@@ -266,50 +426,65 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                   Atrás
                 </Button>
               )}
-              <Button size="sm" onClick={next}>
+              <Button size="sm" className="w-28" onClick={next}>
                 {step === STEPS.length - 1 ? 'Comenzar' : 'Siguiente'}
                 {step < STEPS.length - 1 && <ArrowRight className="h-4 w-4 ml-1" />}
               </Button>
             </div>
           </div>
-        </motion.div>
-      )}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-      <AnimatePresence>
-        {step === 1 && (
-          <motion.div
-            key="walkthrough-panel"
-            initial={{ opacity: 0, y: 24, x: '-50%' }}
-            animate={{ opacity: 1, y: 0, x: '-50%' }}
-            exit={{ opacity: 0, y: 24, x: '-50%' }}
-            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-            className="pointer-events-auto fixed bottom-10 left-1/2 w-[min(92vw,40rem)] rounded-2xl border border-border bg-card text-card-foreground shadow-lg transition-colors duration-300"
-            style={{ zoom: scale }}
-          >
+        <AnimatePresence mode="wait">
+          {step === 1 && (
+            <motion.div
+              key="walkthrough-panel"
+              layoutId="onboarding-container"
+              layout="position"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{
+                opacity: { duration: 0.25, ease: 'easeOut' },
+                layout: { duration: 0.3, ease: [0.22, 1, 0.36, 1] }
+              }}
+              className="pointer-events-auto fixed bottom-10 left-1/2 w-[min(92vw,40rem)]"
+              style={{ translate: '-50% 0' }}
+            >
+              <motion.div
+                animate={{ transform: `scale(${scale})` }}
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                className="rounded-2xl border border-border bg-card text-card-foreground shadow-lg transition-colors duration-300"
+                style={{ transformOrigin: 'center bottom' }}
+              >
             <div className="px-5 py-4 space-y-3">
               <div className="grid grid-cols-3 gap-2">
-                {STEPS[1].walkthrough.map((w, i) => {
-                  const Icon = w.icon;
-                  const on = walk === i;
+                {WALKTHROUGH_VIEWS.map(({ id, label, icon: Icon }) => {
+                  const selected = walkthroughView === id;
                   return (
                     <button
-                      key={w.id}
+                      key={id}
                       type="button"
-                      onClick={() => setWalk(i)}
+                      onClick={() => setWalkthroughView(id)}
+                      aria-pressed={selected}
                       className={cn(
                         'flex flex-col items-center gap-2 rounded-xl border px-3 py-3 text-center transition-all',
-                        on
+                        selected
                           ? 'border-primary bg-primary/5 text-foreground'
                           : 'border-border text-muted-foreground hover:bg-muted/40'
                       )}
                     >
                       <Icon className="h-6 w-6" />
-                      <span className="text-sm font-medium">{w.label}</span>
+                      <span className="text-sm font-medium">{label}</span>
                     </button>
                   );
                 })}
               </div>
-              <p className="text-sm text-muted-foreground">{STEPS[1].walkthrough[walk].desc}</p>
+              <p className="text-sm text-muted-foreground">
+                {WALKTHROUGH_VIEWS.find(({ id }) => id === walkthroughView)?.desc}
+              </p>
               <div className="grid grid-cols-3 items-center gap-3 pt-1">
                 <div className="flex justify-start">
                   <Button variant="outline" size="sm" onClick={finish}>
@@ -321,7 +496,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                     <motion.span
                       key={i}
                       animate={{ width: i === step ? 28 : 8 }}
-                      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                      transition={{ duration: skipDotAnimation ? 0 : 0.3, ease: [0.22, 1, 0.36, 1] }}
                       className={cn(
                         'h-2 rounded-full',
                         i === step ? 'bg-primary' : i < step ? 'bg-primary/40' : 'bg-muted-foreground/30'
@@ -341,9 +516,11 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 </div>
               </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </LayoutGroup>
     </motion.div>
   );
 }

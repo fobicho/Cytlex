@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ArrowLeft, Maximize2, Minimize2, ChevronLeft, ChevronRight, ChevronDown, Download, Loader2 } from 'lucide-react';
+import { ArrowLeft, Maximize2, Minimize2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Download, Loader2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
@@ -151,6 +151,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const [dragging, setDragging] = useState(false);
   const [instantZoomReset, setInstantZoomReset] = useState(false);
   const zoomResetFrame = useRef(null);
+  const verticalZoomAnchorRef = useRef(null);
   const lastPanelPointerDownRef = useRef(null);
   const ignoreNativeDoubleClickUntilRef = useRef(0);
   const [isRead, setIsRead] = useState(() => !!progress.get(chapterUrl, sourceId)?.read);
@@ -171,9 +172,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     const stageRect = stage.getBoundingClientRect();
     const style = getComputedStyle(content);
     const matrix = new DOMMatrixReadOnly(style.transform);
-    const [originX = content.clientWidth / 2, originY = content.clientHeight / 2] = style.transformOrigin.split(' ').map(parseFloat);
     const currentScale = matrix.a || 1;
-    const visibleZoom = Math.max(0, (currentScale - 1) * 100);
     const x = e.clientX - stageRect.left;
     const y = e.clientY - stageRect.top;
     const returningToOriginal = wheelZoomRef.current >= 50;
@@ -181,48 +180,58 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     const panelWidth = panels.length ? Math.max(...panels.map((rect) => rect.right)) - Math.min(...panels.map((rect) => rect.left)) : 0;
     const targetScale = returningToOriginal || !panelWidth ? 1 : currentScale * stageRect.width / panelWidth;
     const targetZoom = returningToOriginal ? 0 : Math.max(0, (targetScale - 1) * 100);
-    const target = returningToOriginal
-      ? { x: 50, y: 50 }
-      : {
-          x: Math.min(100, Math.max(0, (x / stageRect.width) * 100)),
-          y: Math.min(100, Math.max(0, (y / stageRect.height) * 100))
-        };
-    const targetOriginX = (target.x / 100) * content.clientWidth;
-    const targetOriginY = (target.y / 100) * content.clientHeight;
-    const stagedPan = {
-      x: matrix.e + (currentScale - 1) * (targetOriginX - originX),
-      y: matrix.f + (currentScale - 1) * (targetOriginY - originY)
-    };
+    const originX = content.clientWidth / 2;
+    const originY = content.clientHeight / 2;
     let targetPan = { x: 0, y: 0 };
     if (!returningToOriginal) {
       const sourceX = originX + (x - matrix.e - originX) / currentScale;
       const sourceY = originY + (y - matrix.f - originY) / currentScale;
-      const targetOriginX = (target.x / 100) * content.clientWidth;
-      const targetOriginY = (target.y / 100) * content.clientHeight;
       targetPan = {
-        x: x - targetScale * sourceX - (1 - targetScale) * targetOriginX,
-        y: y - targetScale * sourceY - (1 - targetScale) * targetOriginY
+        x: x - originX - targetScale * (sourceX - originX),
+        y: y - originY - targetScale * (sourceY - originY)
       };
     }
 
-    if (zoomResetFrame.current) cancelAnimationFrame(zoomResetFrame.current);
-    setInstantZoomReset(true);
-    panRef.current = stagedPan;
-    setPan(stagedPan);
-    setWheelZoom(visibleZoom);
-    zoomOriginRef.current = target;
-    setZoomOrigin(target);
+    panRef.current = targetPan;
+    setPan(targetPan);
+    zoomOriginRef.current = { x: 50, y: 50 };
+    setZoomOrigin(zoomOriginRef.current);
     wheelZoomRef.current = targetZoom;
-    zoomResetFrame.current = requestAnimationFrame(() => {
-      zoomResetFrame.current = requestAnimationFrame(() => {
-        panRef.current = targetPan;
-        setPan(targetPan);
-        setWheelZoom(targetZoom);
-        setInstantZoomReset(false);
-        zoomResetFrame.current = null;
-      });
-    });
+    setWheelZoom(targetZoom);
   };
+
+  const toggleVerticalZoomAtPointer = (e) => {
+    const image = e.target instanceof Element ? e.target.closest('img[alt^="Página "]') : null;
+    if (!image) return;
+    e.preventDefault();
+    const rect = image.getBoundingClientRect();
+    if (!rect.height) return;
+    let parent = image.parentElement;
+    while (parent && parent !== document.body) {
+      const style = getComputedStyle(parent);
+      if (parent.hasAttribute('data-scrollable') || (/(auto|scroll)/.test(style.overflowY) && parent.scrollHeight > parent.clientHeight)) break;
+      parent = parent.parentElement;
+    }
+    if (!parent || parent === document.body) parent = document.scrollingElement;
+    const anchor = {
+      image,
+      ratio: (e.clientY - rect.top) / rect.height,
+      clientY: e.clientY,
+      parent
+    };
+    verticalZoomAnchorRef.current = anchor;
+    const nextZoom = wheelZoomRef.current > 0 ? 0 : 50;
+    wheelZoomRef.current = nextZoom;
+    setWheelZoom(nextZoom);
+  };
+
+  useLayoutEffect(() => {
+    const anchor = verticalZoomAnchorRef.current;
+    if (!anchor) return;
+    verticalZoomAnchorRef.current = null;
+    const rect = anchor.image.getBoundingClientRect();
+    anchor.parent.scrollTop += rect.top + rect.height * anchor.ratio - anchor.clientY;
+  }, [wheelZoom]);
 
   const showBar = useCallback(() => {
     clearTimeout(hideTimer.current);
@@ -557,15 +566,18 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       const s = getComputedStyle(el);
       return /(auto|scroll)/.test(s.overflowY) && el.scrollHeight > el.clientHeight;
     };
-
     const onWheel = (e) => {
       if (e.deltaY === 0) return;
-      const zoomable = mode === 'paginado' || mode === 'paginado-rtl' || e.ctrlKey;
+      if (e.ctrlKey) {
+        e.preventDefault();
+        return;
+      }
+      const zoomable = mode === 'paginado' || mode === 'paginado-rtl';
       if (!zoomable) return;
       const zoomIn = e.deltaY < 0;
+      const image = e.target instanceof Element ? e.target.closest('img[alt^="Página "]') : null;
       if (zoomIn) {
         if (scrollable(e.target)) return;
-        const image = e.target instanceof Element ? e.target.closest('img[alt^="Página "]') : null;
         if (!image) return;
       }
       const currentZoom = wheelZoomRef.current;
@@ -585,26 +597,22 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       } else if (stage && content && mode !== 'vertical') {
         const rect = stage.getBoundingClientRect();
         if (rect.width && rect.height) {
-          const qy = e.clientY - rect.top;
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
           const s0 = 1 + currentZoom / 100;
           const s1 = 1 + nextZoom / 100;
-          const o0x = (zoomOriginRef.current.x / 100) * rect.width;
-          const o0y = (zoomOriginRef.current.y / 100) * rect.height;
-          const pContentX = (rect.width / 2 - panRef.current.x - o0x) / s0 + o0x;
-          const pContentY = (qy - panRef.current.y - o0y) / s0 + o0y;
-          const o1y = Math.min(100, Math.max(0, (qy / rect.height) * 100)) / 100 * rect.height;
+          const oX = content.clientWidth / 2;
+          const oY = content.clientHeight / 2;
+          const pContentX = oX + (x - oX - panRef.current.x) / s0;
+          const pContentY = oY + (y - oY - panRef.current.y) / s0;
           const nextPan = {
-            x: -s1 * (pContentX - rect.width / 2),
-            y: qy - o1y - s1 * (pContentY - o1y)
+            x: x - oX - s1 * (pContentX - oX),
+            y: y - oY - s1 * (pContentY - oY)
           };
           panRef.current = nextPan;
           setPan(nextPan);
-          const nextOrigin = {
-            x: 50,
-            y: Math.min(100, Math.max(0, (qy / rect.height) * 100))
-          };
-          zoomOriginRef.current = nextOrigin;
-          setZoomOrigin(nextOrigin);
+          zoomOriginRef.current = { x: 50, y: 50 };
+          setZoomOrigin(zoomOriginRef.current);
         }
       }
       setWheelZoom(nextZoom);
@@ -706,15 +714,19 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   };
 
   const navBtn =
-    'fixed top-1/2 -translate-y-1/2 z-20 grid place-items-center w-11 h-11 rounded-lg border border-border bg-card/90 backdrop-blur-xl shadow-2xl text-foreground transition-colors hover:bg-accent';
+    'absolute top-1/2 -translate-y-1/2 z-20 grid place-items-center w-11 h-11 rounded-lg border border-border bg-card/90 backdrop-blur-xl shadow-2xl text-foreground transition-colors hover:bg-accent';
 
   const allPages = [...Array(ch.pages.length).keys()];
 
-  const nextChapter = (() => {
-    const opts = ch?.options?.length ? ch.options : (ch ? [{ title: ch.label, url: chapterUrl }] : []);
-    const idx = opts.findIndex((o) => o.url === chapterUrl);
-    return idx >= 0 && idx < opts.length - 1 ? opts[idx + 1] : null;
-  })();
+  const chapterOptions = ch?.options?.length ? ch.options : [{ title: ch.label, url: chapterUrl }];
+  const chapterIndex = chapterOptions.findIndex((option) => option.url === chapterUrl);
+  const previousChapter = ch?.prev?.url
+    ? ch.prev
+    : chapterIndex >= 0 && chapterIndex < chapterOptions.length - 1 ? chapterOptions[chapterIndex + 1] : null;
+  const nextChapter = ch?.next?.url
+    ? ch.next
+    : chapterIndex > 0 ? chapterOptions[chapterIndex - 1] : null;
+  const atStart = paginated ? page <= 0 : lastSeen <= 0;
   const atEnd = paginated
     ? page >= ch.pages.length - 1
     : (lastSeen >= (ch?.pages?.length || 1) - 1);
@@ -727,7 +739,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   }
 
   return (
-    <div className="h-full min-h-0 p-3">
+    <div className="relative h-full min-h-0 p-3">
       {barsOpen ? (
             <div
               onMouseEnter={showBar}
@@ -838,7 +850,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       )}
 
       {mode === 'vertical' ? (
-        <div className="mx-auto" style={{ width: `${scalePct}%` }}>
+        <div className="mx-auto" onDoubleClick={toggleVerticalZoomAtPointer} style={{ width: `${zoomPct}%` }}>
           {ch.pages.map((src, i) => (
             <ReaderPanel
               key={i}
@@ -943,7 +955,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
             style={{
               transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${1 + wheelZoom / 100})`,
               transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%`,
-              transition: dragging || instantZoomReset ? 'none' : 'transform 140ms ease-out, transform-origin 180ms ease-out',
+              transition: dragging || instantZoomReset ? 'none' : 'transform 140ms ease-out',
               willChange: wheelZoom ? 'transform' : 'auto'
             }}
           >
@@ -969,7 +981,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                          }
                        }}
                        onFailed={() => { if (idx === page) { setPgLoaded(true); scheduleReload(); } }}
-                       wrapperClassName="grid-rows-[minmax(0,1fr)] h-full min-h-0 min-w-0 flex-1"
+                       wrapperClassName={cn('grid-rows-[minmax(0,1fr)] h-full min-h-0 min-w-0 flex-1', idx === indices[indices.length - 1] && 'translate-x-[6px]')}
                        imageClassName={cn('block object-contain max-w-full', mode !== 'vertical' && wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                        imageStyle={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto' }}
                      />
@@ -1000,7 +1012,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
            { (rtl ? (page + (useDouble ? 2 : 1) <= ch.pages.length - 1) : page > 0) && (
             <button
               type="button"
-              className={`${navBtn} left-3`}
+              className={`${navBtn} left-1`}
               aria-label="Página anterior"
               onClick={(e) => { e.stopPropagation(); goPage(rtl ? (useDouble ? Math.min(page + 2, ch.pages.length - 1) : page + 1) : (useDouble ? Math.max(page - 2, 0) : page - 1)); }}
             >
@@ -1010,7 +1022,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
            { (rtl ? page > 0 : (page + (useDouble ? 2 : 1) <= ch.pages.length - 1)) && (
             <button
               type="button"
-              className={`${navBtn} right-3`}
+              className={`${navBtn} right-0`}
               aria-label="Página siguiente"
               onClick={(e) => { e.stopPropagation(); goPage(rtl ? (useDouble ? Math.max(page - 2, 0) : page - 1) : (useDouble ? Math.min(page + 2, ch.pages.length - 1) : page + 1)); }}
             >
@@ -1020,18 +1032,27 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         </div>
       )}
 
+       {previousChapter && atStart && (
+         <button
+           type="button"
+           className={`${navBtn} ${rtl ? 'right-3' : 'left-4'}`}
+           title={`Capítulo anterior: ${previousChapter.title}`}
+           aria-label="Capítulo anterior"
+           onClick={() => { window.location.hash = go(previousChapter.url); }}
+         >
+           {rtl ? <ChevronsRight className="w-5 h-5" /> : <ChevronsLeft className="w-5 h-5" />}
+         </button>
+       )}
+
        {nextChapter && atEnd && (
          <button
            type="button"
-           className={`${navBtn} ${rtl ? 'left-3' : 'right-3'}`}
-           style={{ top: 'auto', bottom: px(16, scale, 12), transform: 'none' }}
+           className={`${navBtn} ${rtl ? 'left-4' : 'right-3'}`}
            title={`Siguiente capítulo: ${nextChapter.title}`}
            aria-label="Siguiente capítulo"
-           onClick={() => {
-             window.location.hash = `#/leer?u=${encodeURIComponent(nextChapter.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}${fromParam ? `&from=${encodeURIComponent(fromParam)}` : ''}`;
-           }}
+           onClick={() => { window.location.hash = go(nextChapter.url); }}
          >
-           {rtl ? <ChevronLeft className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+           {rtl ? <ChevronsLeft className="w-5 h-5" /> : <ChevronsRight className="w-5 h-5" />}
          </button>
        )}
 

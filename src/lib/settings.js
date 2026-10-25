@@ -26,7 +26,7 @@ const defaults = {
   anilistSynopsisLang: 'romaji',
   anilistCover: false,
   notifyEnabled: false,
-  notifyHours: 6,
+  notifyHours: 12,
   notifyBackground: false,
   extUpdateNotify: false,
   notifyBaseline: {},

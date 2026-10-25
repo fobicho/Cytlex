@@ -18,7 +18,7 @@ const DURATION = 0.3;
 const SIDEBAR_WIDTH = { expanded: 196, collapsed: 72 };
 const SIDEBAR_SCALE_MIN = 0.72;
 
-export default function Sidebar() {
+export default function Sidebar({ tutorialNavOnly = false }) {
   const [collapsed, setCollapsed] = useState(settings.get().sidebarCollapsed);
   const location = useLocation();
   const scale = useScale(SIDEBAR_SCALE_MIN);
@@ -35,6 +35,7 @@ export default function Sidebar() {
       className="h-full flex flex-col border-r border-border bg-sidebar overflow-hidden"
     >
       <nav
+        inert={tutorialNavOnly}
         className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col"
         style={{
           gap: `${Math.max(2, Math.round(4 * scale))}px`,
@@ -46,9 +47,22 @@ export default function Sidebar() {
           return (
             <NavLink
               key={item.to}
-              to={item.to}
+              to={tutorialNavOnly && item.to === '/explorar'
+                ? '/explorar?tab=mangas'
+                : tutorialNavOnly && item.to === '/ajustes'
+                  ? '/ajustes?tutorial=1&section=apariencia'
+                  : item.to}
               onClick={() => {
+                if (tutorialNavOnly) return;
                 if (location.pathname === item.to) {
+                  if (item.to === '/explorar' || item.to === '/biblioteca') {
+                    const main = document.querySelector('main');
+                    if (main?.scrollTop > 1) {
+                      main.scrollTo({ top: 0, behavior: 'smooth' });
+                      return;
+                    }
+                    if (item.to === '/biblioteca') return;
+                  }
                   window.dispatchEvent(new CustomEvent(RESET_PAGE_EVENT));
                 }
               }}
@@ -110,6 +124,7 @@ export default function Sidebar() {
         })}
 
         <div
+          inert={tutorialNavOnly}
           className="shrink-0 rounded-lg border border-primary/40 bg-primary/5"
           style={{
             marginTop: 'auto',
@@ -177,6 +192,7 @@ export default function Sidebar() {
       </nav>
 
       <div
+        inert={tutorialNavOnly}
         className="shrink-0 border-t border-border"
         style={{ padding: `${Math.max(8, Math.round(12 * scale))}px` }}
       >

@@ -614,7 +614,8 @@
 }
 
 ::view-transition-new(root) {
-  animation: 360ms cubic-bezier(0.4, 0, 0.2, 1) both cx-vt-wipe;
+  mix-blend-mode: normal;
+  animation: 320ms cubic-bezier(0.65, 0.03, 0.8, 0.55) both cx-vt-wipe;
   z-index: 1;
 }
 
@@ -632,3 +633,11 @@
 .dd-scroll::-webkit-scrollbar-thumb { background-color: hsl(var(--primary) / 0.4); border-radius: 9999px; }
 .dd-scroll::-webkit-scrollbar-thumb:hover { background-color: hsl(var(--primary) / 0.6); }
 .dd-scroll::-webkit-scrollbar-button { display: none !important; }
+
+.ui-scale-transition,
+.ui-scale-transition * {
+  transition-property: width, height, min-width, max-width, font-size, padding-top, padding-right, padding-bottom, padding-left, margin-top, margin-right, margin-bottom, margin-left, gap, column-gap, row-gap, grid-template-columns, color, background-color, border-color, box-shadow, transform;
+  transition-duration: 220ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+

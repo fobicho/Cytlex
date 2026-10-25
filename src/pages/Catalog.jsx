@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, Loader2, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Search, Loader2, ChevronRight, ChevronLeft, CircleHelp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
@@ -15,28 +15,6 @@ import { Input } from '../components/ui/input.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
-
-function waitForCover(url) {
-  if (!url) return Promise.resolve(false);
-  return new Promise((resolve) => {
-    const image = new Image();
-    let settled = false;
-    const finish = (loaded) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(loaded);
-    };
-    const timer = setTimeout(() => finish(false), 15000);
-    image.referrerPolicy = 'no-referrer';
-    image.onload = () => {
-      if (!image.naturalWidth) return finish(false);
-      image.decode().then(() => finish(true)).catch(() => finish(image.naturalWidth > 0));
-    };
-    image.onerror = () => finish(false);
-    image.src = url;
-  });
-}
 
 const TABS = [
   { id: 'mangas', label: 'Mangas' },
@@ -239,7 +217,7 @@ let sessionTab = 'mangas';
 let animateSearch = false;
 let activeSearchRun = 0;
 
-export default function Catalog() {
+export default function Catalog({ tutorialPreview = false }) {
   const loc = useLocation();
   const [tab, setTab] = useState(() => {
     const t = new URLSearchParams(loc.search).get('tab');
@@ -295,19 +273,21 @@ export default function Catalog() {
     list.forEach(async (s) => {
       try {
         const r = await api.catalog({ q: query, genre: '', page: 1 }, s.manifest.id);
-        const catalogItems = (r.items || []).filter((m) =>
+        const items = (r.items || []).filter((m) =>
           s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim()
         );
-        const loadedItems = await Promise.all(catalogItems.map(async (m) => {
-          const coverCached = await preloadSearchCover(m.cover);
-          if (!coverCached && !await waitForCover(m.cover)) return null;
-          return { ...m, coverCached };
-        }));
-        const items = loadedItems.filter(Boolean);
+        const visibleCovers = await Promise.all(items.slice(0, 10).map(async (m) => [
+          m.url,
+          await preloadSearchCover(m.cover)
+        ]));
+        const cachedCovers = new Map(visibleCovers.filter(([, cover]) => cover));
+        const loadedItems = items.map((m) => cachedCovers.has(m.url)
+          ? { ...m, coverCached: cachedCovers.get(m.url) }
+          : m);
         items.forEach((m) => rememberCover(m.url, m.cover));
         if (runId !== activeSearchRun) return;
         updateResults((prev) =>
-          prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'done', items } : x)) : prev
+          prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'done', items: loadedItems } : x)) : prev
         );
       } catch (e) {
         console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);
@@ -375,6 +355,23 @@ export default function Catalog() {
               </button>
             );
           })}
+          {tab === 'extensiones' && (
+            <span
+              className="group relative flex self-center items-center text-muted-foreground hover:text-foreground focus-visible:outline-none"
+              tabIndex={0}
+              aria-describedby="extension-selection-tip"
+              style={{ paddingBottom: px(8, scale, 6) }}
+            >
+              <CircleHelp aria-hidden="true" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+              <span
+                id="extension-selection-tip"
+                role="tooltip"
+                className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-56 rounded-lg border border-border bg-card px-3 py-2 text-xs text-card-foreground opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus:opacity-100"
+              >
+                Pro Tip: Puedes seleccionar varias extensiones para instalarlas o desinstalarlas juntas.
+              </span>
+            </span>
+          )}
         </div>
 
         {tab === 'mangas' && sources.length > 0 && (
@@ -438,7 +435,7 @@ export default function Catalog() {
 
             {results && (
               <>
-                {searching && (
+                  {searching && (
                   <div
                     className="flex items-center gap-2.5"
                     style={{
@@ -467,9 +464,8 @@ export default function Catalog() {
           </>
         )
       ) : (
-        <ExtensionsPanel />
+        <ExtensionsPanel tutorialPreview={tutorialPreview} />
       )}
     </div>
   );
 }
-

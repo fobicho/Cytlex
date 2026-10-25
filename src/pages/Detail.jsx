@@ -84,6 +84,7 @@ export default function Detail() {
   const loc = useLocation();
   const mangaUrl = useQueryUrl();
   const sourceId = useSourceId();
+  const sourceManifest = extensions.manifest(sourceId);
   const backTo = useBackTo();
   const fromParam = new URLSearchParams(loc.search).get('from') || 'biblioteca';
   const sourceAvailable = extensions.isInstalled(sourceId);
@@ -113,6 +114,7 @@ export default function Detail() {
   const catMenuRef = useRef(null);
   const coverRef = useRef(null);
   const synRef = useRef(null);
+  const detailScrollEffectMangaRef = useRef('');
   const [availH, setAvailH] = useState(0);
   const [fullH, setFullH] = useState(0);
   const [animate, setAnimate] = useState(false);
@@ -184,7 +186,12 @@ export default function Detail() {
     const main = document.querySelector('main');
     if (!main) return undefined;
 
-    const saved = detailScroll.takeRestore(mangaUrl);
+    const sameManga = detailScrollEffectMangaRef.current === mangaUrl;
+    const requestedRestore = detailScroll.takeRestore(mangaUrl);
+    const saved = requestedRestore > 0
+      ? requestedRestore
+      : sameManga ? detailScroll.get(mangaUrl) : 0;
+    detailScrollEffectMangaRef.current = mangaUrl;
     let restoring = saved > 0;
     const apply = () => {
       const max = main.scrollHeight - main.clientHeight;
@@ -354,7 +361,9 @@ export default function Detail() {
       type: d.facts.tipo,
       genres: d.genres,
       author: d.facts.autor,
-      sourceId
+      sourceId,
+      sourceName: sourceManifest.name,
+      sourceIcon: sourceManifest.icon
     };
     const key = norm(d.title);
     const duplicates = lib
@@ -495,6 +504,18 @@ export default function Detail() {
   };
 
   const ordered = [...d.chapters].reverse();
+  const saveDetailScroll = () => {
+    const main = document.querySelector('main');
+    if (main) detailScroll.set(mangaUrl, main.scrollTop);
+  };
+  const openMarkBefore = (chapter) => {
+    setMarkBefore({ chapter });
+  };
+
+  const chaptersBefore = markBefore
+    ? ordered.slice(0, ordered.findIndex((chapter) => chapter.url === markBefore.chapter.url))
+    : [];
+  const chaptersToMark = chaptersBefore.filter((chapter) => !progress.get(chapter.url, sourceId)?.read);
 
   const pendiente = ordered.find((c) => !progress.get(c.url, sourceId)?.read) || null;
   const cap = pendiente ? progress.get(pendiente.url, sourceId) : null;
@@ -631,6 +652,7 @@ export default function Detail() {
           <Button
             className="shadow-none"
             onClick={() => {
+              saveDetailScroll();
               window.location.hash = `#/leer?u=${encodeURIComponent(resume.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
             }}
             style={{
@@ -670,7 +692,9 @@ export default function Detail() {
                 cover: d.cover,
                 type: d.facts.tipo,
                 author: d.facts.autor,
-                sourceId
+                sourceId,
+                sourceName: sourceManifest.name,
+                sourceIcon: sourceManifest.icon
               };
               if (fav) {
                 const saved = lib.fav(mangaUrl, sourceId);
@@ -724,10 +748,10 @@ export default function Detail() {
                       }
                       aria-pressed={on}
                       className={cn(
-                        'relative w-full min-w-0 truncate rounded-md border text-center font-medium transition-colors',
+                        'relative flex w-full min-w-0 items-center justify-between gap-2 rounded-lg border text-left font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
                         on
-                          ? 'border-primary/60 bg-card text-foreground'
-                          : 'border-transparent bg-muted text-muted-foreground hover:bg-accent'
+                          ? 'border-primary/40 bg-primary/10 text-foreground'
+                          : 'border-border bg-card text-muted-foreground hover:bg-accent'
                       )}
                       style={{
                         paddingLeft: px(10, scale, 7),
@@ -737,7 +761,10 @@ export default function Detail() {
                         fontSize: px(12, scale, 10)
                       }}
                     >
-                      {c.name}
+                      <span className="min-w-0 truncate">{c.name}</span>
+                      <span className={cn('grid shrink-0 place-items-center rounded border', on ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40 bg-background')} style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}>
+                        {on && <Check aria-hidden="true" style={{ width: px(12, scale, 10), height: px(12, scale, 10) }} />}
+                      </span>
                     </button>
                   );
                 })}
@@ -899,6 +926,7 @@ export default function Detail() {
                 read && 'opacity-45 hover:opacity-70'
               )}
               style={{ minHeight: `${Math.round(52 * scale)}px` }}
+              onClick={saveDetailScroll}
               href={`#/leer?u=${encodeURIComponent(c.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`}
             >
               <span className="flex-1 min-w-0">
@@ -909,50 +937,40 @@ export default function Detail() {
                   {c.title}
                 </span>
                 <span
-                  className="block text-muted-foreground"
+                  className={cn('block text-muted-foreground', chaptersPerRow === 3 && 'truncate')}
                   style={{ fontSize: `${Math.round(13 * scale)}px` }}
                 >
                   {c.date}
                   {c.group ? ` · ${c.group}` : ''}
                   {inCourse && Number.isInteger(cap.total) && cap.total > 0
-                    ? ` · en página ${cap.page + 1} de ${cap.total}`
+                    ? ` · pág. ${cap.page + 1}/${cap.total}`
                     : ''}
                 </span>
               </span>
-              {read ? (
-                <span
-                  role="button"
-                  tabIndex={0}
-                  title="Marcar como no leído"
-                  aria-label={`Marcar ${c.title} como no leído`}
-                  className="shrink-0 flex items-center gap-1 text-primary rounded-md hover:bg-accent"
-                  style={{ fontSize: `${Math.round(13 * scale)}px` }}
-                  onClick={(e) => { e.preventDefault(); progress.markUnread(c.url, sourceId); setProgressTick((t) => t + 1); }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markUnread(c.url, sourceId); setProgressTick((t) => t + 1); }
-                  }}
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  Leído
-                </span>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    title="Marcar todos los anteriores como leídos"
-                    aria-label={`Marcar anteriores a ${c.title} como leídos`}
-                    className="shrink-0 flex items-center rounded-md text-muted-foreground/70 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-accent hover:text-foreground transition-opacity"
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMarkBefore({ chapter: c }); }}
+              <span className="shrink-0 flex items-center gap-2">
+                {read ? (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    title="Marcar como no leído"
+                    aria-label={`Marcar ${c.title} como no leído`}
+                    className="order-2 shrink-0 flex items-center gap-1 text-primary rounded-md hover:bg-accent"
+                    style={{ fontSize: `${Math.round(13 * scale)}px` }}
+                    onClick={(e) => { e.preventDefault(); progress.markUnread(c.url, sourceId); setProgressTick((t) => t + 1); }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markUnread(c.url, sourceId); setProgressTick((t) => t + 1); }
+                    }}
                   >
-                    <CheckCheck className="w-4 h-4" />
-                    <ChevronDown className="w-3.5 h-3.5 ml-1.5" />
-                  </button>
+                    <CheckCircle2 className="w-4 h-4" />
+                    Leído
+                  </span>
+                ) : (
                   <span
                     role="button"
                     tabIndex={0}
                     title="Marcar como leído"
                     aria-label={`Marcar ${c.title} como leído`}
-                    className="shrink-0 flex items-center gap-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded-md hover:bg-accent hover:text-foreground transition-opacity"
+                    className="order-2 shrink-0 flex items-center gap-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded-md hover:bg-accent hover:text-foreground transition-opacity"
                     style={{ fontSize: `${Math.round(13 * scale)}px` }}
                     onClick={(e) => { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0); setProgressTick((t) => t + 1); }}
                     onKeyDown={(e) => {
@@ -962,12 +980,70 @@ export default function Detail() {
                     <Check className="w-4 h-4" />
                     Leído
                   </span>
-                </>
-              )}
+                )}
+                <span className="relative order-1">
+                  <button
+                    type="button"
+                    title="Marcar todos los anteriores como leídos"
+                    aria-label={`Marcar anteriores a ${c.title} como leídos`}
+                    className="shrink-0 flex items-center rounded-md text-muted-foreground/70 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-accent hover:text-foreground transition-opacity"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); openMarkBefore(c); }}
+                  >
+                    <CheckCheck className="w-4 h-4" />
+                    <ChevronDown className="w-3.5 h-3.5 ml-1.5" />
+                  </button>
+                </span>
+              </span>
             </a>
           );
         })}
       </div>
+
+      <Dialog
+        open={!!markBefore}
+        onClose={() => setMarkBefore(null)}
+        scale={scale}
+        hideDivider
+        title={chaptersToMark.length ? 'Marcar capítulos anteriores' : 'Capítulos anteriores'}
+        description={chaptersToMark.length
+          ? `Se marcarán como leídos todos los capítulos anteriores al ${markBefore?.chapter.title}.`
+          : 'Los capítulos anteriores ya están marcados como leídos.'}
+        bodyPaddingTop={8}
+      >
+        <div className="flex justify-end gap-2" style={{ gap: px(8, scale, 6), paddingTop: px(4, scale, 3) }}>
+          {chaptersToMark.length ? (
+            <>
+              <Button
+                size="sm"
+                variant="secondary"
+                style={{ height: px(36, scale, 30), padding: `${px(4, scale, 3)}px ${px(12, scale, 10)}px`, fontSize: px(14, scale, 12), lineHeight: px(20, scale, 17) }}
+                onClick={() => setMarkBefore(null)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                size="sm"
+                style={{ height: px(36, scale, 30), padding: `${px(4, scale, 3)}px ${px(12, scale, 10)}px`, fontSize: px(14, scale, 12), lineHeight: px(20, scale, 17) }}
+                onClick={() => {
+                  progress.markMany(chaptersToMark.map((chapter) => chapter.url), sourceId);
+                  setProgressTick((t) => t + 1);
+                  setMarkBefore(null);
+                }}
+              >
+                Marcar
+              </Button>
+            </>
+          ) : (
+            <Button
+              size="sm"
+              style={{ height: px(36, scale, 30), padding: `${px(4, scale, 3)}px ${px(12, scale, 10)}px`, fontSize: px(14, scale, 12), lineHeight: px(20, scale, 17) }}
+              onClick={() => setMarkBefore(null)}
+            >
+              Cerrar
+            </Button>
+          )}
+        </div>
+      </Dialog>
 
       <Dialog
         open={!!dup}
@@ -1000,41 +1076,6 @@ export default function Detail() {
         )}
       </Dialog>
 
-      <Dialog
-        open={!!markBefore}
-        onClose={() => setMarkBefore(null)}
-        title="Marcar anteriores como leídos"
-        hideDivider
-        bodyClassName="pb-4"
-        description={
-          markBefore
-            ? `Se marcarán como leídos todos los capítulos anteriores al ${markBefore.chapter.title}, ¿desea continuar?`
-            : ''
-        }
-      >
-        {markBefore && (() => {
-          const previos = ordered.slice(0, ordered.findIndex((c) => c.url === markBefore.chapter.url));
-          const pending = previos.filter((x) => !progress.get(x.url, sourceId)?.read);
-          return (
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="secondary" onClick={() => setMarkBefore(null)}>
-                Cancelar
-              </Button>
-              <Button
-                disabled={!pending.length}
-                onClick={() => {
-                  setMarkBefore(null);
-                  if (!pending.length) return;
-                  progress.markMany(pending.map((x) => x.url), sourceId);
-                  setProgressTick((t) => t + 1);
-                }}
-              >
-                Marcar
-              </Button>
-            </div>
-          );
-        })()}
-      </Dialog>
     </div>
   );
 }
