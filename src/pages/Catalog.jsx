@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
+import { withAdultGenreExclusions } from '../lib/adultGenreFilters.js';
 import { lastSearch, scrollMemory, rememberCover, catalogScroll, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import { clearSearchCoverCache, preloadSearchCover } from '../lib/covers.js';
 import MangaCard from '../components/MangaCard.jsx';
@@ -28,6 +29,17 @@ const enabledSources = (showAdultExtensions) => extensions.sources().filter(({ m
 );
 
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
+let zonatmoFiltersPromise;
+
+const zonatmoFilters = () => {
+  if (!zonatmoFiltersPromise) {
+    zonatmoFiltersPromise = api.catalogFilters('zonatmo').catch((error) => {
+      zonatmoFiltersPromise = null;
+      throw error;
+    });
+  }
+  return zonatmoFiltersPromise;
+};
 
 const sourceLangSubtitle = (manifest) => {
   const options = Array.isArray(manifest.config?.languages) ? manifest.config.languages : null;
@@ -262,7 +274,8 @@ export default function Catalog({ tutorialPreview = false }) {
   };
 
   const runSearch = (query = q) => {
-    const list = enabledSources(!!settings.get().showAdultExtensions);
+    const adultExtensionsEnabled = !!settings.get().showAdultExtensions;
+    const list = enabledSources(adultExtensionsEnabled);
     if (!list.length) return;
     const runId = ++activeSearchRun;
     catalogScroll.clear();
@@ -270,6 +283,8 @@ export default function Catalog({ tutorialPreview = false }) {
     animateSearch = true;
     lastSearch.q = query;
     lastSearch.genre = '';
+    lastSearch.adultExtensionsEnabled = adultExtensionsEnabled;
+    lastSearch.adultGenreFilterVersion = 1;
     lastSearch.results = list
       .map((s) => ({ id: s.manifest.id, manifest: s.manifest, status: 'loading', items: [], page: 1, totalPages: 1, hasMore: false }))
       .sort((a, b) => a.manifest.name.localeCompare(b.manifest.name, 'es', { sensitivity: 'base' }));
@@ -277,7 +292,11 @@ export default function Catalog({ tutorialPreview = false }) {
 
     list.forEach(async (s) => {
       try {
-        const r = await api.catalog({ q: query, genre: '', page: 1 }, s.manifest.id);
+        let params = { q: query, genre: '', page: 1 };
+        if (s.manifest.id === 'zonatmo' && !adultExtensionsEnabled) {
+          params = withAdultGenreExclusions(s.manifest.id, params, await zonatmoFilters(), false);
+        }
+        const r = await api.catalog(params, s.manifest.id);
         const items = (r.items || []).filter((m) =>
           s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim()
         ).slice(0, MAX_SEARCH_RESULTS);
@@ -311,6 +330,15 @@ export default function Catalog({ tutorialPreview = false }) {
       }
     });
   };
+
+  useEffect(() => {
+    if (tab === 'mangas' && results && (
+      lastSearch.adultExtensionsEnabled !== showAdultExtensions
+      || lastSearch.adultGenreFilterVersion !== 1
+    )) {
+      runSearch(lastSearch.q);
+    }
+  }, [showAdultExtensions, tab]);
 
   useEffect(() => {
     if (tab !== 'fuentes' && lastSearch.results && lastSearch.results.some((r) => r.status === 'loading')) {

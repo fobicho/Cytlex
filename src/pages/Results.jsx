@@ -5,12 +5,25 @@ import { motion } from 'framer-motion';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { api } from '../lib/api.js';
+import { withAdultGenreExclusions } from '../lib/adultGenreFilters.js';
 import { lastSearch, resultsScroll, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import MangaCard from '../components/MangaCard.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { useScale, px } from '../lib/useScale.js';
+
+let zonatmoFiltersPromise;
+
+const zonatmoFilters = () => {
+  if (!zonatmoFiltersPromise) {
+    zonatmoFiltersPromise = api.catalogFilters('zonatmo').catch((error) => {
+      zonatmoFiltersPromise = null;
+      throw error;
+    });
+  }
+  return zonatmoFiltersPromise;
+};
 
 export default function Results() {
   const navigate = useNavigate();
@@ -46,7 +59,11 @@ export default function Results() {
     setLoadError('');
     try {
       const page = currentGroup.page + 1;
-      const result = await api.catalog({ q: lastSearch.q, genre: '', page }, sourceId);
+      let params = { q: lastSearch.q, genre: '', page };
+      if (sourceId === 'zonatmo' && !settings.get().showAdultExtensions) {
+        params = withAdultGenreExclusions(sourceId, params, await zonatmoFilters(), false);
+      }
+      const result = await api.catalog(params, sourceId);
       const seen = new Set(items.map((item) => item.url));
       const remaining = Math.max(0, MAX_SEARCH_RESULTS - items.length);
       const nextItems = [...items, ...(result.items || []).filter((item) => !seen.has(item.url)).slice(0, remaining)];

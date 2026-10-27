@@ -708,8 +708,8 @@ export default function Settings({ tutorialPreview = false }) {
         <Row
           scale={scale}
           first
-          title="Mostrar extensiones +18"
-          desc="Algunas extensiones podrían  no mostrarse sin esta opción activa"
+          title="Mostrar contenido +18"
+          desc="Algunas extensiones y mangas podrían no mostrarse sin esta opción activa"
           right={
             <Switch
               scale={scale}

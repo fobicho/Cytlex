@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Filter, Loader2, Search, X } from 'lucide-react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import VirtualMangaGrid from './VirtualMangaGrid.jsx';
 import { SourceBadge } from './SourceBadge.jsx';
 import { api } from '../lib/api.js';
 import { extensions } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
+import { isAdultGenreOption, withAdultGenreExclusions } from '../lib/adultGenreFilters.js';
 import { SOURCE_CATALOG_HOME_EVENT, rememberCover, sourceCatalogState } from '../lib/searchState.js';
 import { Button } from './ui/button.jsx';
 import { Dropdown } from './ui/dropdown.jsx';
@@ -14,9 +16,11 @@ import { useScale, px } from '../lib/useScale.js';
 
 export default function SourcesCatalog({ sources, initialSourceId = '' }) {
   const scale = useScale();
+  const reduceMotion = useReducedMotion();
   const [restore] = useState(() => sourceCatalogState.takeRestore());
   const [sourceId, setSourceId] = useState(() => restore?.sourceId || initialSourceId);
   const [filters, setFilters] = useState(() => restore?.filters || []);
+  const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [filterValues, setFilterValues] = useState(() => restore?.filterValues || {});
   const [filterSearches, setFilterSearches] = useState({});
   const [loadedParams, setLoadedParams] = useState(() => restore?.loadedParams || { q: restore?.query || '', ...(restore?.filterValues || {}) });
@@ -31,6 +35,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
   const [restoring, setRestoring] = useState(() => !!restore?.sourceId);
   const requestId = useRef(0);
   const initialRestore = useRef(restore);
+  const previousAdultSetting = useRef(showAdultExtensions);
   const pendingScrollTop = useRef(restore?.scrollTop ?? null);
   const selected = useMemo(() => sources.find((source) => source.manifest.id === sourceId), [sources, sourceId]);
   const allSources = extensions.sources();
@@ -59,7 +64,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
     }
     try {
       const nextPage = append ? page + 1 : 1;
-      const result = await api.catalog({ ...params, page: nextPage }, id);
+      const catalogParams = withAdultGenreExclusions(id, params, filters, showAdultExtensions);
+      const result = await api.catalog({ ...catalogParams, page: nextPage }, id);
       if (runId !== requestId.current) return;
       const received = result.items || [];
       received.forEach((item) => rememberCover(item.url, item.cover));
@@ -85,6 +91,14 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
     }
   };
 
+  useEffect(() => settings.subscribe((next) => setShowAdultExtensions(!!next.showAdultExtensions)), []);
+
+  useEffect(() => {
+    if (previousAdultSetting.current === showAdultExtensions) return;
+    previousAdultSetting.current = showAdultExtensions;
+    if (sourceId === 'zonatmo' && filters.length) loadCatalog(sourceId, loadedParams);
+  }, [showAdultExtensions, sourceId, filters, loadedParams]);
+
   useEffect(() => {
     if (!sourceId) return undefined;
     if (initialRestore.current?.sourceId === sourceId) {
@@ -96,32 +110,28 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
       setError('');
       (async () => {
         try {
-          const [nextFilters, restored] = await Promise.all([
-            api.catalogFilters(sourceId).catch(() => []),
-            (async () => {
-              const items = [];
-              const urls = new Set();
-              let result = { hasMore: false, totalPages: 1 };
-              const params = snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) };
-              for (let nextPage = 1; nextPage <= Math.max(1, snapshot.page || 1); nextPage += 1) {
-                result = await api.catalog({ ...params, page: nextPage }, sourceId);
-                (result.items || []).forEach((item) => rememberCover(item.url, item.cover));
-                for (const item of result.items || []) {
-                  if (item.url && !urls.has(item.url)) {
-                    urls.add(item.url);
-                    items.push(item);
-                  }
-                }
+          const nextFilters = await api.catalogFilters(sourceId).catch(() => []);
+          const restoredItems = [];
+          const urls = new Set();
+          let result = { hasMore: false, totalPages: 1 };
+          const params = snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) };
+          const catalogParams = withAdultGenreExclusions(sourceId, params, nextFilters, showAdultExtensions);
+          for (let nextPage = 1; nextPage <= Math.max(1, snapshot.page || 1); nextPage += 1) {
+            result = await api.catalog({ ...catalogParams, page: nextPage }, sourceId);
+            (result.items || []).forEach((item) => rememberCover(item.url, item.cover));
+            for (const item of result.items || []) {
+              if (item.url && !urls.has(item.url)) {
+                urls.add(item.url);
+                restoredItems.push(item);
               }
-              return { items, result };
-            })()
-          ]);
+            }
+          }
           if (!active || runId !== requestId.current) return;
           setFilters(Array.isArray(nextFilters) ? nextFilters : []);
-          setItems(restored.items);
+          setItems(restoredItems);
           setLoadedParams(snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) });
           setPage(Math.max(1, snapshot.page || 1));
-          setHasMore(restored.result.hasMore ?? ((snapshot.page || 1) < (restored.result.totalPages || 1)));
+          setHasMore(result.hasMore ?? ((snapshot.page || 1) < (result.totalPages || 1)));
           setRestoring(false);
         } catch (loadError) {
           if (active && runId === requestId.current) {
@@ -149,22 +159,26 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
     setError('');
     setLoading(true);
     setFilters([]);
-    Promise.all([
-      api.catalogFilters(sourceId).catch(() => []),
-      api.catalog({ q: '', page: 1 }, sourceId)
-    ]).then(([nextFilters, result]) => {
-      if (!active) return;
-      (result.items || []).forEach((item) => rememberCover(item.url, item.cover));
-      setFilters(Array.isArray(nextFilters) ? nextFilters : []);
-      setItems(result.items || []);
-      setLoadedParams({ q: '' });
-      setPage(1);
-      setHasMore(result.hasMore ?? (result.totalPages > 1));
-    }).catch((loadError) => {
-      if (active) setError(String(loadError?.message || 'No se pudo cargar el catálogo de esta fuente.'));
-    }).finally(() => {
-      if (active) setLoading(false);
-    });
+    (async () => {
+      try {
+        const nextFilters = await api.catalogFilters(sourceId).catch(() => []);
+        if (!active) return;
+        const safeFilters = Array.isArray(nextFilters) ? nextFilters : [];
+        setFilters(safeFilters);
+        const params = withAdultGenreExclusions(sourceId, { q: '' }, safeFilters, showAdultExtensions);
+        const result = await api.catalog({ ...params, page: 1 }, sourceId);
+        if (!active) return;
+        (result.items || []).forEach((item) => rememberCover(item.url, item.cover));
+        setItems(result.items || []);
+        setLoadedParams({ q: '' });
+        setPage(1);
+        setHasMore(result.hasMore ?? (result.totalPages > 1));
+      } catch (loadError) {
+        if (active) setError(String(loadError?.message || 'No se pudo cargar el catálogo de esta fuente.'));
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
     return () => { active = false; };
   }, [sourceId]);
 
@@ -199,6 +213,75 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
     setFiltersOpen(false);
     loadCatalog(sourceId, { q: '' });
   };
+  const filterGroups = useMemo(() => {
+    const groupFor = (filter) => {
+      if (filter.group) return filter.group;
+      if (sourceId !== 'zonatmo') return 'other';
+      if (['searchBy', 'type', 'demography', 'status', 'author'].includes(filter.id)) return 'primary';
+      if (['gender', 'excludeGender'].includes(filter.id)) return 'genres';
+      if (['orderItem', 'orderDirection'].includes(filter.id)) return 'sorting';
+      return 'other';
+    };
+    return Object.fromEntries(['primary', 'genres', 'sorting', 'other'].map((group) => [
+      group,
+      filters.filter((filter) => groupFor(filter) === group)
+    ]));
+  }, [filters, sourceId]);
+
+  const renderFilter = (filter) => (
+    <div key={filter.id} className="flex min-w-0 flex-col text-muted-foreground" style={{ gap: px(5, scale, 4), fontSize: px(12, scale, 10) }}>
+      <span className="truncate">{filter.label}</span>
+      {filter.type === 'text' ? (
+        <Input
+          value={filterValues[filter.id] ?? filter.defaultValue ?? ''}
+          onChange={(event) => setFilterValues((current) => ({ ...current, [filter.id]: event.target.value }))}
+          placeholder={filter.placeholder || filter.label}
+          style={{ height: px(36, scale, 30), fontSize: px(13, scale, 11) }}
+        />
+      ) : filter.type === 'multiselect' ? (
+        <div className="min-w-0 rounded-lg border border-border bg-background p-2">
+          <Input
+            value={filterSearches[filter.id] || ''}
+            onChange={(event) => setFilterSearches((current) => ({ ...current, [filter.id]: event.target.value }))}
+            placeholder="Buscar género…"
+            aria-label={`Buscar en ${filter.label}`}
+            className="mb-2"
+            style={{ height: px(30, scale, 26), fontSize: px(12, scale, 10) }}
+          />
+          <div className="overflow-y-auto" style={{ maxHeight: px(150, scale, 120) }}>
+            {(filter.options || [])
+              .filter((option) => sourceId !== 'zonatmo' || showAdultExtensions || !['gender', 'excludeGender'].includes(filter.id) || !isAdultGenreOption(option))
+              .filter((option) => option.label.toLocaleLowerCase().includes((filterSearches[filter.id] || '').toLocaleLowerCase()))
+              .map((option) => {
+              const selectedValues = Array.isArray(filterValues[filter.id]) ? filterValues[filter.id] : [];
+              return (
+                <label key={option.value} className="flex cursor-pointer items-center gap-2 py-1 text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={selectedValues.includes(option.value)}
+                    onChange={(event) => setFilterValues((current) => {
+                      const values = Array.isArray(current[filter.id]) ? current[filter.id] : [];
+                      return { ...current, [filter.id]: event.target.checked ? [...values, option.value] : values.filter((value) => value !== option.value) };
+                    })}
+                  />
+                  <span className="truncate">{option.label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <Dropdown
+          scale={scale}
+          value={filterValues[filter.id] ?? filter.defaultValue ?? ''}
+          onChange={(value) => setFilterValues((current) => ({ ...current, [filter.id]: value }))}
+          ariaLabel={filter.label}
+          style={{ width: '100%' }}
+          options={(filter.options || []).map((option) => typeof option === 'string' ? { value: option, label: option } : option)}
+        />
+      )}
+    </div>
+  );
 
   if (!sources.length) {
     const hidden = allSources.length > 0 && !settings.get().showAdultExtensions;
@@ -257,7 +340,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
           </div>
 
           <div className="rounded-xl border border-border bg-card" style={{ padding: px(12, scale, 9) }}>
-            <form className="flex min-w-0 items-center" onSubmit={(event) => { event.preventDefault(); search(); }} style={{ gap: px(8, scale, 6) }}>
+            <form className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center" onSubmit={(event) => { event.preventDefault(); search(); }} style={{ gap: px(8, scale, 6) }}>
               <div className="relative min-w-0 flex-1">
                 <Search
                   className="absolute top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -277,76 +360,65 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
                 Buscar
               </Button>
               {filters.length > 0 && (
-                <Button type="button" variant={filtersOpen ? 'secondary' : 'outline'} onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen} aria-controls="source-filters" style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
+                <Button type="button" variant="outline" onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen} aria-controls="source-filters" style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
                   <Filter className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
                   Filtros
                 </Button>
               )}
             </form>
 
-            {filtersOpen && filters.length > 0 && (
-              <div id="source-filters" className="flex flex-wrap items-end border-t border-border/70" style={{ gap: px(12, scale, 9), marginTop: px(12, scale, 9), paddingTop: px(12, scale, 9) }}>
-                {filters.map((filter) => (
-                  <div key={filter.id} className="flex min-w-[150px] flex-[1_1_160px] flex-col text-muted-foreground" style={{ gap: px(5, scale, 4), fontSize: px(12, scale, 10) }}>
-                    <span>{filter.label}</span>
-                    {filter.type === 'text' ? (
-                      <Input
-                        value={filterValues[filter.id] ?? filter.defaultValue ?? ''}
-                        onChange={(event) => setFilterValues((current) => ({ ...current, [filter.id]: event.target.value }))}
-                        placeholder={filter.placeholder || filter.label}
-                        style={{ height: px(36, scale, 30), fontSize: px(13, scale, 11) }}
-                      />
-                    ) : filter.type === 'multiselect' ? (
-                      <div className="min-w-[190px] rounded-lg border border-border bg-background p-2">
-                        <Input
-                          value={filterSearches[filter.id] || ''}
-                          onChange={(event) => setFilterSearches((current) => ({ ...current, [filter.id]: event.target.value }))}
-                          placeholder="Buscar género…"
-                          aria-label={`Buscar en ${filter.label}`}
-                          className="mb-2"
-                          style={{ height: px(30, scale, 26), fontSize: px(12, scale, 10) }}
-                        />
-                        <div className="overflow-y-auto" style={{ maxHeight: px(150, scale, 120) }}>
-                          {(filter.options || []).filter((option) => option.label.toLocaleLowerCase().includes((filterSearches[filter.id] || '').toLocaleLowerCase())).map((option) => {
-                            const selected = filterValues[filter.id] || [];
-                            return (
-                              <label key={option.value} className="flex cursor-pointer items-center gap-2 py-1 text-foreground">
-                                <input
-                                  type="checkbox"
-                                  checked={selected.includes(option.value)}
-                                  onChange={(event) => setFilterValues((current) => {
-                                    const values = current[filter.id] || [];
-                                    return { ...current, [filter.id]: event.target.checked ? [...values, option.value] : values.filter((value) => value !== option.value) };
-                                  })}
-                                />
-                                <span className="truncate">{option.label}</span>
-                              </label>
-                            );
-                          })}
+            <AnimatePresence initial={false}>
+              {filtersOpen && filters.length > 0 && (
+                <motion.div
+                  id="source-filters"
+                  key="source-filters"
+                  initial={{ height: 0, opacity: 0, borderTopWidth: 0 }}
+                  animate={{ height: 'auto', opacity: 1, marginTop: px(12, scale, 9), paddingTop: px(12, scale, 9), borderTopWidth: 1 }}
+                  exit={{ height: 0, opacity: 0, marginTop: 0, paddingTop: 0, borderTopWidth: 0 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
+                  className="overflow-hidden border-t border-border/70"
+                >
+                  <div className="grid grid-cols-1 items-start" style={{ gap: px(14, scale, 10) }}>
+                    {filterGroups.primary.length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5" style={{ gap: px(12, scale, 9) }}>
+                        {filterGroups.primary.map(renderFilter)}
+                      </div>
+                    )}
+                    {filterGroups.genres.length > 0 && (
+                      <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2" style={{ gap: px(12, scale, 9) }}>
+                        {filterGroups.genres.map(renderFilter)}
+                      </div>
+                    )}
+                    {filterGroups.sorting.length > 0 && (
+                      <div className="flex flex-wrap items-end justify-end" style={{ gap: px(10, scale, 7) }}>
+                        {filterGroups.sorting.map((filter) => <div key={filter.id} className="w-full sm:w-[180px]" style={{ maxWidth: '100%' }}>{renderFilter(filter)}</div>)}
+                        <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
+                          <Button type="button" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
+                          <Button type="button" variant="ghost" size="sm" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
+                            <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
+                            Limpiar
+                          </Button>
                         </div>
                       </div>
-                    ) : (
-                      <Dropdown
-                        scale={scale}
-                        value={filterValues[filter.id] ?? filter.defaultValue ?? ''}
-                        onChange={(value) => setFilterValues((current) => ({ ...current, [filter.id]: value }))}
-                        ariaLabel={filter.label}
-                        style={{ width: px(180, scale, 142) }}
-                        options={(filter.options || []).map((option) => typeof option === 'string'
-                          ? { value: option, label: option }
-                          : option
-                        )}
-                      />
+                    )}
+                    {filterGroups.other.length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(170px,1fr))]" style={{ gap: px(12, scale, 9) }}>
+                        {filterGroups.other.map(renderFilter)}
+                      </div>
+                    )}
+                    {filterGroups.sorting.length === 0 && (
+                      <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
+                        <Button type="button" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
+                        <Button type="button" variant="ghost" size="sm" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
+                          <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
+                          Limpiar
+                        </Button>
+                      </div>
                     )}
                   </div>
-                ))}
-                <Button type="button" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
-                <Button type="button" variant="ghost" size="sm" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
-                <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
-                Limpiar
-                </Button>
-              </div>
-            )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {error ? (

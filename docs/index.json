@@ -50,7 +50,7 @@
     "id": "zonatmo",
     "name": "ZonaTMO",
     "lang": "es",
-    "version": "1.0.8",
+    "version": "1.0.9",
     "type": "module",
     "main": "ext/zonatmo.js",
     "baseUrl": "https://zonatmo.org",
