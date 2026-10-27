@@ -19,6 +19,10 @@ import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 
 let sessionCategoria = '';
+let libraryCheckInFlight = false;
+let libraryCheckCooldownUntil = 0;
+
+const remainingLibraryCheckCooldown = () => Math.max(0, Math.ceil((libraryCheckCooldownUntil - Date.now()) / 1000));
 
 export default function Library() {
   const [cats, setCats] = useState(() => lib.cats());
@@ -28,7 +32,8 @@ export default function Library() {
   });
   const [favs, setFavs] = useState(() => lib.favs());
   const [view, setView] = useState(settings.get().libraryView);
-  const [checking, setChecking] = useState(false);
+  const [checking, setChecking] = useState(libraryCheckInFlight);
+  const [checkCooldown, setCheckCooldown] = useState(remainingLibraryCheckCooldown);
   const { toast } = useToast();
   const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
   const [showUnread, setShowUnread] = useState(() => settings.get().libraryShowUnread);
@@ -64,6 +69,8 @@ export default function Library() {
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
 
   const runCheck = async () => {
+    if (libraryCheckInFlight || remainingLibraryCheckCooldown() > 0) return;
+    libraryCheckInFlight = true;
     setChecking(true);
     try {
       const found = await checkLibrary({ silent: true, force: true });
@@ -80,9 +87,21 @@ export default function Library() {
     } catch {
       toast({ title: 'No se pudo comprobar', description: 'Revisa tu conexión e inténtalo de nuevo.', variant: 'error' });
     } finally {
+      libraryCheckInFlight = false;
+      libraryCheckCooldownUntil = Date.now() + 3_000;
       setChecking(false);
+      setCheckCooldown(3);
     }
   };
+
+  useEffect(() => {
+    if (!checking && !checkCooldown) return undefined;
+    const timer = window.setInterval(() => {
+      setChecking(libraryCheckInFlight);
+      setCheckCooldown(remainingLibraryCheckCooldown());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [checking, checkCooldown]);
 
   useEffect(() => settings.subscribe((s) => setView(s.libraryView)), []);
   useEffect(() => {
@@ -237,7 +256,7 @@ export default function Library() {
             size="sm"
             variant="secondary"
             title="Ordenar"
-            className="rounded-md"
+            className="rounded-md disabled:opacity-100"
             onClick={() => {
               const order = ['title-asc', 'title-desc', 'unread-desc', 'recent'];
               const next = order[(order.indexOf(sortBy) + 1) % order.length];
@@ -260,11 +279,12 @@ export default function Library() {
           <Button
             size="sm"
             variant="secondary"
-            disabled={checking || !favs.length}
+            disabled={!favs.length}
             onClick={runCheck}
-            title="Buscar actualizaciones"
+            title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
             className="rounded-md"
             style={{
+              opacity: 1,
               height: px(36, scale, 30),
               fontSize: `${Math.round(14 * scale)}px`,
               paddingLeft: px(12, scale, 9),

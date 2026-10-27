@@ -130,6 +130,10 @@ const writeExtConfig = (cfg) => {
   try { localStorage.setItem(EXT_CONFIG_KEY, JSON.stringify(cfg)); } catch {}
 };
 const extensionSortModes = ['title-asc', 'title-desc', 'added'];
+let manualExtensionCheckInFlight = false;
+let manualExtensionCheckCooldownUntil = 0;
+
+const remainingExtensionCheckCooldown = () => Math.max(0, Math.ceil((manualExtensionCheckCooldownUntil - Date.now()) / 1000));
 
 function sortLabel(sortBy) {
   return sortBy === 'title-desc' ? 'Z-A' : sortBy === 'added' ? 'Adición' : 'A-Z';
@@ -147,7 +151,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   const [loading, setLoading] = useState(() => !cacheHit);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState('');
-  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [checkingUpdates, setCheckingUpdates] = useState(manualExtensionCheckInFlight);
+  const [checkCooldown, setCheckCooldown] = useState(remainingExtensionCheckCooldown);
   const [confirmRemove, setConfirmRemove] = useState(null);
   const [confirmInstall, setConfirmInstall] = useState(null);
   const [confirmUpdate, setConfirmUpdate] = useState(null);
@@ -278,10 +283,12 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   };
 
   const searchUpdates = async () => {
+    if (manualExtensionCheckInFlight || remainingExtensionCheckCooldown() > 0) return;
     if (!repoUrl) {
       toast({ title: 'No hay un repositorio configurado', description: 'Configura un repositorio para buscar actualizaciones.', variant: 'error' });
       return;
     }
+    manualExtensionCheckInFlight = true;
     setCheckingUpdates(true);
     setErr('');
     try {
@@ -304,9 +311,21 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     } catch (error) {
       toast({ title: 'No se pudieron buscar actualizaciones', description: String(error?.message || error), variant: 'error' });
     } finally {
+      manualExtensionCheckInFlight = false;
+      manualExtensionCheckCooldownUntil = Date.now() + 3_000;
       setCheckingUpdates(false);
+      setCheckCooldown(3);
     }
   };
+
+  useEffect(() => {
+    if (!checkingUpdates && !checkCooldown) return undefined;
+    const timer = window.setInterval(() => {
+      setCheckingUpdates(manualExtensionCheckInFlight);
+      setCheckCooldown(remainingExtensionCheckCooldown());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [checkingUpdates, checkCooldown]);
 
   const loadAvailable = async (url = repoUrl) => {
     if (!url) {
@@ -549,10 +568,10 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             variant="secondary"
             size="sm"
             onClick={searchUpdates}
-            disabled={checkingUpdates}
-            title="Buscar actualizaciones"
+            title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
             aria-label="Buscar actualizaciones"
             style={{
+              opacity: 1,
               height: px(36, scale, 30),
               fontSize: px(14, scale, 12),
               paddingLeft: px(12, scale, 9),
