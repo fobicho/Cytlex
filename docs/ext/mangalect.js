@@ -55,6 +55,10 @@ export default function createSource({ fetchText, parse }) {
     };
   }
 
+  function catalogFilters() {
+    return [{ id: 'genre', label: 'Género', type: 'text', placeholder: 'Nombre o identificador del género' }];
+  }
+
   async function detail(mangaUrl) {
     const startUrl = abs(mangaUrl);
     const doc = parse(await fetchText(startUrl));
@@ -129,5 +133,5 @@ export default function createSource({ fetchText, parse }) {
     };
   }
 
-  return { id: 'mangalect', name: 'MangaLect', catalog, detail, chapter };
+  return { id: 'mangalect', name: 'MangaLect', catalog, catalogFilters, detail, chapter };
 }

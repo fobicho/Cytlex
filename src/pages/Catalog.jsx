@@ -9,6 +9,7 @@ import { lastSearch, scrollMemory, rememberCover, catalogScroll, MAX_SEARCH_RESU
 import { clearSearchCoverCache, preloadSearchCover } from '../lib/covers.js';
 import MangaCard from '../components/MangaCard.jsx';
 import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
+import SourcesCatalog from '../components/SourcesCatalog.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
 import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Input } from '../components/ui/input.jsx';
@@ -18,7 +19,8 @@ import { useScale, px } from '../lib/useScale.js';
 
 const TABS = [
   { id: 'mangas', label: 'Mangas' },
-  { id: 'extensiones', label: 'Extensiones' }
+  { id: 'extensiones', label: 'Extensiones' },
+  { id: 'fuentes', label: 'Fuentes' }
 ];
 
 const enabledSources = (showAdultExtensions) => extensions.sources().filter(({ manifest }) =>
@@ -221,7 +223,7 @@ export default function Catalog({ tutorialPreview = false }) {
   const loc = useLocation();
   const [tab, setTab] = useState(() => {
     const t = new URLSearchParams(loc.search).get('tab');
-    return t === 'mangas' || t === 'extensiones' ? t : sessionTab;
+    return t === 'mangas' || t === 'extensiones' || t === 'fuentes' ? t : sessionTab;
   });
   const [sources, setSources] = useState(() => enabledSources(!!settings.get().showAdultExtensions));
   const [q, setQ] = useState(() => lastSearch.q);
@@ -311,19 +313,20 @@ export default function Catalog({ tutorialPreview = false }) {
   };
 
   useEffect(() => {
-    if (lastSearch.results && lastSearch.results.some((r) => r.status === 'loading')) {
+    if (tab !== 'fuentes' && lastSearch.results && lastSearch.results.some((r) => r.status === 'loading')) {
       runSearch(lastSearch.q);
     }
   }, []);
 
   useEffect(() => {
     const t = new URLSearchParams(loc.search).get('tab');
-    if (t === 'mangas' || t === 'extensiones') setTab(t);
+    if (t === 'mangas' || t === 'extensiones' || t === 'fuentes') setTab(t);
   }, [loc.search]);
 
   useEffect(() => {
-    const nq = new URLSearchParams(loc.search).get('q') || '';
-    if (nq) {
+    const params = new URLSearchParams(loc.search);
+    const nq = params.get('q') || '';
+    if (nq && params.get('tab') !== 'fuentes') {
       setQ(nq);
       runSearch(nq);
     }
@@ -332,7 +335,7 @@ export default function Catalog({ tutorialPreview = false }) {
   return (
     <div
       className="min-h-full flex flex-col"
-      data-explore-start={tab === 'extensiones' || (!q.trim() && !results) ? 'true' : 'false'}
+      data-explore-start={tab === 'extensiones' || tab === 'fuentes' || (!q.trim() && !results) ? 'true' : 'false'}
     >
       <div
         className="-mt-1 flex flex-wrap items-center mb-3"
@@ -487,8 +490,10 @@ export default function Catalog({ tutorialPreview = false }) {
             )}
           </>
         )
-      ) : (
+      ) : tab === 'extensiones' ? (
         <ExtensionsPanel tutorialPreview={tutorialPreview} />
+      ) : (
+        <SourcesCatalog sources={sources} />
       )}
     </div>
   );

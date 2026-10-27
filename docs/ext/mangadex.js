@@ -8,6 +8,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
   const types = { ja: 'Manga', ko: 'Manhwa', zh: 'Manhua', 'zh-hk': 'Manhua' };
   let requestQueue = Promise.resolve();
   let lastRequestAt = 0;
+  let genreOptionsRequest = null;
 
   const json = (url) => {
     const request = async () => {
@@ -65,7 +66,10 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
       return defaultLanguages.length ? defaultLanguages : ['es', 'es-la'];
     };
 
-    async function catalog({ q = '', page = 1 } = {}) {
+    async function catalog({ q = '', page = 1, genre = '', year = '', status = '', type = '', sort = '' } = {}) {
+      const order = sort || (q ? 'relevance' : 'followedCount');
+      const orderKey = order === 'title-asc' || order === 'title-desc' ? 'title' : order;
+      const direction = order === 'title-asc' ? 'asc' : 'desc';
       const data = await json(requestUrl('/manga', {
         title: q,
         limit: pageSize,
@@ -73,7 +77,11 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
         'availableTranslatedLanguage[]': getLanguages(),
         'contentRating[]': ratings,
         'includes[]': ['cover_art', 'author', 'artist'],
-        'order[relevance]': 'desc'
+        'includedTags[]': genre,
+        'status[]': status,
+        year: year ? Number(year) : '',
+        'originalLanguage[]': type === 'zh' ? ['zh', 'zh-hk'] : type,
+        [`order[${orderKey}]`]: direction
       }));
 
       return {
@@ -95,6 +103,46 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
         totalPages: Math.max(1, Math.ceil((Number(data.total) || 0) / pageSize)),
         totalText: String(data.total || 0)
       };
+    }
+
+    async function catalogFilters() {
+      genreOptionsRequest ||= json(`${api}/manga/tag`).then((data) => (data?.data || [])
+        .filter((tag) => tag.attributes?.group === 'genre')
+        .map((tag) => ({
+          value: tag.id,
+          label: tag.attributes?.name?.es || tag.attributes?.name?.en || Object.values(tag.attributes?.name || {})[0] || ''
+        }))
+        .filter((tag) => tag.value && tag.label)
+        .sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })));
+      const genres = await genreOptionsRequest;
+      const thisYear = new Date().getFullYear();
+      return [
+        { id: 'genre', label: 'Género', type: 'select', options: genres },
+        { id: 'year', label: 'Año de salida', type: 'select', options: Array.from({ length: thisYear - 1950 + 1 }, (_, i) => String(thisYear - i)) },
+        { id: 'status', label: 'Estado', type: 'select', options: [
+          { value: 'ongoing', label: 'En curso' },
+          { value: 'completed', label: 'Finalizado' },
+          { value: 'hiatus', label: 'En pausa' },
+          { value: 'cancelled', label: 'Cancelado' }
+        ] },
+        { id: 'type', label: 'Tipo', type: 'select', options: [
+          { value: 'ja', label: 'Manga' },
+          { value: 'ko', label: 'Manhwa' },
+          { value: 'zh', label: 'Manhua' }
+        ] },
+        { id: 'sort', label: 'Ordenar por', type: 'select', options: [
+          { value: 'followedCount', label: 'Popularidad' },
+          { value: 'rating', label: 'Valoración' },
+          { value: 'latestUploadedChapter', label: 'Actualización reciente' },
+          { value: 'year', label: 'Año reciente' },
+          { value: 'title-asc', label: 'Título A-Z' }
+        ] }
+      ].map((filter) => ({
+        ...filter,
+        options: [{ value: '', label: filter.id === 'sort' ? 'Predeterminado' : 'Todos' }, ...filter.options.map((option) =>
+          typeof option === 'string' ? { value: option, label: option } : option
+        )]
+      }));
     }
 
     async function detail(url) {
@@ -211,7 +259,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
       };
     }
 
-    return { id: sourceId, name: sourceConfig?.name || 'MangaDex', catalog, detail, chapter };
+    return { id: sourceId, name: sourceConfig?.name || 'MangaDex', catalog, catalogFilters, detail, chapter };
   };
 
   if (Array.isArray(config?.sources) && config.sources.length) {

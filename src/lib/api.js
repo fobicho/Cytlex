@@ -69,6 +69,11 @@ export const api = {
     return src.catalog(args);
   },
 
+  async catalogFilters(sourceId) {
+    const src = await resolveSource(sourceId);
+    return typeof src.catalogFilters === 'function' ? src.catalogFilters() : [];
+  },
+
   async detail(url, sourceId) {
     if (!sourceId || !extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
     assertSourceEnabled(sourceId);

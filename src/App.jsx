@@ -170,6 +170,10 @@ export default function App({ isVisible = true, tutorialMode = false }) {
           goToExtensions();
           return;
         }
+        if (payload?.tipo === 'biblioteca') {
+          window.location.hash = '#/biblioteca';
+          return;
+        }
         const url = payload?.url;
         if (!url) return;
         window.location.hash = `#/manga?u=${encodeURIComponent(url)}&s=${encodeURIComponent(payload.sourceId || 'leercapitulo')}&from=biblioteca`;

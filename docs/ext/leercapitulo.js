@@ -226,6 +226,10 @@ export default function createSource({ fetchText, parse, head }) {
     return { items, totalPages, totalText: text(doc, '.lc-section-title .lc-more') };
   }
 
+  function catalogFilters() {
+    return [{ id: 'genre', label: 'Género', type: 'text', placeholder: 'Nombre o slug del género' }];
+  }
+
   async function detail(mangaUrl) {
     const full = abs(mangaUrl);
     const doc = parse(await fetchText(full));
@@ -296,5 +300,5 @@ export default function createSource({ fetchText, parse, head }) {
     throw new Error(`No se pudo cargar el capítulo en ${chapterUrl}`);
   }
 
-  return { id: 'leercapitulo', name: 'LeerCapitulo', catalog, detail, chapter };
+  return { id: 'leercapitulo', name: 'LeerCapitulo', catalog, catalogFilters, detail, chapter };
 }

@@ -481,14 +481,14 @@ function taskName(hh) {
 }
 
 async function removeTasks() {
-  for (const hh of ['00', '06', '12', '18']) {
+  await Promise.all(['00', '06', '12', '18'].map(async (hh) => {
     try {
       await execFileAsync('schtasks', ['/Delete', '/F', '/TN', taskName(hh)]);
     } catch (e) {
       const raw = `${e?.message || ''} ${e?.stderr || ''}`;
       if (!/no puede encontrar|no se encuentra|not found|cannot find/i.test(raw)) throw e;
     }
-  }
+  }));
 }
 
 const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
@@ -512,12 +512,10 @@ ipcMain.handle('notify:background', async (_e, on, hours = 12) => {
       return { ok: true };
     }
     await removeTasks();
-    for (const hh of list) {
-      await execFileAsync('powershell', [
-        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-        '-Command', taskScript(hh, arg)
-      ]);
-    }
+    await execFileAsync('powershell', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-Command', list.map((hh) => taskScript(hh, arg)).join('\n')
+    ]);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e?.stderr || e?.message || e) };

@@ -23,7 +23,7 @@ async function avisarExtensiones() {
 
   const titulo =
     nuevos.length === 1
-      ? `${nuevos[0].name} tiene actualización`
+      ? `Nueva actualización para ${nuevos[0].name} disponible`
       : `${nuevos.length} extensiones tienen actualización`;
   const cuerpo =
     nuevos.length === 1
@@ -101,16 +101,27 @@ export async function checkLibrary({ silent = false, force = false, notifyFound 
     }
   }
 
-  for (const f of found) {
-    if (!notifyFound) continue;
-    const n = f.count;
+  if (notifyFound && found.length === 1) {
+    const f = found[0];
     try {
       await window.cytlex.notify({
         title: f.title || 'Manga de tu biblioteca',
-        body: n === 1 ? '1 capítulo nuevo disponible' : `${n} capítulos nuevos disponibles`,
+        body: f.count === 1 ? '1 capítulo nuevo disponible' : `${f.count} capítulos nuevos disponibles`,
         key: key(f.url, f.sourceId),
         url: f.url,
         sourceId: f.sourceId
+      });
+    } catch {}
+  } else if (notifyFound && found.length > 1) {
+    const mangaNames = found.slice(0, 3).map((f) => f.title || 'Manga de tu biblioteca');
+    const totalChapters = found.reduce((sum, f) => sum + f.count, 0);
+    const listed = mangaNames.join(' · ');
+    const remaining = found.length - mangaNames.length;
+    try {
+      await window.cytlex.notify({
+        title: `${found.length} mangas tienen capítulos nuevos`,
+        body: `${totalChapters} capítulos nuevos: ${listed}${remaining > 0 ? ` y ${remaining} más` : ''}`,
+        tipo: 'biblioteca'
       });
     } catch {}
   }

@@ -21,16 +21,17 @@ import { Input } from '../components/ui/input.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 
-function Switch({ on, onChange, label, scale = 1 }) {
+function Switch({ on, onChange, label, disabled = false, scale = 1 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={!!on}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!on)}
       className={cn(
-        'relative rounded-full transition-colors shrink-0',
+        'relative rounded-full transition-colors shrink-0 disabled:cursor-wait disabled:opacity-60',
         on ? 'bg-primary' : 'bg-muted'
       )}
       style={{
@@ -188,6 +189,8 @@ export default function Settings({ tutorialPreview = false }) {
   const connectHintRef = useRef(null);
   const { toast } = useToast();
   const [bgErr, setBgErr] = useState('');
+  const [bgBusy, setBgBusy] = useState(false);
+  const [confirmBackground, setConfirmBackground] = useState(false);
   const [confirmAdultExtensions, setConfirmAdultExtensions] = useState(false);
   const [confirmRemoveRepo, setConfirmRemoveRepo] = useState(false);
   const [backupCandidate, setBackupCandidate] = useState(null);
@@ -202,18 +205,31 @@ export default function Settings({ tutorialPreview = false }) {
   const scale = useScale();
   const reduceMotion = useReducedMotion();
 
-  const toggleBackground = async (on) => {
+  const applyBackgroundSetting = async (on) => {
+    const previous = settings.get().notifyBackground;
+    setBgBusy(true);
+    set({ notifyBackground: on });
+    try {
+      const r = await window.cytlex?.setBackgroundCheck?.(on, notifyHours());
+      if (r?.ok === false) {
+        set({ notifyBackground: previous });
+        setBgErr(r.error || 'No se pudo registrar la tarea.');
+      }
+    } catch (error) {
+      set({ notifyBackground: previous });
+      setBgErr(String(error?.message || 'No se pudo registrar la tarea.'));
+    } finally {
+      setBgBusy(false);
+    }
+  };
+
+  const toggleBackground = (on) => {
     setBgErr('');
     if (on) {
-      const ok = await window.cytlex?.confirmTask?.();
-      if (!ok) return;
-    }
-    const r = await window.cytlex?.setBackgroundCheck?.(on, notifyHours());
-    if (r?.ok === false) {
-      setBgErr(r.error || 'No se pudo registrar la tarea.');
+      setConfirmBackground(true);
       return;
     }
-    set({ notifyBackground: on });
+    applyBackgroundSetting(false);
   };
 
   useEffect(() => settings.subscribe(setS), []);
@@ -803,7 +819,7 @@ export default function Settings({ tutorialPreview = false }) {
           scale={scale}
           first
           title="Avisar de capítulos nuevos"
-          desc="Revisa los mangas de tu biblioteca y avisa cuando aparezca un capítulo nuevo."
+          desc="Avisa de novedades en tus mangas guardados cada vez que se ingresa"
           right={
             <Switch
               scale={scale}
@@ -816,7 +832,7 @@ export default function Settings({ tutorialPreview = false }) {
         <Row
           scale={scale}
           title="Avisar de actualizaciones de extensiones"
-          desc="Revisa el repositorio y avisa cuando una extensión tenga una versión nueva."
+          desc="Avisa de novedades en tus extensiones instaladas cada vez que se ingresa"
           right={
             <Switch
               scale={scale}
@@ -829,7 +845,7 @@ export default function Settings({ tutorialPreview = false }) {
         <Row
           scale={scale}
           title="Comprobar cada"
-          desc="Cada cuántas horas se revisan los capítulos nuevos y las actualizaciones de extensiones."
+          desc="Elige cada cuántas horas quieres que se revisen las novedades"
           right={
              <div className={cn('flex items-center', !s.notifyEnabled && !s.extUpdateNotify && 'pointer-events-none opacity-50')} aria-disabled={!s.notifyEnabled && !s.extUpdateNotify}>
               <Dropdown
@@ -854,8 +870,8 @@ export default function Settings({ tutorialPreview = false }) {
           title="Notificaciones en segundo plano"
           desc={
             s.notifyEnabled || s.extUpdateNotify
-              ? 'Comprueba si hay actualizaciones aún con Cytlex cerrado.'
-              : 'Activa algún aviso anterior para poder comprobar con Cytlex cerrado.'
+              ? 'Comprueba si hay novedades aún con Cytlex cerrado'
+              : 'Activa algún aviso anterior para poder comprobar actualizaciones con Cytlex cerrado'
           }
           right={
             <div
@@ -866,6 +882,7 @@ export default function Settings({ tutorialPreview = false }) {
                 scale={scale}
                 on={s.notifyBackground}
                 onChange={toggleBackground}
+                disabled={bgBusy}
                 label="Notificaciones en segundo plano"
               />
             </div>
@@ -887,10 +904,10 @@ export default function Settings({ tutorialPreview = false }) {
           title="Cuenta de AniList"
           desc={
             authState.connected
-              ? `Conectada${authViewer?.name ? ` como ${authViewer.name}` : ''}`
+              ? `Conectado${authViewer?.name ? ` como ${authViewer.name}` : ''}`
               : authState.expired
-                ? 'La sesión anterior caducó. Vuelve a conectarte.'
-                : 'Sin conectar.'
+                ? 'Sesión caducada, vuelve a conectarte'
+                : 'Sin conectar'
           }
           right={
             authState.connected ? (
@@ -945,7 +962,7 @@ export default function Settings({ tutorialPreview = false }) {
         <Row
           scale={scale}
           title="Mostrar portada de AniList"
-          desc="Usa la portada de AniList en lugar de la del manga (solo vinculados)"
+          desc="Cambia las portadas de tus mangas guardados por las de AniList (solo mangas vinculados)"
           right={
             <div className="relative flex items-center">
               <Switch
@@ -978,7 +995,7 @@ export default function Settings({ tutorialPreview = false }) {
           desc={
             linkedCount
               ? `${linkedCount} ${linkedCount === 1 ? 'manga vinculado' : 'mangas vinculados'}`
-              : 'Sin vínculos. Vincúlalos desde la ficha de cada manga.'
+              : 'Sin vínculos'
           }
           right={
             <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
@@ -1071,7 +1088,7 @@ export default function Settings({ tutorialPreview = false }) {
           scale={scale}
           first
           title="Exportar respaldo"
-          desc="Guarda una copia comprimida de tus datos. Las extensiones instaladas no se incluyen."
+          desc="Guarda una copia de tus datos en el directorio de tu preferencia"
           right={
             <Button
               size="sm"
@@ -1088,7 +1105,7 @@ export default function Settings({ tutorialPreview = false }) {
           scale={scale}
           last
           title="Importar respaldo"
-          desc="Restaura tus datos desde un respaldo creado en Cytlex. Tendrás que volver a conectar AniList."
+          desc="Restaura tus datos desde un respaldo creado en Cytlex"
           right={
             <Button
               size="sm"
@@ -1252,10 +1269,39 @@ export default function Settings({ tutorialPreview = false }) {
         </Card>
 
         <Card className="hover:shadow-sm">
-          <div style={{ padding: px(24, scale, 16) }}>{content}</div>
+          <div key={section} style={{ padding: px(24, scale, 16) }}>{content}</div>
         </Card>
       </div>
 
+      <Dialog
+        open={confirmBackground}
+        onClose={() => setConfirmBackground(false)}
+        title="Notificaciones en segundo plano"
+        description="¿Permitir que Cytlex revise tu biblioteca y extensiones aunque esté cerrado?"
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+        scale={scale}
+      >
+        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button
+            variant="outline"
+            onClick={() => setConfirmBackground(false)}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={() => {
+              setConfirmBackground(false);
+              applyBackgroundSetting(true);
+            }}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Permitir
+          </Button>
+        </div>
+      </Dialog>
       <Dialog
         open={!!backupCandidate}
         onClose={() => setBackupCandidate(null)}
