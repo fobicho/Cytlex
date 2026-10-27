@@ -4,6 +4,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { BookOpen, Compass, Settings as SettingsIcon, ChevronsRight } from 'lucide-react';
 import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
+import { SOURCE_CATALOG_HOME_EVENT } from '../lib/searchState.js';
 import { settings } from '../lib/settings.js';
 import { useScale } from '../lib/useScale.js';
 
@@ -71,6 +72,15 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                   }
                   if (item.to === '/explorar' || item.to === '/biblioteca') {
                     const main = document.querySelector('main');
+                    if (item.to === '/explorar' && main?.querySelector('[data-source-catalog-active="true"]')) {
+                      event.preventDefault();
+                      if (main.scrollTop > 1) {
+                        main.scrollTo({ top: 0, behavior: 'smooth' });
+                        return;
+                      }
+                      window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
+                      return;
+                    }
                     if (item.to === '/explorar' && main?.querySelector('[data-explore-start="true"]')) {
                       event.preventDefault();
                       return;

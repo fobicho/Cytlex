@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown, Settings as SettingsIcon } from 'lucide-react';
-import { extensions, isAdultExtension } from '../lib/extensions.js';
+import { extensions, isAdultExtension, isNewer } from '../lib/extensions.js';
 import { extUpdates } from '../lib/extUpdates.js';
 import { settings } from '../lib/settings.js';
 import { Card } from './ui/card.jsx';
@@ -185,7 +185,11 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   const visibleAvailable = tutorialPreview || showAdultExtensions
     ? available
     : available?.filter((manifest) => !isAdultExtension(manifest));
-  const visibleUpdates = updates;
+  const installedById = new Map(installed.map((record) => [record.manifest.id, record.manifest]));
+  const visibleUpdates = updates.filter((update) => {
+    const manifest = installedById.get(update.id);
+    return manifest && isNewer(update.to, manifest.version);
+  });
   const sortedInstalled = [...visibleInstalled].sort((a, b) => {
     if (sortBy === 'added') return (a.installedAt || 0) - (b.installedAt || 0);
     const order = String(a.manifest.name || '').localeCompare(String(b.manifest.name || ''), 'es', { sensitivity: 'base', numeric: true });
@@ -423,6 +427,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
       await extensions.install(m, repoUrl);
       refresh();
       setAvailable((a) => (a ? a.filter((x) => x.id !== m.id) : a));
+      setUpdates((current) => current.filter((update) => update.id !== m.id));
     } catch (e) {
       setErr(String(e?.message || e));
     }
@@ -480,6 +485,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     if (isInstall) {
       refresh();
       setAvailable((current) => current?.filter((manifest) => !succeededIds.has(manifest.id)) ?? current);
+      setUpdates((current) => current.filter((update) => !succeededIds.has(update.id)));
       setSelectedAvailableIds(new Set(failed));
     } else {
       refresh();

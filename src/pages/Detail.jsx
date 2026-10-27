@@ -6,7 +6,7 @@ import { lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { getSearchCover, makeCoverThumb } from '../lib/covers.js';
-import { chapterOrder, detailScroll, recallCover } from '../lib/searchState.js';
+import { chapterOrder, detailScroll, recallCover, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
@@ -76,6 +76,7 @@ function useBackTo() {
   const params = new URLSearchParams(loc.search);
   const from = params.get('from');
   if (from === 'resultados') return `/resultados?s=${encodeURIComponent(params.get('s') || 'leercapitulo')}`;
+  if (from === 'fuentes') return `/explorar?tab=fuentes&source=${encodeURIComponent(params.get('s') || '')}`;
   return from === 'explorar' ? '/explorar' : '/biblioteca';
 }
 
@@ -87,6 +88,9 @@ export default function Detail() {
   const sourceManifest = extensions.manifest(sourceId);
   const backTo = useBackTo();
   const fromParam = new URLSearchParams(loc.search).get('from') || 'biblioteca';
+  useEffect(() => {
+    if (fromParam === 'fuentes') sourceCatalogState.requestRestore();
+  }, [fromParam]);
   const sourceAvailable = extensions.isInstalled(sourceId);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const adultExtensionDisabled = !showAdultExtensions && isAdultExtension(extensions.manifest(sourceId));
@@ -156,16 +160,24 @@ export default function Detail() {
   }, [d?.cover, knownCover, mangaUrl, sourceId, anilistCover, coverTick]);
 
   const [coverError, setCoverError] = useState(false);
-  useEffect(() => { setCoverError(false); }, [coverSrc]);
+  const [coverLoaded, setCoverLoaded] = useState(false);
+  useEffect(() => {
+    setCoverError(false);
+    setCoverLoaded(false);
+  }, [coverSrc]);
   const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
 
   const coverImg = (alt) => (
     <img
-      className="w-full h-full object-cover"
+      className={cn('w-full h-full object-cover', !coverLoaded && 'opacity-0')}
       src={finalCover}
       alt={alt}
       referrerPolicy="no-referrer"
-      onError={() => { if (finalCover !== knownCover) setCoverError(true); }}
+      onLoad={() => setCoverLoaded(true)}
+      onError={() => {
+        if (finalCover !== knownCover) setCoverError(true);
+        else setCoverLoaded(true);
+      }}
     />
   );
 
@@ -437,10 +449,11 @@ export default function Detail() {
         >
           {knownCover ? (
             <div
-              className="aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
+              className="relative aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
               style={{ width: `${coverSize}px` }}
             >
               {coverImg('')}
+              {!coverLoaded && <Skeleton className="absolute inset-0 rounded-xl" />}
             </div>
           ) : (
             <Skeleton className="aspect-[2/3] rounded-xl shrink-0" style={{ width: `${coverSize}px` }} />
@@ -557,7 +570,7 @@ export default function Detail() {
       >
         <div
           ref={coverRef}
-          className="aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
+          className="relative aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
           style={{ width: `${coverSize}px` }}
         >
           {coverSrc ? (
@@ -565,6 +578,7 @@ export default function Detail() {
           ) : (
             <div className="w-full h-full animate-pulse bg-muted/40" />
           )}
+          {coverSrc && !coverLoaded && <Skeleton className="absolute inset-0 rounded-xl" />}
         </div>
         <div className="flex-1 min-w-0">
           <h1

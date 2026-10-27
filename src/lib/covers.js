@@ -1,11 +1,20 @@
 const THUMB_WIDTH = 240;
 const SEARCH_THUMB_WIDTH = 320;
 const MAX_DATAURL = 120000;
-const MAX_SEARCH_COVER_LOADS = 4;
+const MAX_SEARCH_COVER_LOADS = 2;
+const MAX_SEARCH_COVERS = 60;
 const searchCoverCache = new Map();
 const searchCoverWaiters = [];
 let searchCoverGeneration = 0;
 let activeSearchCoverLoads = 0;
+
+function pruneSearchCoverCache() {
+  while (searchCoverCache.size > MAX_SEARCH_COVERS) {
+    const [url, value] = searchCoverCache.entries().next().value;
+    searchCoverCache.delete(url);
+    if (typeof value === 'string' && value.startsWith('blob:')) URL.revokeObjectURL(value);
+  }
+}
 
 async function acquireSearchCoverSlot() {
   if (activeSearchCoverLoads < MAX_SEARCH_COVER_LOADS) activeSearchCoverLoads += 1;
@@ -56,6 +65,7 @@ export function preloadSearchCover(url) {
         return '';
       }
       searchCoverCache.set(url, objectUrl);
+      pruneSearchCoverCache();
       return objectUrl;
     } catch {
       return '';
@@ -65,6 +75,7 @@ export function preloadSearchCover(url) {
     }
   })();
   searchCoverCache.set(url, pending);
+  pruneSearchCoverCache();
   return pending;
 }
 

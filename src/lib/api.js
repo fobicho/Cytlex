@@ -47,10 +47,18 @@ const freshEntry = (key) => {
   return hit.value;
 };
 
+const pruneCache = (cache, ttl, max) => {
+  const now = Date.now();
+  for (const [key, entry] of cache) {
+    if (now - entry.at > ttl) cache.delete(key);
+  }
+  while (cache.size > max) cache.delete(cache.keys().next().value);
+};
+
 const storeDetail = (key, value) => {
   detailCache.delete(key);
   detailCache.set(key, { at: Date.now(), value });
-  while (detailCache.size > DETAIL_CACHE_MAX) detailCache.delete(detailCache.keys().next().value);
+  pruneCache(detailCache, DETAIL_TTL_MS, DETAIL_CACHE_MAX);
 };
 
 export const api = {
@@ -105,10 +113,9 @@ export const api = {
     chapterRequests.set(key, request);
     try {
       const value = await request;
+      chapterCache.delete(key);
       chapterCache.set(key, { at: Date.now(), value });
-      while (chapterCache.size > CHAPTER_CACHE_MAX) {
-        chapterCache.delete(chapterCache.keys().next().value);
-      }
+      pruneCache(chapterCache, CHAPTER_TTL_MS, CHAPTER_CACHE_MAX);
       return value;
     } finally {
       if (chapterRequests.get(key) === request) chapterRequests.delete(key);

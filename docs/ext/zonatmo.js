@@ -33,10 +33,26 @@ export default function createSource({ fetchText, parse }) {
       .filter((x) => x && x.title);
   }
 
-  async function catalog({ q = '', page = 1 } = {}) {
-    const url = q
-      ? `${base}/biblioteca?title=${encodeURIComponent(q)}&page=${page}`
-      : `${base}/biblioteca?page=${page}`;
+  async function catalog({
+    q = '', page = 1, type = '', demography = '', status = '', author = '',
+    gender = [], excludeGender = [], searchBy = 'title',
+    orderItem = 'likes_count', orderDirection = 'desc'
+  } = {}) {
+    const params = new URLSearchParams({
+      order_item: orderItem,
+      order_dir: orderDirection,
+      _pg: '1',
+      filter_by: searchBy,
+      title: q,
+      author_filter: author,
+      type,
+      demography,
+      status,
+      page: String(page)
+    });
+    (Array.isArray(gender) ? gender : [gender]).filter(Boolean).forEach((id) => params.append('genders[]', id));
+    (Array.isArray(excludeGender) ? excludeGender : [excludeGender]).filter(Boolean).forEach((id) => params.append('exclude_genders[]', id));
+    const url = `${base}/biblioteca?${params}`;
     const doc = parse(await fetchText(url));
     const items = mapCards(doc);
     return {
@@ -44,6 +60,30 @@ export default function createSource({ fetchText, parse }) {
       totalPages: items.length ? page + 1 : Math.max(page - 1, 1),
       totalText: ''
     };
+  }
+
+  async function catalogFilters() {
+    const doc = parse(await fetchText(`${base}/biblioteca`));
+    const select = (id) => [...(doc.querySelector(`#${id}`)?.querySelectorAll('option') || [])]
+      .map((option) => ({ value: option.value, label: (option.textContent || '').trim() }))
+      .filter((option) => option.label);
+    const allOption = { value: '', label: 'Ver todo' };
+    const genres = [...doc.querySelectorAll('input[id^="gender_"]')].map((input) => {
+      const label = input.labels?.[0] || input.closest('label') || input.parentElement;
+      return { value: input.id.replace('gender_', ''), label: (label?.textContent || '').replace(/\s+/g, ' ').trim() };
+    }).filter((option) => option.value && option.label);
+
+    return [
+      { id: 'searchBy', label: 'Buscar por', type: 'select', defaultValue: 'title', options: select('order_field_select').filter((option) => option.value) },
+      { id: 'type', label: 'Tipo', type: 'select', options: [allOption, ...select('type').filter((option) => option.value && READABLE.has(option.value))] },
+      { id: 'demography', label: 'Demografía', type: 'select', options: [allOption, ...select('demography').filter((option) => option.value)] },
+      { id: 'status', label: 'Estado', type: 'select', options: [allOption, ...select('status').filter((option) => option.value)] },
+      { id: 'author', label: 'Autor', type: 'text', placeholder: 'Filtrar por autor' },
+      { id: 'gender', label: 'Incluir géneros', type: 'multiselect', options: genres },
+      { id: 'excludeGender', label: 'Excluir géneros', type: 'multiselect', options: genres },
+      { id: 'orderItem', label: 'Ordenar por', type: 'select', defaultValue: 'likes_count', options: select('order_item_select') },
+      { id: 'orderDirection', label: 'Dirección', type: 'select', defaultValue: 'desc', options: select('order_dir_select') }
+    ];
   }
 
   async function detail(mangaUrl) {
@@ -141,5 +181,5 @@ export default function createSource({ fetchText, parse }) {
     };
   }
 
-  return { id: 'zonatmo', name: 'ZonaTMO', catalog, detail, chapter };
+  return { id: 'zonatmo', name: 'ZonaTMO', catalog, catalogFilters, detail, chapter };
 }

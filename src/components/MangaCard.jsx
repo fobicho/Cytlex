@@ -7,10 +7,12 @@ import { extensions } from '../lib/extensions.js';
 import { SourceBadge } from './SourceBadge.jsx';
 
 const prefetched = new Set();
+const MAX_PREFETCHED = 80;
 function prefetch(url, sourceId) {
   const key = `${sourceId}|${url}`;
   if (!url || prefetched.has(key)) return;
   prefetched.add(key);
+  if (prefetched.size > MAX_PREFETCHED) prefetched.delete(prefetched.values().next().value);
   api.prefetchDetail(url, sourceId);
 }
 
@@ -32,7 +34,7 @@ export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = 
   const t = tracking.get(m.url, sourceId);
   const aniLocal = anilistCoverOn ? (t?.coverLocal || '') : '';
   const aniCover = anilistCoverOn ? (t?.cover || '') : '';
-  const [src, setSrc] = useState(aniLocal || aniCover || cachedCover || localCover || m.cover);
+  const [src, setSrc] = useState(() => aniLocal || aniCover || cachedCover || localCover || m.cover);
   const hoverTimer = useRef(null);
 
   const schedulePrefetch = () => {
@@ -48,7 +50,8 @@ export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = 
     const t2 = tracking.get(m.url, sourceId);
     const aniL = anilistCoverOn ? (t2?.coverLocal || '') : '';
     const aniC = anilistCoverOn ? (t2?.cover || '') : '';
-    setSrc(aniL || aniC || cached || local || m.cover);
+    const fallback = aniL || aniC || cached || local || m.cover;
+    setSrc(fallback);
   }, [m.coverCached, m.coverLocal, m.cover, anilistCoverOn, sourceId, m.url]);
 
   const box = coverSize ? { width: `${coverSize}px` } : { aspectRatio: '2 / 3' };

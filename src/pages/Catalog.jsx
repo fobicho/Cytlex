@@ -493,7 +493,7 @@ export default function Catalog({ tutorialPreview = false }) {
       ) : tab === 'extensiones' ? (
         <ExtensionsPanel tutorialPreview={tutorialPreview} />
       ) : (
-        <SourcesCatalog sources={sources} />
+        <SourcesCatalog sources={sources} initialSourceId={new URLSearchParams(loc.search).get('source') || ''} />
       )}
     </div>
   );
