@@ -26,7 +26,7 @@ const STEPS = [
   },
   {
     title: 'Todo listo',
-    body: '¡Ya estás preparado para empezar con tus lecturas! Instala las extensiones que quieras usar, explora el catálogo y descubre los próximos mangas que quieras leer.\n\nCytlex nace como un proyecto pasional, sin fines de lucro y 100% por y para la comunidad. Si luego de usarla consideras que es una buena aplicación, puedes aportar de manera voluntaria la cantidad que desees, con el fin de seguir dándole mantención. <3'
+    body: '¡Ya estás preparado para empezar con tus lecturas! Instala las extensiones que quieras usar, explora el catálogo y descubre los próximos mangas que quieras leer.\n\nCytlex nace como un proyecto pasional, sin fines de lucro y 100% por y para la comunidad. Si luego de usarla consideras que es una buena aplicación, puedes aportar la cantidad que desees de manera voluntaria, para seguir dándole mantención constante. <3'
   }
 ];
 

@@ -16,7 +16,8 @@ export function EmptyState({
   action,
   tone = 'neutral',
   compact = false,
-  className
+  className,
+  animateFace = true
 }) {
   const reduce = useReducedMotion();
   const scale = useScale();
@@ -41,8 +42,8 @@ export function EmptyState({
             fontSize: px(compact ? 30 : 48, scale, compact ? 22 : 32),
             marginBottom: px(compact ? 12 : 16, scale, compact ? 9 : 12)
           }}
-          animate={reduce ? undefined : { y: [0, -5, 0], rotate: [0, -1.5, 1.5, 0] }}
-          transition={{ duration: 3.4, repeat: Infinity, ease: 'easeInOut' }}
+          animate={reduce || !animateFace ? undefined : { y: [0, -5, 0], rotate: [0, -1.5, 1.5, 0] }}
+          transition={animateFace ? { duration: 3.4, repeat: Infinity, ease: 'easeInOut' } : undefined}
         >
           {face}
         </motion.div>

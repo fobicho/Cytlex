@@ -236,6 +236,9 @@ export default function Catalog({ tutorialPreview = false }) {
     setSources(enabledSources(!!s.showAdultExtensions));
   }), []);
   useEffect(() => { sessionTab = tab; }, [tab]);
+  useEffect(() => () => {
+    if (tutorialPreview) sessionTab = 'mangas';
+  }, [tutorialPreview]);
   useEffect(() => () => { animateSearch = false; }, []);
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
@@ -386,6 +389,14 @@ export default function Catalog({ tutorialPreview = false }) {
             </span>
           )}
         </div>
+
+        {tab === 'extensiones' && (
+          <div
+            id="extensions-toolbar"
+            className="ml-auto self-center flex items-center"
+            style={{ gap: px(8, scale, 6) }}
+          />
+        )}
 
         {tab === 'mangas' && sources.length > 0 && (
           <div className="ml-auto self-center flex items-center" style={{ gap: px(12, scale, 9) }}>

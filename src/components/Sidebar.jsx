@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { BookOpen, Compass, Settings as SettingsIcon, ChevronsRight } from 'lucide-react';
 import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
@@ -21,9 +21,17 @@ const SIDEBAR_SCALE_MIN = 0.72;
 export default function Sidebar({ tutorialNavOnly = false }) {
   const [collapsed, setCollapsed] = useState(settings.get().sidebarCollapsed);
   const location = useLocation();
+  const navigate = useNavigate();
+  const pendingQuickSearchReset = useRef(false);
   const scale = useScale(SIDEBAR_SCALE_MIN);
 
   useEffect(() => settings.subscribe((s) => setCollapsed(s.sidebarCollapsed)), []);
+
+  useEffect(() => {
+    if (!pendingQuickSearchReset.current || new URLSearchParams(location.search).has('quick')) return;
+    pendingQuickSearchReset.current = false;
+    window.dispatchEvent(new CustomEvent(RESET_PAGE_EVENT));
+  }, [location.search]);
 
   const toggle = () => settings.set({ sidebarCollapsed: !collapsed });
 
@@ -55,6 +63,12 @@ export default function Sidebar({ tutorialNavOnly = false }) {
               onClick={(event) => {
                 if (tutorialNavOnly) return;
                 if (location.pathname === item.to) {
+                  if (item.to === '/explorar' && new URLSearchParams(location.search).has('quick')) {
+                    event.preventDefault();
+                    pendingQuickSearchReset.current = true;
+                    navigate('/explorar?tab=mangas', { replace: true });
+                    return;
+                  }
                   if (item.to === '/explorar' || item.to === '/biblioteca') {
                     const main = document.querySelector('main');
                     if (item.to === '/explorar' && main?.querySelector('[data-explore-start="true"]')) {

@@ -238,10 +238,11 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     clearTimeout(hideTimer.current);
     clearTimeout(barTimer.current);
     hovering.current = true;
-    if (barsOpen) return;
-    setBarsOpen(true);
-    setBarsLeaving(false);
-  }, [barsOpen]);
+    if (!barsOpen || barsLeaving) {
+      setBarsOpen(true);
+      setBarsLeaving(false);
+    }
+  }, [barsOpen, barsLeaving]);
 
   const scheduleHide = useCallback(() => {
     clearTimeout(hideTimer.current);
@@ -256,7 +257,8 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   }, []);
 
   useEffect(() => {
-    hovering.current = false;
+    clearTimeout(barTimer.current);
+    clearTimeout(hideTimer.current);
     barTimer.current = setTimeout(() => {
       if (hovering.current) return;
       setBarsLeaving(true);
@@ -837,17 +839,20 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
           ) : (
             <div
               onMouseEnter={showBar}
+              onMouseMove={showBar}
               onMouseLeave={scheduleHide}
-              className="fixed z-20 grid place-items-center text-muted-foreground"
+              className="fixed z-20 flex items-center text-muted-foreground"
               style={{
                 left: `${arrowLeft}px`,
-                width: `${barH}px`,
+                width: px(500, scale, 360),
                 height: `${arrowH}px`,
                 top: `${arrowTop}px`
               }}
               aria-hidden
             >
-              <ChevronDown style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+              <span className="grid shrink-0 place-items-center" style={{ width: px(32, scale, 27), height: `${arrowH}px` }}>
+                <ChevronDown style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+              </span>
             </div>
       )}
 

@@ -93,11 +93,6 @@ export default function Library() {
     setSel(cats[0]?.id || '');
   }, [cats, sel]);
 
-  const remove = (manga) => {
-    lib.toggleFav(manga);
-    setFavs(lib.favs());
-  };
-
   const shown = useMemo(
     () => {
       const list = favs.filter((f) => (f.cats || []).includes(sel)).slice();
@@ -242,7 +237,7 @@ export default function Library() {
             size="sm"
             variant="secondary"
             title="Ordenar"
-            className="rounded-lg"
+            className="rounded-md"
             onClick={() => {
               const order = ['title-asc', 'title-desc', 'unread-desc', 'recent'];
               const next = order[(order.indexOf(sortBy) + 1) % order.length];
@@ -268,7 +263,7 @@ export default function Library() {
             disabled={checking || !favs.length}
             onClick={runCheck}
             title="Buscar actualizaciones"
-            className="rounded-lg"
+            className="rounded-md"
             style={{
               height: px(36, scale, 30),
               fontSize: `${Math.round(14 * scale)}px`,
@@ -325,9 +320,13 @@ export default function Library() {
           })}
         </div>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div
+          className="grid gap-3"
+          style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${px(260, scale, 230)}), 1fr))` }}
+        >
           {shown.map((m, i) => {
             const sid = m.sourceId || 'leercapitulo';
+            const unreadCount = unread[`${sid}|${m.url}`];
             const sourceManifest = extensions.manifest(sid);
             const sourceInfo = {
               ...sourceManifest,
@@ -340,11 +339,14 @@ export default function Library() {
               <div key={i} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5">
                 <a
                   href={`#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sid)}&from=biblioteca`}
-                  className={cn('flex items-center gap-3 flex-1 min-w-0', unavailable && 'pointer-events-none opacity-60')}
+                  className={cn('flex items-end gap-3 flex-1 min-w-0', unavailable && 'pointer-events-none opacity-60')}
                   aria-disabled={unavailable}
                   tabIndex={unavailable ? -1 : undefined}
                 >
-                  <span className="relative w-10 h-14 rounded-lg shrink-0 overflow-hidden bg-muted">
+                  <span
+                    className="relative rounded-lg shrink-0 overflow-hidden bg-muted"
+                    style={{ width: px(68, scale, 56), height: px(102, scale, 82) }}
+                  >
                     {m.cover && (
                       <img
                         src={m.cover}
@@ -361,12 +363,14 @@ export default function Library() {
                     )}
                   </span>
                   <span className="flex-1 min-w-0">
-                    <span className="block font-semibold truncate">{m.title}</span>
+                    <span className="block font-semibold truncate" style={{ fontSize: px(16, scale, 13) }}>{m.title}</span>
+                    {showUnread && unreadCount != null && (
+                      <span className="mt-1 block truncate text-muted-foreground" style={{ fontSize: px(12, scale, 10) }}>
+                        {unreadCount > 0 ? `${unreadCount} sin leer` : 'Lectura al día'}
+                      </span>
+                    )}
                   </span>
                 </a>
-                <Button variant="ghost" size="sm" onClick={() => remove(m)} title="Quitar de biblioteca">
-                  Quitar
-                </Button>
               </div>
             );
           })}

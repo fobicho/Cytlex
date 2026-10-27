@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, Component } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar.jsx';
 import TitleBar from './components/TitleBar.jsx';
 import Library from './pages/Library.jsx';
@@ -16,8 +16,19 @@ import { startNotifier, onNotifyClick, checkLibrary } from './lib/notify.js';
 import { announceExtUpdates } from './lib/extUpdates.js';
 import { useToast } from './components/Toast.jsx';
 import { appWindow } from './lib/appWindow.js';
-import { useScale } from './lib/useScale.js';
-import { ArrowUpCircle } from 'lucide-react';
+import { px, useScale } from './lib/useScale.js';
+import { ArrowUpCircle, Search } from 'lucide-react';
+import { Input } from './components/ui/input.jsx';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+
+function quickSearchPosition(x, y) {
+  const width = Math.min(420, Math.max(0, window.innerWidth - 32));
+  const halfWidth = width / 2;
+  return {
+    x: Math.max(halfWidth + 16, Math.min(x, window.innerWidth - halfWidth - 16)),
+    y: Math.max(96, Math.min(y - 8, window.innerHeight - 16))
+  };
+}
 
 class PageBoundary extends Component {
   constructor(props) {
@@ -64,8 +75,15 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   const [extensionMetadataRevision, setExtensionMetadataRevision] = useState(0);
   const scale = useScale();
   const [resetTick, setResetTick] = useState(0);
+  const [quickSearchOpen, setQuickSearchOpen] = useState(false);
+  const [quickSearchQuery, setQuickSearchQuery] = useState('');
+  const [quickSearchPoint, setQuickSearchPoint] = useState(() => quickSearchPosition(window.innerWidth / 2, window.innerHeight / 2));
+  const quickSearchInput = useRef(null);
+  const pointerPosition = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+  const reduceMotion = useReducedMotion();
   const initialLibraryCheck = useRef(false);
   const location = useLocation();
+  const navigate = useNavigate();
   const isReader = location.pathname.startsWith('/leer');
   const resetPage = useCallback(() => {
     setResetTick((t) => t + 1);
@@ -126,7 +144,9 @@ export default function App({ isVisible = true, tutorialMode = false }) {
 
   useEffect(() => {
     const t = setTimeout(() => {
+      if (!settings.get().extUpdateNotify) return;
       announceExtUpdates(({ updates, count }) => {
+        if (!settings.get().extUpdateNotify) return;
         const description = count === 1
           ? `Ya puedes instalar la versión ${updates[0].to}.`
           : `${updates.slice(0, 3).map((update) => `${update.name} ${update.to}`).join(' · ')}${count > 3 ? ` y ${count - 3} más` : ''}`;
@@ -162,15 +182,60 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   };
 
   useEffect(() => {
+    if (!quickSearchOpen) return undefined;
+    const frame = requestAnimationFrame(() => quickSearchInput.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [quickSearchOpen]);
+
+  useEffect(() => {
+    const onMove = (e) => {
+      pointerPosition.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener('mousemove', onMove);
+    return () => window.removeEventListener('mousemove', onMove);
+  }, []);
+
+  useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'F11') {
         e.preventDefault();
         appWindow.toggleFullscreen().then(setIsFullscreen);
+        return;
       }
+
+      if (tutorialMode || isReader) return;
+
+      if (quickSearchOpen && e.key === 'Escape') {
+        e.preventDefault();
+        setQuickSearchOpen(false);
+        return;
+      }
+
+      if (e.ctrlKey && !e.altKey && !e.metaKey && e.code === 'Space') {
+        e.preventDefault();
+        if (quickSearchOpen) {
+          setQuickSearchOpen(false);
+        } else if (extensions.installed().length > 0) {
+          setQuickSearchQuery('');
+          setQuickSearchPoint(quickSearchPosition(pointerPosition.current.x, pointerPosition.current.y));
+          setQuickSearchOpen(true);
+        }
+        return;
+      }
+
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [isReader, location.pathname, navigate, quickSearchOpen, tutorialMode]);
+
+  const submitQuickSearch = (e) => {
+    e.preventDefault();
+    const query = quickSearchQuery.trim();
+    if (!query || !extensions.installed().length) return;
+    const params = new URLSearchParams({ tab: 'mangas', q: query, quick: String(Date.now()) });
+    setQuickSearchOpen(false);
+    navigate(`/explorar?${params}`);
+  };
 
   return (
     <div className="flex flex-col h-screen overflow-hidden" data-extension-metadata-revision={extensionMetadataRevision}>
@@ -192,7 +257,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
                 <Route path="/catalogo" element={<Navigate to="/explorar" replace />} />
                 <Route
                   path="/ajustes"
-                  element={<Settings key={`set-${resetTick}`} />}
+                  element={<Settings key={`set-${resetTick}`} tutorialPreview={tutorialMode} />}
                 />
                 <Route path="/seguimiento" element={<Tracking />} />
                 <Route path="/manga/*" element={<Detail />} />
@@ -202,6 +267,42 @@ export default function App({ isVisible = true, tutorialMode = false }) {
           </main>
         </div>
       </div>
+      <AnimatePresence>
+        {quickSearchOpen && (
+          <div
+            className="fixed left-0 top-0 z-[100] pointer-events-none"
+            style={{ transform: `translate3d(${quickSearchPoint.x}px, ${quickSearchPoint.y}px, 0)` }}
+          >
+            <div style={{ transform: 'translate(-50%, calc(-100% - 8px))' }}>
+              <motion.div
+                role="search"
+                aria-label="Búsqueda rápida de mangas"
+                initial={{ opacity: 0, transform: reduceMotion ? 'scale(1)' : 'scale(.94)' }}
+                animate={{ opacity: 1, transform: 'scale(1)' }}
+                exit={{ opacity: 0, transform: reduceMotion ? 'scale(1)' : 'scale(.94)' }}
+                transition={reduceMotion
+                  ? { duration: 0.1 }
+                  : { duration: 0.18, ease: [0.23, 1, 0.32, 1] }}
+                className="pointer-events-auto w-[min(420px,calc(100vw-32px))] rounded-xl border border-border bg-card p-1.5 shadow-lg"
+                style={{ transformOrigin: 'center' }}
+              >
+                <form onSubmit={submitQuickSearch} className="flex items-center gap-3 pl-1">
+                  <Search className="shrink-0 text-muted-foreground" aria-hidden="true" style={{ width: px(18, scale, 15), height: px(18, scale, 15) }} />
+                  <Input
+                    ref={quickSearchInput}
+                    value={quickSearchQuery}
+                    onChange={(e) => setQuickSearchQuery(e.target.value)}
+                    placeholder="Buscar un manga..."
+                    aria-label="Buscar un manga"
+                    autoComplete="off"
+                    className="h-7 min-w-0 border-0 bg-transparent px-0 py-1 shadow-none focus:border-0"
+                  />
+                </form>
+              </motion.div>
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

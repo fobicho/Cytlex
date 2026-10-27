@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown, Settings as SettingsIcon } from 'lucide-react';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { extUpdates } from '../lib/extUpdates.js';
@@ -146,6 +147,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   const [loading, setLoading] = useState(() => !cacheHit);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState('');
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(null);
   const [confirmInstall, setConfirmInstall] = useState(null);
   const [confirmUpdate, setConfirmUpdate] = useState(null);
@@ -162,6 +164,11 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   });
   const [langConfig, setLangConfig] = useState(() => readExtConfig());
   const [configExt, setConfigExt] = useState(null);
+  const [toolbarTarget, setToolbarTarget] = useState(null);
+
+  useLayoutEffect(() => {
+    setToolbarTarget(document.getElementById('extensions-toolbar'));
+  }, []);
 
   const toggleLang = (subId, code, options) => {
     const cfg = readExtConfig();
@@ -263,6 +270,37 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
       setUpdates(await extensions.checkUpdates(url));
     } catch {
       setUpdates([]);
+    }
+  };
+
+  const searchUpdates = async () => {
+    if (!repoUrl) {
+      toast({ title: 'No hay un repositorio configurado', description: 'Configura un repositorio para buscar actualizaciones.', variant: 'error' });
+      return;
+    }
+    setCheckingUpdates(true);
+    setErr('');
+    try {
+      const [found] = await Promise.all([
+        extensions.checkUpdates(repoUrl),
+        loadAvailable(repoUrl)
+      ]);
+      setUpdates(found);
+      if (!found.length) {
+        toast({ title: 'No hay actualizaciones pendientes', description: 'Tus extensiones están al día.', variant: 'info' });
+      } else {
+        toast({
+          title: found.length === 1 ? `${found[0].name} tiene una actualización` : `${found.length} extensiones tienen actualizaciones`,
+          description: found.length === 1
+            ? `Ya puedes instalar la versión ${found[0].to}.`
+            : 'Ya puedes instalarlas desde Extensiones.',
+          variant: 'info'
+        });
+      }
+    } catch (error) {
+      toast({ title: 'No se pudieron buscar actualizaciones', description: String(error?.message || error), variant: 'error' });
+    } finally {
+      setCheckingUpdates(false);
     }
   };
 
@@ -478,7 +516,53 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   };
 
   return (
-    <div className="flex flex-col" style={{ gap: px(32, scale, 22) }}>
+    <>
+      {toolbarTarget && createPortal(
+        <>
+          <Button
+            variant="secondary"
+            size="sm"
+            title="Ordenar extensiones"
+            aria-label={`Ordenar extensiones: ${sortLabel(sortBy)}`}
+            onClick={() => {
+              const next = extensionSortModes[(extensionSortModes.indexOf(sortBy) + 1) % extensionSortModes.length];
+              setSortBy(next);
+              try { localStorage.setItem('cytlex:extensionsSort', next); } catch {}
+            }}
+            style={{
+              height: px(36, scale, 30),
+              fontSize: px(14, scale, 12),
+              paddingLeft: px(12, scale, 9),
+              paddingRight: px(12, scale, 9)
+            }}
+          >
+            <ArrowUpDown className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+            {sortLabel(sortBy)}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={searchUpdates}
+            disabled={checkingUpdates}
+            title="Buscar actualizaciones"
+            aria-label="Buscar actualizaciones"
+            style={{
+              height: px(36, scale, 30),
+              fontSize: px(14, scale, 12),
+              paddingLeft: px(12, scale, 9),
+              paddingRight: px(12, scale, 9)
+            }}
+          >
+            <RefreshCw
+              className={cn('mr-2', checkingUpdates && 'animate-spin')}
+              style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
+            />
+            Buscar actualizaciones
+          </Button>
+        </>,
+        toolbarTarget
+      )}
+      <div className="flex flex-col" style={{ gap: px(32, scale, 22) }}>
       {err && (
         <Card className="border-destructive/40 hover:shadow-sm">
           <div
@@ -564,26 +648,6 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                 </motion.div>
               )}
             </AnimatePresence>
-            <Button
-              variant="secondary"
-              size="sm"
-              title="Ordenar extensiones"
-              aria-label={`Ordenar extensiones: ${sortLabel(sortBy)}`}
-              onClick={() => {
-                const next = extensionSortModes[(extensionSortModes.indexOf(sortBy) + 1) % extensionSortModes.length];
-                setSortBy(next);
-                try { localStorage.setItem('cytlex:extensionsSort', next); } catch {}
-              }}
-              style={{
-                height: px(36, scale, 30),
-                fontSize: px(14, scale, 12),
-                paddingLeft: px(12, scale, 9),
-                paddingRight: px(12, scale, 9)
-              }}
-            >
-              <ArrowUpDown className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-              {sortLabel(sortBy)}
-            </Button>
             {visibleUpdates.length > 0 && (
               <Button
                 ref={allRef}
@@ -662,24 +726,27 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             title="No hay extensiones instaladas"
           />
         ) : visibleInstalled.length > 0 ? (
-          <>
-          <div className="grid" style={grid}>
+          <div className="grid">
+          <div className="invisible col-start-1 row-start-1 pointer-events-none" aria-hidden="true">
+            <EmptyState compact face="（・_・）" title="No hay extensiones instaladas" animateFace={false} />
+          </div>
+          <div className="grid col-start-1 row-start-1" style={{ ...grid, alignContent: 'start' }}>
             {sortedInstalled.map(({ manifest: m }) => {
               const upd = visibleUpdates.find((u) => u.id === m.id);
               const blocked = !showAdultExtensions && isAdultExtension(m);
               return (
-                <ExtensionCard
-                  key={m.id}
-                  scale={scale}
-                  m={m}
-                  updatable={!!upd}
-                  disabled={blocked}
-                  confirmationOpen={confirmRemove?.id === m.id || (confirmUpdate && confirmUpdate !== 'all' && confirmUpdate.id === m.id)}
-                  selected={selectedInstalledIds.has(m.id)}
-                  onSelectionChange={tutorialPreview ? undefined : (selected) => toggleSelection(setSelectedInstalledIds, m.id, selected)}
-                  selectionLabel={`Seleccionar ${m.name} para desinstalar`}
-                  selectionDisabled={busy !== ''}
-                  action={
+                <div key={m.id}>
+                  <ExtensionCard
+                    scale={scale}
+                    m={m}
+                    updatable={!!upd}
+                    disabled={blocked}
+                    confirmationOpen={confirmRemove?.id === m.id || (confirmUpdate && confirmUpdate !== 'all' && confirmUpdate.id === m.id)}
+                    selected={selectedInstalledIds.has(m.id)}
+                    onSelectionChange={tutorialPreview ? undefined : (selected) => toggleSelection(setSelectedInstalledIds, m.id, selected)}
+                    selectionLabel={`Seleccionar ${m.name} para desinstalar`}
+                    selectionDisabled={busy !== ''}
+                    action={
                     <div className="flex items-center" style={{ gap: px(4, scale, 3) }}>
                       {!blocked && Array.isArray(m.config?.sources) && m.config.sources.length > 0 && (
                         <Button
@@ -789,12 +856,13 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                         </AnimatePresence>
                       </div>
                     </div>
-                  }
-                />
+                    }
+                  />
+                </div>
               );
             })}
           </div>
-          </>
+          </div>
         ) : null}
       </section>
 
@@ -865,27 +933,6 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                 </motion.div>
               )}
             </AnimatePresence>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                checkUpdates();
-                loadAvailable();
-              }}
-              disabled={loading}
-              style={{
-                height: px(36, scale, 30),
-                fontSize: px(14, scale, 12),
-                paddingLeft: px(12, scale, 9),
-                paddingRight: px(12, scale, 9)
-              }}
-            >
-              <RefreshCw
-                className={cn('mr-2', loading && 'animate-spin')}
-                style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
-              />
-              Recargar
-            </Button>
           </div>
         </div>
 
@@ -921,19 +968,22 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             title="No quedan extensiones por instalar"
           />
         ) : (
-          <>
-          <div className="grid" style={grid}>
+          <div className="grid">
+            <div className="invisible col-start-1 row-start-1 pointer-events-none" aria-hidden="true">
+              <EmptyState compact face="ヽ(・∀・)ﾉ" title="No quedan extensiones por instalar" animateFace={false} />
+            </div>
+            <div className="grid col-start-1 row-start-1" style={{ ...grid, alignContent: 'start' }}>
             {sortedAvailable.map((m) => (
-              <ExtensionCard
-                key={m.id}
-                scale={scale}
-                m={m}
-                confirmationOpen={confirmInstall?.id === m.id}
-                selected={selectedAvailableIds.has(m.id)}
-                onSelectionChange={tutorialPreview ? undefined : (selected) => toggleSelection(setSelectedAvailableIds, m.id, selected)}
-                selectionLabel={`Seleccionar ${m.name} para instalar`}
-                selectionDisabled={busy !== '' || loading}
-                action={
+              <div key={m.id}>
+                <ExtensionCard
+                  scale={scale}
+                  m={m}
+                  confirmationOpen={confirmInstall?.id === m.id}
+                  selected={selectedAvailableIds.has(m.id)}
+                  onSelectionChange={tutorialPreview ? undefined : (selected) => toggleSelection(setSelectedAvailableIds, m.id, selected)}
+                  selectionLabel={`Seleccionar ${m.name} para instalar`}
+                  selectionDisabled={busy !== '' || loading}
+                  action={
                   <div
                     ref={confirmInstall?.id === m.id ? confirmRef : null}
                     className="relative flex items-center justify-center"
@@ -977,14 +1027,14 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                       )}
                     </AnimatePresence>
                   </div>
-                }
-              />
+                  }
+                />
+              </div>
             ))}
           </div>
-          </>
+          </div>
         )}
       </section>
-
       <Dialog
         open={!!configExt}
         onClose={() => setConfigExt(null)}
@@ -1031,6 +1081,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
           );
         })}
       </Dialog>
-    </div>
+      </div>
+    </>
   );
 }
