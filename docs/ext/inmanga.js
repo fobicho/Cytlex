@@ -14,28 +14,55 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
 
   const clean = (value) => String(value || '').replace(/\s+/g, ' ').trim();
   const text = (element, selector) => clean(element.querySelector(selector)?.textContent);
+  const imageUrl = (image) => {
+    if (!image) return '';
+    const srcset = image.getAttribute('srcset') || image.getAttribute('data-srcset') || '';
+    const largestSrc = srcset.split(',').map((part) => part.trim().split(/\s+/)[0]).filter(Boolean).at(-1);
+    const candidates = [
+      image.getAttribute('data-src'),
+      image.getAttribute('data-original'),
+      image.getAttribute('data-lazy-src'),
+      image.getAttribute('data-original-src'),
+      image.getAttribute('data-url'),
+      image.getAttribute('data-cfsrc'),
+      largestSrc,
+      image.getAttribute('src'),
+      image.getAttribute('content')
+    ];
+    for (const candidate of candidates) {
+      const value = clean(candidate);
+      if (!value || /^(?:data:|javascript:|about:|#)/i.test(value)) continue;
+      if (/(?:placeholder|no[-_]?image|default[-_]?cover|blank\.gif|transparent\.gif|pixel\.(?:gif|png)|spacer\.(?:gif|png)|\/logo(?:[./_-]|$))/i.test(value)) continue;
+      const resolved = abs(value);
+      if (resolved) return resolved;
+    }
+    return '';
+  };
   const coverFrom = (doc) => {
-    const metaCover = doc.querySelector('meta[property="og:image"]')?.getAttribute('content');
-    if (metaCover) return abs(metaCover);
     const selectors = [
       '.manga-cover img',
       'img[class*="cover" i]',
       'img[id*="cover" i]',
+      '[data-cover] img',
+      '[data-thumbnail] img',
       'img[src*="/i/m/" i]',
       'img[data-src*="/i/m/" i]',
       'img[data-original*="/i/m/" i]',
+      'img[src*="/thumbnails/manga/" i]',
+      'img[data-src*="/thumbnails/manga/" i]',
       'img[src*="/images/manga/" i]',
       'img[data-src*="/images/manga/" i]',
       'img[data-original*="/images/manga/" i]'
     ];
     for (const selector of selectors) {
       const image = doc.querySelector(selector);
-      if (!image) continue;
-      const source = image.getAttribute('data-src')
-        || image.getAttribute('data-original')
-        || image.getAttribute('data-lazy-src')
-        || image.getAttribute('src');
-      if (source && !/^data:image\/(?:gif|svg\+xml)/i.test(source)) return abs(source);
+      const source = imageUrl(image);
+      if (source) return source;
+    }
+    const metaCover = doc.querySelector('meta[property="og:image"]')?.getAttribute('content');
+    if (metaCover) {
+      const source = imageUrl({ getAttribute: (name) => name === 'content' ? metaCover : null });
+      if (source) return source;
     }
     return '';
   };
@@ -98,10 +125,15 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       const url = abs(anchor.getAttribute('href'));
       const card = anchor.closest('article, li') || anchor;
       const image = anchor.querySelector('img') || card.querySelector('img');
+      const cover = imageUrl(image)
+        || imageUrl(anchor)
+        || imageUrl(card)
+        || abs(anchor.getAttribute('data-cover') || anchor.getAttribute('data-thumbnail')
+          || card.getAttribute('data-cover') || card.getAttribute('data-thumbnail'));
       return {
         url,
         title: text(anchor, 'h4, h3, .title') || clean(anchor.getAttribute('title')) || clean(image?.getAttribute('alt')) || clean(anchor.textContent),
-        cover: abs(image?.getAttribute('data-src') || image?.getAttribute('data-original') || image?.getAttribute('data-lazy-src') || image?.getAttribute('src')),
+        cover,
         type: 'Manga',
         lastChapter: text(anchor, '[class*="chapter"], [class*="Chapter"]').replace(/[^\d.,]/g, '')
       };
