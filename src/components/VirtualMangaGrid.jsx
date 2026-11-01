@@ -3,10 +3,11 @@ import MangaCard from './MangaCard.jsx';
 
 const OVERSCAN_ROWS = 1;
 
-export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, renderCard }) {
+export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, renderCard, active = true }) {
   const gridRef = useRef(null);
   const frameRef = useRef(0);
   const layoutRef = useRef(null);
+  const wasActive = useRef(active);
   const [gridWidth, setGridWidth] = useState(0);
   const [cardHeight, setCardHeight] = useState(coverSize * 1.5 + 28);
   const [range, setRange] = useState({ start: 0, end: 6 });
@@ -26,6 +27,9 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, re
   layoutRef.current = { columns, rowStep, totalRows };
 
   useLayoutEffect(() => {
+    const restoreAfterHide = active && !wasActive.current;
+    wasActive.current = active;
+    if (!active) return undefined;
     const updateRange = () => {
       frameRef.current = 0;
       const main = document.querySelector('main');
@@ -62,14 +66,15 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, re
     const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(main);
     if (gridRef.current?.parentElement) observer.observe(gridRef.current.parentElement);
-    updateRange();
+    if (restoreAfterHide) scheduleUpdate();
+    else updateRange();
     return () => {
       main.removeEventListener('scroll', scheduleUpdate);
       observer.disconnect();
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       frameRef.current = 0;
     };
-  }, [items.length, coverSize, scale, columns, rowStep, gridWidth]);
+  }, [items.length, coverSize, scale, columns, rowStep, gridWidth, active]);
 
   const height = totalRows ? totalRows * rowStep - gapY : 0;
   return (

@@ -39,6 +39,63 @@ const chapterRequests = new Map();
 const catalogFiltersCache = new Map();
 const detailKey = (url, sourceId) => `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}|${url}`;
 const chapterKey = (url, sourceId) => `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}|${url}`;
+const titleKey = (value) => String(value || '').normalize('NFKC').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+
+function sameAuthor(expected, actual) {
+  const expectedNames = String(expected || '').split(/[,;|&]|\s+y\s+/i).map((name) => name.trim()).filter(Boolean);
+  const actualNames = String(actual || '').split(/[,;|&]|\s+y\s+/i).map((name) => name.trim()).filter(Boolean);
+  if (!expectedNames.length || !actualNames.length) return true;
+  return expectedNames.some((expectedName) => {
+    const expectedParts = new Set(expectedName.normalize('NFKC').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().match(/[\p{L}]+/gu) || []);
+    return actualNames.some((actualName) => {
+      const actualParts = new Set(actualName.normalize('NFKC').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().match(/[\p{L}]+/gu) || []);
+      const shared = [...expectedParts].filter((part) => actualParts.has(part)).length;
+      return !expectedParts.size || !actualParts.size || shared >= Math.min(2, expectedParts.size);
+    });
+  });
+}
+
+function matchesManga(detail, item, title, author) {
+  const expectedTitle = titleKey(title);
+  if (!expectedTitle) return false;
+  const names = [detail?.title, detail?.altTitles, item?.title]
+    .flatMap((value) => String(value || '').split(/[·•|;]/))
+    .map(titleKey)
+    .filter(Boolean);
+  if (!names.includes(expectedTitle)) return false;
+  return sameAuthor(author, [detail?.facts?.autor, item?.author].filter(Boolean).join(', '));
+}
+
+async function findManga(src, url, title, author) {
+  const queries = [title, ...String(author || '').split(/[,;|&]|\s+y\s+/i)];
+  try {
+    const parts = new URL(url).pathname.split('/').filter(Boolean);
+    const slug = parts.at(-1)?.replace(/[-_]+/g, ' ').trim();
+    if (slug && titleKey(slug) !== titleKey(title)) queries.push(slug);
+  } catch {}
+  const uniqueQueries = [...new Map(queries.filter(Boolean).map((query) => [titleKey(query), query])).values()];
+  const seen = new Set();
+  for (const query of uniqueQueries) {
+    let items = [];
+    try { items = (await src.catalog({ q: query, page: 1 })).items || []; } catch { continue; }
+    const candidates = items.filter((item) => item.url && item.url !== url && !seen.has(item.url)).slice(0, 20);
+    candidates.forEach((item) => seen.add(item.url));
+    let cursor = 0;
+    let found = null;
+    const workers = Array.from({ length: Math.min(3, candidates.length) }, async () => {
+      while (cursor < candidates.length && !found) {
+        const item = candidates[cursor++];
+        try {
+          const detail = await src.detail(item.url);
+          if (matchesManga(detail, item, title, author)) found = { url: item.url, detail };
+        } catch {}
+      }
+    });
+    await Promise.all(workers);
+    if (found) return found;
+  }
+  return null;
+}
 
 function catalogFiltersFor(sourceId, src) {
   if (typeof src.catalogFilters !== 'function') return Promise.resolve([]);
@@ -133,6 +190,28 @@ export const api = {
     } finally {
       if (detailRequests.get(key) === request) detailRequests.delete(key);
     }
+  },
+
+  async refreshDetail(url, sourceId) {
+    const src = await resolveSource(sourceId);
+    return src.detail(url);
+  },
+
+  async refreshManga(url, sourceId, { title = '', author = '' } = {}) {
+    const src = await resolveSource(sourceId);
+    try {
+      return { url, detail: await src.detail(url) };
+    } catch (error) {
+      if (!/\bHTTP 404\b/.test(String(error?.message || error)) || !title) throw error;
+      const replacement = await findManga(src, url, title, author);
+      if (!replacement) throw error;
+      return replacement;
+    }
+  },
+
+  async findManga({ url, title, author = '' }, sourceId) {
+    const src = await resolveSource(sourceId);
+    return findManga(src, url, title, author);
   },
 
   async chapter(url, sourceId, { fresh = false, failedPage } = {}) {

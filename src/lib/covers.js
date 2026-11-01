@@ -6,8 +6,12 @@ const MAX_SEARCH_COVERS = 60;
 const MAX_LIBRARY_COVERS = 120;
 const MAX_LIBRARY_COVER_LOADS = 2;
 const searchCoverCache = new Map();
+const loadedSearchCovers = new Set();
+const decodedSearchCovers = new Map();
 const searchCoverWaiters = [];
 const libraryCoverCache = new Map();
+const loadedLibraryCovers = new Map();
+const decodedLibraryCovers = new Map();
 const libraryCoverWaiters = [];
 let searchCoverGeneration = 0;
 let activeSearchCoverLoads = 0;
@@ -17,7 +21,11 @@ function pruneSearchCoverCache() {
   while (searchCoverCache.size > MAX_SEARCH_COVERS) {
     const [url, value] = searchCoverCache.entries().next().value;
     searchCoverCache.delete(url);
-    if (typeof value === 'string' && value.startsWith('blob:')) URL.revokeObjectURL(value);
+    if (typeof value === 'string' && value.startsWith('blob:')) {
+      loadedSearchCovers.delete(value);
+      decodedSearchCovers.delete(value);
+      URL.revokeObjectURL(value);
+    }
   }
 }
 
@@ -36,8 +44,25 @@ function pruneLibraryCoverCache() {
   while (libraryCoverCache.size > MAX_LIBRARY_COVERS) {
     const [url, value] = libraryCoverCache.entries().next().value;
     libraryCoverCache.delete(url);
-    if (typeof value === 'string' && value.startsWith('blob:')) URL.revokeObjectURL(value);
+    if (typeof value === 'string' && value.startsWith('blob:')) {
+      loadedLibraryCovers.delete(value);
+      decodedLibraryCovers.delete(value);
+      URL.revokeObjectURL(value);
+    }
   }
+}
+
+export function markLibraryCoverLoaded(url) {
+  if (!url) return;
+  loadedLibraryCovers.delete(url);
+  loadedLibraryCovers.set(url, true);
+  while (loadedLibraryCovers.size > MAX_LIBRARY_COVERS) {
+    loadedLibraryCovers.delete(loadedLibraryCovers.keys().next().value);
+  }
+}
+
+export function hasLibraryCoverLoaded(url) {
+  return !!url && (loadedLibraryCovers.has(url) || loadedSearchCovers.has(url));
 }
 
 async function acquireLibraryCoverSlot() {
@@ -54,7 +79,11 @@ function releaseLibraryCoverSlot() {
 export function clearSearchCoverCache() {
   searchCoverGeneration += 1;
   for (const value of searchCoverCache.values()) {
-    if (typeof value === 'string' && value.startsWith('blob:')) URL.revokeObjectURL(value);
+    if (typeof value === 'string' && value.startsWith('blob:')) {
+      loadedSearchCovers.delete(value);
+      decodedSearchCovers.delete(value);
+      URL.revokeObjectURL(value);
+    }
   }
   searchCoverCache.clear();
 }
@@ -91,8 +120,17 @@ export async function preloadLibraryCover(url) {
       if (!thumbnail) return '';
       const blob = await (await fetch(thumbnail)).blob();
       const objectUrl = URL.createObjectURL(blob);
+      const decoded = await decodeCover(objectUrl);
+      if (!decoded) {
+        URL.revokeObjectURL(objectUrl);
+        return '';
+      }
+      markLibraryCoverLoaded(objectUrl);
+      decodedLibraryCovers.set(objectUrl, decoded);
       const current = libraryCoverCache.get(url);
       if (current && current !== pending) {
+        loadedLibraryCovers.delete(objectUrl);
+        decodedLibraryCovers.delete(objectUrl);
         URL.revokeObjectURL(objectUrl);
         return current;
       }
@@ -114,6 +152,8 @@ export async function preloadLibraryCover(url) {
 export function discardLibraryCover(url, objectUrl) {
   if (libraryCoverCache.get(url) !== objectUrl) return;
   libraryCoverCache.delete(url);
+  loadedLibraryCovers.delete(objectUrl);
+  decodedLibraryCovers.delete(objectUrl);
   URL.revokeObjectURL(objectUrl);
 }
 
@@ -137,10 +177,17 @@ export function preloadSearchCover(url) {
       if (!thumbnail) return '';
       const blob = await (await fetch(thumbnail)).blob();
       const objectUrl = URL.createObjectURL(blob);
+      const decoded = await decodeCover(objectUrl);
+      if (!decoded) {
+        URL.revokeObjectURL(objectUrl);
+        return '';
+      }
       if (generation !== searchCoverGeneration) {
         URL.revokeObjectURL(objectUrl);
         return '';
       }
+      loadedSearchCovers.add(objectUrl);
+      decodedSearchCovers.set(objectUrl, decoded);
       searchCoverCache.set(url, objectUrl);
       pruneSearchCoverCache();
       return objectUrl;
@@ -190,5 +237,21 @@ export async function makeCoverThumb(url, maxWidth = THUMB_WIDTH) {
   } catch {
     return '';
   }
+}
+
+function decodeCover(url) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    image.onload = () => finish(image);
+    image.onerror = () => finish(null);
+    image.src = url;
+    if (image.decode) image.decode().then(() => finish(image), () => {});
+  });
 }
 

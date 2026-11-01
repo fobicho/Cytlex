@@ -272,7 +272,7 @@ export async function previewMihonBackup(input, installedSources, availableExten
       url: resolveUrl(chapter.url, manifest),
       read: chapter.read,
       page: chapter.page
-    })).filter((chapter) => chapter.url && (chapter.read || chapter.page > 0));
+    })).filter((chapter) => chapter.url);
     return {
       manga: {
         url,
@@ -284,7 +284,7 @@ export async function previewMihonBackup(input, installedSources, availableExten
         description: manga.description,
         genres: manga.genres,
         status: manga.status,
-        cover: manga.cover,
+        cover: resolveUrl(manga.cover, manifest),
         cats: manga.categoryIds.map((index) => categoryByIndex.get(index)).filter(Boolean),
         savedAt: Date.now()
       },
@@ -360,9 +360,11 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
     if (!manga.cats.length && categories[0]?.id) manga.cats = [categories[0].id];
     const key = `${manga.sourceId}|${urlKey(manga.url)}`;
     const legacyKey = `${entry.legacySourceId}|${pathKey(entry.legacyUrl)}`;
-    const index = byManga.get(key) ?? byManga.get(legacyKey);
+    const originalKey = entry.originalUrl ? `${manga.sourceId}|${urlKey(entry.originalUrl)}` : '';
+    const index = byManga.get(key) ?? (originalKey ? byManga.get(originalKey) : undefined) ?? byManga.get(legacyKey);
     if (index === undefined) {
       byManga.set(key, favorites.length);
+      if (originalKey) byManga.set(originalKey, favorites.length);
       byManga.set(legacyKey, favorites.length);
       favorites.push(manga);
       added += 1;
@@ -382,19 +384,24 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
         author: existing.author || manga.author,
         description: existing.description || manga.description,
         genres: existing.genres?.length ? existing.genres : manga.genres,
-        cover: existing.cover || manga.cover,
+        cover: manga.cover || existing.cover,
+        coverLocal: manga.cover ? '' : existing.coverLocal || '',
         cats: [...new Set([...keptCategories, ...manga.cats])]
       };
       byManga.set(key, index);
+      if (originalKey) byManga.set(originalKey, index);
       byManga.set(legacyKey, index);
       updated += 1;
     }
     for (const chapter of entry.chapterProgress) {
       const chapterKey = `${manga.sourceId}|${chapter.url}`;
       const old = progress[chapterKey] || {};
-      progress[chapterKey] = chapter.read || old.read
-        ? { ...old, page: null, total: old.total || 0, read: true, readAt: old.readAt || Date.now() }
-        : { ...old, page: Math.max(Number(old.page) || 0, chapter.page), total: old.total || 0, read: false, updatedAt: old.updatedAt || Date.now() };
+      delete progress[chapterKey];
+      if (chapter.read) {
+        progress[chapterKey] = { ...old, page: null, total: old.total || 0, read: true, readAt: old.readAt || Date.now() };
+      } else if (chapter.page > 0) {
+        progress[chapterKey] = { ...old, page: chapter.page, total: old.total || 0, read: false, updatedAt: old.updatedAt || Date.now() };
+      }
     }
   }
   const defaultCategory = categories.find((category) => category.id === 'todos' && normalizeName(category.name) === 'todos');

@@ -34,7 +34,8 @@ function CachedLibraryCover({ cover, title, className }) {
       src={src}
       alt={title}
       loading="lazy"
-      decoding="async"
+      decoding="sync"
+      fetchPriority="high"
       referrerPolicy="no-referrer"
       className={className}
       onLoad={() => {
@@ -51,7 +52,7 @@ function CachedLibraryCover({ cover, title, className }) {
   );
 }
 
-export default function Library() {
+export default function Library({ active = true }) {
   const [cats, setCats] = useState(() => lib.cats());
   const [sel, setSel] = useState(() => {
     const list = lib.cats();
@@ -140,6 +141,7 @@ export default function Library() {
   }, [cats, sel]);
 
   useLayoutEffect(() => {
+    if (!active) return undefined;
     const main = document.querySelector('main');
     if (!main) return undefined;
     const restore = () => { main.scrollTop = libraryScroll.get(sel); };
@@ -152,7 +154,7 @@ export default function Library() {
       cancelAnimationFrame(frame);
       main.removeEventListener('scroll', save);
     };
-  }, [sel]);
+  }, [sel, active]);
 
   const inCategory = useMemo(() => favs.filter((f) => (f.cats || []).includes(sel)), [favs, sel]);
 
@@ -323,6 +325,7 @@ export default function Library() {
           items={shown}
           coverSize={cs}
           scale={scale}
+          active={active}
           renderCard={(m) => {
             const sid = m.sourceId || 'leercapitulo';
             const adultBlocked = !showAdultExtensions && isAdultExtension(extensions.manifest(sid));

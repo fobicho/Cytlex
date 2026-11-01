@@ -5,7 +5,7 @@ import { api } from '../lib/api.js';
 import { lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
-import { getLibraryCover, getSearchCover, makeCoverThumb, preloadLibraryCover } from '../lib/covers.js';
+import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover, rememberCover, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { cn } from '../lib/utils.js';
@@ -21,7 +21,6 @@ import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
-const titleKey = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 const EXPAND_CTRL_H = 16;
 const COVER_BASE = 184;
@@ -95,7 +94,12 @@ export default function Detail() {
   const sourceAvailable = extensions.isInstalled(sourceId);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const adultExtensionDisabled = !showAdultExtensions && isAdultExtension(extensions.manifest(sourceId));
-  const [d, setD] = useState(() => api.peekDetail(mangaUrl, sourceId));
+  const detailKey = `${sourceId}|${mangaUrl}`;
+  const [detailState, setDetailState] = useState(() => ({
+    key: detailKey,
+    data: api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId)
+  }));
+  const d = detailState.key === detailKey ? detailState.data : api.peekStaleDetail(mangaUrl, sourceId);
   const [err, setErr] = useState('');
   const [fav, setFav] = useState(false);
   const [asc, setAsc] = useState(() => chapterOrder.get(mangaUrl));
@@ -145,7 +149,7 @@ export default function Detail() {
     if (typeof local === 'string' && local.startsWith('data:')) return local;
     const recalled = recallCover(mangaUrl);
     const remoteCover = fav?.cover || tCover || recalled;
-    return getSearchCover(remoteCover) || getLibraryCover(remoteCover) || remoteCover || '';
+    return getLibraryCover(remoteCover) || getSearchCover(remoteCover) || remoteCover || '';
   }, [mangaUrl, sourceId, progressTick, anilistCover, coverTick]);
 
   const coverSrc = useMemo(() => {
@@ -157,7 +161,7 @@ export default function Detail() {
     const local = lib.fav(mangaUrl, sourceId)?.coverLocal;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
     if (knownCover) return knownCover;
-    if (d?.cover) return getSearchCover(d.cover) || getLibraryCover(d.cover) || d.cover;
+    if (d?.cover) return getLibraryCover(d.cover) || getSearchCover(d.cover) || d.cover;
     return '';
   }, [d?.cover, knownCover, mangaUrl, sourceId, anilistCover, coverTick]);
 
@@ -165,12 +169,12 @@ export default function Detail() {
   const coverKey = `${sourceId}|${mangaUrl}`;
   const [displayedCover, setDisplayedCover] = useState(() => ({
     key: coverKey,
-    src: /^(data:|blob:)/i.test(coverSrc) ? coverSrc : ''
+    src: hasLibraryCoverLoaded(coverSrc) ? coverSrc : ''
   }));
   const [failedCover, setFailedCover] = useState('');
   const visibleCover = displayedCover.key === coverKey
     ? displayedCover.src
-    : (/^(data:|blob:)/i.test(coverSrc) ? coverSrc : '');
+    : (hasLibraryCoverLoaded(coverSrc) ? coverSrc : '');
   useEffect(() => {
     setCoverError(false);
     setFailedCover('');
@@ -189,14 +193,15 @@ export default function Detail() {
       )}
       {finalCover && (
         <img
-          className={cn('absolute inset-0 w-full h-full object-cover', visibleCover !== finalCover && 'opacity-0')}
+          className="absolute inset-0 w-full h-full object-cover"
           src={finalCover}
           alt={alt}
           referrerPolicy="no-referrer"
           onLoad={() => {
+            if (!/^https?:\/\//i.test(finalCover || '')) markLibraryCoverLoaded(finalCover);
             setDisplayedCover({ key: coverKey, src: finalCover });
             setFailedCover('');
-            if (/^(https?:\/\/|data:image\/)/i.test(finalCover || '')) preloadLibraryCover(finalCover);
+            if (/^https?:\/\//i.test(finalCover || '')) preloadLibraryCover(finalCover);
           }}
           onError={() => {
             if (knownCover && finalCover !== knownCover) setCoverError(true);
@@ -279,15 +284,14 @@ export default function Detail() {
     setAniLinked(!!tracking.get(mangaUrl, sourceId));
 
     const cached = api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId);
-    if (cached) setD(cached);
-    else setD(null);
+    setDetailState({ key: `${sourceId}|${mangaUrl}`, data: cached || null });
 
     let alive = true;
     api
       .detail(mangaUrl, sourceId)
       .then((r) => {
         if (!alive) return;
-        setD(r);
+        setDetailState({ key: `${sourceId}|${mangaUrl}`, data: r });
         rememberCover(mangaUrl, r?.cover);
         const favorite = lib.fav(mangaUrl, sourceId);
         if (favorite && r?.cover && favorite.cover !== r.cover) {
@@ -302,15 +306,20 @@ export default function Detail() {
           const title = favorite?.title || d?.title || decodeURIComponent(mangaUrl.split('/').filter(Boolean).at(-1) || '').replace(/-/g, ' ');
           if (title) {
             try {
-              const result = await api.catalog({ q: title, page: 1 }, sourceId);
-              const key = titleKey(title);
-              const candidate = (result.items || []).find((item) => titleKey(item.title) === key && item.url && item.url !== mangaUrl);
-              if (alive && candidate) {
-                lib.updateFav(mangaUrl, { url: candidate.url, title: candidate.title }, sourceId);
-                tracking.move(mangaUrl, candidate.url, sourceId);
-                chapterOrder.move(mangaUrl, candidate.url);
+              const recovered = await api.findManga({ url: mangaUrl, title, author: favorite?.author || d?.facts?.autor || '' }, sourceId);
+              if (alive && recovered) {
+                const updates = { url: recovered.url };
+                if (recovered.detail?.cover) {
+                  updates.cover = recovered.detail.cover;
+                  updates.coverLocal = '';
+                  rememberCover(mangaUrl, recovered.detail.cover);
+                  rememberCover(recovered.url, recovered.detail.cover);
+                }
+                lib.updateFav(mangaUrl, updates, sourceId);
+                tracking.move(mangaUrl, recovered.url, sourceId);
+                chapterOrder.move(mangaUrl, recovered.url);
                 const params = new URLSearchParams(loc.search);
-                params.set('u', candidate.url);
+                params.set('u', recovered.url);
                 navigate({ pathname: loc.pathname, search: params.toString() }, { replace: true });
                 return;
               }
@@ -509,8 +518,8 @@ export default function Detail() {
               className="relative aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
               style={{ width: `${coverSize}px` }}
             >
-              {coverImg('')}
               {!visibleCover && failedCover !== finalCover && <Skeleton className="absolute inset-0 rounded-xl" />}
+              {coverImg('')}
             </div>
           ) : (
             <Skeleton className="aspect-[2/3] rounded-xl shrink-0" style={{ width: `${coverSize}px` }} />
@@ -631,11 +640,13 @@ export default function Detail() {
           style={{ width: `${coverSize}px` }}
         >
           {coverSrc ? (
-            coverImg(d.title)
+            <>
+              {!visibleCover && failedCover !== finalCover && <Skeleton className="absolute inset-0 rounded-xl" />}
+              {coverImg(d.title)}
+            </>
           ) : (
             <Skeleton className="absolute inset-0 rounded-xl" />
           )}
-          {coverSrc && !visibleCover && failedCover !== finalCover && <Skeleton className="absolute inset-0 rounded-xl" />}
         </div>
         <div className="flex-1 min-w-0">
           <h1
@@ -892,7 +903,7 @@ export default function Detail() {
         onClose={() => setAniListOpen(false)}
       />
 
-      <div className="mt-6 border-t border-border pt-3">
+      <div className="border-t border-border pt-3" style={{ marginTop: px(20, scale, 14) }}>
         <div className="mb-2 flex items-center gap-2">
           <button
             type="button"

@@ -85,6 +85,10 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   const location = useLocation();
   const navigate = useNavigate();
   const isReader = location.pathname.startsWith('/leer');
+  const isLibraryPage = location.pathname === '/biblioteca';
+  const isLibraryDetail = location.pathname.startsWith('/manga')
+    && new URLSearchParams(location.search).get('from') === 'biblioteca';
+  const keepLibraryMounted = isLibraryPage || isLibraryDetail;
   const resetPage = useCallback(() => {
     setResetTick((t) => t + 1);
     lastSearch.q = '';
@@ -253,9 +257,14 @@ export default function App({ isVisible = true, tutorialMode = false }) {
             style={isReader ? undefined : { padding: `${Math.max(16, Math.round(24 * scale))}px` }}
           >
             <PageBoundary>
+              {keepLibraryMounted && (
+                <div className={isLibraryPage ? '' : 'hidden'} aria-hidden={!isLibraryPage} inert={!isLibraryPage}>
+                  <Library key={`lib-${resetTick}`} active={isLibraryPage} />
+                </div>
+              )}
               <Routes>
                 <Route path="/" element={<Navigate to="/biblioteca" replace />} />
-                <Route path="/biblioteca" element={<Library key={`lib-${resetTick}`} />} />
+                <Route path="/biblioteca" element={null} />
                 <Route path="/explorar" element={<Catalog key={`cat-${resetTick}`} tutorialPreview={tutorialMode} />} />
                 <Route path="/resultados" element={<Results />} />
                 <Route path="/catalogo" element={<Navigate to="/explorar" replace />} />
