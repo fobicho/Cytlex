@@ -149,7 +149,8 @@ const REFERER_RULES = [
   { hosts: ['onfmangas.com'], referer: 'https://onfmangas.com/' },
   { hosts: ['imagesolymp.xyz', 'olympusxyz.com'], referer: 'https://olympusxyz.com/' },
   { hosts: ['zonatmo.org'], referer: 'https://zonatmo.org/' },
-  { hosts: ['ntr-files.online'], referer: 'https://manga-oni.com/' }
+  { hosts: ['ntr-files.online'], referer: 'https://manga-oni.com/' },
+  { hosts: ['inmanga.com', 'intomanga.com'], referer: 'https://inmanga.com/' }
 ];
 
 const ALLOWED_PROTOCOLS = ['http:', 'https:'];
@@ -623,11 +624,12 @@ ipcMain.handle('http:post', async (_e, payload = {}) => {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
       ...headers
     },
-    body: JSON.stringify(body),
+    body: typeof body === 'string' ? body : JSON.stringify(body),
     timeout: HTTP_GET_TIMEOUT_MS
   });
   if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`HTTP ${res.statusCode} al pedir ${urlStr}`);
-  return JSON.parse((await readResponse(res, HTTP_BODY_MAX_BYTES)).toString('utf8'));
+  const response = (await readResponse(res, HTTP_BODY_MAX_BYTES)).toString('utf8');
+  return payload.responseType === 'text' ? response : JSON.parse(response);
 });
 
 ipcMain.handle('image:fetch', async (_e, url) => {

@@ -84,6 +84,7 @@ addEventListener('message', async (event) => {
         config: message.context.config,
         languageSelections: message.context.languageSelections,
         fetchText: (url) => callHost('fetchText', [url]),
+        fetchPostText: (payload) => callHost('fetchPostText', [payload]),
         head: (url) => callHost('head', [url]),
         parse: (html) => new DOMParser().parseFromString(html, 'text/html')
       });
@@ -169,6 +170,8 @@ async function loadModule(code, manifest) {
     if (message.kind === 'host-call') {
       const action = message.method === 'fetchText'
         ? (url) => window.cytlex.httpGet(url)
+        : message.method === 'fetchPostText'
+          ? (payload) => window.cytlex.httpPost({ ...payload, responseType: 'text' })
         : message.method === 'head'
           ? (url) => window.cytlex.httpHead(url)
           : null;
