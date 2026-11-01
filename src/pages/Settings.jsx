@@ -207,6 +207,7 @@ export default function Settings({ tutorialPreview = false }) {
   const [mihonMissingEntries, setMihonMissingEntries] = useState([]);
   const [mihonInstallManifests, setMihonInstallManifests] = useState([]);
   const [mihonUnknownEntries, setMihonUnknownEntries] = useState([]);
+  const [mihonKeepUnavailable, setMihonKeepUnavailable] = useState(false);
   const [mihonReviewOpen, setMihonReviewOpen] = useState(false);
   const [mihonInstallOpen, setMihonInstallOpen] = useState(false);
   const [mihonBusy, setMihonBusy] = useState(false);
@@ -484,6 +485,7 @@ export default function Settings({ tutorialPreview = false }) {
       setMihonMissingEntries([]);
       setMihonInstallManifests([]);
       setMihonUnknownEntries([]);
+      setMihonKeepUnavailable(false);
       setMihonReviewOpen(false);
       setMihonInstallOpen(false);
       toast({
@@ -501,6 +503,7 @@ export default function Settings({ tutorialPreview = false }) {
 
   const confirmMihonImport = async () => {
     if (!mihonCandidate) return;
+    setMihonKeepUnavailable(false);
     setMihonBusy(true);
     try {
       const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
@@ -558,11 +561,19 @@ export default function Settings({ tutorialPreview = false }) {
 
   const keepUnavailableMihonEntries = async () => {
     setMihonReviewOpen(false);
+    if (mihonInstallManifests.length) {
+      setMihonKeepUnavailable(true);
+      setMihonInstallOpen(true);
+      return;
+    }
     await finishMihonImport();
   };
 
   const skipMihonMissingSources = async () => {
-    await finishMihonImport([...mihonBlockedEntries, ...mihonMissingEntries, ...mihonUnknownEntries]);
+    const excludedEntries = mihonKeepUnavailable
+      ? []
+      : [...mihonBlockedEntries, ...mihonMissingEntries, ...mihonUnknownEntries];
+    await finishMihonImport(excludedEntries);
   };
 
   const installMihonSources = async () => {
@@ -574,7 +585,8 @@ export default function Settings({ tutorialPreview = false }) {
         if (!extensions.isInstalled(manifest.id)) await extensions.install(manifest, indexUrl);
       }
       setMihonInstallOpen(false);
-      await finishMihonImport([...mihonBlockedEntries, ...mihonUnknownEntries]);
+      const excludedEntries = mihonKeepUnavailable ? [] : [...mihonBlockedEntries, ...mihonUnknownEntries];
+      await finishMihonImport(excludedEntries);
     } catch (error) {
       toast({ title: 'No se pudieron instalar las extensiones', description: `${error.message} No se importaron los mangas.`, variant: 'error' });
     } finally {
@@ -1603,7 +1615,9 @@ export default function Settings({ tutorialPreview = false }) {
         open={mihonInstallOpen}
         onClose={() => setMihonInstallOpen(false)}
         title="Instalar extensiones faltantes"
-        description={`${mihonInstallManifests.length} extensiones pueden instalarse para abrir ${mihonMissingEntries.length} mangas del respaldo. Si las omites, esos mangas no se guardarán.`}
+        description={mihonKeepUnavailable
+          ? `${mihonInstallManifests.length} extensiones disponibles para ${mihonMissingEntries.length} mangas. También puedes conservarlos sin instalarlas.`
+          : `${mihonInstallManifests.length} extensiones pueden instalarse para abrir ${mihonMissingEntries.length} mangas del respaldo. Si las omites, esos mangas no se guardarán.`}
         hideDivider
         bodyClassName="pb-6"
         scrollableBody={false}
@@ -1640,7 +1654,7 @@ export default function Settings({ tutorialPreview = false }) {
             disabled={mihonBusy}
             style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            {mihonBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Cargando</> : 'Omitirlas y continuar'}
+            {mihonBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Cargando</> : mihonKeepUnavailable ? 'Mantener sin instalar' : 'Omitirlas y continuar'}
           </Button>
           <Button
             onClick={installMihonSources}

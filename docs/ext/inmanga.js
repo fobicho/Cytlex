@@ -21,6 +21,9 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       '.manga-cover img',
       'img[class*="cover" i]',
       'img[id*="cover" i]',
+      'img[src*="/i/m/" i]',
+      'img[data-src*="/i/m/" i]',
+      'img[data-original*="/i/m/" i]',
       'img[src*="/images/manga/" i]',
       'img[data-src*="/images/manga/" i]',
       'img[data-original*="/images/manga/" i]'
@@ -98,7 +101,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       return {
         url,
         title: text(anchor, 'h4, h3, .title') || clean(anchor.getAttribute('title')) || clean(image?.getAttribute('alt')) || clean(anchor.textContent),
-        cover: abs(image?.getAttribute('data-src') || image?.getAttribute('data-original') || image?.getAttribute('src')),
+        cover: abs(image?.getAttribute('data-src') || image?.getAttribute('data-original') || image?.getAttribute('data-lazy-src') || image?.getAttribute('src')),
         type: 'Manga',
         lastChapter: text(anchor, '[class*="chapter"], [class*="Chapter"]').replace(/[^\d.,]/g, '')
       };
