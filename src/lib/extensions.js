@@ -242,6 +242,16 @@ const subSources = (manifest) => {
 
 const findRecord = (id) => read().find((r) => r.manifest.id === id
   || (r.manifest.config?.sources || []).some((s) => s.id === id));
+const normalizeSourceName = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const hostMatches = (url, baseUrl) => {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+    const sourceHost = new URL(baseUrl).hostname.toLowerCase().replace(/^www\./, '');
+    return host === sourceHost;
+  } catch {
+    return false;
+  }
+};
 
 export const extensions = {
   installed() {
@@ -275,6 +285,22 @@ export const extensions = {
   },
   isInstalled(id) {
     return !!findRecord(id);
+  },
+  resolveInstalledSource(id, name, url) {
+    if (extensions.isInstalled(id)) return id;
+    const sources = extensions.sources();
+    const normalizedName = normalizeSourceName(name);
+    const nameMatches = normalizedName
+      ? sources.filter(({ manifest }) => normalizeSourceName(manifest.name) === normalizedName)
+      : [];
+    if (nameMatches.length === 1) return nameMatches[0].manifest.id;
+    const matches = sources.filter(({ manifest }) => hostMatches(url, manifest.baseUrl));
+    if (matches.length === 1) return matches[0].manifest.id;
+    if (nameMatches.length > 1) {
+      const namedHostMatches = nameMatches.filter(({ manifest }) => hostMatches(url, manifest.baseUrl));
+      if (namedHostMatches.length === 1) return namedHostMatches[0].manifest.id;
+    }
+    return '';
   },
 
   async repoIndex(indexUrl) {

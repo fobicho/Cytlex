@@ -73,6 +73,24 @@ export const progress = {
     delete data[cap(url, sourceId)];
     write(data);
     notify();
+  },
+
+  reassignSource(oldId, newId) {
+    if (!oldId || !newId || oldId === newId) return;
+    const data = read();
+    const prefix = `${oldId}|`;
+    let changed = false;
+    for (const [key, value] of Object.entries(data)) {
+      if (!key.startsWith(prefix)) continue;
+      const nextKey = `${newId}|${key.slice(prefix.length)}`;
+      data[nextKey] = { ...(data[nextKey] || {}), ...value };
+      delete data[key];
+      changed = true;
+    }
+    if (changed) {
+      write(data);
+      notify();
+    }
   }
 };
 

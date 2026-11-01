@@ -583,10 +583,14 @@ const IMAGE_BODY_MAX_BYTES = 50 * 1024 * 1024;
 
 ipcMain.handle('http:get', async (_e, url) => {
   const parsed = validateUrl(url);
+  const mangaDexApi = parsed.hostname.toLowerCase() === 'api.mangadex.org';
   const res = await requestPublic(parsed.toString(), {
     method: 'GET',
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
+      'User-Agent': mangaDexApi
+        ? 'Cytlex/0.1.0 (+https://github.com/fobicho/Cytlex)'
+        : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
+      ...(mangaDexApi ? { Accept: 'application/json' } : {}),
       Referer: refererFor(parsed.toString())
     },
     timeout: HTTP_GET_TIMEOUT_MS

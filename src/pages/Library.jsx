@@ -10,6 +10,7 @@ import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { checkLibrary } from '../lib/notify.js';
 import { progress } from '../lib/progress.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
+import { tracking } from '../lib/tracking.js';
 import { api } from '../lib/api.js';
 import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
@@ -24,6 +25,10 @@ let libraryCheckInFlight = false;
 let libraryCheckCooldownUntil = 0;
 
 const remainingLibraryCheckCooldown = () => Math.max(0, Math.ceil((libraryCheckCooldownUntil - Date.now()) / 1000));
+const sourceIdFor = (manga) => {
+  const id = manga.sourceId || 'leercapitulo';
+  return extensions.resolveInstalledSource(id, manga.sourceName, manga.url) || id;
+};
 
 function CachedLibraryCover({ cover, title, className }) {
   const [coverState, setCoverState] = useState(() => ({ key: cover, src: getLibraryCover(cover) || cover }));
@@ -82,14 +87,27 @@ export default function Library({ active = true }) {
   );
   useEffect(() => {
     const updates = [];
+    const reassigned = new Set();
     favs.forEach((m) => {
-      const manifest = extensions.manifest(m.sourceId || 'leercapitulo');
+      const currentId = m.sourceId || 'leercapitulo';
+      const resolvedId = extensions.resolveInstalledSource(currentId, m.sourceName, m.url);
+      if (resolvedId && resolvedId !== currentId) {
+        const key = `${currentId}|${resolvedId}`;
+        if (!reassigned.has(key)) {
+          progress.reassignSource(currentId, resolvedId);
+          tracking.reassignSource(currentId, resolvedId);
+          chapterIndex.reassignSource(currentId, resolvedId);
+          reassigned.add(key);
+        }
+        updates.push({ url: m.url, sourceId: currentId, patch: { sourceId: resolvedId } });
+      }
+      const manifest = extensions.manifest(resolvedId || currentId);
       const patch = {};
       if ((!m.sourceName || (/^(mihon-\d+|Fuente Mihon \d+)$/i.test(String(m.sourceName)) && !/^(mihon-|Fuente Mihon)/i.test(String(manifest.name || '')))) && manifest.name) {
         patch.sourceName = manifest.name;
       }
       if (!m.sourceIcon && manifest.icon) patch.sourceIcon = manifest.icon;
-      if (Object.keys(patch).length) updates.push({ url: m.url, sourceId: m.sourceId, patch });
+      if (Object.keys(patch).length) updates.push({ url: m.url, sourceId: currentId, patch });
     });
     if (updates.length) setFavs(lib.updateFavs(updates));
   }, []);
@@ -183,13 +201,13 @@ export default function Library({ active = true }) {
     let alive = true;
     (async () => {
       const pending = inCategory.filter((f) => {
-        const sid = f.sourceId || 'leercapitulo';
+        const sid = sourceIdFor(f);
         return extensions.isInstalled(sid) && unreadCheckedAt.current.get(`${sid}|${f.url}`) !== progressTick;
       });
       const results = [];
       for (let i = 0; i < pending.length; i += 3) {
         const batch = await Promise.all(pending.slice(i, i + 3).map(async (f) => {
-          const sid = f.sourceId || 'leercapitulo';
+          const sid = sourceIdFor(f);
           const k = `${sid}|${f.url}`;
           let urls = chapterIndex.get(f.url, sid);
           if (!urls) {
@@ -327,7 +345,7 @@ export default function Library({ active = true }) {
           scale={scale}
           active={active}
           renderCard={(m) => {
-            const sid = m.sourceId || 'leercapitulo';
+            const sid = sourceIdFor(m);
             const adultBlocked = !showAdultExtensions && isAdultExtension(extensions.manifest(sid));
             const cover = recallCover(m.url) || m.cover;
             return (
@@ -351,7 +369,7 @@ export default function Library({ active = true }) {
           style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${px(260, scale, 230)}), 1fr))` }}
         >
           {shown.map((m) => {
-            const sid = m.sourceId || 'leercapitulo';
+            const sid = sourceIdFor(m);
             const cover = recallCover(m.url) || m.cover;
             const unreadCount = unread[`${sid}|${m.url}`];
             const sourceManifest = extensions.manifest(sid);

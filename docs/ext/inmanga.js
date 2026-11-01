@@ -34,7 +34,13 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const data = JSON.parse(await fetchText(`${CHAPTERS}?mangaIdentification=${encodeURIComponent(mangaId)}`));
     let payload = data?.data ?? data;
     if (typeof payload === 'string') payload = JSON.parse(payload);
-    return (payload?.result || []).filter((item) => item?.identification != null);
+    const chapters = payload?.result || payload?.Result || [];
+    return chapters.map((item) => ({
+      ...item,
+      identification: item.identification ?? item.Identification,
+      number: item.number ?? item.Number,
+      date: item.date ?? item.Date ?? item.publishDate ?? item.PublishDate
+    })).filter((item) => item.identification != null);
   }
 
   async function catalog({ q = '', page = 1 } = {}) {

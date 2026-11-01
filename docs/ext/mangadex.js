@@ -14,18 +14,25 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
     const request = async () => {
       const wait = Math.max(0, 300 - (Date.now() - lastRequestAt));
       if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
-      let response;
+      let data;
+      let response = '';
       for (let attempt = 0; attempt < 2; attempt += 1) {
         lastRequestAt = Date.now();
         try {
           response = await fetchText(url);
+          data = JSON.parse(response);
           break;
         } catch (error) {
-          if (attempt || /HTTP \d{3}/.test(String(error?.message || error))) throw error;
+          const message = String(error?.message || error);
+          if (attempt || /HTTP \d{3}/.test(message)) {
+            if (/^\s*</.test(response)) {
+              throw new Error('MangaDex respondió con HTML en lugar de JSON. La API puede estar temporalmente inaccesible.');
+            }
+            throw error;
+          }
           await new Promise((resolve) => setTimeout(resolve, 600));
         }
       }
-      const data = JSON.parse(response);
       if (data?.result !== 'ok') throw new Error('MangaDex devolvió una respuesta no válida.');
       return data;
     };
