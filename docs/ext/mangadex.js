@@ -29,7 +29,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
           const retryable = !status || status === 429 || status >= 500;
           if (!retryable || attempt === 2) {
             if (/^\s*</.test(response)) {
-              throw new Error('MangaDex respondió con HTML en lugar de JSON. La API puede estar temporalmente inaccesible.');
+              throw new Error(`MangaDex respondió con HTML en lugar de JSON al consultar ${new URL(url).pathname}. La API puede estar temporalmente inaccesible.`);
             }
             throw error;
           }

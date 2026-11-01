@@ -643,7 +643,7 @@ ipcMain.handle('image:fetch', async (_e, url) => {
       method: 'GET',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
-        Referer: parsed.origin + '/'
+        Referer: refererFor(urlStr)
       },
       timeout: HTTP_GET_TIMEOUT_MS
     });

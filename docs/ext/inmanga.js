@@ -14,6 +14,28 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
 
   const clean = (value) => String(value || '').replace(/\s+/g, ' ').trim();
   const text = (element, selector) => clean(element.querySelector(selector)?.textContent);
+  const coverFrom = (doc) => {
+    const metaCover = doc.querySelector('meta[property="og:image"]')?.getAttribute('content');
+    if (metaCover) return abs(metaCover);
+    const selectors = [
+      '.manga-cover img',
+      'img[class*="cover" i]',
+      'img[id*="cover" i]',
+      'img[src*="/images/manga/" i]',
+      'img[data-src*="/images/manga/" i]',
+      'img[data-original*="/images/manga/" i]'
+    ];
+    for (const selector of selectors) {
+      const image = doc.querySelector(selector);
+      if (!image) continue;
+      const source = image.getAttribute('data-src')
+        || image.getAttribute('data-original')
+        || image.getAttribute('data-lazy-src')
+        || image.getAttribute('src');
+      if (source && !/^data:image\/(?:gif|svg\+xml)/i.test(source)) return abs(source);
+    }
+    return '';
+  };
   const mangaData = (url) => {
     const parsed = new URL(url, BASE);
     const parts = parsed.pathname.split('/').filter(Boolean);
@@ -94,9 +116,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const manga = mangaData(url);
     const doc = parse(await fetchText(manga.url));
     const title = text(doc, 'h1') || clean(doc.querySelector('meta[property="og:title"]')?.getAttribute('content')) || clean(doc.title);
-    const cover = abs(doc.querySelector('meta[property="og:image"]')?.getAttribute('content')
-      || doc.querySelector('img[class*="cover"], img[id*="cover"], .manga-cover img, img')?.getAttribute('data-src')
-      || doc.querySelector('img[class*="cover"], img[id*="cover"], .manga-cover img, img')?.getAttribute('src'));
+    const cover = coverFrom(doc);
     const synopsis = clean(doc.querySelector('meta[name="description"]')?.getAttribute('content')
       || doc.querySelector('meta[property="og:description"]')?.getAttribute('content')
       || doc.querySelector('[class*="sinopsis"], [class*="synopsis"], [id*="sinopsis"], [id*="synopsis"]')?.textContent);

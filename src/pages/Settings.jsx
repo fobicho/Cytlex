@@ -14,7 +14,6 @@ import { chapterIndex } from '../lib/chapterIndex.js';
 import { compressBackup, createBackup, parseBackup, readBackupFile, restoreBackup } from '../lib/backup.js';
 import { importMihonBackup, previewMihonBackup } from '../lib/mihonBackup.js';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
-import { api } from '../lib/api.js';
 import { Button } from '../components/ui/button.jsx';
 import { Card } from '../components/ui/card.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
@@ -175,33 +174,6 @@ const SHORTCUTS = [
 ];
 
 const DEFAULT_EXTENSION_REPOSITORY = 'https://fobicho.github.io/Cytlex/index.json';
-
-async function refreshMihonCovers(candidate, excludedEntries) {
-  const excluded = new Set(excludedEntries);
-  const entries = candidate.entries.filter((entry) => (
-    !excluded.has(entry)
-    && extensions.isInstalled(entry.manga.sourceId)
-    && !isAdultExtension(extensions.manifest(entry.manga.sourceId))
-  ));
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(4, entries.length) }, async () => {
-    while (cursor < entries.length) {
-      const entry = entries[cursor++];
-      const { manga } = entry;
-      try {
-        const resolved = await api.refreshManga(manga.url, manga.sourceId, { title: manga.title, author: manga.author });
-        const detail = resolved.detail;
-        if (resolved.url !== manga.url) entry.originalUrl = manga.url;
-        manga.url = resolved.url;
-        if (detail?.cover) {
-          manga.cover = detail.cover;
-          manga.coverLocal = '';
-        }
-      } catch {}
-    }
-  });
-  await Promise.all(workers);
-}
 
 const extensionForSource = (repository, sourceId) => repository.find((manifest) => (
   manifest.id === sourceId || manifest.config?.sources?.some((source) => source.id === sourceId)
@@ -506,7 +478,6 @@ export default function Settings({ tutorialPreview = false }) {
     if (!mihonCandidate) return;
     setMihonBusy(true);
     try {
-      await refreshMihonCovers(mihonCandidate, excludedEntries);
       const result = importMihonBackup(mihonCandidate, { excludedEntries });
       setMihonCandidate(null);
       setMihonBlockedEntries([]);
