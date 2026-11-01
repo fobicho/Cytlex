@@ -146,9 +146,9 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
                   try {
                     const result = await api.catalog({ q: m.title, page: 1 }, sourceId);
                     const expectedTitle = coverKey(m.title);
-                    const refreshed = (result.items || []).find((item) => coverKey(item.title) === expectedTitle && item.cover && item.cover !== src);
+                    const refreshed = (result.items || []).find((item) => item.url === m.url && coverKey(item.title) === expectedTitle && item.cover && item.cover !== src);
                     if (refreshed?.cover) {
-                      rememberCover(m.url, refreshed.cover);
+                      rememberCover(m.url, refreshed.cover, sourceId);
                       lib.updateFav(m.url, { cover: refreshed.cover, coverLocal: '' }, sourceId);
                       setCoverState({ key: preferredCover, src: refreshed.cover });
                       return;

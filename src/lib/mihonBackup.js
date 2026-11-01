@@ -2,7 +2,6 @@ import defaultExtensionIndex from '../../docs/index.json' with { type: 'json' };
 
 const FAVORITES_KEY = 'cytlex:favs';
 const CATEGORIES_KEY = 'cytlex:cats:v1';
-const PROGRESS_KEY = 'cytlex:progress:v1';
 const MAX_EXPANDED_SIZE = 250 * 1024 * 1024;
 const MAX_ENTRIES = 100000;
 const decoder = new TextDecoder();
@@ -62,11 +61,17 @@ function stringsOf(list, field) {
 
 function decodeChapter(bytes) {
   const list = fields(bytes);
+  const chapterNumberField = valueOf(list, 9, null);
+  const chapterNumber = chapterNumberField instanceof Uint8Array && chapterNumberField.length === 4
+    ? new DataView(chapterNumberField.buffer, chapterNumberField.byteOffset, 4).getFloat32(0, true)
+    : 0;
+  const rawPage = Number(valueOf(list, 6, 0));
   return {
     url: decoder.decode(valueOf(list, 1, new Uint8Array())),
     name: decoder.decode(valueOf(list, 2, new Uint8Array())),
     read: Boolean(valueOf(list, 4, 0)),
-    page: Number(valueOf(list, 6, 0)) || 0
+    page: Number.isSafeInteger(rawPage) ? Math.max(0, rawPage) : 0,
+    number: Number.isFinite(chapterNumber) ? chapterNumber : 0
   };
 }
 
@@ -100,7 +105,8 @@ function decodeCategory(bytes) {
   return {
     name: decoder.decode(valueOf(list, 1, new Uint8Array())),
     order: Number(valueOf(list, 2, 0)),
-    id: Number(valueOf(list, 3, 0))
+    id: Number(valueOf(list, 3, 0)),
+    hasId: list.some(([field]) => field === 3)
   };
 }
 
@@ -226,10 +232,13 @@ function sourceLookup(installedSources, mihonSources, availableExtensions) {
     if (nameMatch) return nameMatch;
     const rawUrl = manga.url;
     try {
-      const host = new URL(rawUrl).hostname.toLowerCase();
-      return catalog.find(({ manifest }) => {
-        try { return new URL(manifest.baseUrl).hostname.toLowerCase() === host; } catch { return false; }
-      }) || null;
+      const host = new URL(rawUrl).hostname.toLowerCase().replace(/^www\./, '');
+      const matches = catalog.filter(({ manifest }) => {
+        try { return new URL(manifest.baseUrl).hostname.toLowerCase().replace(/^www\./, '') === host; } catch { return false; }
+      });
+      const installedMatches = matches.filter((entry) => entry.installed);
+      if (installedMatches.length === 1) return installedMatches[0];
+      return matches.length === 1 ? matches[0] : null;
     } catch {
       return null;
     }
@@ -261,7 +270,7 @@ export async function previewMihonBackup(input, installedSources, availableExten
   if (!mangas.length) throw new Error('El archivo no contiene mangas de un respaldo Mihon compatible.');
   const resolveSource = sourceLookup(installedSources, sources, availableExtensions);
   const orderedCategories = categories.slice().sort((a, b) => a.order - b.order);
-  const categoryByIndex = new Map(orderedCategories.map((category, index) => [index, category.name]));
+  const categoryByIndex = new Map(orderedCategories.map((category, index) => [String(index), category.name]));
   const converted = mangas.filter((manga) => manga.favorite && manga.url && manga.title).map((manga) => {
     const resolvedSource = resolveSource(manga);
     const manifest = resolvedSource?.manifest;
@@ -270,9 +279,11 @@ export async function previewMihonBackup(input, installedSources, availableExten
     const url = resolveUrl(manga.url, manifest);
     const chapterProgress = manga.chapters.map((chapter) => ({
       url: resolveUrl(chapter.url, manifest),
+      name: chapter.name,
+      number: chapter.number,
       read: chapter.read,
       page: chapter.page
-    })).filter((chapter) => chapter.url);
+    })).filter((chapter) => chapter.url && (chapter.read || chapter.page > 0));
     return {
       manga: {
         url,
@@ -285,7 +296,9 @@ export async function previewMihonBackup(input, installedSources, availableExten
         genres: manga.genres,
         status: manga.status,
         cover: resolveUrl(manga.cover, manifest),
-        cats: manga.categoryIds.map((index) => categoryByIndex.get(index)).filter(Boolean),
+        chapterTotal: manga.chapters.length,
+        chapterReadCount: manga.chapters.filter((chapter) => chapter.read).length,
+        cats: manga.categoryIds.map((index) => categoryByIndex.get(String(index))).filter(Boolean),
         savedAt: Date.now()
       },
       legacySourceId: `mihon-${manga.source}`,
@@ -331,12 +344,35 @@ function mergeDuplicateFavorite(kept, duplicate) {
     cover: kept.cover || duplicate.cover,
     coverLocal: kept.coverLocal || duplicate.coverLocal || '',
     chapterTotal: Math.max(Number(kept.chapterTotal) || 0, Number(duplicate.chapterTotal) || 0),
+    mihonProgress: mergeChapterProgress(kept.mihonProgress, duplicate.mihonProgress),
     cats: [...new Set([...(kept.cats || []), ...(duplicate.cats || [])])]
   };
 }
 
+function chapterProgressKey(chapter) {
+  const number = Number(chapter.number);
+  const name = normalizeName(chapter.name);
+  if (Number.isFinite(number) && number !== 0) return `number|${number}|${name}`;
+  return `name|${name || pathKey(chapter.url)}`;
+}
+
+function mergeChapterProgress(...lists) {
+  const merged = new Map();
+  for (const chapter of lists.flat().filter(Boolean)) {
+    const key = chapterProgressKey(chapter);
+    const previous = merged.get(key);
+    merged.set(key, {
+      ...previous,
+      ...chapter,
+      read: !!(previous?.read || chapter.read),
+      page: Math.max(Number(previous?.page) || 0, Number(chapter.page) || 0)
+    });
+  }
+  return [...merged.values()];
+}
+
 export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
-  const previous = Object.fromEntries([FAVORITES_KEY, CATEGORIES_KEY, PROGRESS_KEY].map((key) => [key, localStorage.getItem(key)]));
+  const previous = Object.fromEntries([FAVORITES_KEY, CATEGORIES_KEY].map((key) => [key, localStorage.getItem(key)]));
   const currentCategories = readStored(CATEGORIES_KEY, [{ id: 'todos', name: 'Todos' }]);
   const categories = Array.isArray(currentCategories) && currentCategories.length ? currentCategories : [{ id: 'todos', name: 'Todos' }];
   const categoryIds = new Map(categories.map((category) => [normalizeName(category.name), category.id]));
@@ -353,17 +389,9 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
     .filter((entry) => !excludedEntries.includes(entry))
     .map((entry) => mangaIdentityKey(entry.manga))
     .filter(Boolean));
-  const excludedKeys = new Set(excludedEntries.flatMap((entry) => [
-    `${entry.manga.sourceId}|${urlKey(entry.manga.url)}`,
-    `${entry.legacySourceId}|${pathKey(entry.legacyUrl)}`
-  ]));
   const favorites = [];
   const byManga = new Map();
-  (Array.isArray(storedFavorites) ? storedFavorites : []).filter((manga) => {
-    const sourceId = manga.sourceId || 'leercapitulo';
-    if (excludedKeys.has(`${sourceId}|${urlKey(manga.url)}`)) return false;
-    return !String(sourceId).startsWith('mihon-') || !excludedKeys.has(`${sourceId}|${pathKey(manga.url)}`);
-  }).forEach((manga) => {
+  (Array.isArray(storedFavorites) ? storedFavorites : []).forEach((manga) => {
     const identityKey = mangaIdentityKey(manga);
     const duplicateIndex = identityKey && incomingIdentityKeys.has(identityKey) ? byManga.get(`identity|${identityKey}`) : undefined;
     if (duplicateIndex !== undefined) {
@@ -382,8 +410,6 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
   });
   const previousMihonCategoryIds = new Set(candidate.categoryNames.map((name) => categoryIds.get(normalizeName(name))).filter(Boolean));
   const defaultCategoryId = categories.find((category) => normalizeName(category.name) === 'todos')?.id;
-  const storedProgress = readStored(PROGRESS_KEY, {});
-  const progress = storedProgress && typeof storedProgress === 'object' && !Array.isArray(storedProgress) ? storedProgress : {};
   let added = 0;
   let updated = 0;
   for (const entry of candidate.entries.filter((item) => !excludedEntries.includes(item))) {
@@ -425,6 +451,8 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
         description: existing.description || manga.description,
         genres: existing.genres?.length ? existing.genres : manga.genres,
         cover: manga.cover || existing.cover,
+        chapterTotal: Math.max(Number(existing.chapterTotal) || 0, Number(manga.chapterTotal) || 0),
+        chapterReadCount: Math.max(Number(existing.chapterReadCount) || 0, Number(manga.chapterReadCount) || 0),
         coverLocal: manga.cover ? '' : existing.coverLocal || '',
         cats: [...new Set([...keptCategories, ...manga.cats])]
       };
@@ -435,15 +463,10 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
       byManga.set(legacyKey, index);
       updated += 1;
     }
-    for (const chapter of entry.chapterProgress) {
-      const chapterKey = `${manga.sourceId}|${chapter.url}`;
-      const old = progress[chapterKey] || {};
-      delete progress[chapterKey];
-      if (chapter.read) {
-        progress[chapterKey] = { ...old, page: null, total: old.total || 0, read: true, readAt: old.readAt || Date.now() };
-      } else if (chapter.page > 0) {
-        progress[chapterKey] = { ...old, page: chapter.page, total: old.total || 0, read: false, updatedAt: old.updatedAt || Date.now() };
-      }
+    const favorite = favorites[index === undefined ? favorites.length - 1 : index];
+    const importedProgress = entry.chapterProgress || [];
+    if (importedProgress.length) {
+      favorite.mihonProgress = mergeChapterProgress(favorite.mihonProgress, importedProgress);
     }
   }
   const defaultCategory = categories.find((category) => category.id === 'todos' && normalizeName(category.name) === 'todos');
@@ -456,7 +479,6 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
   try {
     localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
     localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
   } catch (error) {
     for (const [key, value] of Object.entries(previous)) {
       if (value === null) localStorage.removeItem(key);

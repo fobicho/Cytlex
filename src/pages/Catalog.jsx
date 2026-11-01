@@ -308,7 +308,7 @@ export default function Catalog({ tutorialPreview = false }) {
         const loadedItems = items.map((m) => cachedCovers.has(m.url)
           ? { ...m, coverCached: cachedCovers.get(m.url) }
           : m);
-        items.forEach((m) => rememberCover(m.url, m.cover));
+        items.forEach((m) => rememberCover(m.url, m.cover, s.manifest.id));
         if (runId !== activeSearchRun) return;
         updateResults((prev) =>
           prev ? prev.map((x) => (x.id === s.manifest.id

@@ -68,7 +68,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
       const result = await api.catalog({ ...catalogParams, page: nextPage }, id);
       if (runId !== requestId.current) return;
       const received = result.items || [];
-      received.forEach((item) => rememberCover(item.url, item.cover));
+      received.forEach((item) => rememberCover(item.url, item.cover, id));
       const merged = append ? [...items] : [];
       const urls = new Set(merged.map((item) => item.url));
       for (const item of received) {
@@ -118,7 +118,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
           const catalogParams = withAdultGenreExclusions(sourceId, params, nextFilters, showAdultExtensions);
           for (let nextPage = 1; nextPage <= Math.max(1, snapshot.page || 1); nextPage += 1) {
             result = await api.catalog({ ...catalogParams, page: nextPage }, sourceId);
-            (result.items || []).forEach((item) => rememberCover(item.url, item.cover));
+            (result.items || []).forEach((item) => rememberCover(item.url, item.cover, sourceId));
             for (const item of result.items || []) {
               if (item.url && !urls.has(item.url)) {
                 urls.add(item.url);
@@ -168,7 +168,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
         const params = withAdultGenreExclusions(sourceId, { q: '' }, safeFilters, showAdultExtensions);
         const result = await api.catalog({ ...params, page: 1 }, sourceId);
         if (!active) return;
-        (result.items || []).forEach((item) => rememberCover(item.url, item.cover));
+        (result.items || []).forEach((item) => rememberCover(item.url, item.cover, sourceId));
         setItems(result.items || []);
         setLoadedParams({ q: '' });
         setPage(1);

@@ -13,6 +13,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
   };
 
   const clean = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+  const normalized = (value) => clean(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/:$/, '').toLowerCase();
   const text = (element, selector) => clean(element.querySelector(selector)?.textContent);
   const imageUrl = (image) => {
     if (!image) return '';
@@ -66,6 +67,48 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     }
     return '';
   };
+  const isSeoSynopsis = (value, title) => {
+    const content = normalized(value);
+    if (!content) return true;
+    const titleKey = normalized(title);
+    const titleMentions = titleKey ? content.split(titleKey).length - 1 : 0;
+    return /\b(?:online|gratis|leer)\b/.test(content) && titleMentions >= 2;
+  };
+  const synopsisFrom = (doc, title) => {
+    const selectors = [
+      '[itemprop="description"]',
+      '[class*="synopsis" i]', '[id*="synopsis" i]',
+      '[class*="sinopsis" i]', '[id*="sinopsis" i]',
+      '[class*="manga-description" i]', '[id*="manga-description" i]'
+    ];
+    const candidates = [];
+    for (const selector of selectors) {
+      for (const element of doc.querySelectorAll(selector)) candidates.push(clean(element.textContent));
+    }
+    for (const element of doc.querySelectorAll('main p, article p, p')) candidates.push(clean(element.textContent));
+    for (const element of doc.querySelectorAll('[class*="description" i], [id*="description" i]')) candidates.push(clean(element.textContent));
+    const content = candidates.find((value) => value.length > 60 && !isSeoSynopsis(value, title));
+    if (content) return content;
+    const meta = clean(doc.querySelector('meta[property="og:description"]')?.getAttribute('content')
+      || doc.querySelector('meta[name="description"]')?.getAttribute('content'));
+    return isSeoSynopsis(meta, title) ? '' : meta;
+  };
+  const factValue = (doc, labels) => {
+    const wanted = new Set(labels.map(normalized));
+    for (const label of doc.querySelectorAll('label, dt, th, strong, b, span, div, p')) {
+      if (normalized(label.textContent) && wanted.has(normalized(label.textContent))) {
+        const adjacent = [label.previousElementSibling, label.nextElementSibling]
+          .map((element) => clean(element?.textContent))
+          .find((value) => value && !wanted.has(normalized(value)));
+        if (adjacent) return adjacent;
+        const parentText = clean(label.parentElement?.textContent);
+        const [before, after] = parentText.split(new RegExp(label.textContent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+        const siblingValue = clean(before) || clean(after);
+        if (siblingValue && !wanted.has(normalized(siblingValue))) return siblingValue;
+      }
+    }
+    return '';
+  };
   const mangaData = (url) => {
     const parsed = new URL(url, BASE);
     const parts = parsed.pathname.split('/').filter(Boolean);
@@ -97,7 +140,6 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
 
   async function catalog({ q = '', page = 1 } = {}) {
     const query = clean(q);
-    if (!query) return { items: [], totalPages: 1, hasMore: false, totalText: '' };
     const skip = (Math.max(1, Number(page) || 1) - 1) * PAGE_SIZE;
     const form = new URLSearchParams();
     form.set('hfilter[generes][]', '-1');
@@ -152,17 +194,9 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const doc = parse(await fetchText(manga.url));
     const title = text(doc, 'h1') || clean(doc.querySelector('meta[property="og:title"]')?.getAttribute('content')) || clean(doc.title);
     const cover = coverFrom(doc);
-    const synopsis = clean(doc.querySelector('meta[name="description"]')?.getAttribute('content')
-      || doc.querySelector('meta[property="og:description"]')?.getAttribute('content')
-      || doc.querySelector('[class*="sinopsis"], [class*="synopsis"], [id*="sinopsis"], [id*="synopsis"]')?.textContent);
+    const synopsis = synopsisFrom(doc, title);
     const genres = [...doc.querySelectorAll('a[href*="genre"], a[href*="genero"], [class*="genre"] a, [class*="genero"] a')]
       .map((element) => clean(element.textContent)).filter(Boolean);
-    const facts = [...doc.querySelectorAll('dt, th, .label, strong, b')].map((label) => {
-      const key = clean(label.textContent).replace(/:$/, '').toLowerCase();
-      const value = clean(label.nextElementSibling?.textContent || label.parentElement?.textContent?.replace(label.textContent, ''));
-      return [key, value];
-    });
-    const fact = (pattern) => facts.find(([key]) => pattern.test(key))?.[1] || '';
     const chaptersData = await chapterList(manga.id);
     const chapters = chaptersData
       .sort((a, b) => Number(a.number) - Number(b.number))
@@ -179,11 +213,14 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       altTitles: clean(doc.querySelector('[class*="alternative"], [class*="alternate"], [class*="sinonimo"]')?.textContent),
       genres: [...new Set(genres)],
       facts: {
-        estado: fact(/estado|status/),
-        status: fact(/estado|status/),
-        tipo: fact(/tipo|type/) || 'Manga',
-        autor: fact(/autor|author|artist/),
-        vistas: fact(/vista|view/)
+        estado: factValue(doc, ['Estado', 'Status']),
+        status: factValue(doc, ['Estado', 'Status']),
+        tipo: factValue(doc, ['Tipo', 'Type']) || 'Manga',
+        autor: factValue(doc, ['Autor', 'Author', 'Artist']),
+        vistas: factValue(doc, ['Vistas', 'Views']),
+        publicacion: factValue(doc, ['Publicación', 'Publication']),
+        periodicidad: factValue(doc, ['Periodicidad', 'Frequency']),
+        proximo: factValue(doc, ['Próximo capítulo', 'Next chapter'])
       },
       sinopsis: synopsis,
       chapters

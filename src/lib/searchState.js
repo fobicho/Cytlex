@@ -5,15 +5,18 @@ export const SOURCE_CATALOG_HOME_EVENT = 'cytlex:source-catalog-home';
 const seenCovers = new Map();
 const MAX_SEEN_COVERS = 120;
 
-export function rememberCover(url, cover) {
+const coverCacheKey = (url, sourceId = '') => `${sourceId || ''}|${url || ''}`;
+
+export function rememberCover(url, cover, sourceId = '') {
   if (!url || !cover) return;
-  seenCovers.delete(url);
-  seenCovers.set(url, cover);
+  const key = coverCacheKey(url, sourceId);
+  seenCovers.delete(key);
+  seenCovers.set(key, cover);
   while (seenCovers.size > MAX_SEEN_COVERS) seenCovers.delete(seenCovers.keys().next().value);
 }
 
-export function recallCover(url) {
-  const key = url || '';
+export function recallCover(url, sourceId = '') {
+  const key = coverCacheKey(url, sourceId);
   const cover = seenCovers.get(key) || '';
   if (cover) {
     seenCovers.delete(key);

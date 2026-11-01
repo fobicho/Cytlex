@@ -178,6 +178,7 @@ const DEFAULT_EXTENSION_REPOSITORY = 'https://fobicho.github.io/Cytlex/index.jso
 const extensionForSource = (repository, sourceId) => repository.find((manifest) => (
   manifest.id === sourceId || manifest.config?.sources?.some((source) => source.id === sourceId)
 ));
+const canInstallExtension = (manifest) => !!manifest?.id && (manifest.type !== 'module' || !!manifest.main);
 
 let sessionSeccion = '';
 
@@ -202,6 +203,9 @@ export default function Settings({ tutorialPreview = false }) {
   const [confirmAdultExtensions, setConfirmAdultExtensions] = useState(false);
   const [confirmRemoveRepo, setConfirmRemoveRepo] = useState(false);
   const [backupCandidate, setBackupCandidate] = useState(null);
+  const [backupInstallOpen, setBackupInstallOpen] = useState(false);
+  const [backupMissingSources, setBackupMissingSources] = useState([]);
+  const [backupInstallManifests, setBackupInstallManifests] = useState([]);
   const [mihonCandidate, setMihonCandidate] = useState(null);
   const [mihonBlockedEntries, setMihonBlockedEntries] = useState([]);
   const [mihonMissingEntries, setMihonMissingEntries] = useState([]);
@@ -433,15 +437,85 @@ export default function Settings({ tutorialPreview = false }) {
     }
   };
 
-  const confirmBackupImport = () => {
+  const finishBackupImport = () => {
     if (!backupCandidate) return;
     try {
       restoreBackup(backupCandidate.data);
       setBackupCandidate(null);
+      setBackupInstallOpen(false);
+      setBackupMissingSources([]);
+      setBackupInstallManifests([]);
       toast({ title: 'Respaldo restaurado', description: 'Cytlex se recargará para aplicar los datos.', variant: 'success' });
       window.setTimeout(() => window.location.reload(), 800);
     } catch (error) {
       toast({ title: 'No se pudo restaurar el respaldo', description: error.message, variant: 'error' });
+    }
+  };
+
+  const confirmBackupImport = async () => {
+    if (!backupCandidate) return;
+    setBackupBusy(true);
+    try {
+      let favorites = [];
+      try {
+        const value = JSON.parse(backupCandidate.data['cytlex:favs'] || '[]');
+        if (Array.isArray(value)) favorites = value;
+      } catch {}
+      const sources = new Map();
+      favorites.forEach((manga) => {
+        const id = manga?.sourceId || 'leercapitulo';
+        if (!extensions.isInstalled(id)) {
+          const source = sources.get(id) || { id, name: manga?.sourceName || id, count: 0 };
+          source.count += 1;
+          sources.set(id, source);
+        }
+      });
+      if (!sources.size) {
+        finishBackupImport();
+        return;
+      }
+
+      const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
+      let repository = [];
+      try { repository = await extensions.repoIndex(indexUrl); } catch {}
+      const manifests = new Map();
+      const missing = [...sources.values()].map((source) => {
+        const manifest = extensionForSource(repository, source.id);
+        const fallback = manifest || extensions.manifest(source.id);
+        const installable = canInstallExtension(fallback);
+        if (installable) manifests.set(fallback.id, fallback);
+        return { ...source, manifest: installable ? fallback : null };
+      });
+      setBackupMissingSources(missing);
+      setBackupInstallManifests([...manifests.values()]);
+      setBackupInstallOpen(true);
+    } catch (error) {
+      toast({ title: 'No se pudieron comprobar las extensiones', description: error.message, variant: 'error' });
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const cancelBackupInstall = () => {
+    setBackupInstallOpen(false);
+    setBackupCandidate(null);
+    setBackupMissingSources([]);
+    setBackupInstallManifests([]);
+  };
+
+  const installBackupExtensions = async () => {
+    if (!backupCandidate) return;
+    setBackupBusy(true);
+    try {
+      const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
+      for (const manifest of backupInstallManifests) {
+        if (!extensions.isInstalled(manifest.id)) await extensions.install(manifest, indexUrl);
+      }
+      finishBackupImport();
+    } catch (error) {
+      toast({ title: 'No se pudieron instalar las extensiones', description: `${error.message} No se restauró el respaldo.`, variant: 'error' });
+    } finally {
+      setBackupBusy(false);
     }
   };
 
@@ -1508,8 +1582,8 @@ export default function Settings({ tutorialPreview = false }) {
         </div>
       </Dialog>
       <Dialog
-        open={!!backupCandidate}
-        onClose={() => setBackupCandidate(null)}
+        open={!!backupCandidate && !backupInstallOpen}
+        onClose={() => { if (!backupBusy) setBackupCandidate(null); }}
         title="Restaurar respaldo"
         description={`El archivo ${backupCandidate?.fileName || ''} reemplazará tus datos actuales de Cytlex, incluidas la biblioteca, el progreso y los ajustes. Las extensiones instaladas se conservarán. La aplicación se recargará.`}
         hideDivider
@@ -1521,15 +1595,77 @@ export default function Settings({ tutorialPreview = false }) {
           <Button
             variant="outline"
             onClick={() => setBackupCandidate(null)}
+            disabled={backupBusy}
             style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
             Cancelar
           </Button>
           <Button
             onClick={confirmBackupImport}
+            disabled={backupBusy}
             style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            Restaurar
+            {backupBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Cargando</> : 'Restaurar'}
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={backupInstallOpen}
+        onClose={() => { if (!backupBusy) cancelBackupInstall(); }}
+        title="Extensiones no instaladas"
+        description="El respaldo incluye mangas de estas extensiones. Puedes instalarlas ahora o restaurar el respaldo sin instalarlas."
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+        scale={scale}
+      >
+        <div className="space-y-2 text-muted-foreground" style={{ fontSize: px(13, scale, 11), marginBottom: px(18, scale, 14) }}>
+          {backupMissingSources.map((source) => (
+            <div key={source.id} className="flex items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center" style={{ gap: px(8, scale, 6) }}>
+                <span
+                  className="relative grid shrink-0 place-items-center overflow-hidden rounded-lg bg-secondary text-secondary-foreground font-semibold"
+                  style={{ width: px(28, scale, 24), height: px(28, scale, 24), fontSize: px(11, scale, 9) }}
+                >
+                  {(source.manifest?.name || source.name || source.id || '?')[0].toUpperCase()}
+                  {source.manifest?.icon && (
+                    <img src={source.manifest.icon} alt="" className="absolute inset-0 h-full w-full object-cover" onError={(event) => event.currentTarget.remove()} />
+                  )}
+                </span>
+                <span className="truncate text-foreground" title={source.manifest?.name || source.name || source.id}>
+                  {source.manifest?.name || source.name || source.id}
+                </span>
+              </div>
+              <span className="shrink-0">{source.count} mangas</span>
+            </div>
+          ))}
+          {!backupInstallManifests.length && (
+            <p>No se encontraron extensiones instalables en el repositorio configurado.</p>
+          )}
+        </div>
+        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button
+            variant="outline"
+            onClick={cancelBackupInstall}
+            disabled={backupBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            variant="outline"
+            onClick={finishBackupImport}
+            disabled={backupBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Restaurar sin instalar
+          </Button>
+          <Button
+            onClick={installBackupExtensions}
+            disabled={backupBusy || !backupInstallManifests.length}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            {backupBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Cargando</> : 'Instalar y restaurar'}
           </Button>
         </div>
       </Dialog>

@@ -4,9 +4,10 @@ import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, 
 import { api } from '../lib/api.js';
 import { lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
+import { reconcileMihonProgress } from '../lib/mihonProgress.js';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover } from '../lib/covers.js';
-import { chapterOrder, detailScroll, recallCover, rememberCover, sourceCatalogState } from '../lib/searchState.js';
+import { chapterOrder, detailScroll, recallCover, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
@@ -147,7 +148,7 @@ export default function Detail() {
     if (anilistCover && tLocal) return tLocal;
     if (anilistCover && tCover) return getLibraryCover(tCover) || tCover;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
-    const recalled = recallCover(mangaUrl);
+    const recalled = recallCover(mangaUrl, sourceId);
     const remoteCover = fav?.cover || tCover || recalled;
     return getLibraryCover(remoteCover) || getSearchCover(remoteCover) || remoteCover || '';
   }, [mangaUrl, sourceId, progressTick, anilistCover, coverTick]);
@@ -293,6 +294,7 @@ export default function Detail() {
 
     const cached = api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId);
     setDetailState({ key: `${sourceId}|${mangaUrl}`, data: cached || null });
+    if (cached?.chapters?.length) reconcileMihonProgress(mangaUrl, sourceId, cached.chapters);
 
     let alive = true;
     api
@@ -300,10 +302,10 @@ export default function Detail() {
       .then((r) => {
         if (!alive) return;
         setDetailState({ key: `${sourceId}|${mangaUrl}`, data: r });
-        rememberCover(mangaUrl, r?.cover);
+        reconcileMihonProgress(mangaUrl, sourceId, r?.chapters);
         const favorite = lib.fav(mangaUrl, sourceId);
-        if (favorite && r?.cover && favorite.cover !== r.cover) {
-          lib.updateFav(mangaUrl, { cover: r.cover, coverLocal: '' }, sourceId);
+        if (r?.cover && !favorite?.cover && !favorite?.coverLocal) {
+          if (favorite) lib.updateFav(mangaUrl, { cover: r.cover }, sourceId);
         }
       })
       .catch(async (e) => {
@@ -317,11 +319,8 @@ export default function Detail() {
               const recovered = await api.findManga({ url: mangaUrl, title, author: favorite?.author || d?.facts?.autor || '' }, sourceId);
               if (alive && recovered) {
                 const updates = { url: recovered.url };
-                if (recovered.detail?.cover) {
+                if (recovered.detail?.cover && !favorite?.cover && !favorite?.coverLocal) {
                   updates.cover = recovered.detail.cover;
-                  updates.coverLocal = '';
-                  rememberCover(mangaUrl, recovered.detail.cover);
-                  rememberCover(recovered.url, recovered.detail.cover);
                 }
                 lib.updateFav(mangaUrl, updates, sourceId);
                 tracking.move(mangaUrl, recovered.url, sourceId);
@@ -604,7 +603,7 @@ export default function Detail() {
     : [];
   const chaptersToMark = chaptersBefore.filter((chapter) => !progress.get(chapter.url, sourceId)?.read);
 
-  const pendiente = ordered.find((c) => !progress.get(c.url, sourceId)?.read) || null;
+  const pendiente = ordered.find((c) => !progress.get(c.url, sourceId)?.read) || ordered[0] || null;
   const cap = pendiente ? progress.get(pendiente.url, sourceId) : null;
   const enMarcha = !!(cap && !cap.read && Number.isInteger(cap.page));
   const resume = pendiente ? { ...pendiente, cap } : null;
@@ -689,6 +688,14 @@ export default function Detail() {
               </Badge>
             ))}
           </div>
+
+          {(d.facts.publicacion || d.facts.periodicidad || d.facts.proximo) && (
+            <div className="mt-2 flex flex-wrap gap-x-2 text-muted-foreground" style={{ fontSize: `${Math.round(13 * scale)}px` }}>
+              {d.facts.publicacion && <span>Publicado: {d.facts.publicacion}</span>}
+              {d.facts.periodicidad && <span>Periodicidad: {d.facts.periodicidad}</span>}
+              {d.facts.proximo && <span>Próximo capítulo: {d.facts.proximo}</span>}
+            </div>
+          )}
 
           <div style={{ marginTop: px(12, scale, 9) }}>
             <div
@@ -1028,7 +1035,11 @@ export default function Detail() {
                 </span>
                 <span
                   className={cn('block text-muted-foreground', chaptersPerRow === 3 && 'truncate')}
-                  style={{ fontSize: `${Math.round(13 * scale)}px`, minHeight: `${Math.round(16 * scale)}px` }}
+                  style={{
+                    fontSize: `${Math.round(13 * scale)}px`,
+                    lineHeight: `${Math.round(20 * scale)}px`,
+                    minHeight: `${Math.round(20 * scale)}px`
+                  }}
                 >
                   {c.date}
                   {c.group ? ` · ${c.group}` : ''}

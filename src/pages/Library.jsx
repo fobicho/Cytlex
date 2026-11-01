@@ -209,12 +209,17 @@ export default function Library({ active = true }) {
         const batch = await Promise.all(pending.slice(i, i + 3).map(async (f) => {
           const sid = sourceIdFor(f);
           const k = `${sid}|${f.url}`;
-          let urls = chapterIndex.get(f.url, sid);
+          let urls = chapterIndex.peek(f.url, sid);
           if (!urls) {
             const d = api.peekDetail(f.url, sid);
-            if (!d || !Array.isArray(d.chapters)) return null;
-            urls = d.chapters.map((c) => c.url);
-            chapterIndex.set(f.url, sid, urls);
+            if (d && Array.isArray(d.chapters)) {
+              urls = d.chapters.map((c) => c.url);
+              chapterIndex.set(f.url, sid, urls);
+            }
+          }
+          if (!urls) {
+            const readCount = Number(f.chapterReadCount) || (f.mihonProgress || []).filter((chapter) => chapter.read).length;
+            return [k, Math.max(0, (Number(f.chapterTotal) || 0) - readCount)];
           }
           const n = urls.reduce((acc, u) => acc + (progress.get(u, sid)?.read ? 0 : 1), 0);
           return [k, n];
@@ -347,7 +352,7 @@ export default function Library({ active = true }) {
           renderCard={(m) => {
             const sid = sourceIdFor(m);
             const adultBlocked = !showAdultExtensions && isAdultExtension(extensions.manifest(sid));
-            const cover = recallCover(m.url) || m.cover;
+            const cover = recallCover(m.url, sid) || m.cover;
             return (
               <MangaCard
                 key={`${sid}|${m.url}`}
@@ -370,7 +375,7 @@ export default function Library({ active = true }) {
         >
           {shown.map((m) => {
             const sid = sourceIdFor(m);
-            const cover = recallCover(m.url) || m.cover;
+            const cover = recallCover(m.url, sid) || m.cover;
             const unreadCount = unread[`${sid}|${m.url}`];
             const sourceManifest = extensions.manifest(sid);
             const savedSourceName = String(m.sourceName || '');
