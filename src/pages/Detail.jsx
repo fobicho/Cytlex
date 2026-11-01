@@ -191,7 +191,7 @@ export default function Detail() {
           referrerPolicy="no-referrer"
         />
       )}
-      {finalCover && (
+      {finalCover && failedCover !== finalCover && (
         <img
           className="absolute inset-0 w-full h-full object-cover"
           src={finalCover}
@@ -203,7 +203,15 @@ export default function Detail() {
             setFailedCover('');
             if (/^https?:\/\//i.test(finalCover || '')) preloadLibraryCover(finalCover);
           }}
-          onError={() => {
+          onError={async () => {
+            if (/^https?:\/\//i.test(finalCover || '')) {
+              const local = await preloadLibraryCover(finalCover);
+              if (local) {
+                setDisplayedCover({ key: coverKey, src: local });
+                setFailedCover('');
+                return;
+              }
+            }
             if (knownCover && finalCover !== knownCover) setCoverError(true);
             else setFailedCover(finalCover);
           }}
@@ -1020,7 +1028,7 @@ export default function Detail() {
                 </span>
                 <span
                   className={cn('block text-muted-foreground', chaptersPerRow === 3 && 'truncate')}
-                  style={{ fontSize: `${Math.round(13 * scale)}px` }}
+                  style={{ fontSize: `${Math.round(13 * scale)}px`, minHeight: `${Math.round(16 * scale)}px` }}
                 >
                   {c.date}
                   {c.group ? ` · ${c.group}` : ''}

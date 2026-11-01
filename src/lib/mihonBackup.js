@@ -317,6 +317,23 @@ const pathKey = (value) => {
   try { return new URL(value).pathname.replace(/\/+$/, '').toLowerCase() || '/'; }
   catch { return String(value || '').split(/[?#]/, 1)[0].replace(/\/+$/, '').toLowerCase() || '/'; }
 };
+const mangaIdentityKey = (manga) => {
+  const source = normalizeName(manga.sourceName);
+  const title = normalizeName(manga.title);
+  if (!source || !title) return '';
+  return `${source}|${title}|${normalizeName(manga.author)}`;
+};
+
+function mergeDuplicateFavorite(kept, duplicate) {
+  return {
+    ...duplicate,
+    ...kept,
+    cover: kept.cover || duplicate.cover,
+    coverLocal: kept.coverLocal || duplicate.coverLocal || '',
+    chapterTotal: Math.max(Number(kept.chapterTotal) || 0, Number(duplicate.chapterTotal) || 0),
+    cats: [...new Set([...(kept.cats || []), ...(duplicate.cats || [])])]
+  };
+}
 
 export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
   const previous = Object.fromEntries([FAVORITES_KEY, CATEGORIES_KEY, PROGRESS_KEY].map((key) => [key, localStorage.getItem(key)]));
@@ -332,18 +349,33 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
     }
   });
   const storedFavorites = readStored(FAVORITES_KEY, []);
+  const incomingIdentityKeys = new Set(candidate.entries
+    .filter((entry) => !excludedEntries.includes(entry))
+    .map((entry) => mangaIdentityKey(entry.manga))
+    .filter(Boolean));
   const excludedKeys = new Set(excludedEntries.flatMap((entry) => [
     `${entry.manga.sourceId}|${urlKey(entry.manga.url)}`,
     `${entry.legacySourceId}|${pathKey(entry.legacyUrl)}`
   ]));
-  const favorites = (Array.isArray(storedFavorites) ? storedFavorites : []).filter((manga) => {
+  const favorites = [];
+  const byManga = new Map();
+  (Array.isArray(storedFavorites) ? storedFavorites : []).filter((manga) => {
     const sourceId = manga.sourceId || 'leercapitulo';
     if (excludedKeys.has(`${sourceId}|${urlKey(manga.url)}`)) return false;
     return !String(sourceId).startsWith('mihon-') || !excludedKeys.has(`${sourceId}|${pathKey(manga.url)}`);
+  }).forEach((manga) => {
+    const identityKey = mangaIdentityKey(manga);
+    const duplicateIndex = identityKey && incomingIdentityKeys.has(identityKey) ? byManga.get(`identity|${identityKey}`) : undefined;
+    if (duplicateIndex !== undefined) {
+      favorites[duplicateIndex] = mergeDuplicateFavorite(favorites[duplicateIndex], manga);
+      return;
+    }
+    const index = favorites.push(manga) - 1;
+    if (identityKey && incomingIdentityKeys.has(identityKey)) byManga.set(`identity|${identityKey}`, index);
   });
-  const byManga = new Map();
   favorites.forEach((manga, index) => {
     byManga.set(`${manga.sourceId || 'leercapitulo'}|${urlKey(manga.url)}`, index);
+    byManga.set(`${manga.sourceId || 'leercapitulo'}|${pathKey(manga.url)}`, index);
     if (String(manga.sourceId || '').startsWith('mihon-')) {
       byManga.set(`${manga.sourceId}|${pathKey(manga.url)}`, index);
     }
@@ -361,9 +393,17 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
     const key = `${manga.sourceId}|${urlKey(manga.url)}`;
     const legacyKey = `${entry.legacySourceId}|${pathKey(entry.legacyUrl)}`;
     const originalKey = entry.originalUrl ? `${manga.sourceId}|${urlKey(entry.originalUrl)}` : '';
-    const index = byManga.get(key) ?? (originalKey ? byManga.get(originalKey) : undefined) ?? byManga.get(legacyKey);
+    const pathMatchKey = `${manga.sourceId}|${pathKey(manga.url)}`;
+    const identityKey = mangaIdentityKey(manga);
+    const index = byManga.get(key)
+      ?? (originalKey ? byManga.get(originalKey) : undefined)
+      ?? byManga.get(pathMatchKey)
+      ?? byManga.get(legacyKey)
+      ?? (identityKey ? byManga.get(`identity|${identityKey}`) : undefined);
     if (index === undefined) {
       byManga.set(key, favorites.length);
+      byManga.set(pathMatchKey, favorites.length);
+      if (identityKey) byManga.set(`identity|${identityKey}`, favorites.length);
       if (originalKey) byManga.set(originalKey, favorites.length);
       byManga.set(legacyKey, favorites.length);
       favorites.push(manga);
@@ -389,6 +429,8 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
         cats: [...new Set([...keptCategories, ...manga.cats])]
       };
       byManga.set(key, index);
+      byManga.set(pathMatchKey, index);
+      if (identityKey) byManga.set(`identity|${identityKey}`, index);
       if (originalKey) byManga.set(originalKey, index);
       byManga.set(legacyKey, index);
       updated += 1;

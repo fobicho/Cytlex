@@ -5,7 +5,7 @@ import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
 import { extensions } from '../lib/extensions.js';
 import { lib } from '../lib/library.js';
-import { discardLibraryCover, getLibraryCover, markLibraryCoverLoaded, preloadLibraryCover } from '../lib/covers.js';
+import { discardLibraryCover, getLibraryCover, markLibraryCoverLoaded, preloadLibraryCover, restoreLibraryCover } from '../lib/covers.js';
 import { rememberCover } from '../lib/searchState.js';
 import { SourceBadge } from './SourceBadge.jsx';
 
@@ -44,11 +44,25 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
   const aniLocal = anilistCoverOn ? (t?.coverLocal || '') : '';
   const aniCover = anilistCoverOn ? (t?.cover || '') : '';
   const preferredCover = aniLocal || aniCover || cachedCover || localCover || m.cover;
-  const [coverState, setCoverState] = useState(() => ({ key: preferredCover, src: getLibraryCover(preferredCover) || preferredCover }));
-  const src = coverState.key === preferredCover ? coverState.src : getLibraryCover(preferredCover) || preferredCover;
+  const [coverState, setCoverState] = useState(() => {
+    const cached = getLibraryCover(preferredCover);
+    return { key: preferredCover, src: cached || (from === 'biblioteca' && /^https?:\/\//i.test(preferredCover || '') ? '' : preferredCover) };
+  });
+  const src = coverState.key === preferredCover
+    ? coverState.src
+    : getLibraryCover(preferredCover) || (from === 'biblioteca' && /^https?:\/\//i.test(preferredCover || '') ? '' : preferredCover);
   const hoverTimer = useRef(null);
   const failedCoverUrls = useRef(new Set());
   const refreshedCoverMangas = useRef(new Set());
+
+  useEffect(() => {
+    if (from !== 'biblioteca' || !/^https?:\/\//i.test(preferredCover || '')) return undefined;
+    let alive = true;
+    restoreLibraryCover(preferredCover).then((local) => {
+      if (alive) setCoverState({ key: preferredCover, src: local || preferredCover });
+    });
+    return () => { alive = false; };
+  }, [from, preferredCover]);
 
   const schedulePrefetch = () => {
     if (unavailable || from === 'biblioteca') return;

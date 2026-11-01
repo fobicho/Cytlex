@@ -4,15 +4,18 @@ const MAX_DATAURL = 120000;
 const MAX_SEARCH_COVER_LOADS = 2;
 const MAX_SEARCH_COVERS = 60;
 const MAX_LIBRARY_COVERS = 120;
-const MAX_LIBRARY_COVER_LOADS = 2;
+const MAX_LIBRARY_COVER_LOADS = 4;
+const LIBRARY_COVER_DB = 'cytlex-library-covers';
+const LIBRARY_COVER_STORE = 'covers';
+const MAX_PERSISTED_LIBRARY_COVERS = 500;
 const searchCoverCache = new Map();
 const loadedSearchCovers = new Set();
 const decodedSearchCovers = new Map();
 const searchCoverWaiters = [];
 const libraryCoverCache = new Map();
 const loadedLibraryCovers = new Map();
-const decodedLibraryCovers = new Map();
 const libraryCoverWaiters = [];
+let libraryCoverDbPromise;
 let searchCoverGeneration = 0;
 let activeSearchCoverLoads = 0;
 let activeLibraryCoverLoads = 0;
@@ -46,7 +49,6 @@ function pruneLibraryCoverCache() {
     libraryCoverCache.delete(url);
     if (typeof value === 'string' && value.startsWith('blob:')) {
       loadedLibraryCovers.delete(value);
-      decodedLibraryCovers.delete(value);
       URL.revokeObjectURL(value);
     }
   }
@@ -68,6 +70,70 @@ export function hasLibraryCoverLoaded(url) {
 async function acquireLibraryCoverSlot() {
   if (activeLibraryCoverLoads < MAX_LIBRARY_COVER_LOADS) activeLibraryCoverLoads += 1;
   else await new Promise((resolve) => libraryCoverWaiters.push(resolve));
+}
+
+function openLibraryCoverDb() {
+  if (!globalThis.indexedDB) return Promise.resolve(null);
+  if (!libraryCoverDbPromise) {
+    libraryCoverDbPromise = new Promise((resolve) => {
+      const request = indexedDB.open(LIBRARY_COVER_DB, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(LIBRARY_COVER_STORE, { keyPath: 'url' });
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(null);
+      request.onblocked = () => resolve(null);
+    });
+  }
+  return libraryCoverDbPromise;
+}
+
+function idbRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function readPersistedLibraryCover(url) {
+  try {
+    const db = await openLibraryCoverDb();
+    if (!db) return null;
+    const record = await idbRequest(db.transaction(LIBRARY_COVER_STORE, 'readonly').objectStore(LIBRARY_COVER_STORE).get(url));
+    if (!record?.blob) return null;
+    const cached = libraryCoverCache.get(url);
+    if (typeof cached === 'string') return cached;
+    if (cached) return null;
+    const objectUrl = URL.createObjectURL(record.blob);
+    libraryCoverCache.set(url, objectUrl);
+    markLibraryCoverLoaded(objectUrl);
+    db.transaction(LIBRARY_COVER_STORE, 'readwrite').objectStore(LIBRARY_COVER_STORE).put({ ...record, usedAt: Date.now() });
+    pruneLibraryCoverCache();
+    return objectUrl;
+  } catch {
+    return null;
+  }
+}
+
+async function persistLibraryCover(url, blob) {
+  try {
+    const db = await openLibraryCoverDb();
+    if (!db) return;
+    const store = db.transaction(LIBRARY_COVER_STORE, 'readwrite').objectStore(LIBRARY_COVER_STORE);
+    store.put({ url, blob, usedAt: Date.now() });
+    const count = await idbRequest(store.count());
+    if (count <= MAX_PERSISTED_LIBRARY_COVERS) return;
+    const records = await idbRequest(db.transaction(LIBRARY_COVER_STORE, 'readonly').objectStore(LIBRARY_COVER_STORE).getAll());
+    records.sort((a, b) => a.usedAt - b.usedAt);
+    const cleanup = db.transaction(LIBRARY_COVER_STORE, 'readwrite').objectStore(LIBRARY_COVER_STORE);
+    records.slice(0, count - MAX_PERSISTED_LIBRARY_COVERS).forEach((record) => cleanup.delete(record.url));
+  } catch {}
+}
+
+export async function restoreLibraryCover(url) {
+  if (!url) return '';
+  const cached = libraryCoverCache.get(url);
+  if (typeof cached === 'string') return cached;
+  if (cached) return (await cached) || '';
+  return (await readPersistedLibraryCover(url)) || '';
 }
 
 function releaseLibraryCoverSlot() {
@@ -114,6 +180,8 @@ export async function preloadLibraryCover(url) {
   pending = (async () => {
     let acquired = false;
     try {
+      const persisted = await readPersistedLibraryCover(url);
+      if (persisted) return persisted;
       await acquireLibraryCoverSlot();
       acquired = true;
       const thumbnail = url.startsWith('data:') ? url : await makeCoverThumb(url);
@@ -126,16 +194,15 @@ export async function preloadLibraryCover(url) {
         return '';
       }
       markLibraryCoverLoaded(objectUrl);
-      decodedLibraryCovers.set(objectUrl, decoded);
       const current = libraryCoverCache.get(url);
       if (current && current !== pending) {
         loadedLibraryCovers.delete(objectUrl);
-        decodedLibraryCovers.delete(objectUrl);
         URL.revokeObjectURL(objectUrl);
         return current;
       }
       libraryCoverCache.set(url, objectUrl);
       pruneLibraryCoverCache();
+      persistLibraryCover(url, blob);
       return objectUrl;
     } catch {
       return '';
@@ -153,7 +220,6 @@ export function discardLibraryCover(url, objectUrl) {
   if (libraryCoverCache.get(url) !== objectUrl) return;
   libraryCoverCache.delete(url);
   loadedLibraryCovers.delete(objectUrl);
-  decodedLibraryCovers.delete(objectUrl);
   URL.revokeObjectURL(objectUrl);
 }
 
