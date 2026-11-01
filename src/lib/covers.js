@@ -3,10 +3,15 @@ const SEARCH_THUMB_WIDTH = 320;
 const MAX_DATAURL = 120000;
 const MAX_SEARCH_COVER_LOADS = 2;
 const MAX_SEARCH_COVERS = 60;
+const MAX_LIBRARY_COVERS = 120;
+const MAX_LIBRARY_COVER_LOADS = 2;
 const searchCoverCache = new Map();
 const searchCoverWaiters = [];
+const libraryCoverCache = new Map();
+const libraryCoverWaiters = [];
 let searchCoverGeneration = 0;
 let activeSearchCoverLoads = 0;
+let activeLibraryCoverLoads = 0;
 
 function pruneSearchCoverCache() {
   while (searchCoverCache.size > MAX_SEARCH_COVERS) {
@@ -27,6 +32,25 @@ function releaseSearchCoverSlot() {
   else activeSearchCoverLoads -= 1;
 }
 
+function pruneLibraryCoverCache() {
+  while (libraryCoverCache.size > MAX_LIBRARY_COVERS) {
+    const [url, value] = libraryCoverCache.entries().next().value;
+    libraryCoverCache.delete(url);
+    if (typeof value === 'string' && value.startsWith('blob:')) URL.revokeObjectURL(value);
+  }
+}
+
+async function acquireLibraryCoverSlot() {
+  if (activeLibraryCoverLoads < MAX_LIBRARY_COVER_LOADS) activeLibraryCoverLoads += 1;
+  else await new Promise((resolve) => libraryCoverWaiters.push(resolve));
+}
+
+function releaseLibraryCoverSlot() {
+  const next = libraryCoverWaiters.shift();
+  if (next) next();
+  else activeLibraryCoverLoads -= 1;
+}
+
 export function clearSearchCoverCache() {
   searchCoverGeneration += 1;
   for (const value of searchCoverCache.values()) {
@@ -38,6 +62,59 @@ export function clearSearchCoverCache() {
 export function getSearchCover(url) {
   const cached = searchCoverCache.get(url || '');
   return typeof cached === 'string' ? cached : '';
+}
+
+export function getLibraryCover(url) {
+  const cached = libraryCoverCache.get(url || '');
+  if (typeof cached !== 'string') return '';
+  libraryCoverCache.delete(url);
+  libraryCoverCache.set(url, cached);
+  return cached;
+}
+
+export async function preloadLibraryCover(url) {
+  if (!url || typeof window === 'undefined' || !window.cytlex?.fetchImage) return '';
+  const cached = libraryCoverCache.get(url);
+  if (cached) {
+    libraryCoverCache.delete(url);
+    libraryCoverCache.set(url, cached);
+    return cached;
+  }
+
+  let pending;
+  pending = (async () => {
+    let acquired = false;
+    try {
+      await acquireLibraryCoverSlot();
+      acquired = true;
+      const thumbnail = url.startsWith('data:') ? url : await makeCoverThumb(url);
+      if (!thumbnail) return '';
+      const blob = await (await fetch(thumbnail)).blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const current = libraryCoverCache.get(url);
+      if (current && current !== pending) {
+        URL.revokeObjectURL(objectUrl);
+        return current;
+      }
+      libraryCoverCache.set(url, objectUrl);
+      pruneLibraryCoverCache();
+      return objectUrl;
+    } catch {
+      return '';
+    } finally {
+      if (acquired) releaseLibraryCoverSlot();
+      if (libraryCoverCache.get(url) === pending) libraryCoverCache.delete(url);
+    }
+  })();
+  libraryCoverCache.set(url, pending);
+  pruneLibraryCoverCache();
+  return pending;
+}
+
+export function discardLibraryCover(url, objectUrl) {
+  if (libraryCoverCache.get(url) !== objectUrl) return;
+  libraryCoverCache.delete(url);
+  URL.revokeObjectURL(objectUrl);
 }
 
 export function preloadSearchCover(url) {

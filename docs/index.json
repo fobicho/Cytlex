@@ -3,11 +3,11 @@
     "id": "leercapitulo",
     "name": "LeerCapitulo",
     "lang": "es",
-    "version": "1.0.8",
+    "version": "1.0.10",
     "type": "module",
     "contentWarning": "SAFE",
     "main": "ext/leercapitulo.js",
-    "baseUrl": "https://leercapitulo.co",
+    "baseUrl": "https://www.leercapitulo.co",
     "icon": "https://www.google.com/s2/favicons?domain=leercapitulo.co&sz=128",
     "desc": "Manga, manhwa y manhua en español."
   },

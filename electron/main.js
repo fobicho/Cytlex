@@ -143,8 +143,8 @@ function createWindow(startBounds = null, startMaximized = false) {
 }
 
 const REFERER_RULES = [
-  { hosts: ['t34798ndc.com'], referer: 'https://leercapitulo.co/' },
-  { hosts: ['leercapitulo.co'], referer: 'https://leercapitulo.co/' },
+  { hosts: ['t34798ndc.com'], referer: 'https://www.leercapitulo.co/' },
+  { hosts: ['leercapitulo.co'], referer: 'https://www.leercapitulo.co/' },
   { hosts: ['mangalect.org'], referer: 'https://mangalect.org/' },
   { hosts: ['onfmangas.com'], referer: 'https://onfmangas.com/' },
   { hosts: ['imagesolymp.xyz', 'olympusxyz.com'], referer: 'https://olympusxyz.com/' },
@@ -572,7 +572,7 @@ const refererFor = (url) => {
     const rule = REFERER_RULES.find((r) => r.hosts.some((h) => host === h || host.endsWith(`.${h}`)));
     if (rule) return rule.referer;
   } catch {}
-  try { return new URL(url).origin + '/'; } catch { return 'https://leercapitulo.co/'; }
+  try { return new URL(url).origin + '/'; } catch { return 'https://www.leercapitulo.co/'; }
 };
 
 const HTTP_GET_TIMEOUT_MS = 15_000;
@@ -714,6 +714,25 @@ ipcMain.handle('backup:open', async (e) => {
       ? gunzipSync(bytes, { maxOutputLength: 100 * 1024 * 1024 }).toString('utf8')
       : bytes.toString('utf8');
     return { ok: true, content, fileName: path.basename(filePath) };
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error) };
+  }
+});
+
+ipcMain.handle('backup:open-mihon', async (e) => {
+  try {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const options = {
+      properties: ['openFile'],
+      filters: [{ name: 'Respaldo de Mihon', extensions: ['tachibk', 'gz', 'proto'] }]
+    };
+    const { canceled, filePaths } = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    if (canceled || !filePaths?.[0]) return { ok: false, canceled: true };
+    const filePath = filePaths[0];
+    const fileInfo = await stat(filePath);
+    if (fileInfo.size > 100 * 1024 * 1024) return { ok: false, error: 'El archivo supera el límite de 100 MB.' };
+    const bytes = await readFile(filePath);
+    return { ok: true, bytes, fileName: path.basename(filePath) };
   } catch (error) {
     return { ok: false, error: String(error?.message || error) };
   }

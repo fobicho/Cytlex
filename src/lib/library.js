@@ -76,6 +76,19 @@ export const lib = {
     }
     return favs;
   },
+  updateFavs(updates) {
+    const favs = lib.favs();
+    const patches = new Map(updates.map(({ url, sourceId, patch }) => [`${sourceId || 'leercapitulo'}|${sameUrlKey(url)}`, patch]));
+    let changed = false;
+    const next = favs.map((f) => {
+      const patch = patches.get(`${SRC(f)}|${sameUrlKey(f.url)}`);
+      if (!patch) return f;
+      changed = true;
+      return { ...f, ...patch };
+    });
+    if (changed) write(FAV, next);
+    return next;
+  },
 
   cats() { return loadCats(); },
   addCat(name) {

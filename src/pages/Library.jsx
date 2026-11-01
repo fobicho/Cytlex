@@ -1,15 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { RefreshCw, ArrowUpDown } from 'lucide-react';
 import { lib } from '../lib/library.js';
 import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
+import VirtualMangaGrid from '../components/VirtualMangaGrid.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
-import { makeCoverThumb } from '../lib/covers.js';
 import { checkLibrary } from '../lib/notify.js';
 import { progress } from '../lib/progress.js';
-import { tracking } from '../lib/tracking.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { api } from '../lib/api.js';
 import { useToast } from '../components/Toast.jsx';
@@ -17,12 +16,40 @@ import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
+import { discardLibraryCover, getLibraryCover, preloadLibraryCover } from '../lib/covers.js';
+import { libraryScroll, recallCover } from '../lib/searchState.js';
 
 let sessionCategoria = '';
 let libraryCheckInFlight = false;
 let libraryCheckCooldownUntil = 0;
 
 const remainingLibraryCheckCooldown = () => Math.max(0, Math.ceil((libraryCheckCooldownUntil - Date.now()) / 1000));
+
+function CachedLibraryCover({ cover, title, className }) {
+  const [coverState, setCoverState] = useState(() => ({ key: cover, src: getLibraryCover(cover) || cover }));
+  const src = coverState.key === cover ? coverState.src : getLibraryCover(cover) || cover;
+
+  return (
+    <img
+      src={src}
+      alt={title}
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      className={className}
+      onLoad={() => {
+        if (src !== cover || !/^(https?:\/\/|data:image\/)/i.test(cover || '')) return;
+        preloadLibraryCover(cover);
+      }}
+      onError={() => {
+        if (src !== cover) {
+          discardLibraryCover(cover, src);
+          setCoverState({ key: cover, src: cover });
+        }
+      }}
+    />
+  );
+}
 
 export default function Library() {
   const [cats, setCats] = useState(() => lib.cats());
@@ -40,6 +67,7 @@ export default function Library() {
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('cytlex:librarySort') || 'title-asc');
   const [unread, setUnread] = useState({});
+  const unreadCheckedAt = useRef(new Map());
   const scale = useScale();
   const [progressTick, setProgressTick] = useState(0);
   useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
@@ -52,18 +80,17 @@ export default function Library() {
     []
   );
   useEffect(() => {
-    let changed = false;
+    const updates = [];
     favs.forEach((m) => {
       const manifest = extensions.manifest(m.sourceId || 'leercapitulo');
       const patch = {};
-      if (!m.sourceName && manifest.name) patch.sourceName = manifest.name;
-      if (!m.sourceIcon && manifest.icon) patch.sourceIcon = manifest.icon;
-      if (Object.keys(patch).length) {
-        lib.updateFav(m.url, patch, m.sourceId || 'leercapitulo');
-        changed = true;
+      if ((!m.sourceName || (/^(mihon-\d+|Fuente Mihon \d+)$/i.test(String(m.sourceName)) && !/^(mihon-|Fuente Mihon)/i.test(String(manifest.name || '')))) && manifest.name) {
+        patch.sourceName = manifest.name;
       }
+      if (!m.sourceIcon && manifest.icon) patch.sourceIcon = manifest.icon;
+      if (Object.keys(patch).length) updates.push({ url: m.url, sourceId: m.sourceId, patch });
     });
-    if (changed) setFavs(lib.favs());
+    if (updates.length) setFavs(lib.updateFavs(updates));
   }, []);
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
@@ -112,9 +139,26 @@ export default function Library() {
     setSel(cats[0]?.id || '');
   }, [cats, sel]);
 
+  useLayoutEffect(() => {
+    const main = document.querySelector('main');
+    if (!main) return undefined;
+    const restore = () => { main.scrollTop = libraryScroll.get(sel); };
+    const save = () => libraryScroll.set(sel, main.scrollTop);
+    restore();
+    const frame = requestAnimationFrame(restore);
+    main.addEventListener('scroll', save, { passive: true });
+    return () => {
+      save();
+      cancelAnimationFrame(frame);
+      main.removeEventListener('scroll', save);
+    };
+  }, [sel]);
+
+  const inCategory = useMemo(() => favs.filter((f) => (f.cats || []).includes(sel)), [favs, sel]);
+
   const shown = useMemo(
     () => {
-      const list = favs.filter((f) => (f.cats || []).includes(sel)).slice();
+      const list = inCategory.slice();
       const cmp = (a, b) => {
         switch (sortBy) {
           case 'title-desc':
@@ -129,89 +173,50 @@ export default function Library() {
       };
       return list.sort(cmp);
     },
-    [favs, sel, sortBy, unread, progressTick]
+    [inCategory, sortBy, unread]
   );
 
   useEffect(() => {
     if (!showUnread) return undefined;
     let alive = true;
     (async () => {
-      const pending = favs.filter((f) => (f.cats || []).includes(sel)).filter((f) => extensions.isInstalled(f.sourceId || 'leercapitulo'));
-      const results = await Promise.all(
-        pending.map(async (f) => {
+      const pending = inCategory.filter((f) => {
+        const sid = f.sourceId || 'leercapitulo';
+        return extensions.isInstalled(sid) && unreadCheckedAt.current.get(`${sid}|${f.url}`) !== progressTick;
+      });
+      const results = [];
+      for (let i = 0; i < pending.length; i += 3) {
+        const batch = await Promise.all(pending.slice(i, i + 3).map(async (f) => {
           const sid = f.sourceId || 'leercapitulo';
           const k = `${sid}|${f.url}`;
           let urls = chapterIndex.get(f.url, sid);
           if (!urls) {
-            let d = api.peekDetail(f.url, sid);
-            if (!d) {
-              try { d = await api.detail(f.url, sid); } catch { chapterIndex.drop(f.url, sid); return null; }
-            }
+            const d = api.peekDetail(f.url, sid);
             if (!d || !Array.isArray(d.chapters)) return null;
             urls = d.chapters.map((c) => c.url);
             chapterIndex.set(f.url, sid, urls);
           }
           const n = urls.reduce((acc, u) => acc + (progress.get(u, sid)?.read ? 0 : 1), 0);
           return [k, n];
-        })
-      );
+        }));
+        if (!alive) return;
+        results.push(...batch);
+      }
       if (!alive) return;
       setUnread((prev) => {
-        const next = { ...prev };
-        for (const entry of results) if (entry) next[entry[0]] = entry[1];
+        let next = prev;
+        for (const entry of results) {
+          if (!entry) continue;
+          unreadCheckedAt.current.set(entry[0], progressTick);
+          if (prev[entry[0]] === entry[1]) continue;
+          if (next === prev) next = { ...prev };
+          next[entry[0]] = entry[1];
+        }
         return next;
       });
     })();
     return () => { alive = false; };
-  }, [favs, sel, progressTick, showUnread]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const pending = shown.filter((f) => f.cover && !(f.coverLocal || '').startsWith('data:'));
-      const thumbs = await Promise.all(
-        pending.map(async (f) => [f, await makeCoverThumb(f.cover)])
-      );
-      if (cancelled) return;
-      let changed = false;
-      for (const [f, local] of thumbs) {
-        if (local) {
-          lib.updateFav(f.url, { coverLocal: local }, f.sourceId);
-          changed = true;
-        }
-      }
-      if (changed) setFavs(lib.favs());
-    })();
-    return () => { cancelled = true; };
-  }, [shown]);
-
-  useEffect(() => {
-    if (!settings.get().anilistCover) return undefined;
-    let cancelled = false;
-    (async () => {
-      const pending = shown.filter((f) => {
-        const t = tracking.get(f.url, f.sourceId || 'leercapitulo');
-        return t?.cover && !t?.coverLocal;
-      });
-      const thumbs = await Promise.all(
-        pending.map(async (f) => {
-          const sid = f.sourceId || 'leercapitulo';
-          const t = tracking.get(f.url, sid);
-          return [f, sid, t?.cover, await makeCoverThumb(t?.cover)];
-        })
-      );
-      if (cancelled) return;
-      let changed = false;
-      for (const [f, sid, url, local] of thumbs) {
-        if (local) {
-          tracking.updateCover(f.url, sid, { coverLocal: local });
-          changed = true;
-        }
-      }
-      if (changed) setFavs(lib.favs());
-    })();
-    return () => { cancelled = true; };
-  }, [shown, settings.get().anilistCover]);
+  }, [inCategory, progressTick, showUnread]);
 
   return (
     <div className="min-h-full flex flex-col">
@@ -314,20 +319,18 @@ export default function Library() {
           title={favs.some((f) => (f.cats || []).includes(sel)) ? 'No hay mangas visibles con este filtro' : 'Tu biblioteca está vacía'}
         />
       ) : view === 'grid' ? (
-        <div
-          className="grid gap-x-5 gap-y-8"
-          style={{
-            gridTemplateColumns: `repeat(auto-fill, ${cs}px)`,
-            gap: `${Math.max(16, Math.round(20 * scale))}px ${Math.max(12, Math.round(20 * scale))}px`
-          }}
-        >
-          {shown.map((m, i) => {
+        <VirtualMangaGrid
+          items={shown}
+          coverSize={cs}
+          scale={scale}
+          renderCard={(m) => {
             const sid = m.sourceId || 'leercapitulo';
             const adultBlocked = !showAdultExtensions && isAdultExtension(extensions.manifest(sid));
+            const cover = recallCover(m.url) || m.cover;
             return (
               <MangaCard
-                key={i}
-                m={m}
+                key={`${sid}|${m.url}`}
+                m={m.cover === cover ? m : { ...m, cover }}
                 sourceId={sid}
                 unavailable={!extensions.isInstalled(sid) || adultBlocked}
                 unavailableLabel={adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}
@@ -337,26 +340,32 @@ export default function Library() {
                 chapterCount={showUnread ? unread[`${sid}|${m.url}`] ?? null : null}
               />
             );
-          })}
-        </div>
+          }}
+        />
       ) : (
         <div
           className="grid gap-3"
           style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${px(260, scale, 230)}), 1fr))` }}
         >
-          {shown.map((m, i) => {
+          {shown.map((m) => {
             const sid = m.sourceId || 'leercapitulo';
+            const cover = recallCover(m.url) || m.cover;
             const unreadCount = unread[`${sid}|${m.url}`];
             const sourceManifest = extensions.manifest(sid);
+            const savedSourceName = String(m.sourceName || '');
+            const manifestSourceName = String(sourceManifest.name || '');
+            const hasSavedSourceName = savedSourceName && !/^(mihon-\d+|Fuente Mihon \d+)$/i.test(savedSourceName);
             const sourceInfo = {
               ...sourceManifest,
-              name: m.sourceName || sourceManifest.name || sid,
+              name: hasSavedSourceName
+                ? savedSourceName
+                : (manifestSourceName && !/^(mihon-|Fuente Mihon)/i.test(manifestSourceName) ? manifestSourceName : sid),
               icon: sourceManifest.icon || m.sourceIcon
             };
             const adultBlocked = !showAdultExtensions && isAdultExtension(sourceManifest);
             const unavailable = !extensions.isInstalled(sid) || adultBlocked;
             return (
-              <div key={i} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5">
+              <div key={`${sid}|${m.url}`} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5">
                 <a
                   href={`#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sid)}&from=biblioteca`}
                   className={cn('flex items-end gap-3 flex-1 min-w-0', unavailable && 'pointer-events-none opacity-60')}
@@ -367,18 +376,16 @@ export default function Library() {
                     className="relative rounded-lg shrink-0 overflow-hidden bg-muted"
                     style={{ width: px(68, scale, 56), height: px(102, scale, 82) }}
                   >
-                    {m.cover && (
-                      <img
-                        src={m.cover}
-                        alt=""
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover bg-black"
-                      />
+                    {cover && (
+                      <CachedLibraryCover cover={cover} title={m.title} className="w-full h-full object-cover bg-black" />
                     )}
                     {unavailable && (
                       <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 px-0.5 text-center text-[8px] font-semibold leading-tight text-white">
                         <span>{adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}</span>
-                        <SourceBadge m={sourceInfo} className="!h-5 !w-5 rounded bg-white shadow-sm" />
+                        <span className="flex max-w-full min-w-0 items-center rounded-full bg-black/80 py-0.5 pl-0.5 pr-1 text-left" style={{ gap: px(4, scale, 3) }} title={sourceInfo.name}>
+                          <SourceBadge m={sourceInfo} className="rounded-full bg-white shadow-sm" style={{ width: px(18, scale, 16), height: px(18, scale, 16), fontSize: px(8, scale, 7) }} />
+                          <span className="min-w-0 truncate" style={{ fontSize: px(8, scale, 7) }}>{sourceInfo.name}</span>
+                        </span>
                       </span>
                     )}
                   </span>

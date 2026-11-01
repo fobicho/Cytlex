@@ -3,7 +3,7 @@ import MangaCard from './MangaCard.jsx';
 
 const OVERSCAN_ROWS = 1;
 
-export default function VirtualMangaGrid({ items, sourceId, coverSize, scale }) {
+export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, renderCard }) {
   const gridRef = useRef(null);
   const frameRef = useRef(0);
   const layoutRef = useRef(null);
@@ -32,7 +32,10 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale }) 
       const grid = gridRef.current;
       if (!main || !grid) return;
       const width = grid.parentElement?.clientWidth || main.clientWidth;
-      setGridWidth((current) => current === width ? current : width);
+      if (width > 0 && width !== gridWidth) {
+        setGridWidth(width);
+        return;
+      }
 
       const firstCard = grid.querySelector('[data-virtual-card]');
       const measuredHeight = firstCard?.getBoundingClientRect().height || 0;
@@ -59,14 +62,14 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale }) 
     const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(main);
     if (gridRef.current?.parentElement) observer.observe(gridRef.current.parentElement);
-    scheduleUpdate();
+    updateRange();
     return () => {
       main.removeEventListener('scroll', scheduleUpdate);
       observer.disconnect();
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       frameRef.current = 0;
     };
-  }, [items.length, coverSize, scale, columns, rowStep]);
+  }, [items.length, coverSize, scale, columns, rowStep, gridWidth]);
 
   const height = totalRows ? totalRows * rowStep - gapY : 0;
   return (
@@ -80,8 +83,10 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale }) 
         }}
       >
         {visibleItems.map((manga, index) => (
-          <div key={manga.url} data-virtual-card={index === 0 ? '' : undefined}>
-            <MangaCard m={manga} sourceId={sourceId} from="fuentes" coverSize={coverSize} showAuthor={false} />
+          <div key={`${manga.sourceId || sourceId || ''}|${manga.url}`} data-virtual-card={index === 0 ? '' : undefined}>
+            {renderCard
+              ? renderCard(manga)
+              : <MangaCard m={manga} sourceId={sourceId} from="fuentes" coverSize={coverSize} showAuthor={false} />}
           </div>
         ))}
       </div>

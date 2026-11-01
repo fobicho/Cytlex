@@ -1,5 +1,6 @@
 import { extensions, isAdultExtension } from './extensions.js';
 import { settings } from './settings.js';
+import { withAdultGenreExclusions } from './adultGenreFilters.js';
 
 function bridge() {
   if (typeof window !== 'undefined' && window.cytlex) return window.cytlex;
@@ -26,14 +27,31 @@ async function resolveSource(sourceId) {
 
 const DETAIL_TTL_MS = 10 * 60 * 1000;
 const DETAIL_CACHE_MAX = 40;
+const DETAIL_NOT_FOUND_TTL_MS = 60 * 1000;
 const CHAPTER_TTL_MS = 2 * 60 * 1000;
 const CHAPTER_CACHE_MAX = 40;
 
 const detailCache = new Map();
+const detailRequests = new Map();
+const detailNotFound = new Map();
 const chapterCache = new Map();
 const chapterRequests = new Map();
+const catalogFiltersCache = new Map();
 const detailKey = (url, sourceId) => `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}|${url}`;
 const chapterKey = (url, sourceId) => `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}|${url}`;
+
+function catalogFiltersFor(sourceId, src) {
+  if (typeof src.catalogFilters !== 'function') return Promise.resolve([]);
+  const key = `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}`;
+  if (!catalogFiltersCache.has(key)) {
+    const request = Promise.resolve().then(() => src.catalogFilters()).catch((error) => {
+      catalogFiltersCache.delete(key);
+      throw error;
+    });
+    catalogFiltersCache.set(key, request);
+  }
+  return catalogFiltersCache.get(key);
+}
 
 const freshEntry = (key) => {
   const hit = detailCache.get(key);
@@ -74,24 +92,47 @@ export const api = {
 
   async catalog(args, sourceId) {
     const src = await resolveSource(sourceId);
-    return src.catalog(args);
+    const params = sourceId === 'zonatmo' && !settings.get().showAdultExtensions
+      ? withAdultGenreExclusions(sourceId, args, await catalogFiltersFor(sourceId, src).catch(() => []), false)
+      : args;
+    return src.catalog(params);
   },
 
   async catalogFilters(sourceId) {
     const src = await resolveSource(sourceId);
-    return typeof src.catalogFilters === 'function' ? src.catalogFilters() : [];
+    return catalogFiltersFor(sourceId, src);
   },
 
-  async detail(url, sourceId) {
+  async detail(url, sourceId, { cacheResult = true } = {}) {
     if (!sourceId || !extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
     assertSourceEnabled(sourceId);
     const key = detailKey(url, sourceId);
     const hit = freshEntry(key);
     if (hit) return hit;
-    const src = await resolveSource(sourceId);
-    const result = await src.detail(url);
-    storeDetail(key, result);
-    return result;
+    const failed = detailNotFound.get(key);
+    if (failed && Date.now() - failed.at < DETAIL_NOT_FOUND_TTL_MS) throw failed.error;
+    if (failed) detailNotFound.delete(key);
+    let request = detailRequests.get(key);
+    if (!request) {
+      request = (async () => {
+        const src = await resolveSource(sourceId);
+        return src.detail(url);
+      })();
+      detailRequests.set(key, request);
+    }
+    try {
+      const result = await request;
+      if (cacheResult) storeDetail(key, result);
+      return result;
+    } catch (error) {
+      if (/\bHTTP 404\b/.test(String(error?.message || error))) {
+        detailNotFound.set(key, { at: Date.now(), error });
+        while (detailNotFound.size > DETAIL_CACHE_MAX) detailNotFound.delete(detailNotFound.keys().next().value);
+      }
+      throw error;
+    } finally {
+      if (detailRequests.get(key) === request) detailRequests.delete(key);
+    }
   },
 
   async chapter(url, sourceId, { fresh = false, failedPage } = {}) {
@@ -125,14 +166,12 @@ export const api = {
   prefetchDetail(url, sourceId) {
     const key = detailKey(url, sourceId);
     if (freshEntry(key) || !sourceId) return;
-    try {
-      resolveSource(sourceId)
-        .then((src) => src.detail(url))
-        .then((r) => storeDetail(key, r))
-        .catch(() => {});
-    } catch {}
+    this.detail(url, sourceId).catch(() => {});
   },
 
-  clearDetailCache() { detailCache.clear(); }
+  clearDetailCache() {
+    detailCache.clear();
+    detailNotFound.clear();
+  }
 };
 

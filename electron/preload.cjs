@@ -23,6 +23,7 @@ if (process.isMainFrame) contextBridge.exposeInMainWorld('cytlex', {
   downloadImage: (payload) => ipcRenderer.invoke('image:download', payload),
   saveBackup: (payload) => ipcRenderer.invoke('backup:save', payload),
   openBackup: () => ipcRenderer.invoke('backup:open'),
+  openMihonBackup: () => ipcRenderer.invoke('backup:open-mihon'),
   toggleFullscreen: () => ipcRenderer.invoke('window:toggle-fullscreen'),
   saveTheme: (payload) => ipcRenderer.invoke('theme:save', payload),
   isFullscreen: () => ipcRenderer.invoke('window:is-fullscreen'),

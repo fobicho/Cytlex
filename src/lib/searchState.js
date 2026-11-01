@@ -24,6 +24,18 @@ export function recallCover(url) {
 
 export const scrollMemory = { catalog: 0 };
 
+const libraryScrollMap = new Map();
+
+export const libraryScroll = {
+  get(categoryId) {
+    return libraryScrollMap.get(categoryId || '') ?? 0;
+  },
+  set(categoryId, top) {
+    if (!Number.isFinite(top) || top < 0) return;
+    libraryScrollMap.set(categoryId || '', top);
+  }
+};
+
 let sourceCatalogSnapshot = null;
 let restoreSourceCatalog = false;
 
@@ -127,6 +139,16 @@ export const chapterOrder = {
     if (!mangaUrl) return;
     try {
       localStorage.setItem(ORDER_KEY, JSON.stringify({ ...readOrder(), [mangaUrl]: asc ? 'asc' : 'desc' }));
+    } catch {}
+  },
+  move(mangaUrl, nextUrl) {
+    if (!mangaUrl || !nextUrl || mangaUrl === nextUrl) return;
+    try {
+      const order = readOrder();
+      if (order[mangaUrl] === undefined) return;
+      if (order[nextUrl] === undefined) order[nextUrl] = order[mangaUrl];
+      delete order[mangaUrl];
+      localStorage.setItem(ORDER_KEY, JSON.stringify(order));
     } catch {}
   }
 };

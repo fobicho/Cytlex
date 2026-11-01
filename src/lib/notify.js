@@ -2,6 +2,7 @@ import { api } from './api.js';
 import { lib } from './library.js';
 import { settings } from './settings.js';
 import { extUpdates } from './extUpdates.js';
+import { chapterIndex } from './chapterIndex.js';
 
 const key = (url, sourceId) => `${sourceId}|${url}`;
 
@@ -40,8 +41,11 @@ async function avisarExtensiones() {
 }
 
 async function countChapters(manga) {
-  const d = await api.detail(manga.url, manga.sourceId || 'leercapitulo');
-  return Array.isArray(d?.chapters) ? d.chapters.length : null;
+  const sourceId = manga.sourceId || 'leercapitulo';
+  const d = await api.detail(manga.url, sourceId, { cacheResult: false });
+  if (!Array.isArray(d?.chapters)) return null;
+  chapterIndex.set(manga.url, sourceId, d.chapters.map((chapter) => chapter.url));
+  return d.chapters.length;
 }
 
 export async function checkLibrary({ silent = false, force = false, notifyFound = !silent } = {}) {

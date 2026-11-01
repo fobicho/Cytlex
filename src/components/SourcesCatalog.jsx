@@ -301,7 +301,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
     return (
       <div
         className="grid items-start"
-        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${px(250, scale, 210)}px, 1fr))`, gap: px(12, scale, 9) }}
+        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${px(250, scale, 210)}, ${px(340, scale, 280)}))`, justifyContent: 'start', gap: px(12, scale, 9) }}
       >
         {sources.map(({ manifest }) => (
           <button

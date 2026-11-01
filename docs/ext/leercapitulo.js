@@ -1,8 +1,12 @@
-const BASE = 'https://leercapitulo.co';
+const BASE = 'https://www.leercapitulo.co';
 
 const abs = (u) => {
   if (!u) return '';
-  try { return new URL(u, BASE).href; } catch { return u; }
+  try {
+    const url = new URL(u, BASE);
+    if (url.hostname === 'leercapitulo.co') url.hostname = 'www.leercapitulo.co';
+    return url.href;
+  } catch { return u; }
 };
 
 const text = (el, sel) => (el.querySelector(sel)?.textContent || '').replace(/\s+/g, ' ').trim();

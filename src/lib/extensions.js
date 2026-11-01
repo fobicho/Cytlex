@@ -5,6 +5,7 @@ import defaultExtensionIndex from '../../docs/index.json';
 const KEY = 'cytlex:extensions:v1';
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
 const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
+let recordsCache = null;
 
 export function isAdultExtension(source) {
   const manifest = source?.manifest || source;
@@ -12,11 +13,16 @@ export function isAdultExtension(source) {
 }
 
 const read = () => {
+  if (recordsCache) return recordsCache;
   let list = [];
   try { list = JSON.parse(localStorage.getItem(KEY)) || []; } catch { list = []; }
-  return list.filter((r) => r?.manifest?.type !== 'builtin');
+  recordsCache = list.filter((r) => r?.manifest?.type !== 'builtin');
+  return recordsCache;
 };
-const write = (v) => localStorage.setItem(KEY, JSON.stringify(v));
+const write = (v) => {
+  localStorage.setItem(KEY, JSON.stringify(v));
+  recordsCache = v.filter((r) => r?.manifest?.type !== 'builtin');
+};
 
 function ctx(manifest = {}) {
   let storedConfig = {};

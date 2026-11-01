@@ -5,8 +5,8 @@ import { api } from '../lib/api.js';
 import { lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
-import { getSearchCover, makeCoverThumb } from '../lib/covers.js';
-import { chapterOrder, detailScroll, recallCover, sourceCatalogState } from '../lib/searchState.js';
+import { getLibraryCover, getSearchCover, makeCoverThumb, preloadLibraryCover } from '../lib/covers.js';
+import { chapterOrder, detailScroll, recallCover, rememberCover, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
@@ -21,6 +21,7 @@ import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+const titleKey = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 const EXPAND_CTRL_H = 16;
 const COVER_BASE = 184;
@@ -140,11 +141,11 @@ export default function Detail() {
     const tLocal = t?.coverLocal;
     const tCover = t?.cover;
     if (anilistCover && tLocal) return tLocal;
-    if (anilistCover && tCover) return tCover;
+    if (anilistCover && tCover) return getLibraryCover(tCover) || tCover;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
     const recalled = recallCover(mangaUrl);
     const remoteCover = fav?.cover || tCover || recalled;
-    return getSearchCover(remoteCover) || remoteCover || '';
+    return getSearchCover(remoteCover) || getLibraryCover(remoteCover) || remoteCover || '';
   }, [mangaUrl, sourceId, progressTick, anilistCover, coverTick]);
 
   const coverSrc = useMemo(() => {
@@ -152,33 +153,58 @@ export default function Detail() {
     const tLocal = t?.coverLocal;
     const tCover = t?.cover;
     if (anilistCover && tLocal) return tLocal;
-    if (anilistCover && tCover) return tCover;
+    if (anilistCover && tCover) return getLibraryCover(tCover) || tCover;
     const local = lib.fav(mangaUrl, sourceId)?.coverLocal;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
     if (knownCover) return knownCover;
-    return d?.cover || '';
+    if (d?.cover) return getSearchCover(d.cover) || getLibraryCover(d.cover) || d.cover;
+    return '';
   }, [d?.cover, knownCover, mangaUrl, sourceId, anilistCover, coverTick]);
 
   const [coverError, setCoverError] = useState(false);
-  const [coverLoaded, setCoverLoaded] = useState(false);
+  const coverKey = `${sourceId}|${mangaUrl}`;
+  const [displayedCover, setDisplayedCover] = useState(() => ({
+    key: coverKey,
+    src: /^(data:|blob:)/i.test(coverSrc) ? coverSrc : ''
+  }));
+  const [failedCover, setFailedCover] = useState('');
+  const visibleCover = displayedCover.key === coverKey
+    ? displayedCover.src
+    : (/^(data:|blob:)/i.test(coverSrc) ? coverSrc : '');
   useEffect(() => {
     setCoverError(false);
-    setCoverLoaded(false);
+    setFailedCover('');
   }, [coverSrc]);
   const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
 
   const coverImg = (alt) => (
-    <img
-      className={cn('w-full h-full object-cover', !coverLoaded && 'opacity-0')}
-      src={finalCover}
-      alt={alt}
-      referrerPolicy="no-referrer"
-      onLoad={() => setCoverLoaded(true)}
-      onError={() => {
-        if (finalCover !== knownCover) setCoverError(true);
-        else setCoverLoaded(true);
-      }}
-    />
+    <>
+      {visibleCover && visibleCover !== finalCover && (
+        <img
+          className="absolute inset-0 w-full h-full object-cover"
+          src={visibleCover}
+          alt={alt}
+          referrerPolicy="no-referrer"
+        />
+      )}
+      {finalCover && (
+        <img
+          className={cn('absolute inset-0 w-full h-full object-cover', visibleCover !== finalCover && 'opacity-0')}
+          src={finalCover}
+          alt={alt}
+          referrerPolicy="no-referrer"
+          onLoad={() => {
+            setDisplayedCover({ key: coverKey, src: finalCover });
+            setFailedCover('');
+            if (/^(https?:\/\/|data:image\/)/i.test(finalCover || '')) preloadLibraryCover(finalCover);
+          }}
+          onError={() => {
+            if (knownCover && finalCover !== knownCover) setCoverError(true);
+            else setFailedCover(finalCover);
+          }}
+        />
+      )}
+    </>
   );
 
   useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
@@ -262,8 +288,37 @@ export default function Detail() {
       .then((r) => {
         if (!alive) return;
         setD(r);
+        rememberCover(mangaUrl, r?.cover);
+        const favorite = lib.fav(mangaUrl, sourceId);
+        if (favorite && r?.cover && favorite.cover !== r.cover) {
+          lib.updateFav(mangaUrl, { cover: r.cover, coverLocal: '' }, sourceId);
+        }
       })
-      .catch((e) => { if (alive && !cached) setErr(String(e)); });
+      .catch(async (e) => {
+        if (!alive) return;
+        const message = String(e?.message || e);
+        if (/\bHTTP 404\b/.test(message)) {
+          const favorite = lib.fav(mangaUrl, sourceId);
+          const title = favorite?.title || d?.title || decodeURIComponent(mangaUrl.split('/').filter(Boolean).at(-1) || '').replace(/-/g, ' ');
+          if (title) {
+            try {
+              const result = await api.catalog({ q: title, page: 1 }, sourceId);
+              const key = titleKey(title);
+              const candidate = (result.items || []).find((item) => titleKey(item.title) === key && item.url && item.url !== mangaUrl);
+              if (alive && candidate) {
+                lib.updateFav(mangaUrl, { url: candidate.url, title: candidate.title }, sourceId);
+                tracking.move(mangaUrl, candidate.url, sourceId);
+                chapterOrder.move(mangaUrl, candidate.url);
+                const params = new URLSearchParams(loc.search);
+                params.set('u', candidate.url);
+                navigate({ pathname: loc.pathname, search: params.toString() }, { replace: true });
+                return;
+              }
+            } catch {}
+          }
+        }
+        if (alive && !cached) setErr(message);
+      });
 
     return () => { alive = false; };
   }, [mangaUrl, sourceId]);
@@ -311,7 +366,9 @@ export default function Detail() {
 
   const addToLibrary = (manga, catIds) => {
     if (!Array.isArray(catIds) || catIds.length === 0) return;
-    lib.toggleFav(manga, catIds);
+    const chapterUrls = (d?.chapters || []).map((chapter) => chapter.url).filter(Boolean);
+    chapterIndex.set(manga.url, manga.sourceId, chapterUrls);
+    lib.toggleFav({ ...manga, chapterTotal: chapterUrls.length }, catIds);
     setFav(true);
     makeCoverThumb(manga.cover).then((local) => {
       if (local) lib.updateFav(manga.url, { coverLocal: local }, manga.sourceId);
@@ -447,13 +504,13 @@ export default function Detail() {
           className="flex flex-col md:flex-row"
           style={{ gap: px(24, scale, 19) }}
         >
-          {knownCover ? (
+          {coverSrc ? (
             <div
               className="relative aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
               style={{ width: `${coverSize}px` }}
             >
               {coverImg('')}
-              {!coverLoaded && <Skeleton className="absolute inset-0 rounded-xl" />}
+              {!visibleCover && failedCover !== finalCover && <Skeleton className="absolute inset-0 rounded-xl" />}
             </div>
           ) : (
             <Skeleton className="aspect-[2/3] rounded-xl shrink-0" style={{ width: `${coverSize}px` }} />
@@ -576,9 +633,9 @@ export default function Detail() {
           {coverSrc ? (
             coverImg(d.title)
           ) : (
-            <div className="w-full h-full animate-pulse bg-muted/40" />
+            <Skeleton className="absolute inset-0 rounded-xl" />
           )}
-          {coverSrc && !coverLoaded && <Skeleton className="absolute inset-0 rounded-xl" />}
+          {coverSrc && !visibleCover && failedCover !== finalCover && <Skeleton className="absolute inset-0 rounded-xl" />}
         </div>
         <div className="flex-1 min-w-0">
           <h1

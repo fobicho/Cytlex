@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { cn } from '../lib/utils.js';
 import { api } from '../lib/api.js';
 import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
 import { extensions } from '../lib/extensions.js';
+import { lib } from '../lib/library.js';
+import { discardLibraryCover, getLibraryCover, preloadLibraryCover } from '../lib/covers.js';
 import { SourceBadge } from './SourceBadge.jsx';
 
 const prefetched = new Set();
@@ -16,12 +18,17 @@ function prefetch(url, sourceId) {
   api.prefetchDetail(url, sourceId);
 }
 
-export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', coverSize, chapterCount }) {
+function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', coverSize, chapterCount }) {
   const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}`;
   const sourceManifest = extensions.manifest(sourceId);
+  const savedSourceName = String(m.sourceName || '');
+  const manifestSourceName = String(sourceManifest.name || '');
+  const hasSavedSourceName = savedSourceName && !/^(mihon-\d+|Fuente Mihon \d+)$/i.test(savedSourceName);
   const sourceInfo = {
     ...sourceManifest,
-    name: m.sourceName || sourceManifest.name || sourceId,
+    name: hasSavedSourceName
+      ? savedSourceName
+      : (manifestSourceName && !/^(mihon-|Fuente Mihon)/i.test(manifestSourceName) ? manifestSourceName : sourceId),
     icon: sourceManifest.icon || m.sourceIcon
   };
   const linkCls = cn(unavailable && 'pointer-events-none');
@@ -34,26 +41,19 @@ export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = 
   const t = tracking.get(m.url, sourceId);
   const aniLocal = anilistCoverOn ? (t?.coverLocal || '') : '';
   const aniCover = anilistCoverOn ? (t?.cover || '') : '';
-  const [src, setSrc] = useState(() => aniLocal || aniCover || cachedCover || localCover || m.cover);
+  const preferredCover = aniLocal || aniCover || cachedCover || localCover || m.cover;
+  const [coverState, setCoverState] = useState(() => ({ key: preferredCover, src: getLibraryCover(preferredCover) || preferredCover }));
+  const src = coverState.key === preferredCover ? coverState.src : getLibraryCover(preferredCover) || preferredCover;
   const hoverTimer = useRef(null);
+  const failedCoverUrls = useRef(new Set());
 
   const schedulePrefetch = () => {
-    if (unavailable) return;
+    if (unavailable || from === 'biblioteca') return;
     clearTimeout(hoverTimer.current);
     hoverTimer.current = setTimeout(() => prefetch(m.url, sourceId), 180);
   };
   const cancelPrefetch = () => clearTimeout(hoverTimer.current);
   useEffect(() => () => clearTimeout(hoverTimer.current), []);
-  useEffect(() => {
-    const local = m.coverLocal?.startsWith('data:') ? m.coverLocal : '';
-    const cached = m.coverCached || '';
-    const t2 = tracking.get(m.url, sourceId);
-    const aniL = anilistCoverOn ? (t2?.coverLocal || '') : '';
-    const aniC = anilistCoverOn ? (t2?.cover || '') : '';
-    const fallback = aniL || aniC || cached || local || m.cover;
-    setSrc(fallback);
-  }, [m.coverCached, m.coverLocal, m.cover, anilistCoverOn, sourceId, m.url]);
-
   const box = coverSize ? { width: `${coverSize}px` } : { aspectRatio: '2 / 3' };
   const inner = coverSize ? 'h-full w-full object-cover block' : 'w-full h-full aspect-[2/3] object-cover block';
   const ph = coverSize ? 'h-full w-full' : 'w-full aspect-[2/3]';
@@ -93,26 +93,61 @@ export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = 
         <div className="relative rounded-xl overflow-hidden bg-muted/50 border border-border/50 shadow-sm aspect-[2/3]" style={box}>
           {src ? (
             <img
-              loading="lazy"
+              loading={from === 'biblioteca' ? 'eager' : 'lazy'}
               decoding="async"
               src={src}
               alt={m.title}
               referrerPolicy="no-referrer"
-              onError={() => {
-                if (src !== m.cover) setSrc(m.cover);
-                else setSrc('');
+              onLoad={() => {
+                if (from === 'biblioteca' && src === preferredCover && /^(https?:\/\/|data:image\/)/i.test(preferredCover || '')) preloadLibraryCover(preferredCover);
+              }}
+              onError={async () => {
+                if (src !== preferredCover && preferredCover) {
+                  discardLibraryCover(preferredCover, src);
+                  setCoverState({ key: preferredCover, src: preferredCover });
+                  return;
+                }
+                if (unavailable) {
+                  setCoverState({ key: preferredCover, src: '' });
+                  return;
+                }
+                if (!src || failedCoverUrls.current.has(src)) {
+                  setCoverState({ key: preferredCover, src: '' });
+                  return;
+                }
+                failedCoverUrls.current.add(src);
+                const local = await preloadLibraryCover(src);
+                if (local) {
+                  setCoverState({ key: preferredCover, src: local });
+                  return;
+                }
+                if (!unavailable && from !== 'biblioteca' && m.url && sourceId) {
+                  try {
+                    const detail = await api.detail(m.url, sourceId);
+                    const refreshedCover = detail?.cover;
+                    if (refreshedCover && refreshedCover !== src && !failedCoverUrls.current.has(refreshedCover)) {
+                      lib.updateFav(m.url, { cover: refreshedCover, coverLocal: '' }, sourceId);
+                      setCoverState({ key: preferredCover, src: refreshedCover });
+                      return;
+                    }
+                  } catch {}
+                }
+                setCoverState({ key: preferredCover, src: '' });
               }}
               className={inner}
             />
           ) : (
-            <div className={cn(ph, 'animate-pulse bg-muted/40')} />
+            <div className={cn(ph, 'bg-muted/40')} />
           )}
           {unavailable && (
-            <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60">
+            <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 px-2">
               <span className="rounded-full bg-black/80 px-2.5 py-1 text-[10px] font-semibold text-white">
                 {unavailableLabel}
               </span>
-              <SourceBadge m={sourceInfo} className="border border-white/50 bg-white shadow-sm" />
+              <span className="flex max-w-full min-w-0 items-center rounded-full bg-black/80 py-1 pl-1 pr-2 text-white" style={{ gap: px(6, 5) }} title={sourceInfo.name}>
+                <SourceBadge m={sourceInfo} className="border border-white/50 bg-white shadow-sm" style={{ width: px(22, 20), height: px(22, 20), borderRadius: '999px', fontSize: px(10, 8) }} />
+                <span className="min-w-0 truncate font-semibold" style={{ fontSize: px(10, 8) }}>{sourceInfo.name}</span>
+              </span>
             </span>
           )}
           {chapterCount > 0 && !unavailable && (
@@ -147,3 +182,5 @@ export default function MangaCard({ m, sourceId = 'leercapitulo', unavailable = 
     </div>
   );
 }
+
+export default memo(MangaCard);
