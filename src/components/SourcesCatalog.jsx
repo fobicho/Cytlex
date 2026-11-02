@@ -14,7 +14,7 @@ import { EmptyState } from './ui/empty-state.jsx';
 import { Input } from './ui/input.jsx';
 import { useScale, px } from '../lib/useScale.js';
 
-export default function SourcesCatalog({ sources, initialSourceId = '' }) {
+export default function SourcesCatalog({ sources, initialSourceId = '', active = true }) {
   const scale = useScale();
   const reduceMotion = useReducedMotion();
   const [restore] = useState(() => sourceCatalogState.takeRestore());
@@ -36,11 +36,23 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
   const requestId = useRef(0);
   const requestSequence = useRef(0);
   const activeHttpRequest = useRef('');
+  const catalogRef = useRef(null);
+  const [catalogWidth, setCatalogWidth] = useState(0);
   const initialRestore = useRef(restore);
   const previousAdultSetting = useRef(showAdultExtensions);
   const pendingScrollTop = useRef(restore?.scrollTop ?? null);
   const selected = useMemo(() => sources.find((source) => source.manifest.id === sourceId), [sources, sourceId]);
   const allSources = extensions.sources();
+
+  useLayoutEffect(() => {
+    const element = catalogRef.current;
+    if (!element) return undefined;
+    const updateWidth = () => setCatalogWidth(element.clientWidth);
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [selected]);
 
   const cancelActiveRequest = () => {
     const request = activeHttpRequest.current;
@@ -245,21 +257,21 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
   }, [sourceId, filters, filterValues, filtersOpen, query, loadedParams, page, hasMore, items, restoring]);
 
   useLayoutEffect(() => {
-    if (restoring || loading || pendingScrollTop.current == null || !sourceId) return;
+    if (!active || restoring || loading || pendingScrollTop.current == null || !sourceId) return;
     const main = document.querySelector('main');
     if (!main) return;
     main.scrollTop = pendingScrollTop.current;
     pendingScrollTop.current = null;
-  }, [sourceId, restoring, loading, items]);
+  }, [active, sourceId, restoring, loading, items]);
 
   useEffect(() => {
     const main = document.querySelector('main');
-    if (!sourceId || !main) return undefined;
+    if (!active || !sourceId || !main) return undefined;
     const save = () => sourceCatalogState.saveScroll(main.scrollTop);
     save();
     main.addEventListener('scroll', save, { passive: true });
     return () => main.removeEventListener('scroll', save);
-  }, [sourceId]);
+  }, [active, sourceId]);
 
   const search = () => loadCatalog(sourceId, { q: query.trim(), ...filterValues });
   const hasActiveFilters = !!query.trim() || Object.values(filterValues).some((value) => Array.isArray(value) ? value.length > 0 : Boolean(value));
@@ -332,6 +344,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
           value={filterValues[filter.id] ?? filter.defaultValue ?? ''}
           onChange={(value) => setFilterValues((current) => ({ ...current, [filter.id]: value }))}
           ariaLabel={filter.label}
+          placeholder={filter.placeholder || `Selecciona ${filter.label.toLocaleLowerCase()}`}
           style={{ width: '100%' }}
           options={(filter.options || []).map((option) => typeof option === 'string' ? { value: option, label: option } : option)}
         />
@@ -352,6 +365,13 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
 
   const coverSize = Math.round(160 * (settings.get().uiScale || 1));
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
+  const catalogGapX = Math.max(12, Math.round(20 * scale));
+  const catalogColumns = catalogWidth > 0 ? Math.max(1, Math.floor((catalogWidth + catalogGapX) / (cs + catalogGapX))) : 1;
+  const visibleColumns = items.length ? Math.min(catalogColumns, items.length) : catalogColumns;
+  const minSearchWidth = Math.max(420, Math.round(520 * scale));
+  const searchWidth = catalogWidth > 0
+    ? Math.min(catalogWidth, Math.max(Math.min(minSearchWidth, catalogWidth), visibleColumns * cs + (visibleColumns - 1) * catalogGapX))
+    : '100%';
 
   if (!selected) {
     return (
@@ -384,7 +404,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
   }
 
   return (
-    <div data-source-catalog-active="true" className="flex min-h-full flex-col" style={{ gap: px(16, scale, 12) }}>
+    <div ref={catalogRef} data-source-catalog-active="true" className="flex min-h-full flex-col" style={{ gap: px(16, scale, 12) }}>
       {selected && (
         <>
           <div className="flex min-w-0 items-center" style={{ gap: px(10, scale, 8) }}>
@@ -395,8 +415,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
             <h2 className="min-w-0 truncate font-semibold" style={{ fontSize: px(16, scale, 13) }}>{selected.manifest.name}</h2>
           </div>
 
-          <div className="rounded-xl border border-border bg-card" style={{ padding: px(12, scale, 9) }}>
-            <form className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center" onSubmit={(event) => { event.preventDefault(); search(); }} style={{ gap: px(8, scale, 6) }}>
+          <div className="rounded-xl border border-border bg-card" style={{ width: searchWidth, maxWidth: '100%', padding: px(12, scale, 9) }}>
+            <form className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center" onSubmit={(event) => { event.preventDefault(); if (query.trim()) search(); }} style={{ gap: px(8, scale, 6) }}>
               <div className="relative min-w-0 flex-1">
                 <Search
                   className="absolute top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -411,7 +431,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
                   style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(36, scale, 30), paddingRight: px(12, scale, 9) }}
                 />
               </div>
-              <Button type="submit" disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
+              <Button type="submit" disabled={loading || !query.trim()} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
                 <Search className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
                 Buscar
               </Button>

@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Link2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { lib } from '../lib/library.js';
@@ -62,18 +62,15 @@ function DuplicateRow({ cover, title, author, sourceId, scale }) {
   );
 }
 
-function useQueryUrl() {
-  const loc = useLocation();
+function queryUrl(loc) {
   return new URLSearchParams(loc.search).get('u') || '';
 }
 
-function useSourceId() {
-  const loc = useLocation();
+function querySourceId(loc) {
   return new URLSearchParams(loc.search).get('s') || 'leercapitulo';
 }
 
-function useBackTo() {
-  const loc = useLocation();
+function backToFor(loc) {
   const params = new URLSearchParams(loc.search);
   const from = params.get('from');
   if (from === 'resultados') return `/resultados?s=${encodeURIComponent(params.get('s') || 'leercapitulo')}`;
@@ -81,13 +78,13 @@ function useBackTo() {
   return from === 'explorar' ? '/explorar' : '/biblioteca';
 }
 
-export default function Detail() {
+const Detail = memo(function Detail({ locationOverride, activeRef }) {
   const navigate = useNavigate();
-  const loc = useLocation();
-  const mangaUrl = useQueryUrl();
-  const sourceId = useSourceId();
+  const loc = locationOverride;
+  const mangaUrl = queryUrl(loc);
+  const sourceId = querySourceId(loc);
   const sourceManifest = extensions.manifest(sourceId);
-  const backTo = useBackTo();
+  const backTo = backToFor(loc);
   const fromParam = new URLSearchParams(loc.search).get('from') || 'biblioteca';
   useEffect(() => {
     if (fromParam === 'fuentes') sourceCatalogState.requestRestore();
@@ -321,7 +318,7 @@ export default function Detail() {
           if (title) {
             try {
               const recovered = await api.findManga({ url: mangaUrl, title, author: favorite?.author || d?.facts?.autor || '' }, sourceId);
-              if (alive && recovered) {
+              if (alive && activeRef.current && recovered) {
                 const updates = { url: recovered.url };
                 if (recovered.detail?.cover && !favorite?.cover && !favorite?.coverLocal) {
                   updates.cover = recovered.detail.cover;
@@ -351,6 +348,7 @@ export default function Detail() {
     const update = () => {
       const c = cover.getBoundingClientRect();
       const s = syn.getBoundingClientRect();
+      if (c.height === 0 || s.width === 0) return;
       const avail = Math.max(0, c.bottom - s.top - EXPAND_CTRL_H);
       setFullH(syn.scrollHeight);
       setAvailH(avail);
@@ -359,6 +357,11 @@ export default function Detail() {
 
     update();
     const raf = requestAnimationFrame(update);
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(update)
+      : null;
+    resizeObserver?.observe(cover);
+    resizeObserver?.observe(syn);
     let raf2 = 0;
     if (document.fonts?.ready) {
       document.fonts.ready.then(() => {
@@ -369,6 +372,7 @@ export default function Detail() {
     return () => {
       cancelAnimationFrame(raf);
       cancelAnimationFrame(raf2);
+      resizeObserver?.disconnect();
       window.removeEventListener('resize', update);
     };
   }, [d, scale]);
@@ -643,7 +647,10 @@ export default function Detail() {
 
       <div
         className="flex flex-col md:flex-row"
-        style={{ gap: px(24, scale, 19) }}
+        style={{
+          gap: px(24, scale, 19),
+          minHeight: `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})`
+        }}
       >
         <div
           ref={coverRef}
@@ -747,7 +754,11 @@ export default function Detail() {
 
       <div
         className="flex flex-wrap items-center border-t border-border"
-        style={{ gap: px(12, scale, 8), marginTop: px(24, scale, 16), paddingTop: px(20, scale, 14) }}
+        style={{
+          gap: px(12, scale, 8),
+          marginTop: px(24, scale, 16),
+          paddingTop: px(overflow ? 20 : 19, scale, 14)
+        }}
       >
         {resume ? (
           <Button
@@ -757,7 +768,10 @@ export default function Detail() {
               window.location.hash = `#/leer?u=${encodeURIComponent(resume.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
             }}
             style={{
-              height: px(40, scale, 33),
+              height: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
+              minHeight: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
+              translate: overflow ? undefined : '0 1px',
+              flexShrink: 0,
               paddingLeft: px(16, scale, 13),
               paddingRight: px(16, scale, 13),
               fontSize: px(14, scale, 12)
@@ -805,8 +819,10 @@ export default function Detail() {
               onAddClick();
             }}
             style={{
-              transform: 'none',
-              height: px(40, scale, 33),
+              height: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
+              minHeight: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
+              translate: overflow ? undefined : '0 1px',
+              flexShrink: 0,
               paddingLeft: px(16, scale, 13),
               paddingRight: px(16, scale, 13),
               fontSize: px(14, scale, 12)
@@ -899,8 +915,10 @@ export default function Detail() {
           onClick={() => setAniListOpen(true)}
           title="Vincular con AniList"
           style={{
-            transform: 'none',
-            height: px(40, scale, 33),
+            height: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
+            minHeight: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
+            translate: overflow ? undefined : '0 1px',
+            flexShrink: 0,
             paddingLeft: px(16, scale, 13),
             paddingRight: px(16, scale, 13),
             fontSize: px(14, scale, 12)
@@ -1186,5 +1204,9 @@ export default function Detail() {
 
     </div>
   );
-}
+}, (previous, next) => previous.activeRef === next.activeRef
+  && previous.locationOverride.pathname === next.locationOverride.pathname
+  && previous.locationOverride.search === next.locationOverride.search);
+
+export default Detail;
 

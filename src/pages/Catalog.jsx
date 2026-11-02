@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { memo, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Search, Loader2, ChevronRight, ChevronLeft, CircleHelp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
@@ -53,7 +53,7 @@ const sourceLangSubtitle = (manifest) => {
   return codes.map((c) => options.find((l) => l.code === c)?.label || c).join(' · ');
 };
 
-function SourceSection({ r, coverSize, scale = 1, first = false, animate = false }) {
+function SourceSection({ r, coverSize, scale = 1, first = false, animate = false, active = true }) {
   const trackRef = useRef(null);
   const mainRef = useRef(null);
   const [canLeft, setCanLeft] = useState(false);
@@ -64,19 +64,19 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
   }, []);
 
   useEffect(() => {
-    if (scrollMemory.catalog > 0 && mainRef.current) {
+    if (active && scrollMemory.catalog > 0 && mainRef.current) {
       mainRef.current.scrollTop = scrollMemory.catalog;
       scrollMemory.catalog = 0;
     }
-  }, [r.id]);
+  }, [r.id, active]);
 
   useEffect(() => {
     const main = mainRef.current;
-    if (!main) return;
+    if (!active || !main) return undefined;
     const save = () => { scrollMemory.catalog = main.scrollTop; };
     main.addEventListener('scroll', save, { passive: true });
     return () => main.removeEventListener('scroll', save);
-  }, []);
+  }, [active]);
 
   const gap = Math.max(8, Math.round(12 * scale));
 
@@ -231,8 +231,8 @@ let sessionTab = 'mangas';
 let animateSearch = false;
 let activeSearchRun = 0;
 
-export default function Catalog({ tutorialPreview = false }) {
-  const loc = useLocation();
+const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = false, active = true }) {
+  const loc = locationOverride;
   const navigate = useNavigate();
   const [tab, setTab] = useState(() => {
     const t = new URLSearchParams(loc.search).get('tab');
@@ -539,7 +539,7 @@ export default function Catalog({ tutorialPreview = false }) {
                     description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para mostrarlas."
                   />
                 ) : visibleCompleted.map((r, i) => (
-                  <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} first={i === 0} animate={animateSearch} />
+                  <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} first={i === 0} animate={animateSearch} active={active} />
                 ))}
               </>
             )}
@@ -548,8 +548,10 @@ export default function Catalog({ tutorialPreview = false }) {
       ) : tab === 'extensiones' ? (
         <ExtensionsPanel tutorialPreview={tutorialPreview} />
       ) : (
-        <SourcesCatalog sources={sources} initialSourceId={new URLSearchParams(loc.search).get('source') || ''} />
+        <SourcesCatalog sources={sources} initialSourceId={new URLSearchParams(loc.search).get('source') || ''} active={active} />
       )}
     </div>
   );
-}
+});
+
+export default Catalog;

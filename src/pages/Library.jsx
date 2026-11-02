@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { RefreshCw, ArrowUpDown } from 'lucide-react';
 import { lib } from '../lib/library.js';
@@ -73,6 +73,22 @@ const invalidateUnreadCountsForUrl = (mangaUrl) => {
   }
 };
 const compareLibraryTitles = (a, b) => libraryTitleCollator.compare(String(a.title || ''), String(b.title || ''));
+const sameLibraryFavorites = (left, right) => left.length === right.length && left.every((manga, index) => {
+  const next = right[index];
+  return manga.url === next.url
+    && manga.sourceId === next.sourceId
+    && manga.title === next.title
+    && manga.author === next.author
+    && manga.cover === next.cover
+    && (manga.coverLocal || '').length === (next.coverLocal || '').length
+    && (manga.coverCached || '').length === (next.coverCached || '').length
+    && manga.sourceName === next.sourceName
+    && manga.sourceIcon === next.sourceIcon
+    && manga.chapterTotal === next.chapterTotal
+    && manga.chapterReadCount === next.chapterReadCount
+    && manga.addedAt === next.addedAt
+    && (manga.cats || []).join('\0') === (next.cats || []).join('\0');
+});
 const sortLibraryManga = (items, sortBy, unread) => items.sort((a, b) => {
   switch (sortBy) {
     case 'title-desc':
@@ -190,7 +206,7 @@ function CachedLibraryCover({ cover, title, className }) {
   );
 }
 
-export default function Library({ active = true }) {
+const Library = memo(function Library({ active = true }) {
   const [cats, setCats] = useState(() => lib.cats());
   const [sel, setSel] = useState(() => {
     const list = lib.cats();
@@ -250,7 +266,10 @@ export default function Library({ active = true }) {
   }, []);
 
   useEffect(() => {
-    if (active) setFavs(lib.favs());
+    if (active) {
+      const latest = lib.favs();
+      setFavs((current) => sameLibraryFavorites(current, latest) ? current : latest);
+    }
   }, [active]);
 
   useEffect(() => {
@@ -661,5 +680,7 @@ export default function Library({ active = true }) {
       })}
     </div>
   );
-}
+});
+
+export default Library;
 

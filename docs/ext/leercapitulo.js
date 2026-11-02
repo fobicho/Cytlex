@@ -230,8 +230,17 @@ export default function createSource({ fetchText, parse, head }) {
     return { items, totalPages, totalText: text(doc, '.lc-section-title .lc-more') };
   }
 
-  function catalogFilters() {
-    return [{ id: 'genre', label: 'Género', type: 'text', placeholder: 'Nombre o slug del género' }];
+  async function catalogFilters() {
+    const doc = parse(await fetchText(BASE));
+    const genres = new Map();
+    for (const link of doc.querySelectorAll('a[href*="/genre/"]')) {
+      const url = new URL(link.getAttribute('href') || '', BASE);
+      const slug = url.pathname.match(/\/genre\/([^/]+)/)?.[1];
+      const label = (link.textContent || '').replace(/\s+/g, ' ').trim();
+      if (slug && label && !genres.has(slug)) genres.set(slug, { value: slug, label });
+    }
+    const options = [...genres.values()].sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }));
+    return [{ id: 'genre', label: 'Género', type: 'select', options }];
   }
 
   async function detail(mangaUrl) {

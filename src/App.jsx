@@ -54,6 +54,12 @@ class PageBoundary extends Component {
 
 export const RESET_PAGE_EVENT = 'cytlex:reset-page';
 export const GO_EXTENSIONS_EVENT = 'cytlex:go-extensions';
+const DETAIL_ORIGINS = ['biblioteca', 'explorar', 'fuentes', 'resultados'];
+
+function detailOrigin(location) {
+  const from = new URLSearchParams(location.search).get('from');
+  return DETAIL_ORIGINS.includes(from) ? from : 'biblioteca';
+}
 
 export function goToExtensions() {
   window.location.hash = '#/explorar?tab=extensiones';
@@ -75,6 +81,9 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   const [extensionMetadataRevision, setExtensionMetadataRevision] = useState(0);
   const scale = useScale();
   const [resetTick, setResetTick] = useState(0);
+  const [retainedDetailLocations, setRetainedDetailLocations] = useState({});
+  const [retainedExploreLocation, setRetainedExploreLocation] = useState(null);
+  const [hasVisitedLibrary, setHasVisitedLibrary] = useState(() => window.location.hash.includes('/biblioteca'));
   const [quickSearchOpen, setQuickSearchOpen] = useState(false);
   const [quickSearchQuery, setQuickSearchQuery] = useState('');
   const [quickSearchPoint, setQuickSearchPoint] = useState(() => quickSearchPosition(window.innerWidth / 2, window.innerHeight / 2));
@@ -85,10 +94,29 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   const location = useLocation();
   const navigate = useNavigate();
   const isReader = location.pathname.startsWith('/leer');
+  const isMangaPage = location.pathname.startsWith('/manga');
+  const isExplorePage = location.pathname === '/explorar';
+  const currentDetailOrigin = isMangaPage ? detailOrigin(location) : '';
+  const detailActivityRefs = useRef(Object.fromEntries(DETAIL_ORIGINS.map((origin) => [origin, { current: false }])));
+  DETAIL_ORIGINS.forEach((origin) => {
+    detailActivityRefs.current[origin].current = isMangaPage && currentDetailOrigin === origin;
+  });
+  useEffect(() => {
+    if (!isMangaPage) return;
+    setRetainedDetailLocations((current) => current[currentDetailOrigin] === location
+      ? current
+      : { ...current, [currentDetailOrigin]: location });
+  }, [isMangaPage, currentDetailOrigin, location.pathname, location.search]);
+  useEffect(() => {
+    if (isExplorePage) setRetainedExploreLocation(location);
+  }, [isExplorePage, location.pathname, location.search]);
+  const catalogLocation = isExplorePage ? location : retainedExploreLocation;
   const isLibraryPage = location.pathname === '/biblioteca';
-  const isLibraryDetail = location.pathname.startsWith('/manga')
-    && new URLSearchParams(location.search).get('from') === 'biblioteca';
-  const keepLibraryMounted = isLibraryPage || isLibraryDetail;
+  const isLibraryDetail = isMangaPage && new URLSearchParams(location.search).get('from') === 'biblioteca';
+  const shouldMountLibrary = hasVisitedLibrary || isLibraryPage || isLibraryDetail;
+  useEffect(() => {
+    if (isLibraryPage || isLibraryDetail) setHasVisitedLibrary(true);
+  }, [isLibraryPage, isLibraryDetail]);
   const resetPage = useCallback(() => {
     setResetTick((t) => t + 1);
     lastSearch.q = '';
@@ -257,7 +285,22 @@ export default function App({ isVisible = true, tutorialMode = false }) {
             style={isReader ? undefined : { padding: `${Math.max(16, Math.round(24 * scale))}px` }}
           >
             <PageBoundary>
-              {keepLibraryMounted && (
+              {catalogLocation && (
+                <div className={isExplorePage ? '' : 'hidden'} aria-hidden={!isExplorePage} inert={!isExplorePage}>
+                  <Catalog key={`cat-${resetTick}`} locationOverride={catalogLocation} tutorialPreview={tutorialMode} active={isExplorePage} />
+                </div>
+              )}
+              {DETAIL_ORIGINS.map((origin) => {
+                const active = isMangaPage && currentDetailOrigin === origin;
+                const detailLocation = active ? location : retainedDetailLocations[origin];
+                if (!detailLocation) return null;
+                return (
+                  <div key={origin} className={active ? '' : 'hidden'} aria-hidden={!active} inert={!active}>
+                    <Detail locationOverride={detailLocation} activeRef={detailActivityRefs.current[origin]} />
+                  </div>
+                );
+              })}
+              {shouldMountLibrary && (
                 <div className={isLibraryPage ? '' : 'hidden'} aria-hidden={!isLibraryPage} inert={!isLibraryPage}>
                   <Library key={`lib-${resetTick}`} active={isLibraryPage} />
                 </div>
@@ -265,7 +308,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
               <Routes>
                 <Route path="/" element={<Navigate to="/biblioteca" replace />} />
                 <Route path="/biblioteca" element={null} />
-                <Route path="/explorar" element={<Catalog key={`cat-${resetTick}`} tutorialPreview={tutorialMode} />} />
+                <Route path="/explorar" element={null} />
                 <Route path="/resultados" element={<Results />} />
                 <Route path="/catalogo" element={<Navigate to="/explorar" replace />} />
                 <Route
@@ -273,7 +316,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
                   element={<Settings key={`set-${resetTick}`} tutorialPreview={tutorialMode} />}
                 />
                 <Route path="/seguimiento" element={<Tracking />} />
-                <Route path="/manga/*" element={<Detail />} />
+                <Route path="/manga/*" element={null} />
                 <Route path="/leer/*" element={<Reader isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} />} />
               </Routes>
             </PageBoundary>
