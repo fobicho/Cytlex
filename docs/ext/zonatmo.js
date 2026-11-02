@@ -36,7 +36,7 @@ export default function createSource({ fetchText, parse }) {
   async function catalog({
     q = '', page = 1, type = '', demography = '', status = '', author = '',
     gender = [], excludeGender = [], searchBy = 'title',
-    orderItem = 'likes_count', orderDirection = 'desc'
+    orderItem = 'likes_count', orderDirection = 'desc', __cytlexRequestId
   } = {}) {
     const params = new URLSearchParams({
       order_item: orderItem,
@@ -53,7 +53,7 @@ export default function createSource({ fetchText, parse }) {
     (Array.isArray(gender) ? gender : [gender]).filter(Boolean).forEach((id) => params.append('genders[]', id));
     (Array.isArray(excludeGender) ? excludeGender : [excludeGender]).filter(Boolean).forEach((id) => params.append('exclude_genders[]', id));
     const url = `${base}/biblioteca?${params}`;
-    const doc = parse(await fetchText(url));
+    const doc = parse(await fetchText(url, __cytlexRequestId));
     const items = mapCards(doc);
     return {
       items,

@@ -210,7 +210,7 @@ export default function createSource({ fetchText, parse, head }) {
     return pages;
   }
 
-  async function catalog({ q = '', genre = '', page = 1 } = {}) {
+  async function catalog({ q = '', genre = '', page = 1, __cytlexRequestId } = {}) {
     const params = new URLSearchParams();
     if (q) params.set('q', q);
     if (genre) params.set('genre', genre);
@@ -218,7 +218,7 @@ export default function createSource({ fetchText, parse, head }) {
     if (page > 1) params.set('page', String(page));
     const url = `${BASE}/manga/?${params.toString()}`;
 
-    const doc = parse(await fetchText(url));
+    const doc = parse(await fetchText(url, __cytlexRequestId));
     const items = [...doc.querySelectorAll('.lc-card')].map(parseCard).filter((c) => c.title);
 
     let totalPages = 1;

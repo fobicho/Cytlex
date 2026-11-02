@@ -33,10 +33,10 @@ export function ToastProvider({ children }) {
   }, []);
 
   const toast = useCallback(
-    ({ title, description, variant = 'info', duration = 4500, action, icon }) => {
+    ({ title, description, variant = 'info', duration = 4500, action, icon, loading = false, onDismiss }) => {
       const id = ++seq;
-      setItems((list) => [...list.slice(-3), { id, title, description, variant, action, icon }]);
-      timers.current.set(id, setTimeout(() => dismiss(id), duration));
+      setItems((list) => [...list.slice(-3), { id, title, description, variant, action, icon, loading, onDismiss }]);
+      if (duration !== null) timers.current.set(id, setTimeout(() => dismiss(id), duration));
       return id;
     },
     [dismiss]
@@ -61,7 +61,7 @@ export function ToastProvider({ children }) {
                 transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
                 className="pointer-events-auto flex items-start gap-3 rounded-xl border border-border bg-card/95 backdrop-blur-xl shadow-2xl px-4 py-3"
               >
-                <Icon className={cn('w-4 h-4 mt-0.5 shrink-0', TONES[t.variant] || TONES.info)} />
+                <Icon className={cn('w-4 h-4 mt-0.5 shrink-0', TONES[t.variant] || TONES.info, t.loading && 'animate-spin text-primary')} />
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium leading-snug">{t.title}</div>
                   {t.description && (
@@ -82,7 +82,10 @@ export function ToastProvider({ children }) {
                 </div>
                 <button
                   type="button"
-                  onClick={() => dismiss(t.id)}
+                  onClick={() => {
+                    t.onDismiss?.();
+                    dismiss(t.id);
+                  }}
                   aria-label="Cerrar"
                   className="shrink-0 grid place-items-center w-5 h-5 rounded-md text-muted-foreground hover:text-foreground transition-colors"
                 >

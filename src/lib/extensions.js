@@ -5,6 +5,7 @@ import defaultExtensionIndex from '../../docs/index.json';
 const KEY = 'cytlex:extensions:v1';
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
 const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
+const isPlaceholderExtension = (record) => /^mihon-\d+$/i.test(String(record?.manifest?.id || ''));
 let recordsCache = null;
 
 export function isAdultExtension(source) {
@@ -16,12 +17,15 @@ const read = () => {
   if (recordsCache) return recordsCache;
   let list = [];
   try { list = JSON.parse(localStorage.getItem(KEY)) || []; } catch { list = []; }
-  recordsCache = list.filter((r) => r?.manifest?.type !== 'builtin');
+  recordsCache = list.filter((r) => r?.manifest?.type !== 'builtin' && !isPlaceholderExtension(r));
+  if (recordsCache.length !== list.length) {
+    try { localStorage.setItem(KEY, JSON.stringify(recordsCache)); } catch {}
+  }
   return recordsCache;
 };
 const write = (v) => {
-  localStorage.setItem(KEY, JSON.stringify(v));
-  recordsCache = v.filter((r) => r?.manifest?.type !== 'builtin');
+  recordsCache = v.filter((r) => r?.manifest?.type !== 'builtin' && !isPlaceholderExtension(r));
+  localStorage.setItem(KEY, JSON.stringify(recordsCache));
 };
 
 function ctx(manifest = {}) {
@@ -35,11 +39,11 @@ function ctx(manifest = {}) {
     id: manifest.id,
     config: manifest.config,
     languageSelections,
-    fetchText: (url) => {
+    fetchText: (url, requestId) => {
       if (typeof window === 'undefined' || !window.cytlex?.httpGet) {
         throw new Error('Sin puente Electron para hacer peticiones');
       }
-      return window.cytlex.httpGet(url);
+      return window.cytlex.httpGet(url, requestId);
     },
     parse: (html) => new DOMParser().parseFromString(html, 'text/html'),
     head: async (url) => {
@@ -89,8 +93,8 @@ addEventListener('message', async (event) => {
         id: message.context.id,
         config: message.context.config,
         languageSelections: message.context.languageSelections,
-        fetchText: (url) => callHost('fetchText', [url]),
-        fetchPostText: (payload) => callHost('fetchPostText', [payload]),
+        fetchText: (url, requestId) => callHost('fetchText', [url, requestId]),
+        fetchPostText: (payload, requestId) => callHost('fetchPostText', [payload, requestId]),
         head: (url) => callHost('head', [url]),
         parse: (html) => new DOMParser().parseFromString(html, 'text/html')
       });
@@ -175,9 +179,9 @@ async function loadModule(code, manifest) {
     }
     if (message.kind === 'host-call') {
       const action = message.method === 'fetchText'
-        ? (url) => window.cytlex.httpGet(url)
+        ? (url, requestId) => window.cytlex.httpGet(url, requestId)
         : message.method === 'fetchPostText'
-          ? (payload) => window.cytlex.httpPost({ ...payload, responseType: 'text' })
+          ? (payload, requestId) => window.cytlex.httpPost({ ...payload, responseType: 'text' }, requestId)
         : message.method === 'head'
           ? (url) => window.cytlex.httpHead(url)
           : null;

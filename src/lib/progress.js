@@ -16,14 +16,13 @@ const write = (data) => {
 const cap = (url, sourceId = 'leercapitulo') => `${sourceId}|${url}`;
 
 const listeners = new Set();
-const notify = () => listeners.forEach((l) => l());
+const notify = (change) => listeners.forEach((l) => l(change));
 
 function put(url, sourceId, patch) {
   const data = read();
   const k = cap(url, sourceId);
   data[k] = { ...(data[k] || {}), ...patch };
   write(data);
-  notify();
 }
 
 export const progress = {
@@ -44,35 +43,43 @@ export const progress = {
     put(url, sourceId, { page, total: total ?? cur?.total ?? 0, updatedAt: Date.now() });
   },
 
-  markRead(url, sourceId, total = 0) {
+  markRead(url, sourceId, total = 0, mangaUrl = '') {
     if (!url) return;
+    const wasRead = read()[cap(url, sourceId)]?.read;
     put(url, sourceId, { page: null, total, read: true, readAt: Date.now() });
+    if (!wasRead) notify({ type: 'read', mangaUrl, sourceId });
   },
 
-  markMany(urls, sourceId, total = 0) {
+  markMany(urls, sourceId, total = null, mangaUrl = '') {
     const list = (urls || []).filter(Boolean);
     if (!list.length) return;
     const data = read();
     const now = Date.now();
+    let changed = false;
     list.forEach((url) => {
-      data[cap(url, sourceId)] = { ...(data[cap(url, sourceId)] || {}), page: null, total, read: true, readAt: now };
+      const key = cap(url, sourceId);
+      const previous = data[key] || {};
+      if (!previous.read) changed = true;
+      data[key] = { ...previous, page: null, total: total ?? previous.total ?? 0, read: true, readAt: now };
     });
     write(data);
-    notify();
+    if (changed) notify({ type: 'read', mangaUrl, sourceId });
   },
 
-  markUnread(url, sourceId) {
+  markUnread(url, sourceId, mangaUrl = '') {
     if (!url) return;
     const cur = read()[cap(url, sourceId)];
     if (!cur) return;
     put(url, sourceId, { read: false, readAt: null, page: null });
+    if (cur.read) notify({ type: 'read', mangaUrl, sourceId });
   },
 
-  remove(url, sourceId) {
+  remove(url, sourceId, mangaUrl = '') {
     const data = read();
+    const wasRead = data[cap(url, sourceId)]?.read;
     delete data[cap(url, sourceId)];
     write(data);
-    notify();
+    if (wasRead) notify({ type: 'read', mangaUrl, sourceId });
   },
 
   reassignSource(oldId, newId) {
@@ -89,7 +96,7 @@ export const progress = {
     }
     if (changed) {
       write(data);
-      notify();
+      notify({ type: 'reset', sourceId: newId });
     }
   }
 };

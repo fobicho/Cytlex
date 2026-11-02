@@ -372,6 +372,25 @@ function mergeChapterProgress(...lists) {
 }
 
 export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
+  const excludedKeys = new Set();
+  const excludedUrls = new Set();
+  const excludedIdentities = new Set();
+  for (const entry of excludedEntries) {
+    const sources = [[entry.manga?.sourceId, entry.manga?.url], [entry.legacySourceId, entry.legacyUrl]];
+    for (const [sourceId, url] of sources) {
+      if (url) excludedUrls.add(urlKey(url));
+      if (sourceId && url) {
+        excludedKeys.add(`${sourceId}|${urlKey(url)}`);
+        excludedKeys.add(`${sourceId}|${pathKey(url)}`);
+      }
+    }
+    const identityKey = mangaIdentityKey(entry.manga || {});
+    if (identityKey) excludedIdentities.add(identityKey);
+  }
+  const importableEntries = candidate.entries.filter((entry) => (
+    !excludedKeys.has(`${entry.manga?.sourceId || ''}|${urlKey(entry.manga?.url)}`)
+    && !excludedIdentities.has(mangaIdentityKey(entry.manga || {}))
+  ));
   const previous = Object.fromEntries([FAVORITES_KEY, CATEGORIES_KEY].map((key) => [key, localStorage.getItem(key)]));
   const currentCategories = readStored(CATEGORIES_KEY, [{ id: 'todos', name: 'Todos' }]);
   const categories = Array.isArray(currentCategories) && currentCategories.length ? currentCategories : [{ id: 'todos', name: 'Todos' }];
@@ -384,9 +403,25 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
       categoryIds.set(key, id);
     }
   });
-  const storedFavorites = readStored(FAVORITES_KEY, []);
-  const incomingIdentityKeys = new Set(candidate.entries
-    .filter((entry) => !excludedEntries.includes(entry))
+  const importedCategories = [...new Map(candidate.categoryNames
+    .map((name) => categoryIds.get(normalizeName(name)))
+    .filter(Boolean)
+    .map((id) => [id, categories.find((category) => category.id === id)])).values()];
+  if (importedCategories.length) {
+    const importedCategoryIds = new Set(importedCategories.map((category) => category.id));
+    const firstImportedIndex = categories.findIndex((category) => importedCategoryIds.has(category.id));
+    const before = categories.slice(0, firstImportedIndex).filter((category) => !importedCategoryIds.has(category.id));
+    const after = categories.slice(firstImportedIndex).filter((category) => !importedCategoryIds.has(category.id));
+    categories.splice(0, categories.length, ...before, ...importedCategories, ...after);
+  }
+  const currentFavorites = readStored(FAVORITES_KEY, []);
+  const storedFavorites = (Array.isArray(currentFavorites) ? currentFavorites : []).filter((manga) => (
+    !excludedUrls.has(urlKey(manga.url))
+    && !excludedKeys.has(`${manga.sourceId || 'leercapitulo'}|${urlKey(manga.url)}`)
+    && !excludedKeys.has(`${manga.sourceId || 'leercapitulo'}|${pathKey(manga.url)}`)
+    && !excludedIdentities.has(mangaIdentityKey(manga))
+  ));
+  const incomingIdentityKeys = new Set(importableEntries
     .map((entry) => mangaIdentityKey(entry.manga))
     .filter(Boolean));
   const favorites = [];
@@ -412,7 +447,7 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
   const defaultCategoryId = categories.find((category) => normalizeName(category.name) === 'todos')?.id;
   let added = 0;
   let updated = 0;
-  for (const entry of candidate.entries.filter((item) => !excludedEntries.includes(item))) {
+  for (const entry of importableEntries) {
     const manga = entry.manga;
     manga.cats = [...new Set(manga.cats.map((name) => categoryIds.get(normalizeName(name))).filter(Boolean))];
     if (!manga.cats.length && categories[0]?.id) manga.cats = [categories[0].id];
@@ -454,6 +489,7 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
         chapterTotal: Math.max(Number(existing.chapterTotal) || 0, Number(manga.chapterTotal) || 0),
         chapterReadCount: Math.max(Number(existing.chapterReadCount) || 0, Number(manga.chapterReadCount) || 0),
         coverLocal: manga.cover ? '' : existing.coverLocal || '',
+        coverCached: manga.cover ? '' : existing.coverCached || '',
         cats: [...new Set([...keptCategories, ...manga.cats])]
       };
       byManga.set(key, index);
@@ -486,5 +522,5 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
     }
     throw error;
   }
-  return { added, updated };
+  return { added, updated, excluded: candidate.entries.length - importableEntries.length };
 }

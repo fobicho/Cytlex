@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
-import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, X, Database, Download, Upload } from 'lucide-react';
+import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, X, Database, Download, Upload, CircleHelp } from 'lucide-react';
 import { resolveMode, settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
 import { anilist } from '../lib/anilist.js';
@@ -13,7 +13,9 @@ import { notifyHours } from '../lib/notify.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { compressBackup, createBackup, parseBackup, readBackupFile, restoreBackup } from '../lib/backup.js';
 import { importMihonBackup, previewMihonBackup } from '../lib/mihonBackup.js';
+import { reconcileMihonProgress } from '../lib/mihonProgress.js';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
+import { api } from '../lib/api.js';
 import { Button } from '../components/ui/button.jsx';
 import { Card } from '../components/ui/card.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
@@ -22,6 +24,63 @@ import { useToast } from '../components/Toast.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
+import { invalidateLibraryCovers } from '../lib/covers.js';
+
+function clearLibraryUnreadCache() {
+  localStorage.removeItem('cytlex:libraryUnread:v1');
+  localStorage.removeItem('cytlex:libraryUnread:v2');
+  window.dispatchEvent(new Event('cytlex:library-unread-reset'));
+}
+
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error('Importación cancelada.');
+  error.name = 'AbortError';
+  throw error;
+}
+
+async function refreshImportedMihonCovers(candidate, excludedEntries, signal) {
+  const excluded = new Set(excludedEntries.map((entry) => `${entry.manga?.sourceId || ''}|${entry.manga?.url || ''}`));
+  const entries = candidate.entries.filter(({ manga }) => {
+    if (excluded.has(`${manga?.sourceId || ''}|${manga?.url || ''}`)) return false;
+    const sourceId = extensions.resolveInstalledSource(manga?.sourceId, manga?.sourceName, manga?.url) || manga?.sourceId;
+    if (!extensions.isInstalled(sourceId)) return false;
+    if (sourceId !== manga.sourceId) {
+      manga.sourceId = sourceId;
+      const manifest = extensions.manifest(sourceId);
+      manga.sourceName = manifest?.name || manga.sourceName;
+      manga.sourceIcon = manifest?.icon || manga.sourceIcon;
+    }
+    return true;
+  });
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(4, entries.length) }, async () => {
+    while (cursor < entries.length && !signal?.aborted) {
+      const entry = entries[cursor++];
+      try {
+        const originalUrl = entry.manga.url;
+        const refreshed = await api.refreshManga(originalUrl, entry.manga.sourceId, {
+          title: entry.manga.title,
+          author: entry.manga.author
+        });
+        if (signal?.aborted) return;
+        if (refreshed?.url && refreshed.url !== originalUrl) {
+          entry.originalUrl = entry.originalUrl || originalUrl;
+          entry.manga.url = refreshed.url;
+        }
+        const detail = refreshed?.detail;
+        if (detail && typeof detail === 'object') {
+          entry.importedDetail = detail;
+          if (detail.cover && /^https?:\/\//i.test(detail.cover)) entry.manga.cover = detail.cover;
+          if (Array.isArray(detail.chapters) && detail.chapters.length) {
+            entry.manga.chapterTotal = detail.chapters.length;
+          }
+        }
+      } catch {}
+    }
+  }));
+  throwIfAborted(signal);
+}
 
 function Switch({ on, onChange, label, disabled = false, scale = 1 }) {
   return (
@@ -178,7 +237,10 @@ const DEFAULT_EXTENSION_REPOSITORY = 'https://fobicho.github.io/Cytlex/index.jso
 const extensionForSource = (repository, sourceId) => repository.find((manifest) => (
   manifest.id === sourceId || manifest.config?.sources?.some((source) => source.id === sourceId)
 ));
-const canInstallExtension = (manifest) => !!manifest?.id && (manifest.type !== 'module' || !!manifest.main);
+const canInstallExtension = (manifest) => !!manifest?.id && (
+  (manifest.type === 'module' && !!manifest.main)
+  || (manifest.type === 'selector' && !!manifest.baseUrl && !!manifest.selectors)
+);
 
 let sessionSeccion = '';
 
@@ -196,7 +258,7 @@ export default function Settings({ tutorialPreview = false }) {
   const [authErr, setAuthErr] = useState('');
   const [connectHintFor, setConnectHintFor] = useState(null);
   const connectHintRef = useRef(null);
-  const { toast } = useToast();
+  const { toast, dismiss } = useToast();
   const [bgErr, setBgErr] = useState('');
   const [bgBusy, setBgBusy] = useState(false);
   const [confirmBackground, setConfirmBackground] = useState(false);
@@ -204,7 +266,9 @@ export default function Settings({ tutorialPreview = false }) {
   const [confirmRemoveRepo, setConfirmRemoveRepo] = useState(false);
   const [backupCandidate, setBackupCandidate] = useState(null);
   const [backupInstallOpen, setBackupInstallOpen] = useState(false);
+  const [backupReviewOpen, setBackupReviewOpen] = useState(false);
   const [backupMissingSources, setBackupMissingSources] = useState([]);
+  const [backupUnavailableSources, setBackupUnavailableSources] = useState([]);
   const [backupInstallManifests, setBackupInstallManifests] = useState([]);
   const [mihonCandidate, setMihonCandidate] = useState(null);
   const [mihonBlockedEntries, setMihonBlockedEntries] = useState([]);
@@ -218,6 +282,7 @@ export default function Settings({ tutorialPreview = false }) {
   const [backupBusy, setBackupBusy] = useState(false);
   const backupFileInputRef = useRef(null);
   const mihonFileInputRef = useRef(null);
+  const mihonImportControllerRef = useRef(null);
   const removeRepoRef = useRef(null);
   const settingsRootRef = useRef(null);
   const scaleTransitionTimeoutRef = useRef(null);
@@ -437,15 +502,53 @@ export default function Settings({ tutorialPreview = false }) {
     }
   };
 
-  const finishBackupImport = () => {
+  const finishBackupImport = async ({ omitUnavailable = false } = {}) => {
     if (!backupCandidate) return;
     try {
-      restoreBackup(backupCandidate.data);
+      let data = backupCandidate.data;
+      let omittedCount = 0;
+      if (omitUnavailable) {
+        const excludedIds = new Set(backupUnavailableSources.map((source) => source.id));
+        let favorites = [];
+        try {
+          const value = JSON.parse(data['cytlex:favs'] || '[]');
+          if (Array.isArray(value)) favorites = value;
+        } catch {}
+        const retained = favorites.filter((manga) => !excludedIds.has(manga?.sourceId || 'leercapitulo'));
+        omittedCount = favorites.length - retained.length;
+        data = {
+          ...data,
+          'cytlex:favs': JSON.stringify(retained)
+        };
+      }
+      let favorites = [];
+      try {
+        const value = JSON.parse(data['cytlex:favs'] || '[]');
+        if (Array.isArray(value)) favorites = value;
+      } catch {}
+      const importedCoverUrls = favorites.map((manga) => manga?.cover).filter((cover) => /^https?:\/\//i.test(cover || ''));
+      if (importedCoverUrls.length) {
+        data = {
+          ...data,
+          'cytlex:favs': JSON.stringify(favorites.map((manga) => (
+            /^https?:\/\//i.test(manga?.cover || '') ? { ...manga, coverLocal: '', coverCached: '' } : manga
+          )))
+        };
+        await invalidateLibraryCovers(importedCoverUrls);
+      }
+      restoreBackup(data);
+      clearLibraryUnreadCache();
       setBackupCandidate(null);
       setBackupInstallOpen(false);
+      setBackupReviewOpen(false);
       setBackupMissingSources([]);
+      setBackupUnavailableSources([]);
       setBackupInstallManifests([]);
-      toast({ title: 'Respaldo restaurado', description: 'Cytlex se recargará para aplicar los datos.', variant: 'success' });
+      toast({
+        title: 'Respaldo restaurado',
+        description: `Cytlex se recargará para aplicar los datos${omittedCount ? `; ${omittedCount} mangas omitidos` : ''}.`,
+        variant: 'success'
+      });
       window.setTimeout(() => window.location.reload(), 800);
     } catch (error) {
       toast({ title: 'No se pudo restaurar el respaldo', description: error.message, variant: 'error' });
@@ -464,11 +567,14 @@ export default function Settings({ tutorialPreview = false }) {
       const sources = new Map();
       favorites.forEach((manga) => {
         const id = manga?.sourceId || 'leercapitulo';
-        if (!extensions.isInstalled(id)) {
-          const source = sources.get(id) || { id, name: manga?.sourceName || id, count: 0 };
-          source.count += 1;
-          sources.set(id, source);
-        }
+        const resolvedId = extensions.resolveInstalledSource(id, manga?.sourceName, manga?.url) || id;
+        const manifest = extensions.manifest(resolvedId);
+        const unavailable = !extensions.isInstalled(resolvedId)
+          || (!settings.get().showAdultExtensions && isAdultExtension(manifest));
+        if (!unavailable) return;
+        const source = sources.get(id) || { id, resolvedId, name: manga?.sourceName || manifest?.name || id, count: 0 };
+        source.count += 1;
+        sources.set(id, source);
       });
       if (!sources.size) {
         finishBackupImport();
@@ -477,18 +583,21 @@ export default function Settings({ tutorialPreview = false }) {
 
       const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
       let repository = [];
-      try { repository = await extensions.repoIndex(indexUrl); } catch {}
+      if ([...sources.values()].some((source) => !extensions.isInstalled(source.resolvedId))) {
+        try { repository = await extensions.repoIndex(indexUrl); } catch {}
+      }
       const manifests = new Map();
-      const missing = [...sources.values()].map((source) => {
-        const manifest = extensionForSource(repository, source.id);
-        const fallback = manifest || extensions.manifest(source.id);
+      const missing = [...sources.values()].filter((source) => !extensions.isInstalled(source.resolvedId)).map((source) => {
+        const manifest = extensionForSource(repository, source.id) || extensionForSource(repository, source.resolvedId);
+        const fallback = manifest || extensions.manifest(source.resolvedId) || extensions.manifest(source.id);
         const installable = canInstallExtension(fallback);
         if (installable) manifests.set(fallback.id, fallback);
         return { ...source, manifest: installable ? fallback : null };
       });
       setBackupMissingSources(missing);
+      setBackupUnavailableSources([...sources.values()]);
       setBackupInstallManifests([...manifests.values()]);
-      setBackupInstallOpen(true);
+      setBackupReviewOpen(true);
     } catch (error) {
       toast({ title: 'No se pudieron comprobar las extensiones', description: error.message, variant: 'error' });
     } finally {
@@ -498,9 +607,17 @@ export default function Settings({ tutorialPreview = false }) {
 
   const cancelBackupInstall = () => {
     setBackupInstallOpen(false);
+    setBackupReviewOpen(false);
     setBackupCandidate(null);
     setBackupMissingSources([]);
+    setBackupUnavailableSources([]);
     setBackupInstallManifests([]);
+  };
+
+  const keepBackupUnavailable = () => {
+    setBackupReviewOpen(false);
+    if (backupInstallManifests.length) setBackupInstallOpen(true);
+    else finishBackupImport();
   };
 
   const installBackupExtensions = async () => {
@@ -549,11 +666,45 @@ export default function Settings({ tutorialPreview = false }) {
     }
   };
 
-  const finishMihonImport = async (excludedEntries = []) => {
+  const finishMihonImport = async (excludedEntries = [], progressToastId = null, importController = null) => {
     if (!mihonCandidate) return;
+    const controller = importController || new AbortController();
+    if (!importController) mihonImportControllerRef.current = controller;
+    const activeToastId = progressToastId ?? toast({
+      title: 'Importando respaldo de Mihon',
+      description: 'Aplicando los ajustes necesarios…',
+      icon: Loader2,
+      loading: true,
+      duration: null,
+      onDismiss: () => controller.abort()
+    });
     setMihonBusy(true);
     try {
-      const result = importMihonBackup(mihonCandidate, { excludedEntries });
+      const candidate = {
+        ...mihonCandidate,
+        entries: mihonCandidate.entries.map((entry) => ({ ...entry, manga: { ...entry.manga } }))
+      };
+      await refreshImportedMihonCovers(candidate, excludedEntries, controller.signal);
+      throwIfAborted(controller.signal);
+      const excluded = new Set(excludedEntries.map((entry) => `${entry.manga?.sourceId || ''}|${entry.manga?.url || ''}`));
+      const importedCoverUrls = candidate.entries
+        .filter((entry) => !excluded.has(`${entry.manga?.sourceId || ''}|${entry.manga?.url || ''}`))
+        .map((entry) => entry.manga?.cover)
+        .filter((cover) => /^https?:\/\//i.test(cover || ''));
+      await invalidateLibraryCovers(importedCoverUrls);
+      throwIfAborted(controller.signal);
+      const result = importMihonBackup(candidate, { excludedEntries });
+      candidate.entries.forEach((entry) => {
+        if (excluded.has(`${entry.manga?.sourceId || ''}|${entry.manga?.url || ''}`)) return;
+        const chapters = entry.importedDetail?.chapters;
+        if (!Array.isArray(chapters) || !chapters.length) {
+          chapterIndex.drop(entry.manga.url, entry.manga.sourceId);
+          return;
+        }
+        reconcileMihonProgress(entry.manga.url, entry.manga.sourceId, chapters);
+        chapterIndex.set(entry.manga.url, entry.manga.sourceId, chapters.map((chapter) => chapter.url).filter(Boolean));
+      });
+      clearLibraryUnreadCache();
       setMihonCandidate(null);
       setMihonBlockedEntries([]);
       setMihonMissingEntries([]);
@@ -562,16 +713,22 @@ export default function Settings({ tutorialPreview = false }) {
       setMihonKeepUnavailable(false);
       setMihonReviewOpen(false);
       setMihonInstallOpen(false);
+      dismiss(activeToastId);
       toast({
         title: 'Respaldo de Mihon importado',
-        description: `${result.added + result.updated} mangas importados${excludedEntries.length ? `, ${excludedEntries.length} omitidos` : ''}. Cytlex se recargará.`,
-        variant: 'success'
+        description: `${result.added + result.updated} mangas importados${result.excluded ? `, ${result.excluded} omitidos` : ''}. La app se reiniciará en 3 segundos.`,
+        variant: 'success',
+        duration: 3000
       });
-      window.setTimeout(() => window.location.reload(), 800);
+      window.setTimeout(() => window.location.reload(), 3000);
     } catch (error) {
-      toast({ title: 'No se pudo importar el respaldo de Mihon', description: error.message, variant: 'error' });
+      dismiss(activeToastId);
+      if (!controller.signal.aborted && error?.name !== 'AbortError') {
+        toast({ title: 'No se pudo importar el respaldo de Mihon', description: error.message, variant: 'error' });
+      }
     } finally {
       setMihonBusy(false);
+      if (mihonImportControllerRef.current === controller) mihonImportControllerRef.current = null;
     }
   };
 
@@ -581,12 +738,16 @@ export default function Settings({ tutorialPreview = false }) {
     setMihonBusy(true);
     try {
       const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
-      const notInstalled = mihonCandidate.entries.filter(({ manga }) => !extensions.isInstalled(manga.sourceId));
+      const installedSourceId = (manga) => extensions.resolveInstalledSource(manga.sourceId, manga.sourceName, manga.url) || manga.sourceId;
+      const notInstalled = mihonCandidate.entries.filter(({ manga }) => !extensions.isInstalled(installedSourceId(manga)));
       const repository = notInstalled.length ? await extensions.repoIndex(indexUrl) : [];
       const showAdultExtensions = !!settings.get().showAdultExtensions;
-      const sourceManifest = (sourceId) => extensionForSource(repository, sourceId) || extensions.manifest(sourceId);
+      const sourceManifest = (manga) => {
+        const sourceId = installedSourceId(manga);
+        return extensionForSource(repository, sourceId) || extensions.manifest(sourceId);
+      };
       const blockedEntries = mihonCandidate.entries.filter(({ manga }) => (
-        !showAdultExtensions && isAdultExtension(sourceManifest(manga.sourceId))
+        !showAdultExtensions && isAdultExtension(sourceManifest(manga))
       ));
       const blockedKeys = new Set(blockedEntries.map(({ manga }) => `${manga.sourceId}|${manga.url}`));
       const missingEntries = notInstalled.filter(({ manga }) => !blockedKeys.has(`${manga.sourceId}|${manga.url}`));
@@ -652,19 +813,35 @@ export default function Settings({ tutorialPreview = false }) {
 
   const installMihonSources = async () => {
     if (!mihonInstallManifests.length) return;
+    const controller = new AbortController();
+    mihonImportControllerRef.current = controller;
+    const progressToastId = toast({
+      title: 'Importando respaldo de Mihon',
+      description: 'Instalando extensiones y aplicando los ajustes necesarios…',
+      icon: Loader2,
+      loading: true,
+      duration: null,
+      onDismiss: () => controller.abort()
+    });
     setMihonBusy(true);
     try {
       const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
       for (const manifest of mihonInstallManifests) {
+        throwIfAborted(controller.signal);
         if (!extensions.isInstalled(manifest.id)) await extensions.install(manifest, indexUrl);
       }
+      throwIfAborted(controller.signal);
       setMihonInstallOpen(false);
       const excludedEntries = mihonKeepUnavailable ? [] : [...mihonBlockedEntries, ...mihonUnknownEntries];
-      await finishMihonImport(excludedEntries);
+      await finishMihonImport(excludedEntries, progressToastId, controller);
     } catch (error) {
-      toast({ title: 'No se pudieron instalar las extensiones', description: `${error.message} No se importaron los mangas.`, variant: 'error' });
+      dismiss(progressToastId);
+      if (!controller.signal.aborted && error?.name !== 'AbortError') {
+        toast({ title: 'No se pudieron instalar las extensiones', description: `${error.message} No se importaron los mangas.`, variant: 'error' });
+      }
     } finally {
       setMihonBusy(false);
+      if (mihonImportControllerRef.current === controller) mihonImportControllerRef.current = null;
     }
   };
 
@@ -805,8 +982,26 @@ export default function Settings({ tutorialPreview = false }) {
         <Row
           scale={scale}
           last
-          title="Mostrar capítulos sin leer"
-          desc="Muestra el contador de capítulos restantes de cada manga en la biblioteca"
+          title={
+            <>
+              Mostrar capítulos sin leer{' '}
+              <span
+                className="group relative inline-flex align-middle text-muted-foreground hover:text-foreground focus-visible:outline-none"
+                tabIndex={0}
+                aria-describedby="library-unread-tip"
+              >
+                <CircleHelp aria-hidden="true" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                <span
+                  id="library-unread-tip"
+                  role="tooltip"
+                  className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-64 rounded-lg border border-border bg-card px-3 py-2 text-xs text-card-foreground opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus:opacity-100"
+                >
+                  Pro Tip: Desactivar esta opción podría mejorar el rendimiento en computadores de gama baja-media. Desactivala si ves que el desplazamiento en la biblioteca es muy lento.
+                </span>
+              </span>
+            </>
+          }
+          desc="Muestra un contador de capítulos restantes de los mangas en la biblioteca"
           right={
             <Switch
               scale={scale}
@@ -1582,7 +1777,7 @@ export default function Settings({ tutorialPreview = false }) {
         </div>
       </Dialog>
       <Dialog
-        open={!!backupCandidate && !backupInstallOpen}
+        open={!!backupCandidate && !backupInstallOpen && !backupReviewOpen}
         onClose={() => { if (!backupBusy) setBackupCandidate(null); }}
         title="Restaurar respaldo"
         description={`El archivo ${backupCandidate?.fileName || ''} reemplazará tus datos actuales de Cytlex, incluidas la biblioteca, el progreso y los ajustes. Las extensiones instaladas se conservarán. La aplicación se recargará.`}
@@ -1610,17 +1805,61 @@ export default function Settings({ tutorialPreview = false }) {
         </div>
       </Dialog>
       <Dialog
-        open={backupInstallOpen}
+        open={backupReviewOpen}
         onClose={() => { if (!backupBusy) cancelBackupInstall(); }}
-        title="Extensiones no instaladas"
-        description="El respaldo incluye mangas de estas extensiones. Puedes instalarlas ahora o restaurar el respaldo sin instalarlas."
+        title="Mangas con extensiones no disponibles"
+        description="El respaldo contiene mangas de extensiones bloqueadas, no instaladas o no disponibles. Elige si quieres omitirlos o conservarlos."
         hideDivider
         bodyClassName="pb-6"
         scrollableBody={false}
         scale={scale}
       >
         <div className="space-y-2 text-muted-foreground" style={{ fontSize: px(13, scale, 11), marginBottom: px(18, scale, 14) }}>
-          {backupMissingSources.map((source) => (
+          {backupUnavailableSources.map((source) => (
+            <div key={source.id} className="flex items-center justify-between gap-4">
+              <span className="truncate text-foreground" title={source.name}>{source.name}</span>
+              <span className="shrink-0">{source.count} mangas</span>
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button
+            variant="outline"
+            onClick={cancelBackupInstall}
+            disabled={backupBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => finishBackupImport({ omitUnavailable: true })}
+            disabled={backupBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Omitir y restaurar
+          </Button>
+          <Button
+            onClick={keepBackupUnavailable}
+            disabled={backupBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Mantener y continuar
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={backupInstallOpen}
+        onClose={() => { if (!backupBusy) cancelBackupInstall(); }}
+        title="Extensiones disponibles para instalar"
+        description="Estas extensiones están en el repositorio de Cytlex. Los mangas de otras fuentes se conservarán sin extensión instalada."
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+        scale={scale}
+      >
+        <div className="space-y-2 text-muted-foreground" style={{ fontSize: px(13, scale, 11), marginBottom: px(18, scale, 14) }}>
+          {backupMissingSources.filter((source) => source.manifest).map((source) => (
             <div key={source.id} className="flex items-center justify-between gap-4">
               <div className="flex min-w-0 items-center" style={{ gap: px(8, scale, 6) }}>
                 <span
@@ -1670,7 +1909,7 @@ export default function Settings({ tutorialPreview = false }) {
         </div>
       </Dialog>
       <Dialog
-        open={!!mihonCandidate && !mihonReviewOpen && !mihonInstallOpen}
+        open={!!mihonCandidate && !mihonBusy && !mihonReviewOpen && !mihonInstallOpen}
         onClose={() => { if (!mihonBusy) setMihonCandidate(null); }}
         title="Importar respaldo de Mihon"
         description={`Se fusionará ${mihonCandidate?.fileName || 'este respaldo'} con Cytlex.`}
@@ -1706,7 +1945,7 @@ export default function Settings({ tutorialPreview = false }) {
         </div>
       </Dialog>
       <Dialog
-        open={mihonReviewOpen}
+        open={mihonReviewOpen && !mihonBusy}
         onClose={() => {
           setMihonReviewOpen(false);
         }}
@@ -1748,7 +1987,7 @@ export default function Settings({ tutorialPreview = false }) {
         </div>
       </Dialog>
       <Dialog
-        open={mihonInstallOpen}
+        open={mihonInstallOpen && !mihonBusy}
         onClose={() => setMihonInstallOpen(false)}
         title="Instalar extensiones faltantes"
         description={mihonKeepUnavailable

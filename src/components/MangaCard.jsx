@@ -5,7 +5,7 @@ import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
 import { extensions } from '../lib/extensions.js';
 import { lib } from '../lib/library.js';
-import { discardLibraryCover, getLibraryCover, markLibraryCoverLoaded, preloadLibraryCover, restoreLibraryCover } from '../lib/covers.js';
+import { discardLibraryCover, getLibraryCover, markLibraryCoverLoaded, preloadLibraryCover, preloadSearchCover, requiresImageProxy, restoreLibraryCover } from '../lib/covers.js';
 import { rememberCover } from '../lib/searchState.js';
 import { SourceBadge } from './SourceBadge.jsx';
 
@@ -40,29 +40,61 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
   const cachedCover = m.coverCached || '';
   const [anilistCoverOn, setAnilistCoverOn] = useState(() => !!settings.get().anilistCover);
   useEffect(() => settings.subscribe((s) => setAnilistCoverOn(!!s.anilistCover)), []);
-  const t = tracking.get(m.url, sourceId);
+  const t = unavailable ? null : tracking.get(m.url, sourceId);
   const aniLocal = anilistCoverOn ? (t?.coverLocal || '') : '';
   const aniCover = anilistCoverOn ? (t?.cover || '') : '';
-  const preferredCover = aniLocal || aniCover || cachedCover || localCover || m.cover;
+  const preferredCover = unavailable ? '' : aniLocal || aniCover || cachedCover || localCover || m.cover;
+  const proxyCover = requiresImageProxy(preferredCover);
+  const coverRef = useRef(null);
   const [coverState, setCoverState] = useState(() => {
     const cached = getLibraryCover(preferredCover);
-    return { key: preferredCover, src: cached || (from === 'biblioteca' && /^https?:\/\//i.test(preferredCover || '') ? '' : preferredCover) };
+    return { key: preferredCover, src: cached || (proxyCover ? '' : preferredCover) };
   });
   const src = coverState.key === preferredCover
     ? coverState.src
-    : getLibraryCover(preferredCover) || (from === 'biblioteca' && /^https?:\/\//i.test(preferredCover || '') ? '' : preferredCover);
+    : getLibraryCover(preferredCover) || (proxyCover ? '' : preferredCover);
   const hoverTimer = useRef(null);
+  const loadedCoverKey = useRef('');
   const failedCoverUrls = useRef(new Set());
   const refreshedCoverMangas = useRef(new Set());
 
   useEffect(() => {
-    if (from !== 'biblioteca' || !/^https?:\/\//i.test(preferredCover || '')) return undefined;
+    if (!/^https?:\/\//i.test(preferredCover || '')) return undefined;
     let alive = true;
-    restoreLibraryCover(preferredCover).then((local) => {
-      if (alive) setCoverState({ key: preferredCover, src: local || preferredCover });
+    if (proxyCover) {
+      const prepare = from === 'biblioteca'
+        ? restoreLibraryCover(preferredCover).then((local) => local || preloadLibraryCover(preferredCover))
+        : preloadSearchCover(preferredCover);
+      prepare.then((local) => {
+        if (alive && loadedCoverKey.current !== preferredCover) {
+          setCoverState({ key: preferredCover, src: local || preferredCover });
+        }
+      });
+      return () => { alive = false; };
+    }
+    if (from !== 'biblioteca') return undefined;
+    const restore = () => restoreLibraryCover(preferredCover).then((local) => {
+      if (alive && loadedCoverKey.current !== preferredCover) {
+        setCoverState({ key: preferredCover, src: local || preferredCover });
+      }
     });
-    return () => { alive = false; };
-  }, [from, preferredCover]);
+    const target = coverRef.current;
+    if (!target || !('IntersectionObserver' in window)) {
+      restore();
+      return () => { alive = false; };
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        observer.disconnect();
+        restore();
+      }
+    }, { root: document.querySelector('main'), rootMargin: '220px 0px' });
+    observer.observe(target);
+    return () => {
+      alive = false;
+      observer.disconnect();
+    };
+  }, [from, preferredCover, proxyCover]);
 
   const schedulePrefetch = () => {
     if (unavailable || from === 'biblioteca') return;
@@ -86,8 +118,8 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
   const badgeStyle = coverSize
     ? {
         fontSize: `${Math.max(9, Math.round(11 * scale))}px`,
-        top: `${Math.max(4, Math.round(8 * scale))}px`,
-        right: `${Math.max(4, Math.round(8 * scale))}px`,
+        top: `${Math.max(8, Math.round(10 * scale))}px`,
+        right: `${Math.max(8, Math.round(10 * scale))}px`,
         paddingLeft: `${Math.max(4, Math.round(6 * scale))}px`,
         paddingRight: `${Math.max(4, Math.round(6 * scale))}px`,
         minWidth: `${Math.max(18, Math.round(24 * scale))}px`
@@ -107,7 +139,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
         onBlur={cancelPrefetch}
         {...linkA11y}
       >
-        <div className="relative rounded-xl overflow-hidden bg-muted/50 border border-border/50 shadow-sm aspect-[2/3]" style={box}>
+        <div ref={coverRef} className="relative rounded-xl overflow-hidden bg-muted/50 border border-border/50 shadow-sm aspect-[2/3]" style={box}>
           {src ? (
             <img
               loading={from === 'biblioteca' ? 'eager' : 'lazy'}
@@ -117,8 +149,11 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
               alt={m.title}
               referrerPolicy="no-referrer"
               onLoad={() => {
-                if (from === 'biblioteca') markLibraryCoverLoaded(src);
-                if (from === 'biblioteca' && /^(https?:\/\/|data:image\/)/i.test(src || '')) preloadLibraryCover(src);
+                loadedCoverKey.current = preferredCover;
+                if (from === 'biblioteca') {
+                  markLibraryCoverLoaded(src);
+                  if (/^https?:\/\//i.test(preferredCover || '')) preloadLibraryCover(preferredCover);
+                }
               }}
               onError={async () => {
                 if (src.startsWith('blob:') && src !== preferredCover && preferredCover) {
@@ -149,7 +184,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
                     const refreshed = (result.items || []).find((item) => item.url === m.url && coverKey(item.title) === expectedTitle && item.cover && item.cover !== src);
                     if (refreshed?.cover) {
                       rememberCover(m.url, refreshed.cover, sourceId);
-                      lib.updateFav(m.url, { cover: refreshed.cover, coverLocal: '' }, sourceId);
+                      lib.updateFav(m.url, { cover: refreshed.cover, coverLocal: '', coverCached: '' }, sourceId);
                       setCoverState({ key: preferredCover, src: refreshed.cover });
                       return;
                     }
@@ -160,7 +195,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
                     const detail = await api.detail(m.url, sourceId);
                     const refreshedCover = detail?.cover;
                     if (refreshedCover && refreshedCover !== src && !failedCoverUrls.current.has(refreshedCover)) {
-                      lib.updateFav(m.url, { cover: refreshedCover, coverLocal: '' }, sourceId);
+                      lib.updateFav(m.url, { cover: refreshedCover, coverLocal: '', coverCached: '' }, sourceId);
                       setCoverState({ key: preferredCover, src: refreshedCover });
                       return;
                     }
@@ -188,7 +223,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
             <span
               title={`${chapterCount} capítulos sin leer`}
               style={badgeStyle}
-              className="absolute top-2 right-2 grid place-items-center rounded-full bg-black/70 font-semibold text-white backdrop-blur-md tabular-nums"
+              className="pointer-events-none absolute top-1.5 right-1.5 z-10 grid place-items-center rounded-full bg-black/75 font-semibold text-white tabular-nums"
             >
               {chapterCount}
             </span>

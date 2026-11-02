@@ -138,7 +138,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     })).filter((item) => item.identification != null);
   }
 
-  async function catalog({ q = '', page = 1 } = {}) {
+  async function catalog({ q = '', page = 1, __cytlexRequestId } = {}) {
     const query = clean(q);
     const skip = (Math.max(1, Number(page) || 1) - 1) * PAGE_SIZE;
     const form = new URLSearchParams();
@@ -160,7 +160,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
         Referer: `${BASE}/manga/consult?suggestion=${encodeURIComponent(query)}`,
         'X-Requested-With': 'XMLHttpRequest'
       }
-    });
+    }, __cytlexRequestId);
     const doc = parse(html);
     const seen = new Set();
     const items = [...doc.querySelectorAll('a[href*="/ver/manga/"]')].map((anchor) => {

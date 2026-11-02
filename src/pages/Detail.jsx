@@ -130,7 +130,7 @@ export default function Detail() {
   const [animate, setAnimate] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [overflow, setOverflow] = useState(false);
-  const [progressTick, setProgressTick] = useState(0);
+  const [, setProgressTick] = useState(0);
   const [coverTick, setCoverTick] = useState(0);
   const [markBefore, setMarkBefore] = useState(null);
   const [aniListOpen, setAniListOpen] = useState(false);
@@ -151,7 +151,7 @@ export default function Detail() {
     const recalled = recallCover(mangaUrl, sourceId);
     const remoteCover = fav?.cover || tCover || recalled;
     return getLibraryCover(remoteCover) || getSearchCover(remoteCover) || remoteCover || '';
-  }, [mangaUrl, sourceId, progressTick, anilistCover, coverTick]);
+  }, [mangaUrl, sourceId, anilistCover, coverTick]);
 
   const coverSrc = useMemo(() => {
     const t = tracking.get(mangaUrl, sourceId);
@@ -221,7 +221,6 @@ export default function Detail() {
     </>
   );
 
-  useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
   useEffect(() => tracking.subscribe(() => { setAniLinked(!!tracking.get(mangaUrl, sourceId)); setCoverTick((t) => t + 1); }), []);
   useEffect(() => settings.subscribe((s) => setAnilistCover(!!s.anilistCover)), []);
   useEffect(() => settings.subscribe((s) => setShowAdultExtensions(!!s.showAdultExtensions)), []);
@@ -304,8 +303,13 @@ export default function Detail() {
         setDetailState({ key: `${sourceId}|${mangaUrl}`, data: r });
         reconcileMihonProgress(mangaUrl, sourceId, r?.chapters);
         const favorite = lib.fav(mangaUrl, sourceId);
-        if (r?.cover && !favorite?.cover && !favorite?.coverLocal) {
-          if (favorite) lib.updateFav(mangaUrl, { cover: r.cover }, sourceId);
+        if (r?.cover && favorite && (
+          r.cover !== favorite.cover
+          || favorite.coverLocal
+          || favorite.coverCached
+        )) {
+          lib.updateFav(mangaUrl, { cover: r.cover, coverLocal: '', coverCached: '' }, sourceId);
+          setCoverTick((tick) => tick + 1);
         }
       })
       .catch(async (e) => {
@@ -1057,9 +1061,9 @@ export default function Detail() {
                     aria-label={`Marcar ${c.title} como no leído`}
                     className="order-2 shrink-0 flex items-center gap-1 text-primary rounded-md hover:bg-accent"
                     style={{ fontSize: `${Math.round(13 * scale)}px` }}
-                    onClick={(e) => { e.preventDefault(); progress.markUnread(c.url, sourceId); setProgressTick((t) => t + 1); }}
+                    onClick={(e) => { e.preventDefault(); progress.markUnread(c.url, sourceId, mangaUrl); setProgressTick((t) => t + 1); }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markUnread(c.url, sourceId); setProgressTick((t) => t + 1); }
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markUnread(c.url, sourceId, mangaUrl); setProgressTick((t) => t + 1); }
                     }}
                   >
                     <CheckCircle2 className="w-4 h-4" />
@@ -1073,9 +1077,9 @@ export default function Detail() {
                     aria-label={`Marcar ${c.title} como leído`}
                     className="order-2 shrink-0 flex items-center gap-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded-md hover:bg-accent hover:text-foreground transition-opacity"
                     style={{ fontSize: `${Math.round(13 * scale)}px` }}
-                    onClick={(e) => { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0); setProgressTick((t) => t + 1); }}
+                    onClick={(e) => { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0, mangaUrl); setProgressTick((t) => t + 1); }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0); setProgressTick((t) => t + 1); }
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0, mangaUrl); setProgressTick((t) => t + 1); }
                     }}
                   >
                     <Check className="w-4 h-4" />
@@ -1126,7 +1130,7 @@ export default function Detail() {
                 size="sm"
                 style={{ height: px(36, scale, 30), padding: `${px(4, scale, 3)}px ${px(12, scale, 10)}px`, fontSize: px(14, scale, 12), lineHeight: px(20, scale, 17) }}
                 onClick={() => {
-                  progress.markMany(chaptersToMark.map((chapter) => chapter.url), sourceId);
+                  progress.markMany(chaptersToMark.map((chapter) => chapter.url), sourceId, null, mangaUrl);
                   setProgressTick((t) => t + 1);
                   setMarkBefore(null);
                 }}

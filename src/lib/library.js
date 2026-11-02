@@ -71,7 +71,12 @@ export const lib = {
     const favs = lib.favs();
     const i = favs.findIndex((f) => match(f, url, sourceId));
     if (i >= 0) {
-      favs[i] = { ...favs[i], ...patch };
+      const coverChanged = typeof patch.cover === 'string' && patch.cover && patch.cover !== favs[i].cover;
+      favs[i] = {
+        ...favs[i],
+        ...patch,
+        ...(coverChanged ? { coverLocal: '', coverCached: '' } : {})
+      };
       write(FAV, favs);
     }
     return favs;

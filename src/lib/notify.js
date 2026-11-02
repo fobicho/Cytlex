@@ -48,7 +48,7 @@ async function countChapters(manga) {
   return d.chapters.length;
 }
 
-export async function checkLibrary({ silent = false, force = false, notifyFound = !silent } = {}) {
+export async function checkLibrary({ silent = false, force = false, notifyFound = !silent, onProgress } = {}) {
   if (running) return [];
   if (typeof window === 'undefined' || !window.cytlex?.notify) return [];
   const cfg = settings.get();
@@ -62,32 +62,34 @@ export async function checkLibrary({ silent = false, force = false, notifyFound 
 
   const favs = lib.favs();
   if (!favs.length) {
+    onProgress?.({ current: 0, total: 0 });
     await finishIfBackground();
     return [];
   }
 
   running = true;
+  onProgress?.({ current: 0, total: favs.length });
   const baseline = { ...(cfg.notifyBaseline || {}) };
   const found = [];
   let checked = 0;
 
-  for (const m of favs) {
-    const sourceId = m.sourceId || 'leercapitulo';
-    const k = key(m.url, sourceId);
-    let total = null;
+  for (let i = 0; i < favs.length; i += 1) {
+    const m = favs[i];
     try {
-      total = await countChapters({ ...m, sourceId });
-    } catch {
-      continue;
-    }
-    if (total == null) continue;
+      const sourceId = m.sourceId || 'leercapitulo';
+      const k = key(m.url, sourceId);
+      const total = await countChapters({ ...m, sourceId });
+      if (total != null) {
+        checked++;
+        const prev = baseline[k];
+        baseline[k] = total;
 
-    checked++;
-    const prev = baseline[k];
-    baseline[k] = total;
-
-    if (prev != null && total > prev) {
-      found.push({ url: m.url, sourceId, title: m.title, count: total - prev, last: total });
+        if (prev != null && total > prev) {
+          found.push({ url: m.url, sourceId, title: m.title, count: total - prev, last: total });
+        }
+      }
+    } catch {} finally {
+      onProgress?.({ current: i + 1, total: favs.length });
     }
   }
 

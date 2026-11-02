@@ -3,22 +3,33 @@ const SEARCH_THUMB_WIDTH = 320;
 const MAX_DATAURL = 120000;
 const MAX_SEARCH_COVER_LOADS = 2;
 const MAX_SEARCH_COVERS = 60;
-const MAX_LIBRARY_COVERS = 120;
+const MAX_LIBRARY_COVERS = 240;
 const MAX_LIBRARY_COVER_LOADS = 4;
 const LIBRARY_COVER_DB = 'cytlex-library-covers';
 const LIBRARY_COVER_STORE = 'covers';
 const MAX_PERSISTED_LIBRARY_COVERS = 500;
+const PROXIED_IMAGE_HOSTS = ['plotnofansub.com'];
 const searchCoverCache = new Map();
 const loadedSearchCovers = new Set();
 const decodedSearchCovers = new Map();
 const searchCoverWaiters = [];
 const libraryCoverCache = new Map();
 const loadedLibraryCovers = new Map();
+const libraryCoverVersions = new Map();
 const libraryCoverWaiters = [];
 let libraryCoverDbPromise;
 let searchCoverGeneration = 0;
 let activeSearchCoverLoads = 0;
 let activeLibraryCoverLoads = 0;
+
+export function requiresImageProxy(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return PROXIED_IMAGE_HOSTS.some((domain) => host === domain || host.endsWith(`.${domain}`));
+  } catch {
+    return false;
+  }
+}
 
 function pruneSearchCoverCache() {
   while (searchCoverCache.size > MAX_SEARCH_COVERS) {
@@ -113,10 +124,12 @@ async function readPersistedLibraryCover(url) {
   }
 }
 
-async function persistLibraryCover(url, blob) {
+async function persistLibraryCover(url, blob, version) {
   try {
+    if ((libraryCoverVersions.get(url) || 0) !== version) return;
     const db = await openLibraryCoverDb();
     if (!db) return;
+    if ((libraryCoverVersions.get(url) || 0) !== version) return;
     const store = db.transaction(LIBRARY_COVER_STORE, 'readwrite').objectStore(LIBRARY_COVER_STORE);
     store.put({ url, blob, usedAt: Date.now() });
     const count = await idbRequest(store.count());
@@ -134,6 +147,31 @@ export async function restoreLibraryCover(url) {
   if (typeof cached === 'string') return cached;
   if (cached) return (await cached) || '';
   return (await readPersistedLibraryCover(url)) || '';
+}
+
+export async function invalidateLibraryCovers(urls) {
+  const uniqueUrls = [...new Set((urls || []).filter((url) => typeof url === 'string' && /^https?:\/\//i.test(url)))];
+  if (!uniqueUrls.length) return;
+
+  const db = await openLibraryCoverDb();
+  const transaction = db?.transaction(LIBRARY_COVER_STORE, 'readwrite');
+  uniqueUrls.forEach((url) => {
+    libraryCoverVersions.set(url, (libraryCoverVersions.get(url) || 0) + 1);
+    const cached = libraryCoverCache.get(url);
+    libraryCoverCache.delete(url);
+    if (typeof cached === 'string' && cached.startsWith('blob:')) {
+      loadedLibraryCovers.delete(cached);
+      URL.revokeObjectURL(cached);
+    }
+    transaction?.objectStore(LIBRARY_COVER_STORE).delete(url);
+  });
+  if (transaction) {
+    await new Promise((resolve) => {
+      transaction.oncomplete = resolve;
+      transaction.onerror = resolve;
+      transaction.onabort = resolve;
+    });
+  }
 }
 
 function releaseLibraryCoverSlot() {
@@ -179,17 +217,27 @@ export async function preloadLibraryCover(url) {
   let pending;
   pending = (async () => {
     let acquired = false;
+    const version = libraryCoverVersions.get(url) || 0;
     try {
       const persisted = await readPersistedLibraryCover(url);
       if (persisted) return persisted;
       await acquireLibraryCoverSlot();
       acquired = true;
-      const thumbnail = url.startsWith('data:') ? url : await makeCoverThumb(url);
-      if (!thumbnail) return '';
-      const blob = await (await fetch(thumbnail)).blob();
+      let original = url;
+      if (!url.startsWith('data:')) {
+        const fetched = await window.cytlex.fetchImage(url);
+        if (!fetched?.base64) return '';
+        original = `data:${fetched.mime};base64,${fetched.base64}`;
+      }
+      const blob = await makeCoverThumbBlob(original);
+      if (!blob || blob.size > MAX_DATAURL) return '';
       const objectUrl = URL.createObjectURL(blob);
       const decoded = await decodeCover(objectUrl);
       if (!decoded) {
+        URL.revokeObjectURL(objectUrl);
+        return '';
+      }
+      if ((libraryCoverVersions.get(url) || 0) !== version) {
         URL.revokeObjectURL(objectUrl);
         return '';
       }
@@ -202,7 +250,7 @@ export async function preloadLibraryCover(url) {
       }
       libraryCoverCache.set(url, objectUrl);
       pruneLibraryCoverCache();
-      persistLibraryCover(url, blob);
+      persistLibraryCover(url, blob, version);
       return objectUrl;
     } catch {
       return '';
@@ -217,10 +265,16 @@ export async function preloadLibraryCover(url) {
 }
 
 export function discardLibraryCover(url, objectUrl) {
-  if (libraryCoverCache.get(url) !== objectUrl) return;
-  libraryCoverCache.delete(url);
+  libraryCoverVersions.set(url, (libraryCoverVersions.get(url) || 0) + 1);
+  if (libraryCoverCache.get(url) === objectUrl) libraryCoverCache.delete(url);
   loadedLibraryCovers.delete(objectUrl);
-  URL.revokeObjectURL(objectUrl);
+  if (typeof objectUrl === 'string' && objectUrl.startsWith('blob:')) URL.revokeObjectURL(objectUrl);
+  openLibraryCoverDb().then((db) => {
+    if (!db) return;
+    try {
+      db.transaction(LIBRARY_COVER_STORE, 'readwrite').objectStore(LIBRARY_COVER_STORE).delete(url);
+    } catch {}
+  });
 }
 
 export function preloadSearchCover(url) {
@@ -302,6 +356,30 @@ export async function makeCoverThumb(url, maxWidth = THUMB_WIDTH) {
     }
   } catch {
     return '';
+  }
+}
+
+async function makeCoverThumbBlob(source, maxWidth = THUMB_WIDTH) {
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = reject;
+      element.src = source;
+    });
+    if (!image.width) return null;
+
+    const width = Math.min(maxWidth, image.width);
+    const height = Math.max(1, Math.round((image.height / image.width) * width));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+    context.drawImage(image, 0, 0, width, height);
+    return await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+  } catch {
+    return null;
   }
 }
 

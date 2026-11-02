@@ -150,6 +150,7 @@ const REFERER_RULES = [
   { hosts: ['imagesolymp.xyz', 'olympusxyz.com'], referer: 'https://olympusxyz.com/' },
   { hosts: ['zonatmo.org'], referer: 'https://zonatmo.org/' },
   { hosts: ['ntr-files.online'], referer: 'https://manga-oni.com/' },
+  { hosts: ['plotnofansub.com'], referer: 'https://plotnofansub.com/' },
   { hosts: ['inmanga.com', 'intomanga.com'], referer: 'https://inmanga.com/' }
 ];
 
@@ -212,7 +213,18 @@ async function resolvePublicAddress(hostname) {
 
 function requestOnce(parsed, options, address) {
   return new Promise((resolve, reject) => {
+    if (isHttpRequestCancelled(options.requestId)) {
+      reject(httpRequestAborted());
+      return;
+    }
     const transport = parsed.protocol === 'https:' ? https : http;
+    let response;
+    let releaseAbort = () => {};
+    const abort = () => {
+      const error = httpRequestAborted();
+      request.destroy(error);
+      response?.destroy(error);
+    };
     const request = transport.request(parsed, {
       method: options.method,
       headers: options.headers,
@@ -221,18 +233,56 @@ function requestOnce(parsed, options, address) {
         if (lookupOptions?.all) callback(null, [{ address: address.address, family: address.family }]);
         else callback(null, address.address, address.family);
       }
-    }, resolve);
+    }, (res) => {
+      response = res;
+      res.once('close', releaseAbort);
+      resolve(res);
+    });
+    releaseAbort = registerHttpRequest(options.requestId, abort);
     const timer = setTimeout(() => request.destroy(new Error('La petición excedió el tiempo límite')), options.timeout);
     request.on('error', reject);
-    request.on('close', () => clearTimeout(timer));
+    request.on('close', () => {
+      clearTimeout(timer);
+      if (!response) releaseAbort();
+    });
     if (options.body != null) request.write(options.body);
     request.end();
   });
 }
 
+const activeHttpRequests = new Map();
+const cancelledHttpRequests = new Set();
+
+function httpRequestAborted() {
+  const error = new Error('Petición cancelada');
+  error.code = 'HTTP_REQUEST_ABORTED';
+  return error;
+}
+
+function isHttpRequestCancelled(requestId) {
+  return !!requestId && cancelledHttpRequests.has(requestId);
+}
+
+function registerHttpRequest(requestId, abort) {
+  if (!requestId) return () => {};
+  if (isHttpRequestCancelled(requestId)) {
+    abort();
+    return () => {};
+  }
+  let requests = activeHttpRequests.get(requestId);
+  if (!requests) activeHttpRequests.set(requestId, requests = new Set());
+  requests.add(abort);
+  return () => {
+    requests.delete(abort);
+    if (!requests.size) activeHttpRequests.delete(requestId);
+  };
+}
+
 async function requestPublic(url, options = {}, redirects = 0) {
+  if (isHttpRequestCancelled(options.requestId)) throw httpRequestAborted();
   const parsed = validateUrl(url);
   const address = await withTimeout(resolvePublicAddress(parsed.hostname), options.timeout);
+  if (isHttpRequestCancelled(options.requestId)) throw httpRequestAborted();
   const response = await requestOnce(parsed, options, address);
   const status = response.statusCode || 0;
   const location = response.headers.location;
@@ -581,7 +631,19 @@ const HTTP_HEAD_TIMEOUT_MS = 5_000;
 const HTTP_BODY_MAX_BYTES = 10 * 1024 * 1024;
 const IMAGE_BODY_MAX_BYTES = 50 * 1024 * 1024;
 
-ipcMain.handle('http:get', async (_e, url) => {
+ipcMain.on('http:cancel', (_event, requestId) => {
+  if (typeof requestId !== 'string' || !requestId) return;
+  cancelledHttpRequests.add(requestId);
+  for (const abort of activeHttpRequests.get(requestId) || []) abort();
+});
+
+ipcMain.on('http:release', (_event, requestId) => {
+  if (typeof requestId !== 'string' || !requestId) return;
+  cancelledHttpRequests.delete(requestId);
+  activeHttpRequests.delete(requestId);
+});
+
+ipcMain.handle('http:get', async (_e, url, requestId) => {
   const parsed = validateUrl(url);
   const mangaDexApi = parsed.hostname.toLowerCase() === 'api.mangadex.org';
   const res = await requestPublic(parsed.toString(), {
@@ -593,7 +655,8 @@ ipcMain.handle('http:get', async (_e, url) => {
       ...(mangaDexApi ? { Accept: 'application/json' } : {}),
       Referer: refererFor(parsed.toString())
     },
-    timeout: HTTP_GET_TIMEOUT_MS
+    timeout: HTTP_GET_TIMEOUT_MS,
+    requestId
   });
   if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`HTTP ${res.statusCode} al pedir ${parsed.toString()}`);
   return (await readResponse(res, HTTP_BODY_MAX_BYTES)).toString('utf8');
@@ -614,7 +677,7 @@ ipcMain.handle('http:head', async (_e, url) => {
   return { ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, length: Number(res.headers['content-length']) || 0, type: res.headers['content-type'] || '' };
 });
 
-ipcMain.handle('http:post', async (_e, payload = {}) => {
+ipcMain.handle('http:post', async (_e, payload = {}, requestId) => {
   const { url, body, headers } = payload;
   if (!url) throw new Error('Falta la URL de la petición POST');
   const parsed = validateUrl(url);
@@ -627,7 +690,8 @@ ipcMain.handle('http:post', async (_e, payload = {}) => {
       ...headers
     },
     body: typeof body === 'string' ? body : JSON.stringify(body),
-    timeout: HTTP_GET_TIMEOUT_MS
+    timeout: HTTP_GET_TIMEOUT_MS,
+    requestId
   });
   if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`HTTP ${res.statusCode} al pedir ${urlStr}`);
   const response = (await readResponse(res, HTTP_BODY_MAX_BYTES)).toString('utf8');

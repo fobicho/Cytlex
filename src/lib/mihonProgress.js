@@ -46,6 +46,7 @@ export function reconcileMihonProgress(mangaUrl, sourceId, chapters) {
   });
   const matchedIndexes = new Set();
   const remaining = [];
+  const readUrls = [];
 
   pending.forEach((saved, pendingIndex) => {
     const savedNumber = chapterNumber(saved);
@@ -62,7 +63,7 @@ export function reconcileMihonProgress(mangaUrl, sourceId, chapters) {
     matchedIndexes.add(pendingIndex);
     const existing = progress.get(chapter.url, sourceId);
     if (saved.read) {
-      if (!existing?.read) progress.markRead(chapter.url, sourceId, existing?.total || 0);
+      if (!existing?.read) readUrls.push(chapter.url);
     } else if (saved.page > 0 && !existing?.read) {
       const page = Math.max(Number(existing?.page) || 0, Number(saved.page) || 0);
       if (Number.isSafeInteger(page) && page > 0 && page !== existing?.page) {
@@ -71,6 +72,7 @@ export function reconcileMihonProgress(mangaUrl, sourceId, chapters) {
     }
   });
 
+  if (readUrls.length) progress.markMany(readUrls, sourceId, null, mangaUrl);
   if (matchedIndexes.size) {
     lib.updateFav(mangaUrl, { mihonProgress: remaining.length ? remaining : undefined }, sourceId);
   }

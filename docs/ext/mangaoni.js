@@ -51,10 +51,10 @@ export default function createSource({ fetchText, parse, head }) {
     return Math.max(1, ...pages);
   }
 
-  async function listing(p) {
+  async function listing(p, requestId) {
     if (listingCache.has(p)) return listingCache.get(p);
     const pending = (async () => {
-      const doc = parse(await fetchText(`${BASE}/directorio?filtro=nombre&orden=asc&p=${p}`));
+      const doc = parse(await fetchText(`${BASE}/directorio?filtro=nombre&orden=asc&p=${p}`, requestId));
       lastPage = Math.max(lastPage, pageCount(doc));
       return [...doc.querySelectorAll('div._135yj')]
         .map((el) => mapCard(el))
@@ -87,13 +87,13 @@ export default function createSource({ fetchText, parse, head }) {
     };
   }
 
-  async function search(term, page = 1) {
+  async function search(term, page = 1, requestId) {
     const key = `${term.trim().toLocaleLowerCase()}|${page}`;
     if (searchCache.has(key)) return searchCache.get(key);
 
     const pending = (async () => {
       const url = `${BASE}/buscar?q=${encodeURIComponent(term)}&p=${page}`;
-      const doc = parse(await fetchText(url));
+      const doc = parse(await fetchText(url, requestId));
       const items = [...doc.querySelectorAll('#article-div > div')]
         .map((el) => mapSearchCard(el))
         .filter((item) => item?.title);
@@ -112,10 +112,10 @@ export default function createSource({ fetchText, parse, head }) {
     }
   }
 
-  async function catalog({ q = '', page = 1 } = {}) {
-    if (q) return search(q, page);
+  async function catalog({ q = '', page = 1, __cytlexRequestId } = {}) {
+    if (q) return search(q, page, __cytlexRequestId);
 
-    const doc = parse(await fetchText(`${BASE}/directorio?p=${page}`));
+    const doc = parse(await fetchText(`${BASE}/directorio?p=${page}`, __cytlexRequestId));
     lastPage = Math.max(lastPage, pageCount(doc));
     const seen = new Set();
     const items = [];

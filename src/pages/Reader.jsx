@@ -414,7 +414,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       : (mode === 'paginado' || mode === 'paginado-rtl' ? page : lastSeen);
     const done = lastDisplayed >= total - 1;
     if (done) {
-      progress.markRead(chapterUrl, sourceId, total);
+      progress.markRead(chapterUrl, sourceId, total, mangaUrl);
       setIsRead(true);
       const manga = tracking.get(mangaUrl, sourceId);
       if (manga) {

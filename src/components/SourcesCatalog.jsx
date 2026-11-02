@@ -34,11 +34,32 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
   const [error, setError] = useState('');
   const [restoring, setRestoring] = useState(() => !!restore?.sourceId);
   const requestId = useRef(0);
+  const requestSequence = useRef(0);
+  const activeHttpRequest = useRef('');
   const initialRestore = useRef(restore);
   const previousAdultSetting = useRef(showAdultExtensions);
   const pendingScrollTop = useRef(restore?.scrollTop ?? null);
   const selected = useMemo(() => sources.find((source) => source.manifest.id === sourceId), [sources, sourceId]);
   const allSources = extensions.sources();
+
+  const cancelActiveRequest = () => {
+    const request = activeHttpRequest.current;
+    if (!request) return;
+    window.cytlex?.cancelHttpRequest?.(request);
+    activeHttpRequest.current = '';
+  };
+
+  const beginHttpRequest = () => {
+    cancelActiveRequest();
+    const request = `sources-catalog-${Date.now()}-${++requestSequence.current}`;
+    activeHttpRequest.current = request;
+    return request;
+  };
+
+  const finishHttpRequest = (request) => {
+    window.cytlex?.releaseHttpRequest?.(request);
+    if (activeHttpRequest.current === request) activeHttpRequest.current = '';
+  };
 
   useEffect(() => {
     if (sourceId && !sources.some((source) => source.manifest.id === sourceId)) setSourceId('');
@@ -56,6 +77,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
   const loadCatalog = async (id, params, append = false) => {
     if (!id) return;
     const runId = ++requestId.current;
+    const httpRequestId = beginHttpRequest();
     setError('');
     if (append) setLoadingMore(true);
     else {
@@ -65,7 +87,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
     try {
       const nextPage = append ? page + 1 : 1;
       const catalogParams = withAdultGenreExclusions(id, params, filters, showAdultExtensions);
-      const result = await api.catalog({ ...catalogParams, page: nextPage }, id);
+      const result = await api.catalog({ ...catalogParams, page: nextPage, __cytlexRequestId: httpRequestId }, id);
       if (runId !== requestId.current) return;
       const received = result.items || [];
       received.forEach((item) => rememberCover(item.url, item.cover, id));
@@ -88,10 +110,13 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
         setLoading(false);
         setLoadingMore(false);
       }
+      finishHttpRequest(httpRequestId);
     }
   };
 
   useEffect(() => settings.subscribe((next) => setShowAdultExtensions(!!next.showAdultExtensions)), []);
+
+  useEffect(() => () => cancelActiveRequest(), [sourceId]);
 
   useEffect(() => {
     if (previousAdultSetting.current === showAdultExtensions) return;
@@ -104,10 +129,25 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
     if (initialRestore.current?.sourceId === sourceId) {
       const snapshot = initialRestore.current;
       initialRestore.current = null;
+      if (Array.isArray(snapshot.items)) {
+        setFilters(snapshot.filters || []);
+        setFilterValues(snapshot.filterValues || {});
+        setFiltersOpen(!!snapshot.filtersOpen);
+        setQuery(snapshot.query || '');
+        setItems(snapshot.items);
+        setLoadedParams(snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) });
+        setPage(snapshot.page || 1);
+        setHasMore(!!snapshot.hasMore);
+        setRestoring(false);
+        setLoading(false);
+        setError('');
+        return undefined;
+      }
       let active = true;
       const runId = ++requestId.current;
       setLoading(true);
       setError('');
+      const httpRequestId = beginHttpRequest();
       (async () => {
         try {
           const nextFilters = await api.catalogFilters(sourceId).catch(() => []);
@@ -117,7 +157,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
           const params = snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) };
           const catalogParams = withAdultGenreExclusions(sourceId, params, nextFilters, showAdultExtensions);
           for (let nextPage = 1; nextPage <= Math.max(1, snapshot.page || 1); nextPage += 1) {
-            result = await api.catalog({ ...catalogParams, page: nextPage }, sourceId);
+            result = await api.catalog({ ...catalogParams, page: nextPage, __cytlexRequestId: httpRequestId }, sourceId);
             (result.items || []).forEach((item) => rememberCover(item.url, item.cover, sourceId));
             for (const item of result.items || []) {
               if (item.url && !urls.has(item.url)) {
@@ -131,8 +171,9 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
           setItems(restoredItems);
           setLoadedParams(snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) });
           setPage(Math.max(1, snapshot.page || 1));
-          setHasMore(result.hasMore ?? ((snapshot.page || 1) < (result.totalPages || 1)));
+          setHasMore(snapshot.hasMore ?? (result.hasMore ?? ((snapshot.page || 1) < (result.totalPages || 1))));
           setRestoring(false);
+          setLoading(false);
         } catch (loadError) {
           if (active && runId === requestId.current) {
             pendingScrollTop.current = null;
@@ -143,9 +184,10 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
             setLoading(false);
             setRestoring(false);
           }
+          finishHttpRequest(httpRequestId);
         }
       })();
-      return () => { active = false; };
+      return () => { active = false; if (activeHttpRequest.current === httpRequestId) cancelActiveRequest(); };
     }
     let active = true;
     requestId.current += 1;
@@ -159,14 +201,27 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
     setError('');
     setLoading(true);
     setFilters([]);
+    const httpRequestId = beginHttpRequest();
     (async () => {
       try {
-        const nextFilters = await api.catalogFilters(sourceId).catch(() => []);
-        if (!active) return;
-        const safeFilters = Array.isArray(nextFilters) ? nextFilters : [];
-        setFilters(safeFilters);
-        const params = withAdultGenreExclusions(sourceId, { q: '' }, safeFilters, showAdultExtensions);
-        const result = await api.catalog({ ...params, page: 1 }, sourceId);
+        const requiresFiltersForCatalog = sourceId === 'zonatmo' && !showAdultExtensions;
+        let resultPromise;
+        const loadFilters = () => api.catalogFilters(sourceId).catch(() => []).then((nextFilters) => {
+          const safeFilters = Array.isArray(nextFilters) ? nextFilters : [];
+          if (active) setFilters(safeFilters);
+          return safeFilters;
+        });
+        if (requiresFiltersForCatalog) {
+          const filtersPromise = loadFilters();
+          resultPromise = filtersPromise.then((nextFilters) => {
+            const params = withAdultGenreExclusions(sourceId, { q: '' }, nextFilters, showAdultExtensions);
+            return api.catalog({ ...params, page: 1, __cytlexRequestId: httpRequestId }, sourceId);
+          });
+        } else {
+          resultPromise = api.catalog({ q: '', page: 1, __cytlexRequestId: httpRequestId }, sourceId);
+          loadFilters();
+        }
+        const result = await resultPromise;
         if (!active) return;
         (result.items || []).forEach((item) => rememberCover(item.url, item.cover, sourceId));
         setItems(result.items || []);
@@ -177,16 +232,17 @@ export default function SourcesCatalog({ sources, initialSourceId = '' }) {
         if (active) setError(String(loadError?.message || 'No se pudo cargar el catálogo de esta fuente.'));
       } finally {
         if (active) setLoading(false);
+        finishHttpRequest(httpRequestId);
       }
     })();
-    return () => { active = false; };
+    return () => { active = false; if (activeHttpRequest.current === httpRequestId) cancelActiveRequest(); };
   }, [sourceId]);
 
   useEffect(() => {
     if (restoring) return;
     if (!sourceId) return;
-    sourceCatalogState.save({ sourceId, filters, filterValues, filtersOpen, query, loadedParams, page, hasMore });
-  }, [sourceId, filters, filterValues, filtersOpen, query, loadedParams, page, hasMore, restoring]);
+    sourceCatalogState.save({ sourceId, filters, filterValues, filtersOpen, query, loadedParams, page, hasMore, items });
+  }, [sourceId, filters, filterValues, filtersOpen, query, loadedParams, page, hasMore, items, restoring]);
 
   useLayoutEffect(() => {
     if (restoring || loading || pendingScrollTop.current == null || !sourceId) return;

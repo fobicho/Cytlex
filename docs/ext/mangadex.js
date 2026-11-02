@@ -11,7 +11,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
   let lastRequestAt = 0;
   let genreOptionsRequest = null;
 
-  const json = (url) => {
+  const json = (url, requestId) => {
     const request = async () => {
       let data;
       let response = '';
@@ -20,11 +20,12 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
         if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
         lastRequestAt = Date.now();
         try {
-          response = await fetchText(url);
+          response = await fetchText(url, requestId);
           data = JSON.parse(response);
           break;
         } catch (error) {
           const message = String(error?.message || error);
+          if (/Petición cancelada|HTTP_REQUEST_ABORTED/i.test(message)) throw error;
           const status = Number(message.match(/HTTP (\d{3})/)?.[1]);
           const retryable = !status || status === 429 || status >= 500;
           if (!retryable || attempt === 2) {
@@ -76,7 +77,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
       return defaultLanguages.length ? defaultLanguages : ['es', 'es-la'];
     };
 
-    async function catalog({ q = '', page = 1, genre = '', year = '', status = '', type = '', sort = '' } = {}) {
+    async function catalog({ q = '', page = 1, genre = '', year = '', status = '', type = '', sort = '', __cytlexRequestId } = {}) {
       const order = sort || (q ? 'relevance' : 'followedCount');
       const orderKey = order === 'title-asc' || order === 'title-desc' ? 'title' : order;
       const direction = order === 'title-asc' ? 'asc' : 'desc';
@@ -92,7 +93,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
         year: year ? Number(year) : '',
         'originalLanguage[]': type === 'zh' ? ['zh', 'zh-hk'] : type,
         [`order[${orderKey}]`]: direction
-      }));
+      }), __cytlexRequestId);
 
       return {
         items: (data.data || []).map((item) => {

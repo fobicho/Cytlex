@@ -12,15 +12,15 @@ export default function createSource({ fetchText, parse }) {
 
   const text = (el, sel) => (el.querySelector(sel)?.textContent || '').replace(/\s+/g, ' ').trim();
 
-  const json = async (url) => {
+  const json = async (url, requestId) => {
     try {
-      return JSON.parse(await fetchText(url));
+      return JSON.parse(await fetchText(url, requestId));
     } catch {
       return null;
     }
   };
 
-  async function catalog({ q = '', genre = '', page: p = 1 } = {}) {
+  async function catalog({ q = '', genre = '', page: p = 1, __cytlexRequestId } = {}) {
     const params = new URLSearchParams({
       page: String(p),
       page_size: String(PAGE_SIZE)
@@ -28,7 +28,7 @@ export default function createSource({ fetchText, parse }) {
     if (q) params.set('query', q);
     if (genre) params.set('generos', genre);
 
-    const data = await json(`${base}/api/buscar_mangas/?${params}`);
+    const data = await json(`${base}/api/buscar_mangas/?${params}`, __cytlexRequestId);
     if (!data) return { items: [], totalPages: 1, totalText: '' };
 
     const items = (data.resultados || [])

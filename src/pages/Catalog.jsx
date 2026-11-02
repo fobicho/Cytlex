@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Search, Loader2, ChevronRight, ChevronLeft, CircleHelp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { withAdultGenreExclusions } from '../lib/adultGenreFilters.js';
-import { lastSearch, scrollMemory, rememberCover, catalogScroll, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
+import { lastSearch, scrollMemory, rememberCover, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import { clearSearchCoverCache, preloadSearchCover } from '../lib/covers.js';
 import MangaCard from '../components/MangaCard.jsx';
 import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
@@ -233,6 +233,7 @@ let activeSearchRun = 0;
 
 export default function Catalog({ tutorialPreview = false }) {
   const loc = useLocation();
+  const navigate = useNavigate();
   const [tab, setTab] = useState(() => {
     const t = new URLSearchParams(loc.search).get('tab');
     return t === 'mangas' || t === 'extensiones' || t === 'fuentes' ? t : sessionTab;
@@ -250,6 +251,9 @@ export default function Catalog({ tutorialPreview = false }) {
     setSources(enabledSources(!!s.showAdultExtensions));
   }), []);
   useEffect(() => { sessionTab = tab; }, [tab]);
+  useEffect(() => () => {
+    if (tab === 'fuentes') sourceCatalogState.requestRestore();
+  }, [tab]);
   useEffect(() => () => {
     if (tutorialPreview) sessionTab = 'mangas';
   }, [tutorialPreview]);
@@ -380,7 +384,30 @@ export default function Catalog({ tutorialPreview = false }) {
               <button
                 key={t.id}
                 type="button"
-                onClick={() => setTab(t.id)}
+                onClick={() => {
+                  if (active) {
+                    const main = document.querySelector('main');
+                    if (t.id === 'fuentes' && main?.querySelector('[data-source-catalog-active="true"]')) {
+                      window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
+                    }
+                    if (t.id === 'mangas') {
+                      setQ('');
+                      lastSearch.q = '';
+                      lastSearch.genre = '';
+                      lastSearch.results = null;
+                      setResults(null);
+                    }
+                    main?.scrollTo({ top: 0, behavior: 'smooth' });
+                    return;
+                  }
+                  setTab(t.id);
+                  const params = new URLSearchParams(loc.search);
+                  params.set('tab', t.id);
+                  params.delete('source');
+                  params.delete('q');
+                  params.delete('quick');
+                  navigate({ pathname: loc.pathname, search: `?${params}` }, { replace: true });
+                }}
                 className={cn(
                   'relative font-medium transition-colors',
                   active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
