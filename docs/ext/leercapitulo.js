@@ -210,11 +210,11 @@ export default function createSource({ fetchText, parse, head }) {
     return pages;
   }
 
-  async function catalog({ q = '', genre = '', page = 1, __cytlexRequestId } = {}) {
+  async function catalog({ q = '', genre = '', sort = 'az', page = 1, __cytlexRequestId } = {}) {
     const params = new URLSearchParams();
     if (q) params.set('q', q);
     if (genre) params.set('genre', genre);
-    params.set('sort', 'az');
+    params.set('sort', sort === 'za' ? 'za' : 'az');
     if (page > 1) params.set('page', String(page));
     const url = `${BASE}/manga/?${params.toString()}`;
 

@@ -611,7 +611,12 @@ const Detail = memo(function Detail({ locationOverride, activeRef }) {
     : [];
   const chaptersToMark = chaptersBefore.filter((chapter) => !progress.get(chapter.url, sourceId)?.read);
 
-  const pendiente = ordered.find((c) => !progress.get(c.url, sourceId)?.read) || ordered[0] || null;
+  const chaptersOldestFirst = [...d.chapters].sort((a, b) => byNumber(a, b, 1));
+  const mangaStatus = norm(d.facts.estado || d.facts.status).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const isCompleted = /finaliz|complet|concluid|terminad|finished|ended/.test(mangaStatus);
+  const pendiente = isCompleted
+    ? chaptersOldestFirst.at(-1) || null
+    : chaptersOldestFirst.find((c) => !progress.get(c.url, sourceId)?.read) || chaptersOldestFirst[0] || null;
   const cap = pendiente ? progress.get(pendiente.url, sourceId) : null;
   const enMarcha = !!(cap && !cap.read && Number.isInteger(cap.page));
   const resume = pendiente ? { ...pendiente, cap } : null;

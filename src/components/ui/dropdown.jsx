@@ -11,8 +11,12 @@ export function Dropdown({
   ariaLabel,
   placeholder = '',
   className,
+  buttonClassName,
+  buttonStyle,
   menuClassName,
   portal,
+  menuWidth,
+  menuMaxHeight = 256,
   style,
   scale = 1
 }) {
@@ -27,7 +31,9 @@ export function Dropdown({
     const el = btnRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    setPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    const width = menuWidth ? Math.min(r.width, window.innerWidth - 16) : r.width;
+    const left = menuWidth ? Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) : r.left;
+    setPos({ top: r.bottom + 4, left, width });
   };
 
   useLayoutEffect(() => {
@@ -69,9 +75,9 @@ export function Dropdown({
     <div
       role="listbox"
       style={{
-        ...(portal && pos ? { top: pos.top, left: pos.left, minWidth: pos.width } : null),
+        ...(portal && pos ? { top: pos.top, left: pos.left, ...(menuWidth ? { width: pos.width, minWidth: pos.width } : { minWidth: pos.width }) } : null),
         marginTop: px(4, scale, 3),
-        maxHeight: px(256, scale, 200),
+        maxHeight: px(menuMaxHeight, scale, 200),
         fontSize: px(14, scale, 12)
       }}
       className={cn(
@@ -84,7 +90,7 @@ export function Dropdown({
         ref={listRef}
         className="dd-scroll overflow-y-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/40 [&::-webkit-scrollbar-thumb:hover]:bg-primary/60"
         style={{
-          maxHeight: px(256, scale, 200),
+          maxHeight: px(menuMaxHeight, scale, 200),
           padding: `${px(4, scale, 3)} ${px(4, scale, 3)} ${px(4, scale, 3)} ${px(4, scale, 3)}`
         }}
       >
@@ -127,14 +133,15 @@ export function Dropdown({
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center rounded-lg border border-border bg-background text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn('flex items-center rounded-lg border border-border bg-background text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', buttonClassName)}
         style={{
           gap: px(8, scale, 6),
           height: px(32, scale, 27),
           width: '100%',
           paddingLeft: px(12, scale, 10),
           paddingRight: px(10, scale, 8),
-          fontSize: px(14, scale, 12)
+          fontSize: px(14, scale, 12),
+          ...buttonStyle
         }}
       >
         <span className="min-w-0 flex-1 truncate text-left">{current ? current.label : placeholder}</span>

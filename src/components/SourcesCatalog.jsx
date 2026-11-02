@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Filter, Loader2, Search, X } from 'lucide-react';
+import { ArrowLeft, ArrowUpDown, Filter, Loader2, Search, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import VirtualMangaGrid from './VirtualMangaGrid.jsx';
 import { SourceBadge } from './SourceBadge.jsx';
@@ -237,7 +237,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         if (!active) return;
         (result.items || []).forEach((item) => rememberCover(item.url, item.cover, sourceId));
         setItems(result.items || []);
-        setLoadedParams({ q: '' });
+        setLoadedParams({ q: '', ...(sourceId === 'leercapitulo' ? { sort: 'az' } : {}) });
         setPage(1);
         setHasMore(result.hasMore ?? (result.totalPages > 1));
       } catch (loadError) {
@@ -273,14 +273,20 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     return () => main.removeEventListener('scroll', save);
   }, [active, sourceId]);
 
-  const search = () => loadCatalog(sourceId, { q: query.trim(), ...filterValues });
+  const search = () => loadCatalog(sourceId, {
+    q: query.trim(),
+    ...filterValues,
+    ...(sourceId === 'leercapitulo' ? { sort: loadedParams.sort || 'az' } : {})
+  });
   const hasActiveFilters = !!query.trim() || Object.values(filterValues).some((value) => Array.isArray(value) ? value.length > 0 : Boolean(value));
   const reset = () => {
     setQuery('');
     setFilterValues({});
     setFiltersOpen(false);
-    loadCatalog(sourceId, { q: '' });
+    loadCatalog(sourceId, { q: '', ...(sourceId === 'leercapitulo' ? { sort: loadedParams.sort || 'az' } : {}) });
   };
+  const leercapituloSort = loadedParams.sort === 'za' ? 'za' : 'az';
+  const genreFilter = sourceId === 'leercapitulo' ? filters.find((filter) => filter.id === 'genre') : null;
   const filterGroups = useMemo(() => {
     const groupFor = (filter) => {
       if (filter.group) return filter.group;
@@ -345,6 +351,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           onChange={(value) => setFilterValues((current) => ({ ...current, [filter.id]: value }))}
           ariaLabel={filter.label}
           placeholder={filter.placeholder || `Selecciona ${filter.label.toLocaleLowerCase()}`}
+          menuMaxHeight={sourceId === 'leercapitulo' && filter.id === 'genre' ? 288 : 256}
           style={{ width: '100%' }}
           options={(filter.options || []).map((option) => typeof option === 'string' ? { value: option, label: option } : option)}
         />
@@ -414,67 +421,104 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
             <SourceBadge m={selected.manifest} style={{ width: px(30, scale, 24), height: px(30, scale, 24) }} />
             <div className="relative flex min-w-0 items-center" style={{ gap: px(10, scale, 8) }}>
               <h2 className="min-w-0 truncate font-semibold" style={{ maxWidth: px(520, scale, 260), fontSize: px(16, scale, 13) }}>{selected.manifest.name}</h2>
-              {filters.length > 0 && (
+              {sourceId === 'leercapitulo' && (
                 <>
-                  <Button type="button" variant="outline" className="shrink-0" onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen} aria-controls="source-filters" style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
-                    <Filter className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
-                    Filtros
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => {
+                      const sort = leercapituloSort === 'az' ? 'za' : 'az';
+                      loadCatalog(sourceId, { ...loadedParams, q: query.trim(), ...filterValues, sort });
+                    }}
+                    disabled={loading}
+                    title={`Orden actual: ${leercapituloSort.toUpperCase()}. Cambiar a ${leercapituloSort === 'az' ? 'Z-A' : 'A-Z'}`}
+                    style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9), marginLeft: px(4, scale, 3) }}
+                  >
+                    <ArrowUpDown className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    {leercapituloSort === 'az' ? 'A-Z' : 'Z-A'}
                   </Button>
-                  <AnimatePresence initial={false}>
-                    {filtersOpen && (
-                      <motion.div
-                        id="source-filters"
-                        key="source-filters"
-                        initial={{ opacity: 0, y: -4, scale: 0.98 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: -4, scale: 0.98 }}
-                        transition={{ duration: reduceMotion ? 0 : 0.16, ease: [0.22, 1, 0.36, 1] }}
-                        className="absolute left-0 top-full z-50 overflow-hidden rounded-xl border border-border bg-card p-3 shadow-xl"
-                        style={{ width: px(360, scale, 300), maxWidth: 'calc(100vw - 32px)', marginTop: px(8, scale, 6), transformOrigin: 'top left' }}
-                      >
-                        <div className="grid grid-cols-1 items-start" style={{ gap: px(14, scale, 10) }}>
-                          {filterGroups.primary.length > 0 && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5" style={{ gap: px(12, scale, 9) }}>
-                              {filterGroups.primary.map(renderFilter)}
-                            </div>
-                          )}
-                          {filterGroups.genres.length > 0 && (
-                            <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2" style={{ gap: px(12, scale, 9) }}>
-                              {filterGroups.genres.map(renderFilter)}
-                            </div>
-                          )}
-                          {filterGroups.sorting.length > 0 && (
-                            <div className="flex flex-wrap items-end justify-end" style={{ gap: px(10, scale, 7) }}>
-                              {filterGroups.sorting.map((filter) => <div key={filter.id} className="w-full sm:w-[180px]" style={{ maxWidth: '100%' }}>{renderFilter(filter)}</div>)}
-                              <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
-                                <Button type="button" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
-                                <Button type="button" variant="ghost" size="sm" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
-                                  <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
-                                  Limpiar
-                                </Button>
-                              </div>
-                            </div>
-                          )}
-                          {filterGroups.other.length > 0 && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(170px,1fr))]" style={{ gap: px(12, scale, 9) }}>
-                              {filterGroups.other.map(renderFilter)}
-                            </div>
-                          )}
-                          {filterGroups.sorting.length === 0 && (
-                            <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
-                              <Button type="button" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
-                              <Button type="button" variant="ghost" size="sm" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
-                                <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
-                                Limpiar
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                  {genreFilter?.options?.length > 0 && (
+                    <Dropdown
+                      scale={scale}
+                      value={filterValues.genre || ''}
+                      options={genreFilter.options}
+                      ariaLabel="Filtrar por género"
+                      placeholder="Género"
+                      menuMaxHeight={288}
+                      menuWidth={190}
+                      portal
+                      buttonClassName="rounded-md border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                      buttonStyle={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+                      style={{ width: px(190, scale, 160) }}
+                      onChange={(genre) => {
+                        setFilterValues((current) => ({ ...current, genre }));
+                        loadCatalog(sourceId, { ...loadedParams, q: query.trim(), ...filterValues, genre, sort: leercapituloSort });
+                      }}
+                    />
+                  )}
                 </>
               )}
+              {sourceId !== 'leercapitulo' && filters.length > 0 && (
+                <Button type="button" variant="outline" className="shrink-0" onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen} aria-controls="source-filters" style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
+                  <Filter className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
+                  Filtros
+                </Button>
+              )}
+              <AnimatePresence initial={false}>
+                {sourceId !== 'leercapitulo' && filtersOpen && filters.length > 0 && (
+                  <motion.div
+                    id="source-filters"
+                    key="source-filters"
+                    initial={{ opacity: 0, y: -4, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                    transition={{ duration: reduceMotion ? 0 : 0.16, ease: [0.22, 1, 0.36, 1] }}
+                    className="absolute left-0 top-full z-50 rounded-xl border border-border bg-card p-3 shadow-xl"
+                    style={{ width: px(360, scale, 300), maxWidth: 'calc(100vw - 32px)', marginTop: px(8, scale, 6), transformOrigin: 'top left' }}
+                  >
+                    <div className="grid grid-cols-1 items-start" style={{ gap: px(14, scale, 10) }}>
+                      {filterGroups.primary.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5" style={{ gap: px(12, scale, 9) }}>
+                          {filterGroups.primary.map(renderFilter)}
+                        </div>
+                      )}
+                      {filterGroups.genres.length > 0 && (
+                        <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2" style={{ gap: px(12, scale, 9) }}>
+                          {filterGroups.genres.map(renderFilter)}
+                        </div>
+                      )}
+                      {filterGroups.sorting.length > 0 && (
+                        <div className="flex flex-wrap items-end justify-end" style={{ gap: px(10, scale, 7) }}>
+                          {filterGroups.sorting.map((filter) => <div key={filter.id} className="w-full sm:w-[180px]" style={{ maxWidth: '100%' }}>{renderFilter(filter)}</div>)}
+                          <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
+                            <Button type="button" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
+                            <Button type="button" variant="ghost" size="sm" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
+                              <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
+                              Limpiar
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      {filterGroups.other.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(170px,1fr))]" style={{ gap: px(12, scale, 9) }}>
+                          {filterGroups.other.map(renderFilter)}
+                        </div>
+                      )}
+                      {filterGroups.sorting.length === 0 && (
+                        <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
+                          <Button type="button" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
+                          <Button type="button" variant="ghost" size="sm" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
+                            <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
+                            Limpiar
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
 
@@ -514,7 +558,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
               <VirtualMangaGrid items={items} sourceId={sourceId} coverSize={cs} scale={scale} />
               {hasMore && (
                 <div className="flex flex-col items-center" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 8) }}>
-                  <Button variant="secondary" onClick={() => loadCatalog(sourceId, { q: query.trim(), ...filterValues }, true)} disabled={loadingMore}>
+                  <Button variant="secondary" onClick={() => loadCatalog(sourceId, { ...loadedParams, q: query.trim(), ...filterValues }, true)} disabled={loadingMore}>
                     {loadingMore && <Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />}
                     {loadingMore ? 'Cargando…' : 'Cargar más mangas'}
                   </Button>
