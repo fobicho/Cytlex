@@ -412,11 +412,74 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
               <ArrowLeft style={{ width: px(18, scale, 15), height: px(18, scale, 15) }} />
             </Button>
             <SourceBadge m={selected.manifest} style={{ width: px(30, scale, 24), height: px(30, scale, 24) }} />
-            <h2 className="min-w-0 truncate font-semibold" style={{ fontSize: px(16, scale, 13) }}>{selected.manifest.name}</h2>
+            <div className="relative flex min-w-0 items-center" style={{ gap: px(10, scale, 8) }}>
+              <h2 className="min-w-0 truncate font-semibold" style={{ maxWidth: px(520, scale, 260), fontSize: px(16, scale, 13) }}>{selected.manifest.name}</h2>
+              {filters.length > 0 && (
+                <>
+                  <Button type="button" variant="outline" className="shrink-0" onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen} aria-controls="source-filters" style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
+                    <Filter className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
+                    Filtros
+                  </Button>
+                  <AnimatePresence initial={false}>
+                    {filtersOpen && (
+                      <motion.div
+                        id="source-filters"
+                        key="source-filters"
+                        initial={{ opacity: 0, y: -4, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                        transition={{ duration: reduceMotion ? 0 : 0.16, ease: [0.22, 1, 0.36, 1] }}
+                        className="absolute left-0 top-full z-50 overflow-hidden rounded-xl border border-border bg-card p-3 shadow-xl"
+                        style={{ width: px(360, scale, 300), maxWidth: 'calc(100vw - 32px)', marginTop: px(8, scale, 6), transformOrigin: 'top left' }}
+                      >
+                        <div className="grid grid-cols-1 items-start" style={{ gap: px(14, scale, 10) }}>
+                          {filterGroups.primary.length > 0 && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5" style={{ gap: px(12, scale, 9) }}>
+                              {filterGroups.primary.map(renderFilter)}
+                            </div>
+                          )}
+                          {filterGroups.genres.length > 0 && (
+                            <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2" style={{ gap: px(12, scale, 9) }}>
+                              {filterGroups.genres.map(renderFilter)}
+                            </div>
+                          )}
+                          {filterGroups.sorting.length > 0 && (
+                            <div className="flex flex-wrap items-end justify-end" style={{ gap: px(10, scale, 7) }}>
+                              {filterGroups.sorting.map((filter) => <div key={filter.id} className="w-full sm:w-[180px]" style={{ maxWidth: '100%' }}>{renderFilter(filter)}</div>)}
+                              <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
+                                <Button type="button" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
+                                <Button type="button" variant="ghost" size="sm" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
+                                  <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
+                                  Limpiar
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                          {filterGroups.other.length > 0 && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(170px,1fr))]" style={{ gap: px(12, scale, 9) }}>
+                              {filterGroups.other.map(renderFilter)}
+                            </div>
+                          )}
+                          {filterGroups.sorting.length === 0 && (
+                            <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
+                              <Button type="button" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
+                              <Button type="button" variant="ghost" size="sm" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
+                                <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
+                                Limpiar
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </>
+              )}
+            </div>
           </div>
 
           <div className="rounded-xl border border-border bg-card" style={{ width: searchWidth, maxWidth: '100%', padding: px(12, scale, 9) }}>
-            <form className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center" onSubmit={(event) => { event.preventDefault(); if (query.trim()) search(); }} style={{ gap: px(8, scale, 6) }}>
+            <form className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center" onSubmit={(event) => { event.preventDefault(); if (query.trim()) search(); }} style={{ gap: px(8, scale, 6) }}>
               <div className="relative min-w-0 flex-1">
                 <Search
                   className="absolute top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -435,66 +498,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                 <Search className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
                 Buscar
               </Button>
-              {filters.length > 0 && (
-                <Button type="button" variant="outline" onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen} aria-controls="source-filters" style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
-                  <Filter className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
-                  Filtros
-                </Button>
-              )}
             </form>
 
-            <AnimatePresence initial={false}>
-              {filtersOpen && filters.length > 0 && (
-                <motion.div
-                  id="source-filters"
-                  key="source-filters"
-                  initial={{ height: 0, opacity: 0, borderTopWidth: 0 }}
-                  animate={{ height: 'auto', opacity: 1, marginTop: px(12, scale, 9), paddingTop: px(12, scale, 9), borderTopWidth: 1 }}
-                  exit={{ height: 0, opacity: 0, marginTop: 0, paddingTop: 0, borderTopWidth: 0 }}
-                  transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
-                  className="overflow-hidden border-t border-border/70"
-                >
-                  <div className="grid grid-cols-1 items-start" style={{ gap: px(14, scale, 10) }}>
-                    {filterGroups.primary.length > 0 && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5" style={{ gap: px(12, scale, 9) }}>
-                        {filterGroups.primary.map(renderFilter)}
-                      </div>
-                    )}
-                    {filterGroups.genres.length > 0 && (
-                      <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2" style={{ gap: px(12, scale, 9) }}>
-                        {filterGroups.genres.map(renderFilter)}
-                      </div>
-                    )}
-                    {filterGroups.sorting.length > 0 && (
-                      <div className="flex flex-wrap items-end justify-end" style={{ gap: px(10, scale, 7) }}>
-                        {filterGroups.sorting.map((filter) => <div key={filter.id} className="w-full sm:w-[180px]" style={{ maxWidth: '100%' }}>{renderFilter(filter)}</div>)}
-                        <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
-                          <Button type="button" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
-                          <Button type="button" variant="ghost" size="sm" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
-                            <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
-                            Limpiar
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                    {filterGroups.other.length > 0 && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(170px,1fr))]" style={{ gap: px(12, scale, 9) }}>
-                        {filterGroups.other.map(renderFilter)}
-                      </div>
-                    )}
-                    {filterGroups.sorting.length === 0 && (
-                      <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
-                        <Button type="button" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
-                        <Button type="button" variant="ghost" size="sm" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
-                          <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
-                          Limpiar
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
           </div>
 
           {error ? (

@@ -233,9 +233,9 @@ export default function createSource({ fetchText, parse, head }) {
   async function catalogFilters() {
     const doc = parse(await fetchText(BASE));
     const genres = new Map();
-    for (const link of doc.querySelectorAll('a[href*="/genre/"]')) {
+    for (const link of doc.querySelectorAll('a[href*="genre="]')) {
       const url = new URL(link.getAttribute('href') || '', BASE);
-      const slug = url.pathname.match(/\/genre\/([^/]+)/)?.[1];
+      const slug = url.searchParams.get('genre') || url.pathname.match(/\/genre\/([^/]+)/)?.[1];
       const label = (link.textContent || '').replace(/\s+/g, ' ').trim();
       if (slug && label && !genres.has(slug)) genres.set(slug, { value: slug, label });
     }
