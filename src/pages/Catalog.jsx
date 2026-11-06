@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { Search, Loader2, ChevronRight, ChevronLeft, CircleHelp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
-import { extensions, isAdultExtension } from '../lib/extensions.js';
 import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { lastSearch, scrollMemory, rememberCover, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
