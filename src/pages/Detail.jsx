@@ -6,7 +6,7 @@ import { lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { reconcileMihonProgress } from '../lib/mihonProgress.js';
 import { extensions, isExtensionAllowed } from '../lib/extensions.js';
-import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover } from '../lib/covers.js';
+import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { cn } from '../lib/utils.js';
@@ -177,6 +177,17 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     setFailedCover('');
   }, [coverSrc]);
   const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
+  const proxyCover = requiresImageProxy(finalCover);
+  useEffect(() => {
+    if (!proxyCover || !finalCover) return undefined;
+    let alive = true;
+    preloadLibraryCover(finalCover).then((local) => {
+      if (!alive) return;
+      if (local) setDisplayedCover({ key: coverKey, src: local });
+      else setFailedCover(finalCover);
+    });
+    return () => { alive = false; };
+  }, [coverKey, finalCover, proxyCover]);
   const coverImg = (alt) => (
     <>
       {visibleCover && visibleCover !== finalCover && (
@@ -187,7 +198,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           referrerPolicy="no-referrer"
         />
       )}
-      {finalCover && failedCover !== finalCover && (
+      {finalCover && !proxyCover && failedCover !== finalCover && (
         <img
           className="absolute inset-0 w-full h-full object-cover"
           src={finalCover}

@@ -704,12 +704,13 @@ ipcMain.handle('image:fetch', async (_e, url) => {
   try {
     const parsed = validateUrl(url);
     const urlStr = parsed.toString();
+    const host = parsed.hostname.toLowerCase();
+    const mangaDexImage = host === 'uploads.mangadex.org';
+    const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1' };
+    if (!mangaDexImage) headers.Referer = refererFor(urlStr);
     const res = await requestPublic(urlStr, {
       method: 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
-        Referer: refererFor(urlStr)
-      },
+      headers,
       timeout: HTTP_GET_TIMEOUT_MS
     });
     if (res.statusCode < 200 || res.statusCode >= 300) return null;

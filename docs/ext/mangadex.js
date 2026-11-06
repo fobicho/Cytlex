@@ -3,7 +3,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
   const site = 'https://mangadex.org';
   const coverBase = 'https://uploads.mangadex.org/covers';
   const pageSize = 20;
-  const chapterPageSize = 100;
+  const chapterPageSize = 500;
   const ratings = ['safe', 'suggestive', 'erotica', 'pornographic'];
   const types = { ja: 'Manga', ko: 'Manhwa', zh: 'Manhua', 'zh-hk': 'Manhua' };
   const requestInterval = 500;
@@ -171,8 +171,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
         let offset = 0;
         let total = Infinity;
         while (offset < total) {
-          const page = await json(requestUrl('/chapter', {
-            manga: mangaId,
+          const page = await json(requestUrl(`/manga/${mangaId}/feed`, {
             limit: chapterPageSize,
             offset,
             'translatedLanguage[]': getLanguages(),

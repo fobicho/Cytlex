@@ -79,7 +79,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
         : preloadSearchCover(preferredCover);
       prepare.then((local) => {
         if (alive && loadedCoverKey.current !== preferredCover) {
-          setCoverState({ key: preferredCover, src: local || preferredCover });
+          setCoverState({ key: preferredCover, src: local || (proxyCover ? '' : preferredCover) });
         }
       });
       return () => { alive = false; };

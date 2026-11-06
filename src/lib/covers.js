@@ -8,7 +8,7 @@ const MAX_LIBRARY_COVER_LOADS = 4;
 const LIBRARY_COVER_DB = 'cytlex-library-covers';
 const LIBRARY_COVER_STORE = 'covers';
 const MAX_PERSISTED_LIBRARY_COVERS = 500;
-const PROXIED_IMAGE_HOSTS = ['plotnofansub.com'];
+const PROXIED_IMAGE_HOSTS = ['plotnofansub.com', 'uploads.mangadex.org'];
 const searchCoverCache = new Map();
 const loadedSearchCovers = new Set();
 const decodedSearchCovers = new Map();
@@ -29,6 +29,12 @@ export function requiresImageProxy(url) {
   } catch {
     return false;
   }
+}
+
+function persistedCoverKey(url) {
+  return requiresImageProxy(url) && new URL(url).hostname.toLowerCase().endsWith('mangadex.org')
+    ? `mangadex-cover-v2:${url}`
+    : url;
 }
 
 function pruneSearchCoverCache() {
@@ -108,7 +114,7 @@ async function readPersistedLibraryCover(url) {
   try {
     const db = await openLibraryCoverDb();
     if (!db) return null;
-    const record = await idbRequest(db.transaction(LIBRARY_COVER_STORE, 'readonly').objectStore(LIBRARY_COVER_STORE).get(url));
+    const record = await idbRequest(db.transaction(LIBRARY_COVER_STORE, 'readonly').objectStore(LIBRARY_COVER_STORE).get(persistedCoverKey(url)));
     if (!record?.blob) return null;
     const cached = libraryCoverCache.get(url);
     if (typeof cached === 'string') return cached;
@@ -131,7 +137,7 @@ async function persistLibraryCover(url, blob, version) {
     if (!db) return;
     if ((libraryCoverVersions.get(url) || 0) !== version) return;
     const store = db.transaction(LIBRARY_COVER_STORE, 'readwrite').objectStore(LIBRARY_COVER_STORE);
-    store.put({ url, blob, usedAt: Date.now() });
+    store.put({ url: persistedCoverKey(url), blob, usedAt: Date.now() });
     const count = await idbRequest(store.count());
     if (count <= MAX_PERSISTED_LIBRARY_COVERS) return;
     const records = await idbRequest(db.transaction(LIBRARY_COVER_STORE, 'readonly').objectStore(LIBRARY_COVER_STORE).getAll());
@@ -164,6 +170,8 @@ export async function invalidateLibraryCovers(urls) {
       URL.revokeObjectURL(cached);
     }
     transaction?.objectStore(LIBRARY_COVER_STORE).delete(url);
+    const storageKey = persistedCoverKey(url);
+    if (storageKey !== url) transaction?.objectStore(LIBRARY_COVER_STORE).delete(storageKey);
   });
   if (transaction) {
     await new Promise((resolve) => {
@@ -272,7 +280,10 @@ export function discardLibraryCover(url, objectUrl) {
   openLibraryCoverDb().then((db) => {
     if (!db) return;
     try {
-      db.transaction(LIBRARY_COVER_STORE, 'readwrite').objectStore(LIBRARY_COVER_STORE).delete(url);
+      const store = db.transaction(LIBRARY_COVER_STORE, 'readwrite').objectStore(LIBRARY_COVER_STORE);
+      store.delete(url);
+      const storageKey = persistedCoverKey(url);
+      if (storageKey !== url) store.delete(storageKey);
     } catch {}
   });
 }

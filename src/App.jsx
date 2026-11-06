@@ -88,6 +88,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   const [quickSearchQuery, setQuickSearchQuery] = useState('');
   const [quickSearchPoint, setQuickSearchPoint] = useState(() => quickSearchPosition(window.innerWidth / 2, window.innerHeight / 2));
   const quickSearchInput = useRef(null);
+  const quickSearchPanel = useRef(null);
   const pointerPosition = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
   const reduceMotion = useReducedMotion();
   const initialLibraryCheck = useRef(false);
@@ -245,6 +246,15 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   }, [quickSearchOpen]);
 
   useEffect(() => {
+    if (!quickSearchOpen) return undefined;
+    const closeOnOutsidePointer = (event) => {
+      if (!quickSearchPanel.current?.contains(event.target)) setQuickSearchOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer, true);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer, true);
+  }, [quickSearchOpen]);
+
+  useEffect(() => {
     const onMove = (e) => {
       pointerPosition.current = { x: e.clientX, y: e.clientY };
     };
@@ -352,6 +362,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
           >
             <div style={{ transform: 'translate(-50%, calc(-100% - 8px))' }}>
               <motion.div
+                ref={quickSearchPanel}
                 role="search"
                 aria-label="Búsqueda rápida de mangas"
                 initial={{ opacity: 0, transform: reduceMotion ? 'scale(1)' : 'scale(.94)' }}
