@@ -2109,7 +2109,16 @@ export default function Settings({ tutorialPreview = false }) {
                   ? [...current, rating]
                   : current.filter((value) => value !== rating))}
               />
-              <span className="font-medium" style={{ fontSize: px(14, scale, 12) }}>{rating}</span>
+              <span className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
+                {rating}{' '}
+                <span className="font-normal text-muted-foreground">
+                  ({rating === 'SAFE'
+                    ? 'sin contenido para adultos'
+                    : rating === 'MIXED'
+                      ? 'puede incluir contenido para adultos'
+                      : 'contenido sexual explícito para adultos'})
+                </span>
+              </span>
             </label>
           ))}
         </div>

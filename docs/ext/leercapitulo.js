@@ -13,6 +13,8 @@ const text = (el, sel) => (el.querySelector(sel)?.textContent || '').replace(/\s
 
 function highestResolutionImage(img) {
   if (!img) return '';
+  const linkedImage = img.closest?.('a[href]')?.getAttribute('href') || '';
+  if (/\.(?:avif|gif|jpe?g|png|webp)(?:[?#]|$)/i.test(linkedImage)) return linkedImage;
   const picture = img.closest('picture');
   const srcsets = [
     ...[...(picture?.querySelectorAll('source[srcset], source[data-srcset]') || [])]
@@ -93,7 +95,7 @@ export default function createSource({ fetchText, parse, head }) {
     return {
       title: text(el, '.lc-card-name'),
       url: abs(link?.getAttribute('href')),
-      cover: abs(img?.getAttribute('src')),
+      cover: abs(highestResolutionImage(img)),
       author: text(el, '.lc-card-author, .lc-author, [class*="author"]'),
       type: text(el, '.lc-card-badge'),
       lastChapter: text(el, '.lc-chapter-link'),

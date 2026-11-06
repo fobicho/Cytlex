@@ -186,14 +186,13 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     setLangConfig({ ...cfg });
     extensions.invalidate(subId);
   };
-  const visibleInstalled = installed.filter((record) => isExtensionAllowed(record.manifest, showAdultExtensions));
   const visibleAvailable = available?.filter((manifest) => isExtensionAllowed(manifest, showAdultExtensions));
   const installedById = new Map(installed.map((record) => [record.manifest.id, record.manifest]));
   const visibleUpdates = updates.filter((update) => {
     const manifest = installedById.get(update.id);
     return manifest && isExtensionAllowed(manifest, showAdultExtensions) && isNewer(update.to, manifest.version);
   });
-  const sortedInstalled = [...visibleInstalled].sort((a, b) => {
+  const sortedInstalled = [...installed].sort((a, b) => {
     if (sortBy === 'added') return (a.installedAt || 0) - (b.installedAt || 0);
     const order = String(a.manifest.name || '').localeCompare(String(b.manifest.name || ''), 'es', { sensitivity: 'base', numeric: true });
     return sortBy === 'title-desc' ? -order : order;
@@ -748,7 +747,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             face="（・_・）"
             title="No hay extensiones instaladas"
           />
-        ) : visibleInstalled.length > 0 ? (
+        ) : installed.length > 0 ? (
           <div className="grid">
           <div className="invisible col-start-1 row-start-1 pointer-events-none" aria-hidden="true">
             <EmptyState compact face="（・_・）" title="No hay extensiones instaladas" animateFace={false} />

@@ -2,7 +2,7 @@ const BASE = 'https://inmanga.com';
 const CHAPTERS = `${BASE}/chapter/getall`;
 const PAGE_LIST = `${BASE}/chapter/chapterIndexControls`;
 const PAGES = 'https://pack-yak.intomanga.com/images/manga/ms/chapter/ch/page/p';
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 20;
 
 export default function createSource({ fetchText, fetchPostText, parse }) {
   const chapterCache = new Map();
@@ -35,7 +35,9 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
         ? srcsetCandidates.sort((a, b) => b.score - a.score)[0].url
         : srcsetCandidates.at(-1).url)
       : '';
+    const linkedImage = image.closest?.('a[href]')?.getAttribute('href') || '';
     const candidates = [
+      /\.(?:avif|gif|jpe?g|png|webp)(?:[?#]|$)/i.test(linkedImage) ? linkedImage : '',
       largestSrc,
       image.getAttribute('data-original'),
       image.getAttribute('data-original-src'),
