@@ -250,7 +250,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
       };
     }
 
-    async function chapter(url, { failedPage = '' } = {}) {
+    async function chapter(url) {
       const parsed = new URL(url, site);
       const id = parsed.pathname.split('/').filter(Boolean).at(-1);
       if (!id) throw new Error('No se pudo identificar el capítulo de MangaDex.');
@@ -258,13 +258,9 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
       const label = parsed.searchParams.get('label') || 'Capítulo';
       const data = await json(`${api}/at-home/server/${id}`);
       const chapter = data.chapter || {};
-      const serverBaseUrl = String(data.baseUrl || 'https://uploads.mangadex.org').replace(/\/$/, '');
-      let baseUrl = serverBaseUrl;
-      if (failedPage) {
-        try {
-          const failedHost = new URL(failedPage).hostname;
-          baseUrl = failedHost === 'uploads.mangadex.org' ? serverBaseUrl : 'https://uploads.mangadex.org';
-        } catch {}
+      const baseUrl = String(data.baseUrl || '').replace(/\/$/, '');
+      if (!baseUrl || !chapter.hash || !Array.isArray(chapter.data)) {
+        throw new Error('MangaDex no devolvió una asignación válida para las páginas del capítulo.');
       }
       const pages = (chapter.data || []).map((file) => `${baseUrl}/data/${chapter.hash}/${file}`);
 

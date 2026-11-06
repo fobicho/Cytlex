@@ -210,7 +210,7 @@ export const api = {
     return findManga(src, url, title, author);
   },
 
-  async chapter(url, sourceId, { fresh = false, failedPage } = {}) {
+  async chapter(url, sourceId, { fresh = false } = {}) {
     if (!extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
     assertSourceEnabled(sourceId);
     const key = chapterKey(url, sourceId);
@@ -225,7 +225,7 @@ export const api = {
       if (chapterRequests.has(key)) return chapterRequests.get(key);
     }
 
-    const request = resolveSource(sourceId).then((src) => src.chapter(url, { failedPage }));
+    const request = resolveSource(sourceId).then((src) => src.chapter(url));
     chapterRequests.set(key, request);
     try {
       const value = await request;

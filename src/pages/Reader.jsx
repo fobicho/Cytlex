@@ -99,7 +99,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const [chReload, setChReload] = useState(0);
   const reloadTimerRef = useRef(null);
   const reloadCountRef = useRef(0);
-  const failedPageRef = useRef('');
   const [err, setErr] = useState('');
   const [mode, setMode] = useState(() => {
     try {
@@ -292,9 +291,8 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     if (src && img.naturalWidth) sizesRef.current.set(src, { w: img.naturalWidth, h: img.naturalHeight });
   };
 
-  const scheduleReload = (failedPage = '') => {
+  const scheduleReload = () => {
     if (reloadTimerRef.current || reloadCountRef.current >= 3) return;
-    failedPageRef.current = failedPage;
     reloadTimerRef.current = setTimeout(() => {
       reloadTimerRef.current = null;
       reloadCountRef.current += 1;
@@ -306,7 +304,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     if (!chReload || !chapterUrl) return undefined;
     let active = true;
     setPgLoaded(false);
-    api.chapter(chapterUrl, sourceId, { fresh: true, failedPage: failedPageRef.current })
+    api.chapter(chapterUrl, sourceId, { fresh: true })
       .then((r) => { if (active && chUrl === chapterUrl) setCh(r); })
       .catch(() => {});
     return () => { active = false; };
@@ -1002,7 +1000,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                            setPgLoaded(true);
                          }
                        }}
-                       onFailed={(src) => { if (idx === page) { setPgLoaded(true); scheduleReload(src); } }}
+                       onFailed={() => { if (idx === page) { setPgLoaded(true); scheduleReload(); } }}
                        wrapperClassName={cn('grid-rows-[minmax(0,1fr)] h-full min-h-0 min-w-0 flex-1', idx === indices[indices.length - 1] && 'translate-x-[6px]')}
                        imageClassName={cn('block object-contain max-w-full', mode !== 'vertical' && wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                        imageStyle={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto' }}
@@ -1024,7 +1022,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                   }
                   setPgLoaded(true);
                 }}
-                onFailed={(src) => { setPgLoaded(true); scheduleReload(src); }}
+                onFailed={() => { setPgLoaded(true); scheduleReload(); }}
                 wrapperClassName="grid-rows-[minmax(0,1fr)] h-full min-h-0 w-full"
                 imageClassName={cn('block max-w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                 imageStyle={{ ...pageStyle, maxHeight: '100%', height: 'auto' }}
