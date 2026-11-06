@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Link2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { lib } from '../lib/library.js';
@@ -79,7 +81,10 @@ function useBackTo() {
   return from === 'explorar' ? '/explorar' : '/biblioteca';
 }
 
+
 export default function Detail() {
+
+  const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const navigate = useNavigate();
   const loc = useLocation();
   const mangaUrl = useQueryUrl();
@@ -114,7 +119,6 @@ export default function Detail() {
   const catMenuRef = useRef(null);
   const coverRef = useRef(null);
   const synRef = useRef(null);
-  const detailScrollEffectMangaRef = useRef('');
   const [availH, setAvailH] = useState(0);
   const [fullH, setFullH] = useState(0);
   const [animate, setAnimate] = useState(false);
@@ -157,6 +161,21 @@ export default function Detail() {
 
   const [coverError, setCoverError] = useState(false);
   useEffect(() => { setCoverError(false); }, [coverSrc]);
+  
+  const coverKey = `${sourceId}|${mangaUrl}`;
+  const [displayedCover, setDisplayedCover] = useState(() => ({
+    key: coverKey,
+    src: hasLibraryCoverLoaded(coverSrc) ? coverSrc : ''
+  }));
+  const [failedCover, setFailedCover] = useState('');
+  const visibleCover = displayedCover.key === coverKey
+    ? displayedCover.src
+    : (hasLibraryCoverLoaded(coverSrc) ? coverSrc : '');
+  useEffect(() => {
+    setCoverError(false);
+    setFailedCover('');
+  }, [coverSrc]);
+  
   const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
 
   const coverImg = (alt) => (
@@ -184,14 +203,13 @@ export default function Detail() {
 
   useEffect(() => {
     const main = document.querySelector('main');
+
     if (!main) return undefined;
 
-    const sameManga = detailScrollEffectMangaRef.current === mangaUrl;
+    if (!main || !active || !activeRef.current) return undefined;
+
     const requestedRestore = detailScroll.takeRestore(mangaUrl);
-    const saved = requestedRestore > 0
-      ? requestedRestore
-      : sameManga ? detailScroll.get(mangaUrl) : 0;
-    detailScrollEffectMangaRef.current = mangaUrl;
+    const saved = requestedRestore;
     let restoring = saved > 0;
     const apply = () => {
       const max = main.scrollHeight - main.clientHeight;
@@ -224,7 +242,7 @@ export default function Detail() {
       cover?.removeEventListener('load', apply);
       main.removeEventListener('scroll', save);
     };
-  }, [mangaUrl, d?.chapters?.length]);
+  }, [active, mangaUrl, d?.chapters?.length]);
   useEffect(
     () => tracking.subscribe(() => setAniLinked(!!tracking.get(mangaUrl, sourceId))),
     [mangaUrl, sourceId]
@@ -558,6 +576,7 @@ export default function Detail() {
         <div
           ref={coverRef}
           className="aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
+          className="relative aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
           style={{ width: `${coverSize}px` }}
         >
           {coverSrc ? (
@@ -1082,4 +1101,9 @@ export default function Detail() {
     </div>
   );
 }
+}, (previous, next) => previous.active === next.active
+  && previous.activeRef === next.activeRef
+  && previous.locationOverride.pathname === next.locationOverride.pathname
+  && previous.locationOverride.search === next.locationOverride.search);
 
+export default Detail;

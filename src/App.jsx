@@ -249,6 +249,26 @@ export default function App({ isVisible = true, tutorialMode = false }) {
             style={isReader ? undefined : { padding: `${Math.max(16, Math.round(24 * scale))}px` }}
           >
             <PageBoundary>
+              {catalogLocation && (
+                <div className={isExplorePage ? '' : 'hidden'} aria-hidden={!isExplorePage} inert={!isExplorePage}>
+                  <Catalog key={`cat-${resetTick}`} locationOverride={catalogLocation} tutorialPreview={tutorialMode} active={isExplorePage} />
+                </div>
+              )}
+              {DETAIL_ORIGINS.map((origin) => {
+                const active = isMangaPage && currentDetailOrigin === origin;
+                const detailLocation = active ? location : retainedDetailLocations[origin];
+                if (!detailLocation) return null;
+                return (
+                  <div key={origin} className={active ? '' : 'hidden'} aria-hidden={!active} inert={!active}>
+                    <Detail locationOverride={detailLocation} active={active} activeRef={detailActivityRefs.current[origin]} />
+                  </div>
+                );
+              })}
+              {shouldMountLibrary && (
+                <div className={isLibraryPage ? '' : 'hidden'} aria-hidden={!isLibraryPage} inert={!isLibraryPage}>
+                  <Library key={`lib-${resetTick}`} active={isLibraryPage} />
+                </div>
+              )}
               <Routes>
                 <Route path="/" element={<Navigate to="/biblioteca" replace />} />
                 <Route path="/biblioteca" element={<Library key={`lib-${resetTick}`} />} />
