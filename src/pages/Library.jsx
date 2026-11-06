@@ -6,7 +6,7 @@ import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
 import VirtualMangaGrid from '../components/VirtualMangaGrid.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
-import { extensions, isAdultExtension } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { checkLibrary } from '../lib/notify.js';
 import { progress } from '../lib/progress.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
@@ -135,21 +135,40 @@ chapterIndex.subscribe((change) => {
   persistUnreadCountCache();
 });
 
-function CachedLibraryCover({ cover, title, className }) {
+function CachedLibraryCover({ cover, title, className, cachedOnly = false, cachedCover = '' }) {
   const coverRef = useRef(null);
   const loadedCoverKey = useRef('');
   const proxyCover = requiresImageProxy(cover);
+  const localCachedCover = /^(data:|blob:)/i.test(cachedCover) ? cachedCover : '';
   const [coverState, setCoverState] = useState(() => ({
     key: cover,
-    src: getLibraryCover(cover) || (proxyCover ? '' : cover)
+    src: localCachedCover || getLibraryCover(cover) || (cachedOnly || proxyCover ? '' : cover)
   }));
   const src = coverState.key === cover
     ? coverState.src
-    : getLibraryCover(cover) || (proxyCover ? '' : cover);
+    : localCachedCover || getLibraryCover(cover) || (cachedOnly || proxyCover ? '' : cover);
 
   useEffect(() => {
     if (!/^https?:\/\//i.test(cover || '')) return undefined;
     let alive = true;
+    if (cachedOnly) {
+      const restoreCached = () => restoreLibraryCover(cover).then((local) => {
+        if (alive && local && loadedCoverKey.current !== cover) setCoverState({ key: cover, src: local });
+      });
+      const target = coverRef.current;
+      if (!target || !('IntersectionObserver' in window)) {
+        restoreCached();
+        return () => { alive = false; };
+      }
+      const observer = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          restoreCached();
+        }
+      }, { root: document.querySelector('main'), rootMargin: '220px 0px' });
+      observer.observe(target);
+      return () => { alive = false; observer.disconnect(); };
+    }
     if (proxyCover) {
       restoreLibraryCover(cover).then((cached) => cached || preloadLibraryCover(cover)).then((local) => {
         if (alive && loadedCoverKey.current !== cover) setCoverState({ key: cover, src: local || cover });
@@ -173,7 +192,7 @@ function CachedLibraryCover({ cover, title, className }) {
     }, { root, rootMargin: '220px 0px' });
     observer.observe(target);
     return () => { alive = false; observer.disconnect(); };
-  }, [cover, proxyCover]);
+  }, [cachedOnly, cover, localCachedCover, proxyCover]);
 
   return (
     <div ref={coverRef} className="h-full w-full">
@@ -188,13 +207,13 @@ function CachedLibraryCover({ cover, title, className }) {
           onLoad={() => {
             loadedCoverKey.current = cover;
             markLibraryCoverLoaded(src);
-            if (/^https?:\/\//i.test(cover || '')) preloadLibraryCover(cover);
+            if (!cachedOnly && /^https?:\/\//i.test(cover || '')) preloadLibraryCover(cover);
           }}
           onError={() => {
             if (src !== cover) {
               discardLibraryCover(cover, src);
-              setCoverState({ key: cover, src: cover });
-            } else if (/^https?:\/\//i.test(cover || '')) {
+              setCoverState({ key: cover, src: cachedOnly ? '' : cover });
+            } else if (!cachedOnly && /^https?:\/\//i.test(cover || '')) {
               preloadLibraryCover(cover).then((local) => {
                 if (local) setCoverState({ key: cover, src: local });
               });
@@ -597,7 +616,7 @@ const Library = memo(function Library({ active = true }) {
                 overscanRows={2}
                 renderCard={(m) => {
                   const sid = sourceIdFor(m);
-                  const adultBlocked = !showAdultExtensions && isAdultExtension(extensions.manifest(sid));
+                  const adultBlocked = !isExtensionAllowed(extensions.manifest(sid), showAdultExtensions);
                   const cover = m.cover || recallCover(m.url, sid);
                   return (
                     <MangaCard
@@ -634,7 +653,7 @@ const Library = memo(function Library({ active = true }) {
                       : (manifestSourceName && !/^(mihon-|Fuente Mihon)/i.test(manifestSourceName) ? manifestSourceName : sid),
                     icon: sourceManifest.icon || m.sourceIcon
                   };
-                  const adultBlocked = !showAdultExtensions && isAdultExtension(sourceManifest);
+                  const adultBlocked = !isExtensionAllowed(sourceManifest, showAdultExtensions);
                   const unavailable = !extensions.isInstalled(sid) || adultBlocked;
                   return (
                     <div key={`${sid}|${m.url}`} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5">
@@ -648,8 +667,8 @@ const Library = memo(function Library({ active = true }) {
                           className="relative rounded-lg shrink-0 overflow-hidden bg-muted"
                           style={{ width: px(68, scale, 56), height: px(102, scale, 82) }}
                         >
-                          {cover && !unavailable && (
-                            <CachedLibraryCover cover={cover} title={m.title} className="w-full h-full object-cover bg-black" />
+                          {cover && (
+                            <CachedLibraryCover cover={cover} title={m.title} className="w-full h-full object-cover bg-black" cachedOnly={unavailable} cachedCover={m.coverCached || m.coverLocal || ''} />
                           )}
                           {unavailable && (
                             <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 px-0.5 text-center text-[8px] font-semibold leading-tight text-white">

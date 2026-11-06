@@ -6,7 +6,7 @@ import { tracking } from '../lib/tracking.js';
 import { extensions } from '../lib/extensions.js';
 import { lib } from '../lib/library.js';
 import { discardLibraryCover, getLibraryCover, markLibraryCoverLoaded, preloadLibraryCover, preloadSearchCover, requiresImageProxy, restoreLibraryCover } from '../lib/covers.js';
-import { rememberCover } from '../lib/searchState.js';
+import { rememberCover, sourceCatalogState } from '../lib/searchState.js';
 import { SourceBadge } from './SourceBadge.jsx';
 
 const prefetched = new Set();
@@ -38,27 +38,39 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
 
   const localCover = m.coverLocal?.startsWith('data:') ? m.coverLocal : '';
   const cachedCover = m.coverCached || '';
+  const indexedCover = getLibraryCover(m.cover);
+  const unavailableCachedCover = [cachedCover, localCover, indexedCover].find((cover) => /^(data:|blob:)/i.test(cover || '')) || '';
   const [anilistCoverOn, setAnilistCoverOn] = useState(() => !!settings.get().anilistCover);
   useEffect(() => settings.subscribe((s) => setAnilistCoverOn(!!s.anilistCover)), []);
   const t = unavailable ? null : tracking.get(m.url, sourceId);
   const aniLocal = anilistCoverOn ? (t?.coverLocal || '') : '';
   const aniCover = anilistCoverOn ? (t?.cover || '') : '';
-  const preferredCover = unavailable ? '' : aniLocal || aniCover || cachedCover || localCover || m.cover;
+  const preferredCover = unavailable ? unavailableCachedCover || m.cover : aniLocal || aniCover || cachedCover || localCover || m.cover;
   const proxyCover = requiresImageProxy(preferredCover);
   const coverRef = useRef(null);
   const [coverState, setCoverState] = useState(() => {
-    const cached = getLibraryCover(preferredCover);
-    return { key: preferredCover, src: cached || (proxyCover ? '' : preferredCover) };
+    const cached = unavailable ? unavailableCachedCover : getLibraryCover(preferredCover);
+    return { key: preferredCover, src: cached || (unavailable || proxyCover ? '' : preferredCover) };
   });
   const src = coverState.key === preferredCover
     ? coverState.src
-    : getLibraryCover(preferredCover) || (proxyCover ? '' : preferredCover);
+    : unavailable
+      ? unavailableCachedCover
+      : getLibraryCover(preferredCover) || (proxyCover ? '' : preferredCover);
   const hoverTimer = useRef(null);
   const loadedCoverKey = useRef('');
   const failedCoverUrls = useRef(new Set());
   const refreshedCoverMangas = useRef(new Set());
 
   useEffect(() => {
+    if (unavailable) {
+      if (unavailableCachedCover || !/^https?:\/\//i.test(m.cover || '')) return undefined;
+      let alive = true;
+      restoreLibraryCover(m.cover).then((local) => {
+        if (alive && local) setCoverState({ key: preferredCover, src: local });
+      });
+      return () => { alive = false; };
+    }
     if (!/^https?:\/\//i.test(preferredCover || '')) return undefined;
     let alive = true;
     if (proxyCover) {
@@ -94,7 +106,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
       alive = false;
       observer.disconnect();
     };
-  }, [from, preferredCover, proxyCover]);
+  }, [from, m.cover, preferredCover, proxyCover, unavailable, unavailableCachedCover]);
 
   const schedulePrefetch = () => {
     if (unavailable || from === 'biblioteca') return;
@@ -102,6 +114,10 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
     hoverTimer.current = setTimeout(() => prefetch(m.url, sourceId), 180);
   };
   const cancelPrefetch = () => clearTimeout(hoverTimer.current);
+  const saveSourceScroll = () => {
+    const main = document.querySelector('main');
+    if (main) sourceCatalogState.saveScroll(main.scrollTop);
+  };
   useEffect(() => () => clearTimeout(hoverTimer.current), []);
   const box = coverSize ? { width: `${coverSize}px` } : { aspectRatio: '2 / 3' };
   const inner = coverSize ? 'h-full w-full object-cover block' : 'w-full h-full aspect-[2/3] object-cover block';
@@ -133,6 +149,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
         aria-label={m.title}
         title={m.title}
         className={linkCls}
+        onClick={from === 'fuentes' ? saveSourceScroll : undefined}
         onMouseEnter={schedulePrefetch}
         onMouseLeave={cancelPrefetch}
         onFocus={schedulePrefetch}
@@ -152,17 +169,18 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
                 loadedCoverKey.current = preferredCover;
                 if (from === 'biblioteca') {
                   markLibraryCoverLoaded(src);
-                  if (/^https?:\/\//i.test(preferredCover || '')) preloadLibraryCover(preferredCover);
+                  if (!unavailable && /^https?:\/\//i.test(preferredCover || '')) preloadLibraryCover(preferredCover);
                 }
               }}
               onError={async () => {
+                if (unavailable) {
+                  if (src.startsWith('blob:') && src !== preferredCover && preferredCover) discardLibraryCover(preferredCover, src);
+                  setCoverState({ key: preferredCover, src: '' });
+                  return;
+                }
                 if (src.startsWith('blob:') && src !== preferredCover && preferredCover) {
                   discardLibraryCover(preferredCover, src);
                   setCoverState({ key: preferredCover, src: preferredCover });
-                  return;
-                }
-                if (unavailable) {
-                  setCoverState({ key: preferredCover, src: '' });
                   return;
                 }
                 if (!src || failedCoverUrls.current.has(src)) {
@@ -236,6 +254,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
           style={titleStyle}
           href={detailHash}
           title={m.title}
+          onClick={from === 'fuentes' ? saveSourceScroll : undefined}
           {...linkA11y}
         >
           {m.title}

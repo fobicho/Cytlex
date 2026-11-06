@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, Component } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, useRef, Component } from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar.jsx';
 import TitleBar from './components/TitleBar.jsx';
@@ -11,7 +11,7 @@ import Settings from './pages/Settings.jsx';
 import Tracking from './pages/Tracking.jsx';
 import { resolveMode, settings } from './lib/settings.js';
 import { extensions } from './lib/extensions.js';
-import { lastSearch, resultsScroll, catalogScroll } from './lib/searchState.js';
+import { lastSearch, resultsScroll, catalogScroll, sourceCatalogState } from './lib/searchState.js';
 import { startNotifier, onNotifyClick, checkLibrary } from './lib/notify.js';
 import { announceExtUpdates } from './lib/extUpdates.js';
 import { useToast } from './components/Toast.jsx';
@@ -93,6 +93,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   const initialLibraryCheck = useRef(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const previousLocation = useRef(location);
   const isReader = location.pathname.startsWith('/leer');
   const isMangaPage = location.pathname.startsWith('/manga');
   const isExplorePage = location.pathname === '/explorar';
@@ -113,6 +114,26 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   const catalogLocation = isExplorePage ? location : retainedExploreLocation;
   const isLibraryPage = location.pathname === '/biblioteca';
   const isLibraryDetail = isMangaPage && new URLSearchParams(location.search).get('from') === 'biblioteca';
+
+  useLayoutEffect(() => {
+    const previous = previousLocation.current;
+    previousLocation.current = location;
+    const tab = new URLSearchParams(location.search).get('tab');
+    if (previous.pathname !== '/manga' || !isExplorePage || tab !== 'fuentes') return undefined;
+    const main = document.querySelector('main');
+    if (!main) return undefined;
+    const savedScrollTop = sourceCatalogState.getScrollTop();
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        main.scrollTop = Math.min(savedScrollTop, Math.max(0, main.scrollHeight - main.clientHeight));
+      });
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
+  }, [location.pathname, location.search, isExplorePage]);
   const shouldMountLibrary = hasVisitedLibrary || isLibraryPage || isLibraryDetail;
   useEffect(() => {
     if (isLibraryPage || isLibraryDetail) setHasVisitedLibrary(true);

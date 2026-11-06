@@ -1,5 +1,6 @@
 import { buildSelectorSource } from './selectorSource.js';
 import { chapterIndex } from './chapterIndex.js';
+import { settings } from './settings.js';
 import defaultExtensionIndex from '../../docs/index.json';
 
 const KEY = 'cytlex:extensions:v1';
@@ -11,6 +12,13 @@ let recordsCache = null;
 export function isAdultExtension(source) {
   const manifest = source?.manifest || source;
   return ADULT_CONTENT_WARNINGS.includes(String(manifest?.contentWarning || '').toUpperCase());
+}
+
+export function isExtensionAllowed(source, showAdultExtensions) {
+  const manifest = source?.manifest || source;
+  const rating = String(manifest?.contentWarning || '').toUpperCase();
+  if (!showAdultExtensions) return rating === 'SAFE';
+  return settings.get().adultContentRatings.includes(rating);
 }
 
 const read = () => {

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown, Settings as SettingsIcon } from 'lucide-react';
-import { extensions, isAdultExtension, isNewer } from '../lib/extensions.js';
+import { extensions, isAdultExtension, isExtensionAllowed, isNewer } from '../lib/extensions.js';
 import { extUpdates } from '../lib/extUpdates.js';
 import { settings } from '../lib/settings.js';
 import { Card } from './ui/card.jsx';
@@ -186,14 +186,12 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     setLangConfig({ ...cfg });
     extensions.invalidate(subId);
   };
-  const visibleInstalled = installed;
-  const visibleAvailable = tutorialPreview || showAdultExtensions
-    ? available
-    : available?.filter((manifest) => !isAdultExtension(manifest));
+  const visibleInstalled = installed.filter((record) => isExtensionAllowed(record.manifest, showAdultExtensions));
+  const visibleAvailable = available?.filter((manifest) => isExtensionAllowed(manifest, showAdultExtensions));
   const installedById = new Map(installed.map((record) => [record.manifest.id, record.manifest]));
   const visibleUpdates = updates.filter((update) => {
     const manifest = installedById.get(update.id);
-    return manifest && isNewer(update.to, manifest.version);
+    return manifest && isExtensionAllowed(manifest, showAdultExtensions) && isNewer(update.to, manifest.version);
   });
   const sortedInstalled = [...visibleInstalled].sort((a, b) => {
     if (sortBy === 'added') return (a.installedAt || 0) - (b.installedAt || 0);
@@ -758,7 +756,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
           <div className="grid col-start-1 row-start-1" style={{ ...grid, alignContent: 'start' }}>
             {sortedInstalled.map(({ manifest: m }) => {
               const upd = visibleUpdates.find((u) => u.id === m.id);
-              const blocked = !showAdultExtensions && isAdultExtension(m);
+              const blocked = !isExtensionAllowed(m, showAdultExtensions);
               return (
                 <div key={m.id}>
                   <ExtensionCard

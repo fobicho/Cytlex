@@ -6,7 +6,6 @@ import { SourceBadge } from './SourceBadge.jsx';
 import { api } from '../lib/api.js';
 import { extensions } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
-import { isAdultGenreOption, withAdultGenreExclusions } from '../lib/adultGenreFilters.js';
 import { SOURCE_CATALOG_HOME_EVENT, rememberCover, sourceCatalogState } from '../lib/searchState.js';
 import { Button } from './ui/button.jsx';
 import { Dropdown } from './ui/dropdown.jsx';
@@ -20,7 +19,6 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const [restore] = useState(() => sourceCatalogState.takeRestore());
   const [sourceId, setSourceId] = useState(() => restore?.sourceId || initialSourceId);
   const [filters, setFilters] = useState(() => restore?.filters || []);
-  const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [filterValues, setFilterValues] = useState(() => restore?.filterValues || {});
   const [filterSearches, setFilterSearches] = useState({});
   const [loadedParams, setLoadedParams] = useState(() => restore?.loadedParams || { q: restore?.query || '', ...(restore?.filterValues || {}) });
@@ -39,7 +37,6 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const catalogRef = useRef(null);
   const [catalogWidth, setCatalogWidth] = useState(0);
   const initialRestore = useRef(restore);
-  const previousAdultSetting = useRef(showAdultExtensions);
   const pendingScrollTop = useRef(restore?.scrollTop ?? null);
   const selected = useMemo(() => sources.find((source) => source.manifest.id === sourceId), [sources, sourceId]);
   const allSources = extensions.sources();
@@ -98,8 +95,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     }
     try {
       const nextPage = append ? page + 1 : 1;
-      const catalogParams = withAdultGenreExclusions(id, params, filters, showAdultExtensions);
-      const result = await api.catalog({ ...catalogParams, page: nextPage, __cytlexRequestId: httpRequestId }, id);
+      const result = await api.catalog({ ...params, page: nextPage, __cytlexRequestId: httpRequestId }, id);
       if (runId !== requestId.current) return;
       const received = result.items || [];
       received.forEach((item) => rememberCover(item.url, item.cover, id));
@@ -126,15 +122,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     }
   };
 
-  useEffect(() => settings.subscribe((next) => setShowAdultExtensions(!!next.showAdultExtensions)), []);
-
   useEffect(() => () => cancelActiveRequest(), [sourceId]);
-
-  useEffect(() => {
-    if (previousAdultSetting.current === showAdultExtensions) return;
-    previousAdultSetting.current = showAdultExtensions;
-    if (sourceId === 'zonatmo' && filters.length) loadCatalog(sourceId, loadedParams);
-  }, [showAdultExtensions, sourceId, filters, loadedParams]);
 
   useEffect(() => {
     if (!sourceId) return undefined;
@@ -167,9 +155,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           const urls = new Set();
           let result = { hasMore: false, totalPages: 1 };
           const params = snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) };
-          const catalogParams = withAdultGenreExclusions(sourceId, params, nextFilters, showAdultExtensions);
           for (let nextPage = 1; nextPage <= Math.max(1, snapshot.page || 1); nextPage += 1) {
-            result = await api.catalog({ ...catalogParams, page: nextPage, __cytlexRequestId: httpRequestId }, sourceId);
+            result = await api.catalog({ ...params, page: nextPage, __cytlexRequestId: httpRequestId }, sourceId);
             (result.items || []).forEach((item) => rememberCover(item.url, item.cover, sourceId));
             for (const item of result.items || []) {
               if (item.url && !urls.has(item.url)) {
@@ -216,23 +203,13 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     const httpRequestId = beginHttpRequest();
     (async () => {
       try {
-        const requiresFiltersForCatalog = sourceId === 'zonatmo' && !showAdultExtensions;
-        let resultPromise;
         const loadFilters = () => api.catalogFilters(sourceId).catch(() => []).then((nextFilters) => {
           const safeFilters = Array.isArray(nextFilters) ? nextFilters : [];
           if (active) setFilters(safeFilters);
           return safeFilters;
         });
-        if (requiresFiltersForCatalog) {
-          const filtersPromise = loadFilters();
-          resultPromise = filtersPromise.then((nextFilters) => {
-            const params = withAdultGenreExclusions(sourceId, { q: '' }, nextFilters, showAdultExtensions);
-            return api.catalog({ ...params, page: 1, __cytlexRequestId: httpRequestId }, sourceId);
-          });
-        } else {
-          resultPromise = api.catalog({ q: '', page: 1, __cytlexRequestId: httpRequestId }, sourceId);
-          loadFilters();
-        }
+        const resultPromise = api.catalog({ q: '', page: 1, __cytlexRequestId: httpRequestId }, sourceId);
+        loadFilters();
         const result = await resultPromise;
         if (!active) return;
         (result.items || []).forEach((item) => rememberCover(item.url, item.cover, sourceId));
@@ -270,7 +247,9 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     const save = () => sourceCatalogState.saveScroll(main.scrollTop);
     save();
     main.addEventListener('scroll', save, { passive: true });
-    return () => main.removeEventListener('scroll', save);
+    return () => {
+      main.removeEventListener('scroll', save);
+    };
   }, [active, sourceId]);
 
   const search = () => loadCatalog(sourceId, {
@@ -324,7 +303,6 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           />
           <div className="overflow-y-auto" style={{ maxHeight: px(150, scale, 120) }}>
             {(filter.options || [])
-              .filter((option) => sourceId !== 'zonatmo' || showAdultExtensions || !['gender', 'excludeGender'].includes(filter.id) || !isAdultGenreOption(option))
               .filter((option) => option.label.toLocaleLowerCase().includes((filterSearches[filter.id] || '').toLocaleLowerCase()))
               .map((option) => {
               const selectedValues = Array.isArray(filterValues[filter.id]) ? filterValues[filter.id] : [];
@@ -374,10 +352,9 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
   const catalogGapX = Math.max(12, Math.round(20 * scale));
   const catalogColumns = catalogWidth > 0 ? Math.max(1, Math.floor((catalogWidth + catalogGapX) / (cs + catalogGapX))) : 1;
-  const visibleColumns = items.length ? Math.min(catalogColumns, items.length) : catalogColumns;
   const minSearchWidth = Math.max(420, Math.round(520 * scale));
   const searchWidth = catalogWidth > 0
-    ? Math.min(catalogWidth, Math.max(Math.min(minSearchWidth, catalogWidth), visibleColumns * cs + (visibleColumns - 1) * catalogGapX))
+    ? Math.min(catalogWidth, Math.max(minSearchWidth, catalogColumns * cs + (catalogColumns - 1) * catalogGapX))
     : '100%';
 
   if (!selected) {
@@ -411,7 +388,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   }
 
   return (
-    <div ref={catalogRef} data-source-catalog-active="true" className="flex min-h-full flex-col" style={{ gap: px(16, scale, 12) }}>
+    <div ref={catalogRef} data-source-catalog-active="true" data-source-catalog-selected={sourceId ? 'true' : 'false'} className="flex min-h-full flex-col" style={{ gap: px(16, scale, 12) }}>
       {selected && (
         <>
           <div className="flex min-w-0 items-center" style={{ gap: px(10, scale, 8) }}>

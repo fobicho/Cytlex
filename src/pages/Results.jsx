@@ -2,28 +2,15 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { extensions, isAdultExtension } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { api } from '../lib/api.js';
-import { withAdultGenreExclusions } from '../lib/adultGenreFilters.js';
 import { lastSearch, resultsScroll, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import MangaCard from '../components/MangaCard.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { useScale, px } from '../lib/useScale.js';
-
-let zonatmoFiltersPromise;
-
-const zonatmoFilters = () => {
-  if (!zonatmoFiltersPromise) {
-    zonatmoFiltersPromise = api.catalogFilters('zonatmo').catch((error) => {
-      zonatmoFiltersPromise = null;
-      throw error;
-    });
-  }
-  return zonatmoFiltersPromise;
-};
 
 export default function Results() {
   const navigate = useNavigate();
@@ -44,7 +31,7 @@ export default function Results() {
   }), []);
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
-  const adultExtensionHidden = !showAdultExtensions && isAdultExtension(manifest);
+  const adultExtensionHidden = !isExtensionAllowed(manifest, showAdultExtensions);
   const currentGroup = groupOverride?.id === sourceId ? groupOverride : group;
   const items = currentGroup?.items || [];
 
@@ -59,10 +46,7 @@ export default function Results() {
     setLoadError('');
     try {
       const page = currentGroup.page + 1;
-      let params = { q: lastSearch.q, genre: '', page };
-      if (sourceId === 'zonatmo' && !settings.get().showAdultExtensions) {
-        params = withAdultGenreExclusions(sourceId, params, await zonatmoFilters(), false);
-      }
+      const params = { q: lastSearch.q, genre: '', page };
       const result = await api.catalog(params, sourceId);
       const seen = new Set(items.map((item) => item.url));
       const remaining = Math.max(0, MAX_SEARCH_RESULTS - items.length);
@@ -134,8 +118,8 @@ export default function Results() {
     return (
       <EmptyState
         face="（・_・）"
-        title="Extensión +18 oculta"
-        description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para ver sus resultados."
+        title="Extensión oculta"
+        description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para ver fuentes MIXED, NSFW o sin clasificación."
         action={
           <Button
             variant="secondary"

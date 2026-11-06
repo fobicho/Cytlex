@@ -17,16 +17,32 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
   const text = (element, selector) => clean(element.querySelector(selector)?.textContent);
   const imageUrl = (image) => {
     if (!image) return '';
-    const srcset = image.getAttribute('srcset') || image.getAttribute('data-srcset') || '';
-    const largestSrc = srcset.split(',').map((part) => part.trim().split(/\s+/)[0]).filter(Boolean).at(-1);
+    const picture = image.closest?.('picture');
+    const srcsets = [
+      ...[...(picture?.querySelectorAll('source[srcset], source[data-srcset]') || [])]
+        .flatMap((source) => [source.getAttribute('srcset'), source.getAttribute('data-srcset')]),
+      image.getAttribute('srcset'),
+      image.getAttribute('data-srcset')
+    ].filter(Boolean);
+    const srcsetCandidates = srcsets.flatMap((srcset) => srcset.split(',').map((entry) => {
+      const [url, descriptor = ''] = entry.trim().split(/\s+/);
+      const amount = Number.parseFloat(descriptor);
+      const score = descriptor.endsWith('w') ? amount : descriptor.endsWith('x') ? amount * 1000 : 0;
+      return { url, score };
+    })).filter((candidate) => candidate.url);
+    const largestSrc = srcsetCandidates.length
+      ? (srcsetCandidates.some((candidate) => candidate.score > 0)
+        ? srcsetCandidates.sort((a, b) => b.score - a.score)[0].url
+        : srcsetCandidates.at(-1).url)
+      : '';
     const candidates = [
-      image.getAttribute('data-src'),
+      largestSrc,
       image.getAttribute('data-original'),
-      image.getAttribute('data-lazy-src'),
       image.getAttribute('data-original-src'),
+      image.getAttribute('data-src'),
+      image.getAttribute('data-lazy-src'),
       image.getAttribute('data-url'),
       image.getAttribute('data-cfsrc'),
-      largestSrc,
       image.getAttribute('src'),
       image.getAttribute('content')
     ];

@@ -11,6 +11,31 @@ const abs = (u) => {
 
 const text = (el, sel) => (el.querySelector(sel)?.textContent || '').replace(/\s+/g, ' ').trim();
 
+function highestResolutionImage(img) {
+  if (!img) return '';
+  const picture = img.closest('picture');
+  const srcsets = [
+    ...[...(picture?.querySelectorAll('source[srcset], source[data-srcset]') || [])]
+      .flatMap((source) => [source.getAttribute('srcset'), source.getAttribute('data-srcset')]),
+    img.getAttribute('srcset'),
+    img.getAttribute('data-srcset')
+  ].filter(Boolean);
+  const candidates = srcsets.flatMap((srcset) => srcset.split(',').map((entry) => {
+    const [url, descriptor = ''] = entry.trim().split(/\s+/);
+    const amount = Number.parseFloat(descriptor);
+    const score = descriptor.endsWith('w') ? amount : descriptor.endsWith('x') ? amount * 1000 : 0;
+    return { url, score };
+  })).filter((candidate) => candidate.url);
+  if (candidates.length) {
+    return candidates.sort((a, b) => b.score - a.score)[0].url;
+  }
+  return img.getAttribute('data-original')
+    || img.getAttribute('data-src')
+    || img.getAttribute('data-lazy-src')
+    || img.getAttribute('src')
+    || '';
+}
+
 function parseMangaUrl(url) {
   const m = String(url || '').match(/\/manga\/([^/]+)\/([^/]+)\/?/);
   if (!m) return null;
@@ -280,7 +305,7 @@ export default function createSource({ fetchText, parse, head }) {
     const info = parseMangaUrl(full) || {};
     return {
       title,
-      cover: abs(coverImg?.getAttribute('src')),
+      cover: abs(highestResolutionImage(coverImg)),
       altTitles,
       genres,
       themes,

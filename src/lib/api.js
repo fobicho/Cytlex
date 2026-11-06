@@ -1,6 +1,5 @@
-import { extensions, isAdultExtension } from './extensions.js';
+import { extensions, isExtensionAllowed } from './extensions.js';
 import { settings } from './settings.js';
-import { withAdultGenreExclusions } from './adultGenreFilters.js';
 
 function bridge() {
   if (typeof window !== 'undefined' && window.cytlex) return window.cytlex;
@@ -14,7 +13,7 @@ function notInstalledError(id) {
 }
 
 function assertSourceEnabled(sourceId) {
-  if (!settings.get().showAdultExtensions && isAdultExtension(extensions.manifest(sourceId))) {
+  if (!isExtensionAllowed(extensions.manifest(sourceId), settings.get().showAdultExtensions)) {
     throw new Error('Esta extensión está desactivada. Activa «Mostrar extensiones +18» en Ajustes > Extensiones para usarla.');
   }
 }
@@ -149,10 +148,7 @@ export const api = {
 
   async catalog(args, sourceId) {
     const src = await resolveSource(sourceId);
-    const params = sourceId === 'zonatmo' && !settings.get().showAdultExtensions
-      ? withAdultGenreExclusions(sourceId, args, await catalogFiltersFor(sourceId, src).catch(() => []), false)
-      : args;
-    return src.catalog(params);
+    return src.catalog(args);
   },
 
   async catalogFilters(sourceId) {

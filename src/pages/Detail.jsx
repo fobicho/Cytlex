@@ -1,11 +1,11 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Link2 } from 'lucide-react';
+import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Link2, X } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { reconcileMihonProgress } from '../lib/mihonProgress.js';
-import { extensions, isAdultExtension } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
@@ -91,7 +91,7 @@ const Detail = memo(function Detail({ locationOverride, activeRef }) {
   }, [fromParam]);
   const sourceAvailable = extensions.isInstalled(sourceId);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
-  const adultExtensionDisabled = !showAdultExtensions && isAdultExtension(extensions.manifest(sourceId));
+  const adultExtensionDisabled = !isExtensionAllowed(extensions.manifest(sourceId), showAdultExtensions);
   const detailKey = `${sourceId}|${mangaUrl}`;
   const [detailState, setDetailState] = useState(() => ({
     key: detailKey,
@@ -164,6 +164,8 @@ const Detail = memo(function Detail({ locationOverride, activeRef }) {
   }, [d?.cover, knownCover, mangaUrl, sourceId, anilistCover, coverTick]);
 
   const [coverError, setCoverError] = useState(false);
+  const [coverViewerOpen, setCoverViewerOpen] = useState(false);
+  const [coverViewerFallback, setCoverViewerFallback] = useState(false);
   const coverKey = `${sourceId}|${mangaUrl}`;
   const [displayedCover, setDisplayedCover] = useState(() => ({
     key: coverKey,
@@ -178,6 +180,29 @@ const Detail = memo(function Detail({ locationOverride, activeRef }) {
     setFailedCover('');
   }, [coverSrc]);
   const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
+  const originalViewerCover = useMemo(() => {
+    const favorite = lib.fav(mangaUrl, sourceId);
+    const tracked = tracking.get(mangaUrl, sourceId);
+    return (anilistCover && tracked?.cover)
+      || d?.cover
+      || favorite?.cover
+      || tracked?.cover
+      || favorite?.coverLocal
+      || tracked?.coverLocal
+      || knownCover
+      || coverSrc
+      || '';
+  }, [anilistCover, coverSrc, d?.cover, knownCover, mangaUrl, sourceId, coverTick]);
+  const viewerCover = coverViewerFallback ? visibleCover || finalCover : originalViewerCover;
+
+  useEffect(() => {
+    if (!coverViewerOpen) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setCoverViewerOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [coverViewerOpen]);
 
   const coverImg = (alt) => (
     <>
@@ -232,7 +257,7 @@ const Detail = memo(function Detail({ locationOverride, activeRef }) {
 
   useEffect(() => {
     const main = document.querySelector('main');
-    if (!main) return undefined;
+    if (!main || !activeRef.current) return undefined;
 
     const sameManga = detailScrollEffectMangaRef.current === mangaUrl;
     const requestedRestore = detailScroll.takeRestore(mangaUrl);
@@ -242,6 +267,7 @@ const Detail = memo(function Detail({ locationOverride, activeRef }) {
     detailScrollEffectMangaRef.current = mangaUrl;
     let restoring = saved > 0;
     const apply = () => {
+      if (!activeRef.current) return;
       const max = main.scrollHeight - main.clientHeight;
       main.scrollTop = restoring ? Math.min(saved, Math.max(0, max)) : 0;
     };
@@ -254,6 +280,7 @@ const Detail = memo(function Detail({ locationOverride, activeRef }) {
     let lastH = -1;
     let settleTimer = null;
     const settle = () => {
+      if (!activeRef.current) { restoring = false; return; }
       if (ticks > 8) { restoring = false; return; }
       ticks += 1;
       const h = main.scrollHeight;
@@ -264,7 +291,7 @@ const Detail = memo(function Detail({ locationOverride, activeRef }) {
     };
     settleTimer = setTimeout(settle, 120);
 
-    const save = () => { if (!restoring) detailScroll.set(mangaUrl, main.scrollTop); };
+    const save = () => { if (activeRef.current && !restoring) detailScroll.set(mangaUrl, main.scrollTop); };
     main.addEventListener('scroll', save, { passive: true });
     return () => {
       cancelAnimationFrame(raf1);
@@ -659,7 +686,18 @@ const Detail = memo(function Detail({ locationOverride, activeRef }) {
       >
         <div
           ref={coverRef}
-          className="relative aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
+          role={viewerCover ? 'button' : undefined}
+          tabIndex={viewerCover ? 0 : undefined}
+          aria-label={viewerCover ? `Ampliar portada de ${d.title}` : undefined}
+          onClick={viewerCover ? () => { setCoverViewerFallback(false); setCoverViewerOpen(true); } : undefined}
+          onKeyDown={viewerCover ? (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+            setCoverViewerFallback(false);
+            setCoverViewerOpen(true);
+            }
+          } : undefined}
+          className={cn('relative aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50', viewerCover && 'cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2')}
           style={{ width: `${coverSize}px` }}
         >
           {coverSrc ? (
@@ -1206,6 +1244,45 @@ const Detail = memo(function Detail({ locationOverride, activeRef }) {
           </>
         )}
       </Dialog>
+
+      {coverViewerOpen && viewerCover && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Portada de ${d.title}`}
+          className="fixed inset-0 z-[80] flex items-center justify-center overflow-hidden bg-black/75 px-4 py-6"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setCoverViewerOpen(false);
+          }}
+        >
+          <img
+            src={viewerCover}
+            alt=""
+            aria-hidden="true"
+            referrerPolicy="no-referrer"
+            className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-40 blur-2xl"
+            onError={() => setCoverViewerFallback(true)}
+          />
+          <button
+            type="button"
+            autoFocus
+            aria-label="Cerrar portada ampliada"
+            title="Cerrar"
+            className="absolute right-4 top-4 z-10 grid h-10 w-10 place-items-center rounded-lg text-white/80 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+            onClick={() => setCoverViewerOpen(false)}
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <img
+            src={viewerCover}
+            alt={d.title}
+            referrerPolicy="no-referrer"
+            className="relative z-[1] h-[calc(100dvh-3rem)] w-auto max-w-[calc(100vw-3rem)] select-none object-contain"
+            onClick={() => setCoverViewerOpen(false)}
+            onError={() => setCoverViewerFallback(true)}
+          />
+        </div>
+      )}
 
     </div>
   );

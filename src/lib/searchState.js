@@ -55,6 +55,9 @@ export const sourceCatalogState = {
       sourceCatalogSnapshot.scrollTop = scrollTop;
     }
   },
+  getScrollTop() {
+    return sourceCatalogSnapshot?.scrollTop ?? 0;
+  },
   requestRestore() {
     restoreSourceCatalog = true;
   },

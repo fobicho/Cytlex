@@ -2,8 +2,8 @@ import { useEffect, useState, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
-import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, X, Database, Download, Upload, CircleHelp } from 'lucide-react';
-import { resolveMode, settings } from '../lib/settings.js';
+import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, X, Database, Download, Upload, CircleHelp, Settings as SettingsIcon } from 'lucide-react';
+import { CONTENT_WARNING_RATINGS, resolveMode, settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
 import { anilist } from '../lib/anilist.js';
 import { session } from '../lib/session.js';
@@ -14,7 +14,7 @@ import { chapterIndex } from '../lib/chapterIndex.js';
 import { compressBackup, createBackup, parseBackup, readBackupFile, restoreBackup } from '../lib/backup.js';
 import { importMihonBackup, previewMihonBackup } from '../lib/mihonBackup.js';
 import { reconcileMihonProgress } from '../lib/mihonProgress.js';
-import { extensions, isAdultExtension } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { api } from '../lib/api.js';
 import { Button } from '../components/ui/button.jsx';
 import { Card } from '../components/ui/card.jsx';
@@ -263,6 +263,8 @@ export default function Settings({ tutorialPreview = false }) {
   const [bgBusy, setBgBusy] = useState(false);
   const [confirmBackground, setConfirmBackground] = useState(false);
   const [confirmAdultExtensions, setConfirmAdultExtensions] = useState(false);
+  const [adultRatingsDialog, setAdultRatingsDialog] = useState(false);
+  const [adultRatingsDraft, setAdultRatingsDraft] = useState(() => [...settings.get().adultContentRatings]);
   const [confirmRemoveRepo, setConfirmRemoveRepo] = useState(false);
   const [backupCandidate, setBackupCandidate] = useState(null);
   const [backupInstallOpen, setBackupInstallOpen] = useState(false);
@@ -570,7 +572,7 @@ export default function Settings({ tutorialPreview = false }) {
         const resolvedId = extensions.resolveInstalledSource(id, manga?.sourceName, manga?.url) || id;
         const manifest = extensions.manifest(resolvedId);
         const unavailable = !extensions.isInstalled(resolvedId)
-          || (!settings.get().showAdultExtensions && isAdultExtension(manifest));
+          || !isExtensionAllowed(manifest, settings.get().showAdultExtensions);
         if (!unavailable) return;
         const source = sources.get(id) || { id, resolvedId, name: manga?.sourceName || manifest?.name || id, count: 0 };
         source.count += 1;
@@ -747,7 +749,7 @@ export default function Settings({ tutorialPreview = false }) {
         return extensionForSource(repository, sourceId) || extensions.manifest(sourceId);
       };
       const blockedEntries = mihonCandidate.entries.filter(({ manga }) => (
-        !showAdultExtensions && isAdultExtension(sourceManifest(manga))
+        !isExtensionAllowed(sourceManifest(manga), showAdultExtensions)
       ));
       const blockedKeys = new Set(blockedEntries.map(({ manga }) => `${manga.sourceId}|${manga.url}`));
       const missingEntries = notInstalled.filter(({ manga }) => !blockedKeys.has(`${manga.sourceId}|${manga.url}`));
@@ -1147,15 +1149,34 @@ export default function Settings({ tutorialPreview = false }) {
           title="Mostrar contenido +18"
           desc="Algunas extensiones y mangas podrían no mostrarse sin esta opción activa"
           right={
-            <Switch
-              scale={scale}
-              on={s.showAdultExtensions}
-              onChange={(v) => {
-                if (v) setConfirmAdultExtensions(true);
-                else set({ showAdultExtensions: false });
-              }}
-              label="Mostrar extensiones +18"
-            />
+            <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
+              {s.showAdultExtensions && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="hover:bg-transparent"
+                  title="Configurar calificaciones de contenido"
+                  aria-label="Configurar calificaciones de contenido"
+                  onClick={() => {
+                    setAdultRatingsDraft([...s.adultContentRatings]);
+                    setAdultRatingsDialog(true);
+                  }}
+                  style={{ width: px(34, scale, 28), height: px(34, scale, 28) }}
+                >
+                  <SettingsIcon style={{ width: px(17, scale, 14), height: px(17, scale, 14) }} />
+                </Button>
+              )}
+              <Switch
+                scale={scale}
+                on={s.showAdultExtensions}
+                onChange={(v) => {
+                  if (v) setConfirmAdultExtensions(true);
+                  else set({ showAdultExtensions: false });
+                }}
+                label="Mostrar extensiones +18"
+              />
+            </div>
           }
         />
         <div style={{ marginTop: px(18, scale, 12) }}>
@@ -2058,10 +2079,56 @@ export default function Settings({ tutorialPreview = false }) {
             onClick={() => {
               set({ showAdultExtensions: true });
               setConfirmAdultExtensions(false);
+              setAdultRatingsDraft([...settings.get().adultContentRatings]);
+              setAdultRatingsDialog(true);
             }}
             style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
             Tengo 18 años o más
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={adultRatingsDialog}
+        onClose={() => setAdultRatingsDialog(false)}
+        title="Calificaciones de contenido"
+        description="Elige qué categorías de extensiones y mangas quieres mostrar."
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+        scale={scale}
+      >
+        <div className="space-y-2">
+          {CONTENT_WARNING_RATINGS.map((rating) => (
+            <label key={rating} className="flex cursor-pointer items-center gap-3 rounded-lg border border-border px-3 py-2.5 text-foreground">
+              <input
+                type="checkbox"
+                className="accent-primary"
+                checked={adultRatingsDraft.includes(rating)}
+                onChange={(event) => setAdultRatingsDraft((current) => event.target.checked
+                  ? [...current, rating]
+                  : current.filter((value) => value !== rating))}
+              />
+              <span className="font-medium" style={{ fontSize: px(14, scale, 12) }}>{rating}</span>
+            </label>
+          ))}
+        </div>
+        <div className="mt-5 flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button
+            variant="outline"
+            onClick={() => setAdultRatingsDialog(false)}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={() => {
+              set({ adultContentRatings: adultRatingsDraft });
+              setAdultRatingsDialog(false);
+            }}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Guardar
           </Button>
         </div>
       </Dialog>

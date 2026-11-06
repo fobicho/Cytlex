@@ -3,9 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Search, Loader2, ChevronRight, ChevronLeft, CircleHelp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
-import { extensions, isAdultExtension } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
-import { withAdultGenreExclusions } from '../lib/adultGenreFilters.js';
 import { lastSearch, scrollMemory, rememberCover, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import { clearSearchCoverCache, preloadSearchCover } from '../lib/covers.js';
 import MangaCard from '../components/MangaCard.jsx';
@@ -25,21 +24,10 @@ const TABS = [
 ];
 
 const enabledSources = (showAdultExtensions) => extensions.sources().filter(({ manifest }) =>
-  showAdultExtensions || !isAdultExtension(manifest)
+  isExtensionAllowed(manifest, showAdultExtensions)
 );
 
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
-let zonatmoFiltersPromise;
-
-const zonatmoFilters = () => {
-  if (!zonatmoFiltersPromise) {
-    zonatmoFiltersPromise = api.catalogFilters('zonatmo').catch((error) => {
-      zonatmoFiltersPromise = null;
-      throw error;
-    });
-  }
-  return zonatmoFiltersPromise;
-};
 
 const sourceLangSubtitle = (manifest) => {
   const options = Array.isArray(manifest.config?.languages) ? manifest.config.languages : null;
@@ -267,7 +255,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
 
   const searching = !!results && results.some((r) => r.status === 'loading');
   const completed = results ? results.filter((r) => r.status !== 'loading') : [];
-  const visibleCompleted = completed.filter((r) => showAdultExtensions || !isAdultExtension(r.manifest));
+  const visibleCompleted = completed.filter((r) => isExtensionAllowed(r.manifest, showAdultExtensions));
   const done = !!results && !searching;
 
   useEffect(() => { if (done) animateSearch = false; }, [done]);
@@ -288,7 +276,6 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     lastSearch.q = query;
     lastSearch.genre = '';
     lastSearch.adultExtensionsEnabled = adultExtensionsEnabled;
-    lastSearch.adultGenreFilterVersion = 1;
     lastSearch.results = list
       .map((s) => ({ id: s.manifest.id, manifest: s.manifest, status: 'loading', items: [], page: 1, totalPages: 1, hasMore: false }))
       .sort((a, b) => a.manifest.name.localeCompare(b.manifest.name, 'es', { sensitivity: 'base' }));
@@ -296,10 +283,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
 
     list.forEach(async (s) => {
       try {
-        let params = { q: query, genre: '', page: 1 };
-        if (s.manifest.id === 'zonatmo' && !adultExtensionsEnabled) {
-          params = withAdultGenreExclusions(s.manifest.id, params, await zonatmoFilters(), false);
-        }
+        const params = { q: query, genre: '', page: 1 };
         const r = await api.catalog(params, s.manifest.id);
         const items = (r.items || []).filter((m) =>
           s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim()
@@ -338,7 +322,6 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   useEffect(() => {
     if (tab === 'mangas' && results && (
       lastSearch.adultExtensionsEnabled !== showAdultExtensions
-      || lastSearch.adultGenreFilterVersion !== 1
     )) {
       runSearch(lastSearch.q);
     }
@@ -387,8 +370,18 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                 onClick={() => {
                   if (active) {
                     const main = document.querySelector('main');
-                    if (t.id === 'fuentes' && main?.querySelector('[data-source-catalog-active="true"]')) {
-                      window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
+                    if (t.id === 'fuentes') {
+                      if (main?.querySelector('[data-source-catalog-selected="true"]')) {
+                        window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
+                      } else {
+                        setTab('extensiones');
+                        const params = new URLSearchParams(loc.search);
+                        params.set('tab', 'extensiones');
+                        params.delete('source');
+                        params.delete('q');
+                        params.delete('quick');
+                        navigate({ pathname: loc.pathname, search: `?${params}` }, { replace: true });
+                      }
                     }
                     if (t.id === 'mangas') {
                       setQ('');

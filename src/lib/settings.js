@@ -1,6 +1,7 @@
 import { THEME_IDS, MODE_IDS } from './themes.js';
 
 const KEY = 'cytlex:settings:v1';
+export const CONTENT_WARNING_RATINGS = ['SAFE', 'MIXED', 'NSFW'];
 
 export function resolveMode(mode) {
   if (mode !== 'system') return mode;
@@ -19,6 +20,7 @@ const defaults = {
   libraryCoverSize: 160,
   libraryShowUnread: true,
   showAdultExtensions: false,
+  adultContentRatings: CONTENT_WARNING_RATINGS,
   chaptersPerRow: 1,
   sidebarCollapsed: false,
   uiScale: 1,
@@ -37,6 +39,9 @@ const defaults = {
 function normalize(s) {
   let { theme, mode } = s;
   const { showAdultManga, anilistClientSecret, anilistClientId, ...rest } = s;
+  rest.adultContentRatings = Array.isArray(rest.adultContentRatings)
+    ? [...new Set(rest.adultContentRatings.map((rating) => String(rating).toUpperCase()).filter((rating) => CONTENT_WARNING_RATINGS.includes(rating)))]
+    : [...CONTENT_WARNING_RATINGS];
   if (rest.showAdultExtensions === undefined && showAdultManga !== undefined) {
     rest.showAdultExtensions = showAdultManga;
   }
