@@ -17,6 +17,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
   const text = (element, selector) => clean(element.querySelector(selector)?.textContent);
   const imageUrl = (image) => {
     if (!image) return '';
+    const linkedImage = image.closest?.('a[href]')?.getAttribute('href') || '';
     const picture = image.closest?.('picture');
     const srcsets = [
       ...[...(picture?.querySelectorAll('source[srcset], source[data-srcset]') || [])]
@@ -35,15 +36,17 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
         ? srcsetCandidates.sort((a, b) => b.score - a.score)[0].url
         : srcsetCandidates.at(-1).url)
       : '';
-    const linkedImage = image.closest?.('a[href]')?.getAttribute('href') || '';
     const candidates = [
       /\.(?:avif|gif|jpe?g|png|webp)(?:[?#]|$)/i.test(linkedImage) ? linkedImage : '',
-      largestSrc,
       image.getAttribute('data-original'),
       image.getAttribute('data-original-src'),
+      image.getAttribute('data-full'),
+      image.getAttribute('data-zoom-image'),
+      image.getAttribute('data-large'),
       image.getAttribute('data-src'),
       image.getAttribute('data-lazy-src'),
       image.getAttribute('data-url'),
+      largestSrc,
       image.getAttribute('data-cfsrc'),
       image.getAttribute('src'),
       image.getAttribute('content')

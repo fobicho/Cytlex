@@ -154,12 +154,12 @@ const Detail = memo(function Detail({ locationOverride, activeRef }) {
     const t = tracking.get(mangaUrl, sourceId);
     const tLocal = t?.coverLocal;
     const tCover = t?.cover;
+    if (anilistCover && tCover) return tCover;
     if (anilistCover && tLocal) return tLocal;
-    if (anilistCover && tCover) return getLibraryCover(tCover) || tCover;
+    if (d?.cover) return d.cover;
     const local = lib.fav(mangaUrl, sourceId)?.coverLocal;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
     if (knownCover) return knownCover;
-    if (d?.cover) return getLibraryCover(d.cover) || getSearchCover(d.cover) || d.cover;
     return '';
   }, [d?.cover, knownCover, mangaUrl, sourceId, anilistCover, coverTick]);
 

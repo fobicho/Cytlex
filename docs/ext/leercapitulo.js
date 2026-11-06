@@ -15,6 +15,19 @@ function highestResolutionImage(img) {
   if (!img) return '';
   const linkedImage = img.closest?.('a[href]')?.getAttribute('href') || '';
   if (/\.(?:avif|gif|jpe?g|png|webp)(?:[?#]|$)/i.test(linkedImage)) return linkedImage;
+
+  // Sites often put the full cover in a lazy-load attribute while `srcset`
+  // only contains responsive thumbnails. Prefer explicit original/zoom URLs.
+  const original = [
+    img.getAttribute('data-original'),
+    img.getAttribute('data-full'),
+    img.getAttribute('data-zoom-image'),
+    img.getAttribute('data-large'),
+    img.getAttribute('data-src'),
+    img.getAttribute('data-lazy-src')
+  ].find(Boolean);
+  if (original) return original;
+
   const picture = img.closest('picture');
   const srcsets = [
     ...[...(picture?.querySelectorAll('source[srcset], source[data-srcset]') || [])]
@@ -31,11 +44,7 @@ function highestResolutionImage(img) {
   if (candidates.length) {
     return candidates.sort((a, b) => b.score - a.score)[0].url;
   }
-  return img.getAttribute('data-original')
-    || img.getAttribute('data-src')
-    || img.getAttribute('data-lazy-src')
-    || img.getAttribute('src')
-    || '';
+  return img.getAttribute('src') || '';
 }
 
 function parseMangaUrl(url) {
