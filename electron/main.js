@@ -143,6 +143,7 @@ function createWindow(startBounds = null, startMaximized = false) {
 }
 
 const REFERER_RULES = [
+  { hosts: ['mangadex.org', 'mangadex.network'], referer: 'https://mangadex.org/' },
   { hosts: ['t34798ndc.com'], referer: 'https://www.leercapitulo.co/' },
   { hosts: ['leercapitulo.co'], referer: 'https://www.leercapitulo.co/' },
   { hosts: ['mangalect.org'], referer: 'https://mangalect.org/' },
