@@ -370,7 +370,7 @@ function SearchDialog({ open, onClose, mangaTitle, onPick }) {
       </form>
 
       <div className="pt-3 flex-1 min-h-0 flex flex-col">
-        <div ref={listRef} className="max-h-full min-h-0 overflow-y-auto overscroll-contain">
+        <div ref={listRef} className="max-h-full min-h-0 overflow-y-auto overscroll-contain pr-3">
           {err && (
             <p className="flex items-center gap-2 text-sm text-destructive">
               <AlertTriangle className="w-4 h-4 shrink-0" />

@@ -49,12 +49,12 @@ export function buildSelectorSource(manifest, ctx) {
         .replaceAll('{page}', String(p))
     );
 
-  async function catalog({ q = '', genre = '', page: p = 1 } = {}) {
+  async function catalog({ q = '', genre = '', page: p = 1, __cytlexRequestId } = {}) {
     const c = cfg.catalog || {};
     const tpl = q ? c.searchUrl : genre ? c.genreUrl : c.popularUrl;
     if (!tpl || !c.list) return { items: [], totalPages: 1, totalText: '' };
 
-    const doc = page(await ctx.fetchText(buildUrl(tpl, { q, genre, p })));
+    const doc = page(await ctx.fetchText(buildUrl(tpl, { q, genre, p }), __cytlexRequestId));
     const items = [...doc.querySelectorAll(c.list)]
       .map((el) => ({
         url: abs(pick(el, c.url)),

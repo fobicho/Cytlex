@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, Component } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, useRef, Component } from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar.jsx';
 import TitleBar from './components/TitleBar.jsx';
@@ -11,7 +11,7 @@ import Settings from './pages/Settings.jsx';
 import Tracking from './pages/Tracking.jsx';
 import { resolveMode, settings } from './lib/settings.js';
 import { extensions } from './lib/extensions.js';
-import { lastSearch, resultsScroll, catalogScroll } from './lib/searchState.js';
+import { lastSearch, resultsScroll, catalogScroll, sourceCatalogState } from './lib/searchState.js';
 import { startNotifier, onNotifyClick, checkLibrary } from './lib/notify.js';
 import { announceExtUpdates } from './lib/extUpdates.js';
 import { useToast } from './components/Toast.jsx';
@@ -54,6 +54,12 @@ class PageBoundary extends Component {
 
 export const RESET_PAGE_EVENT = 'cytlex:reset-page';
 export const GO_EXTENSIONS_EVENT = 'cytlex:go-extensions';
+const DETAIL_ORIGINS = ['biblioteca', 'explorar', 'fuentes', 'resultados'];
+
+function detailOrigin(location) {
+  const from = new URLSearchParams(location.search).get('from');
+  return DETAIL_ORIGINS.includes(from) ? from : 'biblioteca';
+}
 
 export function goToExtensions() {
   window.location.hash = '#/explorar?tab=extensiones';
@@ -75,6 +81,9 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   const [extensionMetadataRevision, setExtensionMetadataRevision] = useState(0);
   const scale = useScale();
   const [resetTick, setResetTick] = useState(0);
+  const [retainedDetailLocations, setRetainedDetailLocations] = useState({});
+  const [retainedExploreLocation, setRetainedExploreLocation] = useState(null);
+  const [hasVisitedLibrary, setHasVisitedLibrary] = useState(() => window.location.hash.includes('/biblioteca'));
   const [quickSearchOpen, setQuickSearchOpen] = useState(false);
   const [quickSearchQuery, setQuickSearchQuery] = useState('');
   const [quickSearchPoint, setQuickSearchPoint] = useState(() => quickSearchPosition(window.innerWidth / 2, window.innerHeight / 2));
@@ -84,7 +93,51 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   const initialLibraryCheck = useRef(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const previousLocation = useRef(location);
   const isReader = location.pathname.startsWith('/leer');
+  const isMangaPage = location.pathname.startsWith('/manga');
+  const isExplorePage = location.pathname === '/explorar';
+  const currentDetailOrigin = isMangaPage ? detailOrigin(location) : '';
+  const detailActivityRefs = useRef(Object.fromEntries(DETAIL_ORIGINS.map((origin) => [origin, { current: false }])));
+  DETAIL_ORIGINS.forEach((origin) => {
+    detailActivityRefs.current[origin].current = isMangaPage && currentDetailOrigin === origin;
+  });
+  useEffect(() => {
+    if (!isMangaPage) return;
+    setRetainedDetailLocations((current) => current[currentDetailOrigin] === location
+      ? current
+      : { ...current, [currentDetailOrigin]: location });
+  }, [isMangaPage, currentDetailOrigin, location.pathname, location.search]);
+  useEffect(() => {
+    if (isExplorePage) setRetainedExploreLocation(location);
+  }, [isExplorePage, location.pathname, location.search]);
+  const catalogLocation = isExplorePage ? location : retainedExploreLocation;
+  const isLibraryPage = location.pathname === '/biblioteca';
+  const isLibraryDetail = isMangaPage && new URLSearchParams(location.search).get('from') === 'biblioteca';
+
+  useLayoutEffect(() => {
+    const previous = previousLocation.current;
+    previousLocation.current = location;
+    const tab = new URLSearchParams(location.search).get('tab');
+    if (previous.pathname !== '/manga' || !isExplorePage || tab !== 'fuentes') return undefined;
+    const main = document.querySelector('main');
+    if (!main) return undefined;
+    const savedScrollTop = sourceCatalogState.getScrollTop();
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        main.scrollTop = Math.min(savedScrollTop, Math.max(0, main.scrollHeight - main.clientHeight));
+      });
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
+  }, [location.pathname, location.search, isExplorePage]);
+  const shouldMountLibrary = hasVisitedLibrary || isLibraryPage || isLibraryDetail;
+  useEffect(() => {
+    if (isLibraryPage || isLibraryDetail) setHasVisitedLibrary(true);
+  }, [isLibraryPage, isLibraryDetail]);
   const resetPage = useCallback(() => {
     setResetTick((t) => t + 1);
     lastSearch.q = '';
@@ -168,6 +221,10 @@ export default function App({ isVisible = true, tutorialMode = false }) {
       onNotifyClick((payload) => {
         if (payload?.tipo === 'extensiones') {
           goToExtensions();
+          return;
+        }
+        if (payload?.tipo === 'biblioteca') {
+          window.location.hash = '#/biblioteca';
           return;
         }
         const url = payload?.url;
@@ -271,8 +328,8 @@ export default function App({ isVisible = true, tutorialMode = false }) {
               )}
               <Routes>
                 <Route path="/" element={<Navigate to="/biblioteca" replace />} />
-                <Route path="/biblioteca" element={<Library key={`lib-${resetTick}`} />} />
-                <Route path="/explorar" element={<Catalog key={`cat-${resetTick}`} tutorialPreview={tutorialMode} />} />
+                <Route path="/biblioteca" element={null} />
+                <Route path="/explorar" element={null} />
                 <Route path="/resultados" element={<Results />} />
                 <Route path="/catalogo" element={<Navigate to="/explorar" replace />} />
                 <Route
@@ -280,7 +337,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
                   element={<Settings key={`set-${resetTick}`} tutorialPreview={tutorialMode} />}
                 />
                 <Route path="/seguimiento" element={<Tracking />} />
-                <Route path="/manga/*" element={<Detail />} />
+                <Route path="/manga/*" element={null} />
                 <Route path="/leer/*" element={<Reader isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} />} />
               </Routes>
             </PageBoundary>

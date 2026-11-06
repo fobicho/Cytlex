@@ -143,13 +143,14 @@ function createWindow(startBounds = null, startMaximized = false) {
 }
 
 const REFERER_RULES = [
-  { hosts: ['t34798ndc.com'], referer: 'https://leercapitulo.co/' },
-  { hosts: ['leercapitulo.co'], referer: 'https://leercapitulo.co/' },
+  { hosts: ['t34798ndc.com'], referer: 'https://www.leercapitulo.co/' },
+  { hosts: ['leercapitulo.co'], referer: 'https://www.leercapitulo.co/' },
   { hosts: ['mangalect.org'], referer: 'https://mangalect.org/' },
   { hosts: ['onfmangas.com'], referer: 'https://onfmangas.com/' },
   { hosts: ['imagesolymp.xyz', 'olympusxyz.com'], referer: 'https://olympusxyz.com/' },
   { hosts: ['zonatmo.org'], referer: 'https://zonatmo.org/' },
   { hosts: ['ntr-files.online'], referer: 'https://manga-oni.com/' },
+  { hosts: ['plotnofansub.com'], referer: 'https://plotnofansub.com/' },
   { hosts: ['inmanga.com', 'intomanga.com'], referer: 'https://inmanga.com/' }
 ];
 
@@ -212,7 +213,18 @@ async function resolvePublicAddress(hostname) {
 
 function requestOnce(parsed, options, address) {
   return new Promise((resolve, reject) => {
+    if (isHttpRequestCancelled(options.requestId)) {
+      reject(httpRequestAborted());
+      return;
+    }
     const transport = parsed.protocol === 'https:' ? https : http;
+    let response;
+    let releaseAbort = () => {};
+    const abort = () => {
+      const error = httpRequestAborted();
+      request.destroy(error);
+      response?.destroy(error);
+    };
     const request = transport.request(parsed, {
       method: options.method,
       headers: options.headers,
@@ -221,18 +233,56 @@ function requestOnce(parsed, options, address) {
         if (lookupOptions?.all) callback(null, [{ address: address.address, family: address.family }]);
         else callback(null, address.address, address.family);
       }
-    }, resolve);
+    }, (res) => {
+      response = res;
+      res.once('close', releaseAbort);
+      resolve(res);
+    });
+    releaseAbort = registerHttpRequest(options.requestId, abort);
     const timer = setTimeout(() => request.destroy(new Error('La petición excedió el tiempo límite')), options.timeout);
     request.on('error', reject);
-    request.on('close', () => clearTimeout(timer));
+    request.on('close', () => {
+      clearTimeout(timer);
+      if (!response) releaseAbort();
+    });
     if (options.body != null) request.write(options.body);
     request.end();
   });
 }
 
+const activeHttpRequests = new Map();
+const cancelledHttpRequests = new Set();
+
+function httpRequestAborted() {
+  const error = new Error('Petición cancelada');
+  error.code = 'HTTP_REQUEST_ABORTED';
+  return error;
+}
+
+function isHttpRequestCancelled(requestId) {
+  return !!requestId && cancelledHttpRequests.has(requestId);
+}
+
+function registerHttpRequest(requestId, abort) {
+  if (!requestId) return () => {};
+  if (isHttpRequestCancelled(requestId)) {
+    abort();
+    return () => {};
+  }
+  let requests = activeHttpRequests.get(requestId);
+  if (!requests) activeHttpRequests.set(requestId, requests = new Set());
+  requests.add(abort);
+  return () => {
+    requests.delete(abort);
+    if (!requests.size) activeHttpRequests.delete(requestId);
+  };
+}
+
 async function requestPublic(url, options = {}, redirects = 0) {
+  if (isHttpRequestCancelled(options.requestId)) throw httpRequestAborted();
   const parsed = validateUrl(url);
   const address = await withTimeout(resolvePublicAddress(parsed.hostname), options.timeout);
+  if (isHttpRequestCancelled(options.requestId)) throw httpRequestAborted();
   const response = await requestOnce(parsed, options, address);
   const status = response.statusCode || 0;
   const location = response.headers.location;
@@ -482,14 +532,14 @@ function taskName(hh) {
 }
 
 async function removeTasks() {
-  for (const hh of ['00', '06', '12', '18']) {
+  await Promise.all(['00', '06', '12', '18'].map(async (hh) => {
     try {
       await execFileAsync('schtasks', ['/Delete', '/F', '/TN', taskName(hh)]);
     } catch (e) {
       const raw = `${e?.message || ''} ${e?.stderr || ''}`;
       if (!/no puede encontrar|no se encuentra|not found|cannot find/i.test(raw)) throw e;
     }
-  }
+  }));
 }
 
 const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
@@ -513,12 +563,10 @@ ipcMain.handle('notify:background', async (_e, on, hours = 12) => {
       return { ok: true };
     }
     await removeTasks();
-    for (const hh of list) {
-      await execFileAsync('powershell', [
-        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-        '-Command', taskScript(hh, arg)
-      ]);
-    }
+    await execFileAsync('powershell', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-Command', list.map((hh) => taskScript(hh, arg)).join('\n')
+    ]);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e?.stderr || e?.message || e) };
@@ -575,7 +623,7 @@ const refererFor = (url) => {
     const rule = REFERER_RULES.find((r) => r.hosts.some((h) => host === h || host.endsWith(`.${h}`)));
     if (rule) return rule.referer;
   } catch {}
-  try { return new URL(url).origin + '/'; } catch { return 'https://leercapitulo.co/'; }
+  try { return new URL(url).origin + '/'; } catch { return 'https://www.leercapitulo.co/'; }
 };
 
 const HTTP_GET_TIMEOUT_MS = 15_000;
@@ -583,15 +631,32 @@ const HTTP_HEAD_TIMEOUT_MS = 5_000;
 const HTTP_BODY_MAX_BYTES = 10 * 1024 * 1024;
 const IMAGE_BODY_MAX_BYTES = 50 * 1024 * 1024;
 
-ipcMain.handle('http:get', async (_e, url) => {
+ipcMain.on('http:cancel', (_event, requestId) => {
+  if (typeof requestId !== 'string' || !requestId) return;
+  cancelledHttpRequests.add(requestId);
+  for (const abort of activeHttpRequests.get(requestId) || []) abort();
+});
+
+ipcMain.on('http:release', (_event, requestId) => {
+  if (typeof requestId !== 'string' || !requestId) return;
+  cancelledHttpRequests.delete(requestId);
+  activeHttpRequests.delete(requestId);
+});
+
+ipcMain.handle('http:get', async (_e, url, requestId) => {
   const parsed = validateUrl(url);
+  const mangaDexApi = parsed.hostname.toLowerCase() === 'api.mangadex.org';
   const res = await requestPublic(parsed.toString(), {
     method: 'GET',
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
+      'User-Agent': mangaDexApi
+        ? 'Cytlex/0.1.0 (+https://github.com/fobicho/Cytlex)'
+        : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
+      ...(mangaDexApi ? { Accept: 'application/json' } : {}),
       Referer: refererFor(parsed.toString())
     },
-    timeout: HTTP_GET_TIMEOUT_MS
+    timeout: HTTP_GET_TIMEOUT_MS,
+    requestId
   });
   if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`HTTP ${res.statusCode} al pedir ${parsed.toString()}`);
   return (await readResponse(res, HTTP_BODY_MAX_BYTES)).toString('utf8');
@@ -612,7 +677,7 @@ ipcMain.handle('http:head', async (_e, url) => {
   return { ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, length: Number(res.headers['content-length']) || 0, type: res.headers['content-type'] || '' };
 });
 
-ipcMain.handle('http:post', async (_e, payload = {}) => {
+ipcMain.handle('http:post', async (_e, payload = {}, requestId) => {
   const { url, body, headers } = payload;
   if (!url) throw new Error('Falta la URL de la petición POST');
   const parsed = validateUrl(url);
@@ -625,7 +690,8 @@ ipcMain.handle('http:post', async (_e, payload = {}) => {
       ...headers
     },
     body: typeof body === 'string' ? body : JSON.stringify(body),
-    timeout: HTTP_GET_TIMEOUT_MS
+    timeout: HTTP_GET_TIMEOUT_MS,
+    requestId
   });
   if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`HTTP ${res.statusCode} al pedir ${urlStr}`);
   const response = (await readResponse(res, HTTP_BODY_MAX_BYTES)).toString('utf8');
@@ -641,7 +707,7 @@ ipcMain.handle('image:fetch', async (_e, url) => {
       method: 'GET',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
-        Referer: parsed.origin + '/'
+        Referer: refererFor(urlStr)
       },
       timeout: HTTP_GET_TIMEOUT_MS
     });
@@ -718,6 +784,25 @@ ipcMain.handle('backup:open', async (e) => {
       ? gunzipSync(bytes, { maxOutputLength: 100 * 1024 * 1024 }).toString('utf8')
       : bytes.toString('utf8');
     return { ok: true, content, fileName: path.basename(filePath) };
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error) };
+  }
+});
+
+ipcMain.handle('backup:open-mihon', async (e) => {
+  try {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const options = {
+      properties: ['openFile'],
+      filters: [{ name: 'Respaldo de Mihon', extensions: ['tachibk', 'gz', 'proto'] }]
+    };
+    const { canceled, filePaths } = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    if (canceled || !filePaths?.[0]) return { ok: false, canceled: true };
+    const filePath = filePaths[0];
+    const fileInfo = await stat(filePath);
+    if (fileInfo.size > 100 * 1024 * 1024) return { ok: false, error: 'El archivo supera el límite de 100 MB.' };
+    const bytes = await readFile(filePath);
+    return { ok: true, bytes, fileName: path.basename(filePath) };
   } catch (error) {
     return { ok: false, error: String(error?.message || error) };
   }

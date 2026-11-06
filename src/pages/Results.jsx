@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { extensions, isAdultExtension } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { api } from '../lib/api.js';
 import { lastSearch, resultsScroll, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
@@ -31,7 +31,7 @@ export default function Results() {
   }), []);
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
-  const adultExtensionHidden = !showAdultExtensions && isAdultExtension(manifest);
+  const adultExtensionHidden = !isExtensionAllowed(manifest, showAdultExtensions);
   const currentGroup = groupOverride?.id === sourceId ? groupOverride : group;
   const items = currentGroup?.items || [];
 
@@ -46,7 +46,8 @@ export default function Results() {
     setLoadError('');
     try {
       const page = currentGroup.page + 1;
-      const result = await api.catalog({ q: lastSearch.q, genre: '', page }, sourceId);
+      const params = { q: lastSearch.q, genre: '', page };
+      const result = await api.catalog(params, sourceId);
       const seen = new Set(items.map((item) => item.url));
       const remaining = Math.max(0, MAX_SEARCH_RESULTS - items.length);
       const nextItems = [...items, ...(result.items || []).filter((item) => !seen.has(item.url)).slice(0, remaining)];
@@ -117,8 +118,8 @@ export default function Results() {
     return (
       <EmptyState
         face="（・_・）"
-        title="Extensión +18 oculta"
-        description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para ver sus resultados."
+        title="Extensión oculta"
+        description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para ver fuentes MIXED, NSFW o sin clasificación."
         action={
           <Button
             variant="secondary"

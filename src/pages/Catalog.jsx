@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { memo, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Search, Loader2, ChevronRight, ChevronLeft, CircleHelp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { extensions, isAdultExtension } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
-import { lastSearch, scrollMemory, rememberCover, catalogScroll, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
+import { lastSearch, scrollMemory, rememberCover, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import { clearSearchCoverCache, preloadSearchCover } from '../lib/covers.js';
 import MangaCard from '../components/MangaCard.jsx';
 import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
+import SourcesCatalog from '../components/SourcesCatalog.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
 import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Input } from '../components/ui/input.jsx';
@@ -18,11 +20,12 @@ import { useScale, px } from '../lib/useScale.js';
 
 const TABS = [
   { id: 'mangas', label: 'Mangas' },
-  { id: 'extensiones', label: 'Extensiones' }
+  { id: 'extensiones', label: 'Extensiones' },
+  { id: 'fuentes', label: 'Fuentes' }
 ];
 
 const enabledSources = (showAdultExtensions) => extensions.sources().filter(({ manifest }) =>
-  showAdultExtensions || !isAdultExtension(manifest)
+  isExtensionAllowed(manifest, showAdultExtensions)
 );
 
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
@@ -39,7 +42,7 @@ const sourceLangSubtitle = (manifest) => {
   return codes.map((c) => options.find((l) => l.code === c)?.label || c).join(' · ');
 };
 
-function SourceSection({ r, coverSize, scale = 1, first = false, animate = false }) {
+function SourceSection({ r, coverSize, scale = 1, first = false, animate = false, active = true }) {
   const trackRef = useRef(null);
   const mainRef = useRef(null);
   const [canLeft, setCanLeft] = useState(false);
@@ -50,19 +53,19 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
   }, []);
 
   useEffect(() => {
-    if (scrollMemory.catalog > 0 && mainRef.current) {
+    if (active && scrollMemory.catalog > 0 && mainRef.current) {
       mainRef.current.scrollTop = scrollMemory.catalog;
       scrollMemory.catalog = 0;
     }
-  }, [r.id]);
+  }, [r.id, active]);
 
   useEffect(() => {
     const main = mainRef.current;
-    if (!main) return;
+    if (!active || !main) return undefined;
     const save = () => { scrollMemory.catalog = main.scrollTop; };
     main.addEventListener('scroll', save, { passive: true });
     return () => main.removeEventListener('scroll', save);
-  }, []);
+  }, [active]);
 
   const gap = Math.max(8, Math.round(12 * scale));
 
@@ -217,11 +220,12 @@ let sessionTab = 'mangas';
 let animateSearch = false;
 let activeSearchRun = 0;
 
-export default function Catalog({ tutorialPreview = false }) {
-  const loc = useLocation();
+const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = false, active = true }) {
+  const loc = locationOverride;
+  const navigate = useNavigate();
   const [tab, setTab] = useState(() => {
     const t = new URLSearchParams(loc.search).get('tab');
-    return t === 'mangas' || t === 'extensiones' ? t : sessionTab;
+    return t === 'mangas' || t === 'extensiones' || t === 'fuentes' ? t : sessionTab;
   });
   const [sources, setSources] = useState(() => enabledSources(!!settings.get().showAdultExtensions));
   const [q, setQ] = useState(() => lastSearch.q);
@@ -237,6 +241,9 @@ export default function Catalog({ tutorialPreview = false }) {
   }), []);
   useEffect(() => { sessionTab = tab; }, [tab]);
   useEffect(() => () => {
+    if (tab === 'fuentes') sourceCatalogState.requestRestore();
+  }, [tab]);
+  useEffect(() => () => {
     if (tutorialPreview) sessionTab = 'mangas';
   }, [tutorialPreview]);
   useEffect(() => () => { animateSearch = false; }, []);
@@ -249,7 +256,7 @@ export default function Catalog({ tutorialPreview = false }) {
 
   const searching = !!results && results.some((r) => r.status === 'loading');
   const completed = results ? results.filter((r) => r.status !== 'loading') : [];
-  const visibleCompleted = completed.filter((r) => showAdultExtensions || !isAdultExtension(r.manifest));
+  const visibleCompleted = completed.filter((r) => isExtensionAllowed(r.manifest, showAdultExtensions));
   const done = !!results && !searching;
 
   useEffect(() => { if (done) animateSearch = false; }, [done]);
@@ -260,7 +267,8 @@ export default function Catalog({ tutorialPreview = false }) {
   };
 
   const runSearch = (query = q) => {
-    const list = enabledSources(!!settings.get().showAdultExtensions);
+    const adultExtensionsEnabled = !!settings.get().showAdultExtensions;
+    const list = enabledSources(adultExtensionsEnabled);
     if (!list.length) return;
     const runId = ++activeSearchRun;
     catalogScroll.clear();
@@ -268,6 +276,7 @@ export default function Catalog({ tutorialPreview = false }) {
     animateSearch = true;
     lastSearch.q = query;
     lastSearch.genre = '';
+    lastSearch.adultExtensionsEnabled = adultExtensionsEnabled;
     lastSearch.results = list
       .map((s) => ({ id: s.manifest.id, manifest: s.manifest, status: 'loading', items: [], page: 1, totalPages: 1, hasMore: false }))
       .sort((a, b) => a.manifest.name.localeCompare(b.manifest.name, 'es', { sensitivity: 'base' }));
@@ -275,7 +284,8 @@ export default function Catalog({ tutorialPreview = false }) {
 
     list.forEach(async (s) => {
       try {
-        const r = await api.catalog({ q: query, genre: '', page: 1 }, s.manifest.id);
+        const params = { q: query, genre: '', page: 1 };
+        const r = await api.catalog(params, s.manifest.id);
         const items = (r.items || []).filter((m) =>
           s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim()
         ).slice(0, MAX_SEARCH_RESULTS);
@@ -287,7 +297,7 @@ export default function Catalog({ tutorialPreview = false }) {
         const loadedItems = items.map((m) => cachedCovers.has(m.url)
           ? { ...m, coverCached: cachedCovers.get(m.url) }
           : m);
-        items.forEach((m) => rememberCover(m.url, m.cover));
+        items.forEach((m) => rememberCover(m.url, m.cover, s.manifest.id));
         if (runId !== activeSearchRun) return;
         updateResults((prev) =>
           prev ? prev.map((x) => (x.id === s.manifest.id
@@ -311,19 +321,28 @@ export default function Catalog({ tutorialPreview = false }) {
   };
 
   useEffect(() => {
-    if (lastSearch.results && lastSearch.results.some((r) => r.status === 'loading')) {
+    if (tab === 'mangas' && results && (
+      lastSearch.adultExtensionsEnabled !== showAdultExtensions
+    )) {
+      runSearch(lastSearch.q);
+    }
+  }, [showAdultExtensions, tab]);
+
+  useEffect(() => {
+    if (tab !== 'fuentes' && lastSearch.results && lastSearch.results.some((r) => r.status === 'loading')) {
       runSearch(lastSearch.q);
     }
   }, []);
 
   useEffect(() => {
     const t = new URLSearchParams(loc.search).get('tab');
-    if (t === 'mangas' || t === 'extensiones') setTab(t);
+    if (t === 'mangas' || t === 'extensiones' || t === 'fuentes') setTab(t);
   }, [loc.search]);
 
   useEffect(() => {
-    const nq = new URLSearchParams(loc.search).get('q') || '';
-    if (nq) {
+    const params = new URLSearchParams(loc.search);
+    const nq = params.get('q') || '';
+    if (nq && params.get('tab') !== 'fuentes') {
       setQ(nq);
       runSearch(nq);
     }
@@ -332,7 +351,7 @@ export default function Catalog({ tutorialPreview = false }) {
   return (
     <div
       className="min-h-full flex flex-col"
-      data-explore-start={tab === 'extensiones' || (!q.trim() && !results) ? 'true' : 'false'}
+      data-explore-start={tab === 'extensiones' || tab === 'fuentes' || (!q.trim() && !results) ? 'true' : 'false'}
     >
       <div
         className="-mt-1 flex flex-wrap items-center mb-3"
@@ -349,7 +368,40 @@ export default function Catalog({ tutorialPreview = false }) {
               <button
                 key={t.id}
                 type="button"
-                onClick={() => setTab(t.id)}
+                onClick={() => {
+                  if (active) {
+                    const main = document.querySelector('main');
+                    if (t.id === 'fuentes') {
+                      if (main?.querySelector('[data-source-catalog-selected="true"]')) {
+                        window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
+                      } else {
+                        setTab('extensiones');
+                        const params = new URLSearchParams(loc.search);
+                        params.set('tab', 'extensiones');
+                        params.delete('source');
+                        params.delete('q');
+                        params.delete('quick');
+                        navigate({ pathname: loc.pathname, search: `?${params}` }, { replace: true });
+                      }
+                    }
+                    if (t.id === 'mangas') {
+                      setQ('');
+                      lastSearch.q = '';
+                      lastSearch.genre = '';
+                      lastSearch.results = null;
+                      setResults(null);
+                    }
+                    main?.scrollTo({ top: 0, behavior: 'smooth' });
+                    return;
+                  }
+                  setTab(t.id);
+                  const params = new URLSearchParams(loc.search);
+                  params.set('tab', t.id);
+                  params.delete('source');
+                  params.delete('q');
+                  params.delete('quick');
+                  navigate({ pathname: loc.pathname, search: `?${params}` }, { replace: true });
+                }}
                 className={cn(
                   'relative font-medium transition-colors',
                   active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
@@ -481,15 +533,19 @@ export default function Catalog({ tutorialPreview = false }) {
                     description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para mostrarlas."
                   />
                 ) : visibleCompleted.map((r, i) => (
-                  <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} first={i === 0} animate={animateSearch} />
+                  <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} first={i === 0} animate={animateSearch} active={active} />
                 ))}
               </>
             )}
           </>
         )
-      ) : (
+      ) : tab === 'extensiones' ? (
         <ExtensionsPanel tutorialPreview={tutorialPreview} />
+      ) : (
+        <SourcesCatalog sources={sources} initialSourceId={new URLSearchParams(loc.search).get('source') || ''} active={active} />
       )}
     </div>
   );
-}
+});
+
+export default Catalog;

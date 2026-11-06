@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useLocation } from 'react-router-dom';
 import { ArrowLeft, Maximize2, Minimize2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Download, Loader2 } from 'lucide-react';
 import { api } from '../lib/api.js';
-import { extensions, isAdultExtension } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { progress } from '../lib/progress.js';
 import { lib } from '../lib/library.js';
@@ -91,7 +91,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const mangaUrl = params.get('m') || '';
   const sourceId = params.get('s') || 'leercapitulo';
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
-  const adultExtensionDisabled = !showAdultExtensions && isAdultExtension(extensions.manifest(sourceId));
+  const adultExtensionDisabled = !isExtensionAllowed(extensions.manifest(sourceId), showAdultExtensions);
   const fromParam = params.get('from') || '';
   const fromQS = fromParam ? `&from=${encodeURIComponent(fromParam)}` : '';
   const [ch, setCh] = useState(null);
@@ -156,6 +156,8 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const lastPanelPointerDownRef = useRef(null);
   const ignoreNativeDoubleClickUntilRef = useRef(0);
   const [isRead, setIsRead] = useState(() => !!progress.get(chapterUrl, sourceId)?.read);
+  const [verticalAtEnd, setVerticalAtEnd] = useState(false);
+  const [lastSeen, setLastSeen] = useState(0);
   const pendingScrollRef = useRef(null);
   const sizesRef = useRef(new Map());
   const areaRef = useRef(null);
@@ -329,6 +331,8 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     dragRef.current = null;
     setDragging(false);
     setIsRead(!!progress.get(chapterUrl, sourceId)?.read);
+    setLastSeen(0);
+    setVerticalAtEnd(false);
     setPgLoaded(false);
     setNat(null);
     setCh(null);
@@ -360,7 +364,14 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     return () => { active = false; };
   }, [chapterUrl, sourceId, showAdultExtensions]);
 
-  const [lastSeen, setLastSeen] = useState(0);
+  const updateVerticalEnd = useCallback(() => {
+    const mainEl = document.querySelector('main');
+    const lastPage = document.getElementById(`pg-${(ch?.pages?.length || 1) - 1}`);
+    const lastImage = lastPage?.querySelector('img');
+    setVerticalAtEnd(!!mainEl && !!lastImage?.naturalWidth
+      && lastPage.getBoundingClientRect().bottom <= mainEl.getBoundingClientRect().bottom + 24);
+  }, [ch]);
+
   useEffect(() => {
     if (!ch || !ch.pages?.length || chUrl !== chapterUrl) return undefined;
     let atTop = true;
@@ -371,6 +382,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         if (mode !== 'vertical') return;
         const mainEl = document.querySelector('main');
         if (!mainEl) return;
+        updateVerticalEnd();
         if (!atTop) {
           if (mainEl.scrollTop > 4) return;
           atTop = true;
@@ -395,7 +407,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       cancelAnimationFrame(raf);
       window.removeEventListener('scroll', onScroll, { capture: true });
     };
-  }, [ch, chUrl, chapterUrl, sourceId, mode]);
+  }, [ch, chUrl, chapterUrl, sourceId, mode, updateVerticalEnd]);
 
   useEffect(() => {
     if (!ch || mode !== 'paginado' && mode !== 'paginado-rtl') return;
@@ -412,9 +424,9 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     const lastDisplayed = (mode === 'paginado' || mode === 'paginado-rtl') && useDouble
       ? Math.min(page + (page + 1 < total ? 1 : 0), total - 1)
       : (mode === 'paginado' || mode === 'paginado-rtl' ? page : lastSeen);
-    const done = lastDisplayed >= total - 1;
+    const done = mode === 'vertical' ? verticalAtEnd : lastDisplayed >= total - 1;
     if (done) {
-      progress.markRead(chapterUrl, sourceId, total);
+      progress.markRead(chapterUrl, sourceId, total, mangaUrl);
       setIsRead(true);
       const manga = tracking.get(mangaUrl, sourceId);
       if (manga) {
@@ -423,7 +435,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         }).catch(() => {});
       }
     }
-  }, [lastSeen, page, mode, ch, chUrl, chapterUrl, sourceId, isRead, mangaUrl]);
+  }, [lastSeen, page, mode, verticalAtEnd, ch, chUrl, chapterUrl, sourceId, isRead, mangaUrl]);
 
   useEffect(() => {
     if (!ch || pendingScrollRef.current == null) return undefined;
@@ -866,7 +878,10 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
               alt={`Página ${i + 1}`}
               loading="lazy"
               onContextMenu={(e) => openPanelMenu(e, src, `Página ${i + 1}`)}
-              onLoaded={(e) => remember(src, e.currentTarget)}
+              onLoaded={(e) => {
+                remember(src, e.currentTarget);
+                if (i === ch.pages.length - 1) requestAnimationFrame(updateVerticalEnd);
+              }}
               wrapperClassName="mb-2.5 w-full min-h-[120px]"
               imageClassName="w-full block mx-auto"
             />

@@ -2,8 +2,8 @@ import { useEffect, useState, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
-import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, X, Database, Download, Upload } from 'lucide-react';
-import { resolveMode, settings } from '../lib/settings.js';
+import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, X, Database, Download, Upload, CircleHelp, Settings as SettingsIcon } from 'lucide-react';
+import { CONTENT_WARNING_RATINGS, resolveMode, settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
 import { anilist } from '../lib/anilist.js';
 import { session } from '../lib/session.js';
@@ -12,6 +12,10 @@ import { MODES, THEMES } from '../lib/themes.js';
 import { notifyHours } from '../lib/notify.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { compressBackup, createBackup, parseBackup, readBackupFile, restoreBackup } from '../lib/backup.js';
+import { importMihonBackup, previewMihonBackup } from '../lib/mihonBackup.js';
+import { reconcileMihonProgress } from '../lib/mihonProgress.js';
+import { extensions, isExtensionAllowed } from '../lib/extensions.js';
+import { api } from '../lib/api.js';
 import { Button } from '../components/ui/button.jsx';
 import { Card } from '../components/ui/card.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
@@ -20,17 +24,75 @@ import { useToast } from '../components/Toast.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
+import { invalidateLibraryCovers } from '../lib/covers.js';
 
-function Switch({ on, onChange, label, scale = 1 }) {
+function clearLibraryUnreadCache() {
+  localStorage.removeItem('cytlex:libraryUnread:v1');
+  localStorage.removeItem('cytlex:libraryUnread:v2');
+  window.dispatchEvent(new Event('cytlex:library-unread-reset'));
+}
+
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error('Importación cancelada.');
+  error.name = 'AbortError';
+  throw error;
+}
+
+async function refreshImportedMihonCovers(candidate, excludedEntries, signal) {
+  const excluded = new Set(excludedEntries.map((entry) => `${entry.manga?.sourceId || ''}|${entry.manga?.url || ''}`));
+  const entries = candidate.entries.filter(({ manga }) => {
+    if (excluded.has(`${manga?.sourceId || ''}|${manga?.url || ''}`)) return false;
+    const sourceId = extensions.resolveInstalledSource(manga?.sourceId, manga?.sourceName, manga?.url) || manga?.sourceId;
+    if (!extensions.isInstalled(sourceId)) return false;
+    if (sourceId !== manga.sourceId) {
+      manga.sourceId = sourceId;
+      const manifest = extensions.manifest(sourceId);
+      manga.sourceName = manifest?.name || manga.sourceName;
+      manga.sourceIcon = manifest?.icon || manga.sourceIcon;
+    }
+    return true;
+  });
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(4, entries.length) }, async () => {
+    while (cursor < entries.length && !signal?.aborted) {
+      const entry = entries[cursor++];
+      try {
+        const originalUrl = entry.manga.url;
+        const refreshed = await api.refreshManga(originalUrl, entry.manga.sourceId, {
+          title: entry.manga.title,
+          author: entry.manga.author
+        });
+        if (signal?.aborted) return;
+        if (refreshed?.url && refreshed.url !== originalUrl) {
+          entry.originalUrl = entry.originalUrl || originalUrl;
+          entry.manga.url = refreshed.url;
+        }
+        const detail = refreshed?.detail;
+        if (detail && typeof detail === 'object') {
+          entry.importedDetail = detail;
+          if (detail.cover && /^https?:\/\//i.test(detail.cover)) entry.manga.cover = detail.cover;
+          if (Array.isArray(detail.chapters) && detail.chapters.length) {
+            entry.manga.chapterTotal = detail.chapters.length;
+          }
+        }
+      } catch {}
+    }
+  }));
+  throwIfAborted(signal);
+}
+
+function Switch({ on, onChange, label, disabled = false, scale = 1 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={!!on}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!on)}
       className={cn(
-        'relative rounded-full transition-colors shrink-0',
+        'relative rounded-full transition-colors shrink-0 disabled:cursor-wait disabled:opacity-60',
         on ? 'bg-primary' : 'bg-muted'
       )}
       style={{
@@ -170,6 +232,16 @@ const SHORTCUTS = [
   { keys: ['←', '→'], desc: 'Página anterior / siguiente' }
 ];
 
+const DEFAULT_EXTENSION_REPOSITORY = 'https://fobicho.github.io/Cytlex/index.json';
+
+const extensionForSource = (repository, sourceId) => repository.find((manifest) => (
+  manifest.id === sourceId || manifest.config?.sources?.some((source) => source.id === sourceId)
+));
+const canInstallExtension = (manifest) => !!manifest?.id && (
+  (manifest.type === 'module' && !!manifest.main)
+  || (manifest.type === 'selector' && !!manifest.baseUrl && !!manifest.selectors)
+);
+
 let sessionSeccion = '';
 
 export default function Settings({ tutorialPreview = false }) {
@@ -186,13 +258,33 @@ export default function Settings({ tutorialPreview = false }) {
   const [authErr, setAuthErr] = useState('');
   const [connectHintFor, setConnectHintFor] = useState(null);
   const connectHintRef = useRef(null);
-  const { toast } = useToast();
+  const { toast, dismiss } = useToast();
   const [bgErr, setBgErr] = useState('');
+  const [bgBusy, setBgBusy] = useState(false);
+  const [confirmBackground, setConfirmBackground] = useState(false);
   const [confirmAdultExtensions, setConfirmAdultExtensions] = useState(false);
+  const [adultRatingsDialog, setAdultRatingsDialog] = useState(false);
+  const [adultRatingsDraft, setAdultRatingsDraft] = useState(() => [...settings.get().adultContentRatings]);
   const [confirmRemoveRepo, setConfirmRemoveRepo] = useState(false);
   const [backupCandidate, setBackupCandidate] = useState(null);
+  const [backupInstallOpen, setBackupInstallOpen] = useState(false);
+  const [backupReviewOpen, setBackupReviewOpen] = useState(false);
+  const [backupMissingSources, setBackupMissingSources] = useState([]);
+  const [backupUnavailableSources, setBackupUnavailableSources] = useState([]);
+  const [backupInstallManifests, setBackupInstallManifests] = useState([]);
+  const [mihonCandidate, setMihonCandidate] = useState(null);
+  const [mihonBlockedEntries, setMihonBlockedEntries] = useState([]);
+  const [mihonMissingEntries, setMihonMissingEntries] = useState([]);
+  const [mihonInstallManifests, setMihonInstallManifests] = useState([]);
+  const [mihonUnknownEntries, setMihonUnknownEntries] = useState([]);
+  const [mihonKeepUnavailable, setMihonKeepUnavailable] = useState(false);
+  const [mihonReviewOpen, setMihonReviewOpen] = useState(false);
+  const [mihonInstallOpen, setMihonInstallOpen] = useState(false);
+  const [mihonBusy, setMihonBusy] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
   const backupFileInputRef = useRef(null);
+  const mihonFileInputRef = useRef(null);
+  const mihonImportControllerRef = useRef(null);
   const removeRepoRef = useRef(null);
   const settingsRootRef = useRef(null);
   const scaleTransitionTimeoutRef = useRef(null);
@@ -202,18 +294,31 @@ export default function Settings({ tutorialPreview = false }) {
   const scale = useScale();
   const reduceMotion = useReducedMotion();
 
-  const toggleBackground = async (on) => {
+  const applyBackgroundSetting = async (on) => {
+    const previous = settings.get().notifyBackground;
+    setBgBusy(true);
+    set({ notifyBackground: on });
+    try {
+      const r = await window.cytlex?.setBackgroundCheck?.(on, notifyHours());
+      if (r?.ok === false) {
+        set({ notifyBackground: previous });
+        setBgErr(r.error || 'No se pudo registrar la tarea.');
+      }
+    } catch (error) {
+      set({ notifyBackground: previous });
+      setBgErr(String(error?.message || 'No se pudo registrar la tarea.'));
+    } finally {
+      setBgBusy(false);
+    }
+  };
+
+  const toggleBackground = (on) => {
     setBgErr('');
     if (on) {
-      const ok = await window.cytlex?.confirmTask?.();
-      if (!ok) return;
-    }
-    const r = await window.cytlex?.setBackgroundCheck?.(on, notifyHours());
-    if (r?.ok === false) {
-      setBgErr(r.error || 'No se pudo registrar la tarea.');
+      setConfirmBackground(true);
       return;
     }
-    set({ notifyBackground: on });
+    applyBackgroundSetting(false);
   };
 
   useEffect(() => settings.subscribe(setS), []);
@@ -399,15 +504,346 @@ export default function Settings({ tutorialPreview = false }) {
     }
   };
 
-  const confirmBackupImport = () => {
+  const finishBackupImport = async ({ omitUnavailable = false } = {}) => {
     if (!backupCandidate) return;
     try {
-      restoreBackup(backupCandidate.data);
+      let data = backupCandidate.data;
+      let omittedCount = 0;
+      if (omitUnavailable) {
+        const excludedIds = new Set(backupUnavailableSources.map((source) => source.id));
+        let favorites = [];
+        try {
+          const value = JSON.parse(data['cytlex:favs'] || '[]');
+          if (Array.isArray(value)) favorites = value;
+        } catch {}
+        const retained = favorites.filter((manga) => !excludedIds.has(manga?.sourceId || 'leercapitulo'));
+        omittedCount = favorites.length - retained.length;
+        data = {
+          ...data,
+          'cytlex:favs': JSON.stringify(retained)
+        };
+      }
+      let favorites = [];
+      try {
+        const value = JSON.parse(data['cytlex:favs'] || '[]');
+        if (Array.isArray(value)) favorites = value;
+      } catch {}
+      const importedCoverUrls = favorites.map((manga) => manga?.cover).filter((cover) => /^https?:\/\//i.test(cover || ''));
+      if (importedCoverUrls.length) {
+        data = {
+          ...data,
+          'cytlex:favs': JSON.stringify(favorites.map((manga) => (
+            /^https?:\/\//i.test(manga?.cover || '') ? { ...manga, coverLocal: '', coverCached: '' } : manga
+          )))
+        };
+        await invalidateLibraryCovers(importedCoverUrls);
+      }
+      restoreBackup(data);
+      clearLibraryUnreadCache();
       setBackupCandidate(null);
-      toast({ title: 'Respaldo restaurado', description: 'Cytlex se recargará para aplicar los datos.', variant: 'success' });
+      setBackupInstallOpen(false);
+      setBackupReviewOpen(false);
+      setBackupMissingSources([]);
+      setBackupUnavailableSources([]);
+      setBackupInstallManifests([]);
+      toast({
+        title: 'Respaldo restaurado',
+        description: `Cytlex se recargará para aplicar los datos${omittedCount ? `; ${omittedCount} mangas omitidos` : ''}.`,
+        variant: 'success'
+      });
       window.setTimeout(() => window.location.reload(), 800);
     } catch (error) {
       toast({ title: 'No se pudo restaurar el respaldo', description: error.message, variant: 'error' });
+    }
+  };
+
+  const confirmBackupImport = async () => {
+    if (!backupCandidate) return;
+    setBackupBusy(true);
+    try {
+      let favorites = [];
+      try {
+        const value = JSON.parse(backupCandidate.data['cytlex:favs'] || '[]');
+        if (Array.isArray(value)) favorites = value;
+      } catch {}
+      const sources = new Map();
+      favorites.forEach((manga) => {
+        const id = manga?.sourceId || 'leercapitulo';
+        const resolvedId = extensions.resolveInstalledSource(id, manga?.sourceName, manga?.url) || id;
+        const manifest = extensions.manifest(resolvedId);
+        const unavailable = !extensions.isInstalled(resolvedId)
+          || !isExtensionAllowed(manifest, settings.get().showAdultExtensions);
+        if (!unavailable) return;
+        const source = sources.get(id) || { id, resolvedId, name: manga?.sourceName || manifest?.name || id, count: 0 };
+        source.count += 1;
+        sources.set(id, source);
+      });
+      if (!sources.size) {
+        finishBackupImport();
+        return;
+      }
+
+      const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
+      let repository = [];
+      if ([...sources.values()].some((source) => !extensions.isInstalled(source.resolvedId))) {
+        try { repository = await extensions.repoIndex(indexUrl); } catch {}
+      }
+      const manifests = new Map();
+      const missing = [...sources.values()].filter((source) => !extensions.isInstalled(source.resolvedId)).map((source) => {
+        const manifest = extensionForSource(repository, source.id) || extensionForSource(repository, source.resolvedId);
+        const fallback = manifest || extensions.manifest(source.resolvedId) || extensions.manifest(source.id);
+        const installable = canInstallExtension(fallback);
+        if (installable) manifests.set(fallback.id, fallback);
+        return { ...source, manifest: installable ? fallback : null };
+      });
+      setBackupMissingSources(missing);
+      setBackupUnavailableSources([...sources.values()]);
+      setBackupInstallManifests([...manifests.values()]);
+      setBackupReviewOpen(true);
+    } catch (error) {
+      toast({ title: 'No se pudieron comprobar las extensiones', description: error.message, variant: 'error' });
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const cancelBackupInstall = () => {
+    setBackupInstallOpen(false);
+    setBackupReviewOpen(false);
+    setBackupCandidate(null);
+    setBackupMissingSources([]);
+    setBackupUnavailableSources([]);
+    setBackupInstallManifests([]);
+  };
+
+  const keepBackupUnavailable = () => {
+    setBackupReviewOpen(false);
+    if (backupInstallManifests.length) setBackupInstallOpen(true);
+    else finishBackupImport();
+  };
+
+  const installBackupExtensions = async () => {
+    if (!backupCandidate) return;
+    setBackupBusy(true);
+    try {
+      const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
+      for (const manifest of backupInstallManifests) {
+        if (!extensions.isInstalled(manifest.id)) await extensions.install(manifest, indexUrl);
+      }
+      finishBackupImport();
+    } catch (error) {
+      toast({ title: 'No se pudieron instalar las extensiones', description: `${error.message} No se restauró el respaldo.`, variant: 'error' });
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const loadMihonBackup = async (bytes, fileName) => {
+    try {
+      const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
+      let repository = [];
+      try { repository = await extensions.repoIndex(indexUrl); } catch {}
+      const candidate = await previewMihonBackup(bytes, extensions.sources(), repository);
+      setMihonCandidate({ ...candidate, fileName });
+    } catch (error) {
+      toast({ title: 'Respaldo de Mihon no válido', description: error.message, variant: 'error' });
+    }
+  };
+
+  const importMihon = async () => {
+    if (!window.cytlex?.openMihonBackup) {
+      mihonFileInputRef.current?.click();
+      return;
+    }
+    setBackupBusy(true);
+    try {
+      const result = await window.cytlex.openMihonBackup();
+      if (result?.canceled) return;
+      if (!result?.ok) throw new Error(result?.error || 'No se pudo abrir el archivo.');
+      await loadMihonBackup(result.bytes, result.fileName);
+    } catch (error) {
+      toast({ title: 'No se pudo leer el respaldo de Mihon', description: error.message, variant: 'error' });
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const finishMihonImport = async (excludedEntries = [], progressToastId = null, importController = null) => {
+    if (!mihonCandidate) return;
+    const controller = importController || new AbortController();
+    if (!importController) mihonImportControllerRef.current = controller;
+    const activeToastId = progressToastId ?? toast({
+      title: 'Importando respaldo de Mihon',
+      description: 'Aplicando los ajustes necesarios…',
+      icon: Loader2,
+      loading: true,
+      duration: null,
+      onDismiss: () => controller.abort()
+    });
+    setMihonBusy(true);
+    try {
+      const candidate = {
+        ...mihonCandidate,
+        entries: mihonCandidate.entries.map((entry) => ({ ...entry, manga: { ...entry.manga } }))
+      };
+      await refreshImportedMihonCovers(candidate, excludedEntries, controller.signal);
+      throwIfAborted(controller.signal);
+      const excluded = new Set(excludedEntries.map((entry) => `${entry.manga?.sourceId || ''}|${entry.manga?.url || ''}`));
+      const importedCoverUrls = candidate.entries
+        .filter((entry) => !excluded.has(`${entry.manga?.sourceId || ''}|${entry.manga?.url || ''}`))
+        .map((entry) => entry.manga?.cover)
+        .filter((cover) => /^https?:\/\//i.test(cover || ''));
+      await invalidateLibraryCovers(importedCoverUrls);
+      throwIfAborted(controller.signal);
+      const result = importMihonBackup(candidate, { excludedEntries });
+      candidate.entries.forEach((entry) => {
+        if (excluded.has(`${entry.manga?.sourceId || ''}|${entry.manga?.url || ''}`)) return;
+        const chapters = entry.importedDetail?.chapters;
+        if (!Array.isArray(chapters) || !chapters.length) {
+          chapterIndex.drop(entry.manga.url, entry.manga.sourceId);
+          return;
+        }
+        reconcileMihonProgress(entry.manga.url, entry.manga.sourceId, chapters);
+        chapterIndex.set(entry.manga.url, entry.manga.sourceId, chapters.map((chapter) => chapter.url).filter(Boolean));
+      });
+      clearLibraryUnreadCache();
+      setMihonCandidate(null);
+      setMihonBlockedEntries([]);
+      setMihonMissingEntries([]);
+      setMihonInstallManifests([]);
+      setMihonUnknownEntries([]);
+      setMihonKeepUnavailable(false);
+      setMihonReviewOpen(false);
+      setMihonInstallOpen(false);
+      dismiss(activeToastId);
+      toast({
+        title: 'Respaldo de Mihon importado',
+        description: `${result.added + result.updated} mangas importados${result.excluded ? `, ${result.excluded} omitidos` : ''}. La app se reiniciará en 3 segundos.`,
+        variant: 'success',
+        duration: 3000
+      });
+      window.setTimeout(() => window.location.reload(), 3000);
+    } catch (error) {
+      dismiss(activeToastId);
+      if (!controller.signal.aborted && error?.name !== 'AbortError') {
+        toast({ title: 'No se pudo importar el respaldo de Mihon', description: error.message, variant: 'error' });
+      }
+    } finally {
+      setMihonBusy(false);
+      if (mihonImportControllerRef.current === controller) mihonImportControllerRef.current = null;
+    }
+  };
+
+  const confirmMihonImport = async () => {
+    if (!mihonCandidate) return;
+    setMihonKeepUnavailable(false);
+    setMihonBusy(true);
+    try {
+      const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
+      const installedSourceId = (manga) => extensions.resolveInstalledSource(manga.sourceId, manga.sourceName, manga.url) || manga.sourceId;
+      const notInstalled = mihonCandidate.entries.filter(({ manga }) => !extensions.isInstalled(installedSourceId(manga)));
+      const repository = notInstalled.length ? await extensions.repoIndex(indexUrl) : [];
+      const showAdultExtensions = !!settings.get().showAdultExtensions;
+      const sourceManifest = (manga) => {
+        const sourceId = installedSourceId(manga);
+        return extensionForSource(repository, sourceId) || extensions.manifest(sourceId);
+      };
+      const blockedEntries = mihonCandidate.entries.filter(({ manga }) => (
+        !isExtensionAllowed(sourceManifest(manga), showAdultExtensions)
+      ));
+      const blockedKeys = new Set(blockedEntries.map(({ manga }) => `${manga.sourceId}|${manga.url}`));
+      const missingEntries = notInstalled.filter(({ manga }) => !blockedKeys.has(`${manga.sourceId}|${manga.url}`));
+      if (blockedEntries.length || missingEntries.length) {
+        const manifests = new Map();
+        const knownMissingEntries = [];
+        const unknownEntries = [];
+        for (const entry of missingEntries) {
+          const manifest = extensionForSource(repository, entry.manga.sourceId);
+          if (manifest) {
+            manifests.set(manifest.id, manifest);
+            knownMissingEntries.push(entry);
+          } else {
+            unknownEntries.push(entry);
+          }
+        }
+        setMihonBlockedEntries(blockedEntries);
+        setMihonMissingEntries(knownMissingEntries);
+        setMihonInstallManifests([...manifests.values()]);
+        setMihonUnknownEntries(unknownEntries);
+        if (blockedEntries.length || unknownEntries.length) {
+          setMihonReviewOpen(true);
+        } else if (manifests.size) {
+          setMihonInstallOpen(true);
+        } else {
+          await finishMihonImport();
+        }
+        return;
+      }
+      await finishMihonImport();
+    } catch (error) {
+      toast({ title: 'No se pudieron comprobar las extensiones', description: error.message, variant: 'error' });
+    } finally {
+      setMihonBusy(false);
+    }
+  };
+
+  const continueMihonImport = async () => {
+    setMihonReviewOpen(false);
+    if (mihonInstallManifests.length) {
+      setMihonInstallOpen(true);
+      return;
+    }
+    await finishMihonImport([...mihonBlockedEntries, ...mihonUnknownEntries]);
+  };
+
+  const keepUnavailableMihonEntries = async () => {
+    setMihonReviewOpen(false);
+    if (mihonInstallManifests.length) {
+      setMihonKeepUnavailable(true);
+      setMihonInstallOpen(true);
+      return;
+    }
+    await finishMihonImport();
+  };
+
+  const skipMihonMissingSources = async () => {
+    const excludedEntries = mihonKeepUnavailable
+      ? []
+      : [...mihonBlockedEntries, ...mihonMissingEntries, ...mihonUnknownEntries];
+    await finishMihonImport(excludedEntries);
+  };
+
+  const installMihonSources = async () => {
+    if (!mihonInstallManifests.length) return;
+    const controller = new AbortController();
+    mihonImportControllerRef.current = controller;
+    const progressToastId = toast({
+      title: 'Importando respaldo de Mihon',
+      description: 'Instalando extensiones y aplicando los ajustes necesarios…',
+      icon: Loader2,
+      loading: true,
+      duration: null,
+      onDismiss: () => controller.abort()
+    });
+    setMihonBusy(true);
+    try {
+      const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
+      for (const manifest of mihonInstallManifests) {
+        throwIfAborted(controller.signal);
+        if (!extensions.isInstalled(manifest.id)) await extensions.install(manifest, indexUrl);
+      }
+      throwIfAborted(controller.signal);
+      setMihonInstallOpen(false);
+      const excludedEntries = mihonKeepUnavailable ? [] : [...mihonBlockedEntries, ...mihonUnknownEntries];
+      await finishMihonImport(excludedEntries, progressToastId, controller);
+    } catch (error) {
+      dismiss(progressToastId);
+      if (!controller.signal.aborted && error?.name !== 'AbortError') {
+        toast({ title: 'No se pudieron instalar las extensiones', description: `${error.message} No se importaron los mangas.`, variant: 'error' });
+      }
+    } finally {
+      setMihonBusy(false);
+      if (mihonImportControllerRef.current === controller) mihonImportControllerRef.current = null;
     }
   };
 
@@ -548,8 +984,26 @@ export default function Settings({ tutorialPreview = false }) {
         <Row
           scale={scale}
           last
-          title="Mostrar capítulos sin leer"
-          desc="Muestra el contador de capítulos restantes de cada manga en la biblioteca"
+          title={
+            <>
+              Mostrar capítulos sin leer{' '}
+              <span
+                className="group relative inline-flex align-middle text-muted-foreground hover:text-foreground focus-visible:outline-none"
+                tabIndex={0}
+                aria-describedby="library-unread-tip"
+              >
+                <CircleHelp aria-hidden="true" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                <span
+                  id="library-unread-tip"
+                  role="tooltip"
+                  className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-64 rounded-lg border border-border bg-card px-3 py-2 text-xs text-card-foreground opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus:opacity-100"
+                >
+                  Pro Tip: Desactivar esta opción podría mejorar el rendimiento en computadores de gama baja-media. Desactivala si ves que el desplazamiento en la biblioteca es muy lento.
+                </span>
+              </span>
+            </>
+          }
+          desc="Muestra un contador de capítulos restantes de los mangas en la biblioteca"
           right={
             <Switch
               scale={scale}
@@ -692,18 +1146,37 @@ export default function Settings({ tutorialPreview = false }) {
         <Row
           scale={scale}
           first
-          title="Mostrar extensiones +18"
-          desc="Algunas extensiones podrían  no mostrarse sin esta opción activa"
+          title="Mostrar contenido +18"
+          desc="Algunas extensiones y mangas podrían no mostrarse sin esta opción activa"
           right={
-            <Switch
-              scale={scale}
-              on={s.showAdultExtensions}
-              onChange={(v) => {
-                if (v) setConfirmAdultExtensions(true);
-                else set({ showAdultExtensions: false });
-              }}
-              label="Mostrar extensiones +18"
-            />
+            <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
+              {s.showAdultExtensions && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="hover:bg-transparent"
+                  title="Configurar calificaciones de contenido"
+                  aria-label="Configurar calificaciones de contenido"
+                  onClick={() => {
+                    setAdultRatingsDraft([...s.adultContentRatings]);
+                    setAdultRatingsDialog(true);
+                  }}
+                  style={{ width: px(34, scale, 28), height: px(34, scale, 28) }}
+                >
+                  <SettingsIcon style={{ width: px(17, scale, 14), height: px(17, scale, 14) }} />
+                </Button>
+              )}
+              <Switch
+                scale={scale}
+                on={s.showAdultExtensions}
+                onChange={(v) => {
+                  if (v) setConfirmAdultExtensions(true);
+                  else set({ showAdultExtensions: false });
+                }}
+                label="Mostrar extensiones +18"
+              />
+            </div>
           }
         />
         <div style={{ marginTop: px(18, scale, 12) }}>
@@ -803,7 +1276,7 @@ export default function Settings({ tutorialPreview = false }) {
           scale={scale}
           first
           title="Avisar de capítulos nuevos"
-          desc="Revisa los mangas de tu biblioteca y avisa cuando aparezca un capítulo nuevo."
+          desc="Avisa de novedades en tus mangas guardados cada vez que se ingresa"
           right={
             <Switch
               scale={scale}
@@ -816,7 +1289,7 @@ export default function Settings({ tutorialPreview = false }) {
         <Row
           scale={scale}
           title="Avisar de actualizaciones de extensiones"
-          desc="Revisa el repositorio y avisa cuando una extensión tenga una versión nueva."
+          desc="Avisa de novedades en tus extensiones instaladas cada vez que se ingresa"
           right={
             <Switch
               scale={scale}
@@ -829,7 +1302,7 @@ export default function Settings({ tutorialPreview = false }) {
         <Row
           scale={scale}
           title="Comprobar cada"
-          desc="Cada cuántas horas se revisan los capítulos nuevos y las actualizaciones de extensiones."
+          desc="Elige cada cuántas horas quieres que se revisen las novedades"
           right={
              <div className={cn('flex items-center', !s.notifyEnabled && !s.extUpdateNotify && 'pointer-events-none opacity-50')} aria-disabled={!s.notifyEnabled && !s.extUpdateNotify}>
               <Dropdown
@@ -854,8 +1327,8 @@ export default function Settings({ tutorialPreview = false }) {
           title="Notificaciones en segundo plano"
           desc={
             s.notifyEnabled || s.extUpdateNotify
-              ? 'Comprueba si hay actualizaciones aún con Cytlex cerrado.'
-              : 'Activa algún aviso anterior para poder comprobar con Cytlex cerrado.'
+              ? 'Comprueba si hay novedades aún con Cytlex cerrado'
+              : 'Activa algún aviso anterior para poder comprobar actualizaciones con Cytlex cerrado'
           }
           right={
             <div
@@ -866,6 +1339,7 @@ export default function Settings({ tutorialPreview = false }) {
                 scale={scale}
                 on={s.notifyBackground}
                 onChange={toggleBackground}
+                disabled={bgBusy}
                 label="Notificaciones en segundo plano"
               />
             </div>
@@ -887,10 +1361,10 @@ export default function Settings({ tutorialPreview = false }) {
           title="Cuenta de AniList"
           desc={
             authState.connected
-              ? `Conectada${authViewer?.name ? ` como ${authViewer.name}` : ''}`
+              ? `Conectado${authViewer?.name ? ` como ${authViewer.name}` : ''}`
               : authState.expired
-                ? 'La sesión anterior caducó. Vuelve a conectarte.'
-                : 'Sin conectar.'
+                ? 'Sesión caducada, vuelve a conectarte'
+                : 'Sin conectar'
           }
           right={
             authState.connected ? (
@@ -945,7 +1419,7 @@ export default function Settings({ tutorialPreview = false }) {
         <Row
           scale={scale}
           title="Mostrar portada de AniList"
-          desc="Usa la portada de AniList en lugar de la del manga (solo vinculados)"
+          desc="Cambia las portadas de tus mangas guardados por las de AniList (solo mangas vinculados)"
           right={
             <div className="relative flex items-center">
               <Switch
@@ -978,7 +1452,7 @@ export default function Settings({ tutorialPreview = false }) {
           desc={
             linkedCount
               ? `${linkedCount} ${linkedCount === 1 ? 'manga vinculado' : 'mangas vinculados'}`
-              : 'Sin vínculos. Vincúlalos desde la ficha de cada manga.'
+              : 'Sin vínculos'
           }
           right={
             <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
@@ -1067,11 +1541,32 @@ export default function Settings({ tutorialPreview = false }) {
             }
           }}
         />
+        <input
+          ref={mihonFileInputRef}
+          type="file"
+          accept=".tachibk,.gz,.proto,application/gzip,application/octet-stream"
+          className="hidden"
+          onChange={async (event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (!file) return;
+            if (file.size > 100 * 1024 * 1024) {
+              toast({ title: 'Respaldo demasiado grande', description: 'El límite de importación es 100 MB.', variant: 'error' });
+              return;
+            }
+            setBackupBusy(true);
+            try {
+              await loadMihonBackup(new Uint8Array(await file.arrayBuffer()), file.name);
+            } finally {
+              setBackupBusy(false);
+            }
+          }}
+        />
         <Row
           scale={scale}
           first
           title="Exportar respaldo"
-          desc="Guarda una copia comprimida de tus datos. Las extensiones instaladas no se incluyen."
+          desc="Guarda una copia de tus datos en el directorio de tu preferencia"
           right={
             <Button
               size="sm"
@@ -1086,9 +1581,8 @@ export default function Settings({ tutorialPreview = false }) {
         />
         <Row
           scale={scale}
-          last
           title="Importar respaldo"
-          desc="Restaura tus datos desde un respaldo creado en Cytlex. Tendrás que volver a conectar AniList."
+          desc="Restaura tus datos desde un respaldo creado en Cytlex"
           right={
             <Button
               size="sm"
@@ -1099,6 +1593,24 @@ export default function Settings({ tutorialPreview = false }) {
             >
               <Upload className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
               Importar
+            </Button>
+          }
+        />
+        <Row
+          scale={scale}
+          last
+          title="Importar desde Mihon"
+          desc="Fusiona mangas, categorías y progreso de lectura sin reemplazar tus datos de Cytlex"
+          right={
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={importMihon}
+              disabled={backupBusy}
+              style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+            >
+              <Upload className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+              Importar Mihon
             </Button>
           }
         />
@@ -1252,13 +1764,42 @@ export default function Settings({ tutorialPreview = false }) {
         </Card>
 
         <Card className="hover:shadow-sm">
-          <div style={{ padding: px(24, scale, 16) }}>{content}</div>
+          <div key={section} style={{ padding: px(24, scale, 16) }}>{content}</div>
         </Card>
       </div>
 
       <Dialog
-        open={!!backupCandidate}
-        onClose={() => setBackupCandidate(null)}
+        open={confirmBackground}
+        onClose={() => setConfirmBackground(false)}
+        title="Notificaciones en segundo plano"
+        description="¿Permitir que Cytlex revise tu biblioteca y extensiones aunque esté cerrado?"
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+        scale={scale}
+      >
+        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button
+            variant="outline"
+            onClick={() => setConfirmBackground(false)}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={() => {
+              setConfirmBackground(false);
+              applyBackgroundSetting(true);
+            }}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Permitir
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={!!backupCandidate && !backupInstallOpen && !backupReviewOpen}
+        onClose={() => { if (!backupBusy) setBackupCandidate(null); }}
         title="Restaurar respaldo"
         description={`El archivo ${backupCandidate?.fileName || ''} reemplazará tus datos actuales de Cytlex, incluidas la biblioteca, el progreso y los ajustes. Las extensiones instaladas se conservarán. La aplicación se recargará.`}
         hideDivider
@@ -1270,15 +1811,253 @@ export default function Settings({ tutorialPreview = false }) {
           <Button
             variant="outline"
             onClick={() => setBackupCandidate(null)}
+            disabled={backupBusy}
             style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
             Cancelar
           </Button>
           <Button
             onClick={confirmBackupImport}
+            disabled={backupBusy}
             style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            Restaurar
+            {backupBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Cargando</> : 'Restaurar'}
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={backupReviewOpen}
+        onClose={() => { if (!backupBusy) cancelBackupInstall(); }}
+        title="Mangas con extensiones no disponibles"
+        description="El respaldo contiene mangas de extensiones bloqueadas, no instaladas o no disponibles. Elige si quieres omitirlos o conservarlos."
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+        scale={scale}
+      >
+        <div className="space-y-2 text-muted-foreground" style={{ fontSize: px(13, scale, 11), marginBottom: px(18, scale, 14) }}>
+          {backupUnavailableSources.map((source) => (
+            <div key={source.id} className="flex items-center justify-between gap-4">
+              <span className="truncate text-foreground" title={source.name}>{source.name}</span>
+              <span className="shrink-0">{source.count} mangas</span>
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button
+            variant="outline"
+            onClick={cancelBackupInstall}
+            disabled={backupBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => finishBackupImport({ omitUnavailable: true })}
+            disabled={backupBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Omitir y restaurar
+          </Button>
+          <Button
+            onClick={keepBackupUnavailable}
+            disabled={backupBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Mantener y continuar
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={backupInstallOpen}
+        onClose={() => { if (!backupBusy) cancelBackupInstall(); }}
+        title="Extensiones disponibles para instalar"
+        description="Estas extensiones están en el repositorio de Cytlex. Los mangas de otras fuentes se conservarán sin extensión instalada."
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+        scale={scale}
+      >
+        <div className="space-y-2 text-muted-foreground" style={{ fontSize: px(13, scale, 11), marginBottom: px(18, scale, 14) }}>
+          {backupMissingSources.filter((source) => source.manifest).map((source) => (
+            <div key={source.id} className="flex items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center" style={{ gap: px(8, scale, 6) }}>
+                <span
+                  className="relative grid shrink-0 place-items-center overflow-hidden rounded-lg bg-secondary text-secondary-foreground font-semibold"
+                  style={{ width: px(28, scale, 24), height: px(28, scale, 24), fontSize: px(11, scale, 9) }}
+                >
+                  {(source.manifest?.name || source.name || source.id || '?')[0].toUpperCase()}
+                  {source.manifest?.icon && (
+                    <img src={source.manifest.icon} alt="" className="absolute inset-0 h-full w-full object-cover" onError={(event) => event.currentTarget.remove()} />
+                  )}
+                </span>
+                <span className="truncate text-foreground" title={source.manifest?.name || source.name || source.id}>
+                  {source.manifest?.name || source.name || source.id}
+                </span>
+              </div>
+              <span className="shrink-0">{source.count} mangas</span>
+            </div>
+          ))}
+          {!backupInstallManifests.length && (
+            <p>No se encontraron extensiones instalables en el repositorio configurado.</p>
+          )}
+        </div>
+        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button
+            variant="outline"
+            onClick={cancelBackupInstall}
+            disabled={backupBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            variant="outline"
+            onClick={finishBackupImport}
+            disabled={backupBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Restaurar sin instalar
+          </Button>
+          <Button
+            onClick={installBackupExtensions}
+            disabled={backupBusy || !backupInstallManifests.length}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            {backupBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Cargando</> : 'Instalar y restaurar'}
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={!!mihonCandidate && !mihonBusy && !mihonReviewOpen && !mihonInstallOpen}
+        onClose={() => { if (!mihonBusy) setMihonCandidate(null); }}
+        title="Importar respaldo de Mihon"
+        description={`Se fusionará ${mihonCandidate?.fileName || 'este respaldo'} con Cytlex.`}
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+        scale={scale}
+      >
+        <div className="text-muted-foreground" style={{ fontSize: px(13, scale, 11), marginBottom: px(18, scale, 14) }}>
+          <div>{mihonCandidate?.mangaCount || 0} mangas · {mihonCandidate?.categoryNames?.length || 0} categorías</div>
+          {mihonCandidate?.unmatchedCount > 0 && (
+            <div style={{ marginTop: px(6, scale, 4) }}>
+              {mihonCandidate.unmatchedCount} mangas requieren extensiones no instaladas.
+            </div>
+          )}
+        </div>
+        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button
+            variant="outline"
+            onClick={() => setMihonCandidate(null)}
+            disabled={mihonBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={confirmMihonImport}
+            disabled={mihonBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            {mihonBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Cargando</> : 'Fusionar'}
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={mihonReviewOpen && !mihonBusy}
+        onClose={() => {
+          setMihonReviewOpen(false);
+        }}
+        title="Mangas inválidos"
+        description={[
+          mihonBlockedEntries.length
+            ? `${mihonBlockedEntries.length} con ${mihonBlockedEntries.length === 1 ? 'extensión bloqueada' : 'extensiones bloqueadas'}`
+            : '',
+          mihonUnknownEntries.length
+            ? `${mihonUnknownEntries.length} sin extensión disponible`
+            : '',
+        ].filter(Boolean).join(' · ')}
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+        scale={scale}
+      >
+        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button
+            variant="outline"
+            onClick={() => setMihonReviewOpen(false)}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            variant="outline"
+            onClick={continueMihonImport}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Omitir y continuar
+          </Button>
+          <Button
+            onClick={keepUnavailableMihonEntries}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Mantener y continuar
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={mihonInstallOpen && !mihonBusy}
+        onClose={() => setMihonInstallOpen(false)}
+        title="Instalar extensiones faltantes"
+        description={mihonKeepUnavailable
+          ? `${mihonInstallManifests.length} extensiones disponibles para ${mihonMissingEntries.length} mangas. También puedes conservarlos sin instalarlas.`
+          : `${mihonInstallManifests.length} extensiones pueden instalarse para abrir ${mihonMissingEntries.length} mangas del respaldo. Si las omites, esos mangas no se guardarán.`}
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+        scale={scale}
+      >
+        <div className="space-y-2 text-muted-foreground" style={{ fontSize: px(13, scale, 11), marginBottom: px(18, scale, 14) }}>
+          {mihonInstallManifests.map((manifest) => (
+            <div key={manifest.id} className="flex items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center" style={{ gap: px(8, scale, 6) }}>
+                <span
+                  className="relative grid shrink-0 place-items-center overflow-hidden rounded-lg bg-secondary text-secondary-foreground font-semibold"
+                  style={{ width: px(28, scale, 24), height: px(28, scale, 24), fontSize: px(11, scale, 9) }}
+                >
+                  {(manifest.name || manifest.id || '?')[0].toUpperCase()}
+                  {manifest.icon && (
+                    <img
+                      src={manifest.icon}
+                      alt=""
+                      className="absolute inset-0 h-full w-full object-cover"
+                      onError={(event) => event.currentTarget.remove()}
+                    />
+                  )}
+                </span>
+                <span className="truncate text-foreground" title={manifest.name || manifest.id}>{manifest.name || manifest.id}</span>
+              </div>
+              <span className="shrink-0">v{manifest.version || '—'}</span>
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button
+            variant="outline"
+            onClick={skipMihonMissingSources}
+            disabled={mihonBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            {mihonBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Cargando</> : mihonKeepUnavailable ? 'Mantener sin instalar' : 'Omitirlas y continuar'}
+          </Button>
+          <Button
+            onClick={installMihonSources}
+            disabled={mihonBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            {mihonBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Cargando</> : 'Instalar y continuar'}
           </Button>
         </div>
       </Dialog>
@@ -1300,10 +2079,65 @@ export default function Settings({ tutorialPreview = false }) {
             onClick={() => {
               set({ showAdultExtensions: true });
               setConfirmAdultExtensions(false);
+              setAdultRatingsDraft([...settings.get().adultContentRatings]);
+              setAdultRatingsDialog(true);
             }}
             style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
             Tengo 18 años o más
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={adultRatingsDialog}
+        onClose={() => setAdultRatingsDialog(false)}
+        title="Calificaciones de contenido"
+        description="Elige qué categorías de extensiones y mangas quieres mostrar."
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+        scale={scale}
+      >
+        <div className="space-y-2">
+          {CONTENT_WARNING_RATINGS.map((rating) => (
+            <label key={rating} className="flex cursor-pointer items-center gap-3 rounded-lg border border-border px-3 py-2.5 text-foreground">
+              <input
+                type="checkbox"
+                className="accent-primary"
+                checked={adultRatingsDraft.includes(rating)}
+                onChange={(event) => setAdultRatingsDraft((current) => event.target.checked
+                  ? [...current, rating]
+                  : current.filter((value) => value !== rating))}
+              />
+              <span className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
+                {rating}{' '}
+                <span className="font-normal text-muted-foreground">
+                  ({rating === 'SAFE'
+                    ? 'sin contenido para adultos'
+                    : rating === 'MIXED'
+                      ? 'puede incluir contenido para adultos'
+                      : 'contenido sexual explícito para adultos'})
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <div className="mt-5 flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button
+            variant="outline"
+            onClick={() => setAdultRatingsDialog(false)}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={() => {
+              set({ adultContentRatings: adultRatingsDraft });
+              setAdultRatingsDialog(false);
+            }}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Guardar
           </Button>
         </div>
       </Dialog>

@@ -10,10 +10,10 @@ const read = () => {
   return cache;
 };
 
-const write = (data) => {
+const write = (data, change = { type: 'reset' }) => {
   cache = data;
   try { localStorage.setItem(KEY, JSON.stringify(data)); } catch {}
-  listeners.forEach((l) => l());
+  listeners.forEach((l) => l(change));
 };
 
 const cap = (url, sourceId = 'leercapitulo') => `${sourceId}|${url}`;
@@ -37,15 +37,17 @@ export const chapterIndex = {
 
   set(url, sourceId, urls) {
     if (!url || !Array.isArray(urls)) return;
+    const resolvedSourceId = sourceId || 'leercapitulo';
     const data = read();
-    data[cap(url, sourceId)] = { urls, at: Date.now() };
-    write(data);
+    data[cap(url, resolvedSourceId)] = { urls, at: Date.now() };
+    write(data, { type: 'set', mangaUrl: url, sourceId: resolvedSourceId });
   },
 
   drop(url, sourceId) {
+    const resolvedSourceId = sourceId || 'leercapitulo';
     const data = read();
-    delete data[cap(url, sourceId)];
-    write(data);
+    delete data[cap(url, resolvedSourceId)];
+    write(data, { type: 'drop', mangaUrl: url, sourceId: resolvedSourceId });
   },
 
   dropSource(sourceId) {
@@ -55,6 +57,21 @@ export const chapterIndex = {
     let changed = false;
     for (const key of Object.keys(data)) {
       if (key.startsWith(prefix)) { delete data[key]; changed = true; }
+    }
+    if (changed) write(data);
+  },
+
+  reassignSource(oldId, newId) {
+    if (!oldId || !newId || oldId === newId) return;
+    const data = read();
+    const prefix = `${oldId}|`;
+    let changed = false;
+    for (const [key, value] of Object.entries(data)) {
+      if (!key.startsWith(prefix)) continue;
+      const nextKey = `${newId}|${key.slice(prefix.length)}`;
+      if (!data[nextKey]) data[nextKey] = value;
+      delete data[key];
+      changed = true;
     }
     if (changed) write(data);
   },

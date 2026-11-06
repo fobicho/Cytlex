@@ -36,6 +36,18 @@ export const tracking = {
     notify();
   },
 
+  move(mangaUrl, nextUrl, sourceId) {
+    if (!mangaUrl || !nextUrl || mangaUrl === nextUrl) return;
+    const data = read();
+    const currentKey = cap(mangaUrl, sourceId);
+    const nextKey = cap(nextUrl, sourceId);
+    if (!data[currentKey]) return;
+    if (!data[nextKey]) data[nextKey] = data[currentKey];
+    delete data[currentKey];
+    write(data);
+    notify();
+  },
+
   updateCover(mangaUrl, sourceId, { cover, coverLocal } = {}) {
     if (!mangaUrl) return;
     const data = read();
@@ -53,6 +65,24 @@ export const tracking = {
     delete data[cap(mangaUrl, sourceId)];
     write(data);
     notify();
+  },
+
+  reassignSource(oldId, newId) {
+    if (!oldId || !newId || oldId === newId) return;
+    const data = read();
+    const prefix = `${oldId}|`;
+    let changed = false;
+    for (const [key, value] of Object.entries(data)) {
+      if (!key.startsWith(prefix)) continue;
+      const nextKey = `${newId}|${key.slice(prefix.length)}`;
+      if (!data[nextKey]) data[nextKey] = value;
+      delete data[key];
+      changed = true;
+    }
+    if (changed) {
+      write(data);
+      notify();
+    }
   },
 
   linkedCount() {

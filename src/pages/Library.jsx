@@ -1,43 +1,254 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { RefreshCw, ArrowUpDown } from 'lucide-react';
 import { lib } from '../lib/library.js';
 import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
+import VirtualMangaGrid from '../components/VirtualMangaGrid.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
-import { extensions, isAdultExtension } from '../lib/extensions.js';
-import { makeCoverThumb } from '../lib/covers.js';
+import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { checkLibrary } from '../lib/notify.js';
 import { progress } from '../lib/progress.js';
-import { tracking } from '../lib/tracking.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
+import { tracking } from '../lib/tracking.js';
 import { api } from '../lib/api.js';
 import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
+import { discardLibraryCover, getLibraryCover, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy, restoreLibraryCover } from '../lib/covers.js';
+import { libraryScroll, recallCover } from '../lib/searchState.js';
 
 let sessionCategoria = '';
+let libraryCheckInFlight = false;
+let libraryCheckCooldownUntil = 0;
+let libraryCheckProgress = { current: 0, total: 0 };
+const libraryCheckProgressListeners = new Set();
+const UNREAD_CACHE_KEY = 'cytlex:libraryUnread:v2';
+const libraryTitleCollator = new Intl.Collator('es', { sensitivity: 'base', numeric: true });
+const unreadCountCache = (() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(UNREAD_CACHE_KEY) || '{}');
+    return new Map(Object.entries(saved).filter(([, count]) => Number.isFinite(count) && count >= 0));
+  } catch {
+    return new Map();
+  }
+})();
 
-export default function Library() {
+const persistUnreadCountCache = () => {
+  try { localStorage.setItem(UNREAD_CACHE_KEY, JSON.stringify(Object.fromEntries(unreadCountCache))); } catch {}
+};
+if (typeof window !== 'undefined') {
+  window.addEventListener('cytlex:library-unread-reset', () => {
+    unreadCountCache.clear();
+    persistUnreadCountCache();
+  });
+}
+
+const remainingLibraryCheckCooldown = () => Math.max(0, Math.ceil((libraryCheckCooldownUntil - Date.now()) / 1000));
+const updateLibraryCheckProgress = (progress) => {
+  libraryCheckProgress = progress;
+  libraryCheckProgressListeners.forEach((listener) => listener(progress));
+};
+const sourceIdFor = (manga) => {
+  const id = manga.sourceId || 'leercapitulo';
+  return extensions.resolveInstalledSource(id, manga.sourceName, manga.url) || id;
+};
+const mangaUrlKey = (url) => {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname.toLowerCase().replace(/^www\./, '')}${parsed.pathname.replace(/\/+$/, '') || '/'}`;
+  } catch {
+    return String(url || '').split(/[?#]/, 1)[0].replace(/\/+$/, '').toLowerCase() || '/';
+  }
+};
+const sameMangaUrl = (left, right) => Boolean(left && right) && mangaUrlKey(left) === mangaUrlKey(right);
+const unreadKeyFor = (manga, sourceId = sourceIdFor(manga)) => `${sourceId}|${manga.url}`;
+const invalidateUnreadCountsForUrl = (mangaUrl) => {
+  if (!mangaUrl) return;
+  for (const key of unreadCountCache.keys()) {
+    const separator = key.indexOf('|');
+    if (separator >= 0 && sameMangaUrl(key.slice(separator + 1), mangaUrl)) unreadCountCache.delete(key);
+  }
+};
+const compareLibraryTitles = (a, b) => libraryTitleCollator.compare(String(a.title || ''), String(b.title || ''));
+const sameLibraryFavorites = (left, right) => left.length === right.length && left.every((manga, index) => {
+  const next = right[index];
+  return manga.url === next.url
+    && manga.sourceId === next.sourceId
+    && manga.title === next.title
+    && manga.author === next.author
+    && manga.cover === next.cover
+    && (manga.coverLocal || '').length === (next.coverLocal || '').length
+    && (manga.coverCached || '').length === (next.coverCached || '').length
+    && manga.sourceName === next.sourceName
+    && manga.sourceIcon === next.sourceIcon
+    && manga.chapterTotal === next.chapterTotal
+    && manga.chapterReadCount === next.chapterReadCount
+    && manga.addedAt === next.addedAt
+    && (manga.cats || []).join('\0') === (next.cats || []).join('\0');
+});
+const sortLibraryManga = (items, sortBy, unread) => items.sort((a, b) => {
+  switch (sortBy) {
+    case 'title-desc':
+      return compareLibraryTitles(b, a);
+    case 'unread-desc':
+      return (unread[unreadKeyFor(b)] ?? unreadCountCache.get(unreadKeyFor(b)) ?? 0) - (unread[unreadKeyFor(a)] ?? unreadCountCache.get(unreadKeyFor(a)) ?? 0);
+    case 'recent':
+      return (b.addedAt || 0) - (a.addedAt || 0);
+    default:
+      return compareLibraryTitles(a, b);
+  }
+});
+
+const unreadCountFor = (manga, sourceId) => {
+  const key = unreadKeyFor(manga, sourceId);
+  if (unreadCountCache.has(key)) return unreadCountCache.get(key);
+  let urls = chapterIndex.peek(manga.url, sourceId);
+  if (!Array.isArray(urls) || urls.length === 0) {
+    const detail = api.peekDetail(manga.url, sourceId);
+    if (Array.isArray(detail?.chapters) && detail.chapters.length) {
+      urls = detail.chapters.map((chapter) => chapter.url).filter(Boolean);
+    }
+  }
+  if (!Array.isArray(urls) || urls.length === 0) {
+    const readCount = Number(manga.chapterReadCount) || (manga.mihonProgress || []).filter((chapter) => chapter.read).length;
+    const count = Math.max(0, (Number(manga.chapterTotal) || 0) - readCount);
+    unreadCountCache.set(key, count);
+    return count;
+  }
+  const count = urls.reduce((total, url) => total + (progress.get(url, sourceId)?.read ? 0 : 1), 0);
+  unreadCountCache.set(key, count);
+  return count;
+};
+
+progress.subscribe((change) => {
+  if (change?.type === 'reset') unreadCountCache.clear();
+  else if (change?.mangaUrl) invalidateUnreadCountsForUrl(change.mangaUrl);
+  persistUnreadCountCache();
+});
+chapterIndex.subscribe((change) => {
+  if (change?.type === 'set' || change?.type === 'drop') {
+    invalidateUnreadCountsForUrl(change.mangaUrl);
+  } else unreadCountCache.clear();
+  persistUnreadCountCache();
+});
+
+function CachedLibraryCover({ cover, title, className, cachedOnly = false, cachedCover = '' }) {
+  const coverRef = useRef(null);
+  const loadedCoverKey = useRef('');
+  const proxyCover = requiresImageProxy(cover);
+  const localCachedCover = /^(data:|blob:)/i.test(cachedCover) ? cachedCover : '';
+  const [coverState, setCoverState] = useState(() => ({
+    key: cover,
+    src: localCachedCover || getLibraryCover(cover) || (cachedOnly || proxyCover ? '' : cover)
+  }));
+  const src = coverState.key === cover
+    ? coverState.src
+    : localCachedCover || getLibraryCover(cover) || (cachedOnly || proxyCover ? '' : cover);
+
+  useEffect(() => {
+    if (!/^https?:\/\//i.test(cover || '')) return undefined;
+    let alive = true;
+    if (cachedOnly) {
+      const restoreCached = () => restoreLibraryCover(cover).then((local) => {
+        if (alive && local && loadedCoverKey.current !== cover) setCoverState({ key: cover, src: local });
+      });
+      const target = coverRef.current;
+      if (!target || !('IntersectionObserver' in window)) {
+        restoreCached();
+        return () => { alive = false; };
+      }
+      const observer = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          restoreCached();
+        }
+      }, { root: document.querySelector('main'), rootMargin: '220px 0px' });
+      observer.observe(target);
+      return () => { alive = false; observer.disconnect(); };
+    }
+    if (proxyCover) {
+      restoreLibraryCover(cover).then((cached) => cached || preloadLibraryCover(cover)).then((local) => {
+        if (alive && loadedCoverKey.current !== cover) setCoverState({ key: cover, src: local || cover });
+      });
+      return () => { alive = false; };
+    }
+    const restore = () => restoreLibraryCover(cover).then((local) => {
+      if (alive && loadedCoverKey.current !== cover) setCoverState({ key: cover, src: local || cover });
+    });
+    const target = coverRef.current;
+    if (!target || !('IntersectionObserver' in window)) {
+      restore();
+      return () => { alive = false; };
+    }
+    const root = document.querySelector('main');
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        observer.disconnect();
+        restore();
+      }
+    }, { root, rootMargin: '220px 0px' });
+    observer.observe(target);
+    return () => { alive = false; observer.disconnect(); };
+  }, [cachedOnly, cover, localCachedCover, proxyCover]);
+
+  return (
+    <div ref={coverRef} className="h-full w-full">
+      {src ? (
+        <img
+          src={src}
+          alt={title}
+          loading="lazy"
+          decoding="sync"
+          referrerPolicy="no-referrer"
+          className={className}
+          onLoad={() => {
+            loadedCoverKey.current = cover;
+            markLibraryCoverLoaded(src);
+            if (!cachedOnly && /^https?:\/\//i.test(cover || '')) preloadLibraryCover(cover);
+          }}
+          onError={() => {
+            if (src !== cover) {
+              discardLibraryCover(cover, src);
+              setCoverState({ key: cover, src: cachedOnly ? '' : cover });
+            } else if (!cachedOnly && /^https?:\/\//i.test(cover || '')) {
+              preloadLibraryCover(cover).then((local) => {
+                if (local) setCoverState({ key: cover, src: local });
+              });
+            }
+          }}
+        />
+      ) : <div className="h-full w-full bg-muted/40" />}
+    </div>
+  );
+}
+
+const Library = memo(function Library({ active = true }) {
   const [cats, setCats] = useState(() => lib.cats());
   const [sel, setSel] = useState(() => {
     const list = lib.cats();
     return sessionCategoria && list.some((c) => c.id === sessionCategoria) ? sessionCategoria : list[0]?.id || '';
   });
+  const [visitedCategoryIds, setVisitedCategoryIds] = useState(() => [
+    sessionCategoria && lib.cats().some((category) => category.id === sessionCategoria)
+      ? sessionCategoria
+      : lib.cats()[0]?.id || ''
+  ]);
   const [favs, setFavs] = useState(() => lib.favs());
   const [view, setView] = useState(settings.get().libraryView);
-  const [checking, setChecking] = useState(false);
+  const [checking, setChecking] = useState(libraryCheckInFlight);
+  const [checkProgress, setCheckProgress] = useState(libraryCheckProgress);
+  const [checkCooldown, setCheckCooldown] = useState(remainingLibraryCheckCooldown);
   const { toast } = useToast();
   const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
   const [showUnread, setShowUnread] = useState(() => settings.get().libraryShowUnread);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('cytlex:librarySort') || 'title-asc');
   const [unread, setUnread] = useState({});
+  const unreadVersions = useRef(new Map());
   const scale = useScale();
-  const [progressTick, setProgressTick] = useState(0);
-  useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
   useEffect(
     () => settings.subscribe((s) => {
       setCoverSize(Math.round(160 * (s.uiScale || 1)));
@@ -47,26 +258,59 @@ export default function Library() {
     []
   );
   useEffect(() => {
-    let changed = false;
+    const updates = [];
+    const reassigned = new Set();
     favs.forEach((m) => {
-      const manifest = extensions.manifest(m.sourceId || 'leercapitulo');
-      const patch = {};
-      if (!m.sourceName && manifest.name) patch.sourceName = manifest.name;
-      if (!m.sourceIcon && manifest.icon) patch.sourceIcon = manifest.icon;
-      if (Object.keys(patch).length) {
-        lib.updateFav(m.url, patch, m.sourceId || 'leercapitulo');
-        changed = true;
+      const currentId = m.sourceId || 'leercapitulo';
+      const resolvedId = extensions.resolveInstalledSource(currentId, m.sourceName, m.url);
+      if (resolvedId && resolvedId !== currentId) {
+        const key = `${currentId}|${resolvedId}`;
+        if (!reassigned.has(key)) {
+          progress.reassignSource(currentId, resolvedId);
+          tracking.reassignSource(currentId, resolvedId);
+          chapterIndex.reassignSource(currentId, resolvedId);
+          reassigned.add(key);
+        }
+        updates.push({ url: m.url, sourceId: currentId, patch: { sourceId: resolvedId } });
       }
+      const manifest = extensions.manifest(resolvedId || currentId);
+      const patch = {};
+      if ((!m.sourceName || (/^(mihon-\d+|Fuente Mihon \d+)$/i.test(String(m.sourceName)) && !/^(mihon-|Fuente Mihon)/i.test(String(manifest.name || '')))) && manifest.name) {
+        patch.sourceName = manifest.name;
+      }
+      if (!m.sourceIcon && manifest.icon) patch.sourceIcon = manifest.icon;
+      if (Object.keys(patch).length) updates.push({ url: m.url, sourceId: currentId, patch });
     });
-    if (changed) setFavs(lib.favs());
+    if (updates.length) setFavs(lib.updateFavs(updates));
+  }, []);
+
+  useEffect(() => {
+    if (active) {
+      const latest = lib.favs();
+      setFavs((current) => sameLibraryFavorites(current, latest) ? current : latest);
+    }
+  }, [active]);
+
+  useEffect(() => {
+    const syncProgress = (progress) => setCheckProgress(progress);
+    libraryCheckProgressListeners.add(syncProgress);
+    syncProgress(libraryCheckProgress);
+    return () => libraryCheckProgressListeners.delete(syncProgress);
   }, []);
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
 
   const runCheck = async () => {
+    if (libraryCheckInFlight || remainingLibraryCheckCooldown() > 0) return;
+    libraryCheckInFlight = true;
     setChecking(true);
+    updateLibraryCheckProgress({ current: 0, total: favs.length });
     try {
-      const found = await checkLibrary({ silent: true, force: true });
+      const found = await checkLibrary({
+        silent: true,
+        force: true,
+        onProgress: updateLibraryCheckProgress
+      });
       const n = found.length;
       if (n === 0) {
         toast({ title: 'Todo está al día', description: 'No hay capítulos nuevos en tu biblioteca.', variant: 'info' });
@@ -80,9 +324,21 @@ export default function Library() {
     } catch {
       toast({ title: 'No se pudo comprobar', description: 'Revisa tu conexión e inténtalo de nuevo.', variant: 'error' });
     } finally {
+      libraryCheckInFlight = false;
+      libraryCheckCooldownUntil = Date.now() + 3_000;
       setChecking(false);
+      setCheckCooldown(3);
     }
   };
+
+  useEffect(() => {
+    if (!checking && !checkCooldown) return undefined;
+    const timer = window.setInterval(() => {
+      setChecking(libraryCheckInFlight);
+      setCheckCooldown(remainingLibraryCheckCooldown());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [checking, checkCooldown]);
 
   useEffect(() => settings.subscribe((s) => setView(s.libraryView)), []);
   useEffect(() => {
@@ -90,109 +346,154 @@ export default function Library() {
       sessionCategoria = sel;
       return;
     }
-    setSel(cats[0]?.id || '');
+    const fallback = cats[0]?.id || '';
+    setSel(fallback);
+    if (fallback) {
+      setVisitedCategoryIds((current) => current.includes(fallback) ? current : [...current, fallback]);
+    }
   }, [cats, sel]);
 
+  useLayoutEffect(() => {
+    if (!active) return undefined;
+    const main = document.querySelector('main');
+    if (!main) return undefined;
+    const restore = () => { main.scrollTop = libraryScroll.get(sel); };
+    const save = () => libraryScroll.set(sel, main.scrollTop);
+    restore();
+    const frame = requestAnimationFrame(restore);
+    main.addEventListener('scroll', save, { passive: true });
+    return () => {
+      save();
+      cancelAnimationFrame(frame);
+      main.removeEventListener('scroll', save);
+    };
+  }, [sel, active]);
+
+  const inCategory = useMemo(() => favs.filter((f) => (f.cats || []).includes(sel)), [favs, sel]);
+
+  const unreadSort = sortBy === 'unread-desc' ? unread : null;
   const shown = useMemo(
-    () => {
-      const list = favs.filter((f) => (f.cats || []).includes(sel)).slice();
-      const cmp = (a, b) => {
-        switch (sortBy) {
-          case 'title-desc':
-            return String(b.title || '').localeCompare(String(a.title || ''), 'es', { sensitivity: 'base', numeric: true });
-          case 'unread-desc':
-            return (unread[`${b.sourceId || 'leercapitulo'}|${b.url}`] ?? 0) - (unread[`${a.sourceId || 'leercapitulo'}|${a.url}`] ?? 0);
-          case 'recent':
-            return (b.addedAt || 0) - (a.addedAt || 0);
-          default:
-            return String(a.title || '').localeCompare(String(b.title || ''), 'es', { sensitivity: 'base', numeric: true });
-        }
-      };
-      return list.sort(cmp);
-    },
-    [favs, sel, sortBy, unread, progressTick]
+    () => sortLibraryManga(inCategory.slice(), sortBy, unreadSort || {}),
+    [inCategory, sortBy, unreadSort]
   );
+  const visitedCategories = useMemo(() => cats
+    .filter((category) => visitedCategoryIds.includes(category.id))
+    .map((category) => ({
+      ...category,
+      items: category.id === sel
+        ? shown
+        : sortLibraryManga(
+            favs.filter((manga) => (manga.cats || []).includes(category.id)),
+            sortBy,
+            unreadSort || {}
+          )
+    })), [cats, visitedCategoryIds, sel, shown, favs, sortBy, unreadSort]);
+
+  const selectCategory = (categoryId) => {
+    setSel(categoryId);
+    setVisitedCategoryIds((current) => current.includes(categoryId) ? current : [...current, categoryId]);
+  };
 
   useEffect(() => {
     if (!showUnread) return undefined;
     let alive = true;
     (async () => {
-      const pending = favs.filter((f) => (f.cats || []).includes(sel)).filter((f) => extensions.isInstalled(f.sourceId || 'leercapitulo'));
-      const results = await Promise.all(
-        pending.map(async (f) => {
-          const sid = f.sourceId || 'leercapitulo';
-          const k = `${sid}|${f.url}`;
-          let urls = chapterIndex.get(f.url, sid);
-          if (!urls) {
-            let d = api.peekDetail(f.url, sid);
-            if (!d) {
-              try { d = await api.detail(f.url, sid); } catch { chapterIndex.drop(f.url, sid); return null; }
-            }
-            if (!d || !Array.isArray(d.chapters)) return null;
-            urls = d.chapters.map((c) => c.url);
-            chapterIndex.set(f.url, sid, urls);
-          }
-          const n = urls.reduce((acc, u) => acc + (progress.get(u, sid)?.read ? 0 : 1), 0);
-          return [k, n];
-        })
-      );
-      if (!alive) return;
-      setUnread((prev) => {
-        const next = { ...prev };
-        for (const entry of results) if (entry) next[entry[0]] = entry[1];
-        return next;
+      const pending = inCategory.filter((manga) => extensions.isInstalled(sourceIdFor(manga)) && !unreadCountCache.has(unreadKeyFor(manga)));
+      const pendingByKey = new Map();
+      const startingVersions = new Map();
+      pending.forEach((manga) => {
+        const key = unreadKeyFor(manga);
+        pendingByKey.set(key, manga);
+        startingVersions.set(key, unreadVersions.current.get(key) || 0);
       });
+      for (let i = 0; i < pending.length; i += 12) {
+        let batch = pending.slice(i, i + 12).map((manga) => {
+          const sid = sourceIdFor(manga);
+          return [unreadKeyFor(manga, sid), unreadCountFor(manga, sid)];
+        });
+        if (!alive) return;
+        batch = batch.map(([key, count]) => {
+          if (unreadVersions.current.get(key) === startingVersions.get(key)) return [key, count];
+          const manga = pendingByKey.get(key);
+          return [key, manga ? unreadCountFor(manga, sourceIdFor(manga)) : count];
+        });
+        persistUnreadCountCache();
+        setUnread((prev) => {
+          let next = prev;
+          for (const [key, count] of batch) {
+            if (prev[key] === count) continue;
+            if (next === prev) next = { ...prev };
+            next[key] = count;
+          }
+          return next;
+        });
+        if (i + 12 < pending.length) await new Promise((resolve) => window.setTimeout(resolve, 0));
+      }
     })();
     return () => { alive = false; };
-  }, [favs, sel, progressTick, showUnread]);
+  }, [inCategory, showUnread]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const pending = shown.filter((f) => f.cover && !(f.coverLocal || '').startsWith('data:'));
-      const thumbs = await Promise.all(
-        pending.map(async (f) => [f, await makeCoverThumb(f.cover)])
-      );
-      if (cancelled) return;
-      let changed = false;
-      for (const [f, local] of thumbs) {
-        if (local) {
-          lib.updateFav(f.url, { coverLocal: local }, f.sourceId);
-          changed = true;
-        }
+    if (!showUnread) return undefined;
+    return progress.subscribe((change) => {
+      if (change?.type === 'reset') {
+        const updates = [];
+        inCategory.forEach((manga) => {
+          const sid = sourceIdFor(manga);
+          if (!extensions.isInstalled(sid)) return;
+          const key = `${sid}|${manga.url}`;
+          unreadVersions.current.set(key, (unreadVersions.current.get(key) || 0) + 1);
+          updates.push([key, unreadCountFor(manga, sid)]);
+        });
+        setUnread((prev) => {
+          const next = { ...prev };
+          updates.forEach(([key, count]) => { next[key] = count; });
+          return next;
+        });
+        persistUnreadCountCache();
+        return;
       }
-      if (changed) setFavs(lib.favs());
-    })();
-    return () => { cancelled = true; };
-  }, [shown]);
+      if (change?.type !== 'read' || !change.mangaUrl) return;
+      const manga = inCategory.find((item) => item.url === change.mangaUrl && sourceIdFor(item) === change.sourceId);
+      if (!manga) return;
+      const key = `${change.sourceId}|${manga.url}`;
+      unreadVersions.current.set(key, (unreadVersions.current.get(key) || 0) + 1);
+      const count = unreadCountFor(manga, change.sourceId);
+      setUnread((prev) => prev[key] === count ? prev : { ...prev, [key]: count });
+      persistUnreadCountCache();
+    });
+  }, [inCategory, showUnread]);
 
   useEffect(() => {
-    if (!settings.get().anilistCover) return undefined;
-    let cancelled = false;
-    (async () => {
-      const pending = shown.filter((f) => {
-        const t = tracking.get(f.url, f.sourceId || 'leercapitulo');
-        return t?.cover && !t?.coverLocal;
+    if (!showUnread) return undefined;
+    return chapterIndex.subscribe((change) => {
+      const changedSourceId = change?.sourceId || 'leercapitulo';
+      const affected = change?.type === 'set' || change?.type === 'drop'
+        ? inCategory.filter((manga) => {
+            const savedSourceId = manga.sourceId || 'leercapitulo';
+            return sameMangaUrl(manga.url, change.mangaUrl)
+              && (sourceIdFor(manga) === changedSourceId || savedSourceId === changedSourceId);
+          })
+        : inCategory;
+      if (!affected.length) return;
+      const updates = affected
+        .filter((manga) => extensions.isInstalled(sourceIdFor(manga)))
+        .map((manga) => {
+          const sid = sourceIdFor(manga);
+          const key = unreadKeyFor(manga, sid);
+          unreadCountCache.delete(key);
+          unreadCountCache.delete(unreadKeyFor(manga, manga.sourceId || 'leercapitulo'));
+          unreadVersions.current.set(key, (unreadVersions.current.get(key) || 0) + 1);
+          return [key, unreadCountFor(manga, sid)];
+        });
+      setUnread((prev) => {
+        const next = { ...prev };
+        updates.forEach(([key, count]) => { next[key] = count; });
+        return next;
       });
-      const thumbs = await Promise.all(
-        pending.map(async (f) => {
-          const sid = f.sourceId || 'leercapitulo';
-          const t = tracking.get(f.url, sid);
-          return [f, sid, t?.cover, await makeCoverThumb(t?.cover)];
-        })
-      );
-      if (cancelled) return;
-      let changed = false;
-      for (const [f, sid, url, local] of thumbs) {
-        if (local) {
-          tracking.updateCover(f.url, sid, { coverLocal: local });
-          changed = true;
-        }
-      }
-      if (changed) setFavs(lib.favs());
-    })();
-    return () => { cancelled = true; };
-  }, [shown, settings.get().anilistCover]);
+      persistUnreadCountCache();
+    });
+  }, [inCategory, showUnread]);
 
   return (
     <div className="min-h-full flex flex-col">
@@ -210,7 +511,7 @@ export default function Library() {
             <button
               key={c.id}
               type="button"
-              onClick={() => setSel(c.id)}
+              onClick={() => selectCategory(c.id)}
               className={cn(
                 'relative font-medium transition-colors',
                 active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
@@ -237,7 +538,7 @@ export default function Library() {
             size="sm"
             variant="secondary"
             title="Ordenar"
-            className="rounded-md"
+            className="rounded-md disabled:opacity-100"
             onClick={() => {
               const order = ['title-asc', 'title-desc', 'unread-desc', 'recent'];
               const next = order[(order.indexOf(sortBy) + 1) % order.length];
@@ -260,9 +561,10 @@ export default function Library() {
           <Button
             size="sm"
             variant="secondary"
-            disabled={checking || !favs.length}
+            disabled={!favs.length || checking || checkCooldown > 0}
+            aria-busy={checking}
             onClick={runCheck}
-            title="Buscar actualizaciones"
+            title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
             className="rounded-md"
             style={{
               height: px(36, scale, 30),
@@ -282,101 +584,122 @@ export default function Library() {
                 style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }}
               />
             )}
-            {checking ? 'Buscando…' : 'Buscar actualizaciones'}
+            {checking ? (
+              <>
+                Buscando
+                <span className="ml-2 tabular-nums opacity-75" aria-live="polite">
+                  {checkProgress.current}/{checkProgress.total}
+                </span>
+              </>
+            ) : 'Buscar actualizaciones'}
           </Button>
         </div>
       </div>
 
-      {shown.length === 0 ? (
-        <EmptyState
-          face="(っ-;)"
-          tone="sad"
-          title={favs.some((f) => (f.cats || []).includes(sel)) ? 'No hay mangas visibles con este filtro' : 'Tu biblioteca está vacía'}
-        />
-      ) : view === 'grid' ? (
-        <div
-          className="grid gap-x-5 gap-y-8"
-          style={{
-            gridTemplateColumns: `repeat(auto-fill, ${cs}px)`,
-            gap: `${Math.max(16, Math.round(20 * scale))}px ${Math.max(12, Math.round(20 * scale))}px`
-          }}
-        >
-          {shown.map((m, i) => {
-            const sid = m.sourceId || 'leercapitulo';
-            const adultBlocked = !showAdultExtensions && isAdultExtension(extensions.manifest(sid));
-            return (
-              <MangaCard
-                key={i}
-                m={m}
-                sourceId={sid}
-                unavailable={!extensions.isInstalled(sid) || adultBlocked}
-                unavailableLabel={adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}
-                minimal
-                from="biblioteca"
-                coverSize={cs}
-                chapterCount={showUnread ? unread[`${sid}|${m.url}`] ?? null : null}
+      {visitedCategories.map((category) => {
+        const selected = category.id === sel;
+        const categoryItems = category.items;
+        return (
+          <section key={category.id} hidden={!selected} aria-hidden={!selected}>
+            {categoryItems.length === 0 ? (
+              <EmptyState
+                face="(っ-;)"
+                tone="sad"
+                title={favs.some((f) => (f.cats || []).includes(category.id)) ? 'No hay mangas visibles con este filtro' : 'Tu biblioteca está vacía'}
               />
-            );
-          })}
-        </div>
-      ) : (
-        <div
-          className="grid gap-3"
-          style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${px(260, scale, 230)}), 1fr))` }}
-        >
-          {shown.map((m, i) => {
-            const sid = m.sourceId || 'leercapitulo';
-            const unreadCount = unread[`${sid}|${m.url}`];
-            const sourceManifest = extensions.manifest(sid);
-            const sourceInfo = {
-              ...sourceManifest,
-              name: m.sourceName || sourceManifest.name || sid,
-              icon: sourceManifest.icon || m.sourceIcon
-            };
-            const adultBlocked = !showAdultExtensions && isAdultExtension(sourceManifest);
-            const unavailable = !extensions.isInstalled(sid) || adultBlocked;
-            return (
-              <div key={i} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5">
-                <a
-                  href={`#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sid)}&from=biblioteca`}
-                  className={cn('flex items-end gap-3 flex-1 min-w-0', unavailable && 'pointer-events-none opacity-60')}
-                  aria-disabled={unavailable}
-                  tabIndex={unavailable ? -1 : undefined}
-                >
-                  <span
-                    className="relative rounded-lg shrink-0 overflow-hidden bg-muted"
-                    style={{ width: px(68, scale, 56), height: px(102, scale, 82) }}
-                  >
-                    {m.cover && (
-                      <img
-                        src={m.cover}
-                        alt=""
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover bg-black"
-                      />
-                    )}
-                    {unavailable && (
-                      <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 px-0.5 text-center text-[8px] font-semibold leading-tight text-white">
-                        <span>{adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}</span>
-                        <SourceBadge m={sourceInfo} className="!h-5 !w-5 rounded bg-white shadow-sm" />
-                      </span>
-                    )}
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className="block font-semibold truncate" style={{ fontSize: px(16, scale, 13) }}>{m.title}</span>
-                    {showUnread && unreadCount != null && (
-                      <span className="mt-1 block truncate text-muted-foreground" style={{ fontSize: px(12, scale, 10) }}>
-                        {unreadCount > 0 ? `${unreadCount} sin leer` : 'Lectura al día'}
-                      </span>
-                    )}
-                  </span>
-                </a>
+            ) : view === 'grid' ? (
+              <VirtualMangaGrid
+                items={categoryItems}
+                coverSize={cs}
+                scale={scale}
+                active={active && selected}
+                overscanRows={2}
+                renderCard={(m) => {
+                  const sid = sourceIdFor(m);
+                  const adultBlocked = !isExtensionAllowed(extensions.manifest(sid), showAdultExtensions);
+                  const cover = m.cover || recallCover(m.url, sid);
+                  return (
+                    <MangaCard
+                      key={`${sid}|${m.url}`}
+                      m={m.cover === cover ? m : { ...m, cover }}
+                      sourceId={sid}
+                      unavailable={!extensions.isInstalled(sid) || adultBlocked}
+                      unavailableLabel={adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}
+                      minimal
+                      from="biblioteca"
+                      coverSize={cs}
+                      chapterCount={showUnread ? unread[unreadKeyFor(m, sid)] ?? unreadCountCache.get(unreadKeyFor(m, sid)) ?? null : null}
+                    />
+                  );
+                }}
+              />
+            ) : (
+              <div
+                className="grid gap-3"
+                style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${px(260, scale, 230)}), 1fr))` }}
+              >
+                {categoryItems.map((m) => {
+                  const sid = sourceIdFor(m);
+                  const cover = m.cover || recallCover(m.url, sid);
+                  const unreadCount = unread[unreadKeyFor(m, sid)] ?? unreadCountCache.get(unreadKeyFor(m, sid));
+                  const sourceManifest = extensions.manifest(sid);
+                  const savedSourceName = String(m.sourceName || '');
+                  const manifestSourceName = String(sourceManifest.name || '');
+                  const hasSavedSourceName = savedSourceName && !/^(mihon-\d+|Fuente Mihon \d+)$/i.test(savedSourceName);
+                  const sourceInfo = {
+                    ...sourceManifest,
+                    name: hasSavedSourceName
+                      ? savedSourceName
+                      : (manifestSourceName && !/^(mihon-|Fuente Mihon)/i.test(manifestSourceName) ? manifestSourceName : sid),
+                    icon: sourceManifest.icon || m.sourceIcon
+                  };
+                  const adultBlocked = !isExtensionAllowed(sourceManifest, showAdultExtensions);
+                  const unavailable = !extensions.isInstalled(sid) || adultBlocked;
+                  return (
+                    <div key={`${sid}|${m.url}`} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5">
+                      <a
+                        href={`#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sid)}&from=biblioteca`}
+                        className={cn('flex items-end gap-3 flex-1 min-w-0', unavailable && 'pointer-events-none opacity-60')}
+                        aria-disabled={unavailable}
+                        tabIndex={unavailable ? -1 : undefined}
+                      >
+                        <span
+                          className="relative rounded-lg shrink-0 overflow-hidden bg-muted"
+                          style={{ width: px(68, scale, 56), height: px(102, scale, 82) }}
+                        >
+                          {cover && (
+                            <CachedLibraryCover cover={cover} title={m.title} className="w-full h-full object-cover bg-black" cachedOnly={unavailable} cachedCover={m.coverCached || m.coverLocal || ''} />
+                          )}
+                          {unavailable && (
+                            <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 px-0.5 text-center text-[8px] font-semibold leading-tight text-white">
+                              <span>{adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}</span>
+                              <span className="flex max-w-full min-w-0 items-center rounded-full bg-black/80 py-0.5 pl-0.5 pr-1 text-left" style={{ gap: px(4, scale, 3) }} title={sourceInfo.name}>
+                                <SourceBadge m={sourceInfo} className="rounded-full bg-white shadow-sm" style={{ width: px(18, scale, 16), height: px(18, scale, 16), fontSize: px(8, scale, 7) }} />
+                                <span className="min-w-0 truncate" style={{ fontSize: px(8, scale, 7) }}>{sourceInfo.name}</span>
+                              </span>
+                            </span>
+                          )}
+                        </span>
+                        <span className="flex-1 min-w-0">
+                          <span className="block font-semibold truncate" style={{ fontSize: px(16, scale, 13) }}>{m.title}</span>
+                          {showUnread && unreadCount != null && (
+                            <span className="mt-1 block truncate text-muted-foreground" style={{ fontSize: px(12, scale, 10) }}>
+                              {unreadCount > 0 ? `${unreadCount} sin leer` : 'Lectura al día'}
+                            </span>
+                          )}
+                        </span>
+                      </a>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
-      )}
+            )}
+          </section>
+        );
+      })}
     </div>
   );
-}
+});
+
+export default Library;
 

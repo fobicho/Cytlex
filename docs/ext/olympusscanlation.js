@@ -3,7 +3,7 @@ export default function createSource({ fetchText }) {
   const panel = 'https://panel.olympusxyz.com';
   const LIMIT_PAGES = 200;
 
-  const getJson = async (url) => JSON.parse(await fetchText(url));
+  const getJson = async (url, requestId) => JSON.parse(await fetchText(url, requestId));
   const isComic = (s) => (s.type || 'comic').toLowerCase() === 'comic';
   let seriesListRequest;
 
@@ -27,9 +27,9 @@ export default function createSource({ fetchText }) {
     return comics.length ? comics : list;
   };
 
-  async function catalog({ q = '', page = 1 } = {}) {
+  async function catalog({ q = '', page = 1, __cytlexRequestId } = {}) {
     if (q) {
-      seriesListRequest ||= getJson(`${base}/api/series/list`).catch((error) => {
+      seriesListRequest ||= getJson(`${base}/api/series/list`, __cytlexRequestId).catch((error) => {
         seriesListRequest = null;
         throw error;
       });
@@ -40,7 +40,7 @@ export default function createSource({ fetchText }) {
       return { items, totalPages: 1, totalText: '' };
     }
 
-    const data = await getJson(`${base}/api/rankings?page=${page}&period=total_ranking`);
+    const data = await getJson(`${base}/api/rankings?page=${page}&period=total_ranking`, __cytlexRequestId);
     const items = comicsOf(data).map(toItem);
     const last = data?.last_page || data?.meta?.last_page || 0;
     const totalPages = last || (data?.next_page_url ? page + 1 : page);

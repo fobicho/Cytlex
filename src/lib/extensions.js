@@ -1,22 +1,40 @@
 import { buildSelectorSource } from './selectorSource.js';
 import { chapterIndex } from './chapterIndex.js';
+import { settings } from './settings.js';
 import defaultExtensionIndex from '../../docs/index.json';
 
 const KEY = 'cytlex:extensions:v1';
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
 const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
+const isPlaceholderExtension = (record) => /^mihon-\d+$/i.test(String(record?.manifest?.id || ''));
+let recordsCache = null;
 
 export function isAdultExtension(source) {
   const manifest = source?.manifest || source;
   return ADULT_CONTENT_WARNINGS.includes(String(manifest?.contentWarning || '').toUpperCase());
 }
 
+export function isExtensionAllowed(source, showAdultExtensions) {
+  const manifest = source?.manifest || source;
+  const rating = String(manifest?.contentWarning || '').toUpperCase();
+  if (!showAdultExtensions) return rating === 'SAFE';
+  return settings.get().adultContentRatings.includes(rating);
+}
+
 const read = () => {
+  if (recordsCache) return recordsCache;
   let list = [];
   try { list = JSON.parse(localStorage.getItem(KEY)) || []; } catch { list = []; }
-  return list.filter((r) => r?.manifest?.type !== 'builtin');
+  recordsCache = list.filter((r) => r?.manifest?.type !== 'builtin' && !isPlaceholderExtension(r));
+  if (recordsCache.length !== list.length) {
+    try { localStorage.setItem(KEY, JSON.stringify(recordsCache)); } catch {}
+  }
+  return recordsCache;
 };
-const write = (v) => localStorage.setItem(KEY, JSON.stringify(v));
+const write = (v) => {
+  recordsCache = v.filter((r) => r?.manifest?.type !== 'builtin' && !isPlaceholderExtension(r));
+  localStorage.setItem(KEY, JSON.stringify(recordsCache));
+};
 
 function ctx(manifest = {}) {
   let storedConfig = {};
@@ -29,11 +47,11 @@ function ctx(manifest = {}) {
     id: manifest.id,
     config: manifest.config,
     languageSelections,
-    fetchText: (url) => {
+    fetchText: (url, requestId) => {
       if (typeof window === 'undefined' || !window.cytlex?.httpGet) {
         throw new Error('Sin puente Electron para hacer peticiones');
       }
-      return window.cytlex.httpGet(url);
+      return window.cytlex.httpGet(url, requestId);
     },
     parse: (html) => new DOMParser().parseFromString(html, 'text/html'),
     head: async (url) => {
@@ -83,8 +101,8 @@ addEventListener('message', async (event) => {
         id: message.context.id,
         config: message.context.config,
         languageSelections: message.context.languageSelections,
-        fetchText: (url) => callHost('fetchText', [url]),
-        fetchPostText: (payload) => callHost('fetchPostText', [payload]),
+        fetchText: (url, requestId) => callHost('fetchText', [url, requestId]),
+        fetchPostText: (payload, requestId) => callHost('fetchPostText', [payload, requestId]),
         head: (url) => callHost('head', [url]),
         parse: (html) => new DOMParser().parseFromString(html, 'text/html')
       });
@@ -169,9 +187,9 @@ async function loadModule(code, manifest) {
     }
     if (message.kind === 'host-call') {
       const action = message.method === 'fetchText'
-        ? (url) => window.cytlex.httpGet(url)
+        ? (url, requestId) => window.cytlex.httpGet(url, requestId)
         : message.method === 'fetchPostText'
-          ? (payload) => window.cytlex.httpPost({ ...payload, responseType: 'text' })
+          ? (payload, requestId) => window.cytlex.httpPost({ ...payload, responseType: 'text' }, requestId)
         : message.method === 'head'
           ? (url) => window.cytlex.httpHead(url)
           : null;
@@ -236,6 +254,16 @@ const subSources = (manifest) => {
 
 const findRecord = (id) => read().find((r) => r.manifest.id === id
   || (r.manifest.config?.sources || []).some((s) => s.id === id));
+const normalizeSourceName = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const hostMatches = (url, baseUrl) => {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+    const sourceHost = new URL(baseUrl).hostname.toLowerCase().replace(/^www\./, '');
+    return host === sourceHost;
+  } catch {
+    return false;
+  }
+};
 
 export const extensions = {
   installed() {
@@ -269,6 +297,22 @@ export const extensions = {
   },
   isInstalled(id) {
     return !!findRecord(id);
+  },
+  resolveInstalledSource(id, name, url) {
+    if (extensions.isInstalled(id)) return id;
+    const sources = extensions.sources();
+    const normalizedName = normalizeSourceName(name);
+    const nameMatches = normalizedName
+      ? sources.filter(({ manifest }) => normalizeSourceName(manifest.name) === normalizedName)
+      : [];
+    if (nameMatches.length === 1) return nameMatches[0].manifest.id;
+    const matches = sources.filter(({ manifest }) => hostMatches(url, manifest.baseUrl));
+    if (matches.length === 1) return matches[0].manifest.id;
+    if (nameMatches.length > 1) {
+      const namedHostMatches = nameMatches.filter(({ manifest }) => hostMatches(url, manifest.baseUrl));
+      if (namedHostMatches.length === 1) return namedHostMatches[0].manifest.id;
+    }
+    return '';
   },
 
   async repoIndex(indexUrl) {

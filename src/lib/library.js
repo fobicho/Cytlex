@@ -71,10 +71,28 @@ export const lib = {
     const favs = lib.favs();
     const i = favs.findIndex((f) => match(f, url, sourceId));
     if (i >= 0) {
-      favs[i] = { ...favs[i], ...patch };
+      const coverChanged = typeof patch.cover === 'string' && patch.cover && patch.cover !== favs[i].cover;
+      favs[i] = {
+        ...favs[i],
+        ...patch,
+        ...(coverChanged ? { coverLocal: '', coverCached: '' } : {})
+      };
       write(FAV, favs);
     }
     return favs;
+  },
+  updateFavs(updates) {
+    const favs = lib.favs();
+    const patches = new Map(updates.map(({ url, sourceId, patch }) => [`${sourceId || 'leercapitulo'}|${sameUrlKey(url)}`, patch]));
+    let changed = false;
+    const next = favs.map((f) => {
+      const patch = patches.get(`${SRC(f)}|${sameUrlKey(f.url)}`);
+      if (!patch) return f;
+      changed = true;
+      return { ...f, ...patch };
+    });
+    if (changed) write(FAV, next);
+    return next;
   },
 
   cats() { return loadCats(); },

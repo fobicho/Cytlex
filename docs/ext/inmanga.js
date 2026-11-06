@@ -2,7 +2,7 @@ const BASE = 'https://inmanga.com';
 const CHAPTERS = `${BASE}/chapter/getall`;
 const PAGE_LIST = `${BASE}/chapter/chapterIndexControls`;
 const PAGES = 'https://pack-yak.intomanga.com/images/manga/ms/chapter/ch/page/p';
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 20;
 
 export default function createSource({ fetchText, fetchPostText, parse }) {
   const chapterCache = new Map();
@@ -13,7 +13,123 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
   };
 
   const clean = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+  const normalized = (value) => clean(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/:$/, '').toLowerCase();
   const text = (element, selector) => clean(element.querySelector(selector)?.textContent);
+  const imageUrl = (image) => {
+    if (!image) return '';
+    const linkedImage = image.closest?.('a[href]')?.getAttribute('href') || '';
+    const picture = image.closest?.('picture');
+    const srcsets = [
+      ...[...(picture?.querySelectorAll('source[srcset], source[data-srcset]') || [])]
+        .flatMap((source) => [source.getAttribute('srcset'), source.getAttribute('data-srcset')]),
+      image.getAttribute('srcset'),
+      image.getAttribute('data-srcset')
+    ].filter(Boolean);
+    const srcsetCandidates = srcsets.flatMap((srcset) => srcset.split(',').map((entry) => {
+      const [url, descriptor = ''] = entry.trim().split(/\s+/);
+      const amount = Number.parseFloat(descriptor);
+      const score = descriptor.endsWith('w') ? amount : descriptor.endsWith('x') ? amount * 1000 : 0;
+      return { url, score };
+    })).filter((candidate) => candidate.url);
+    const largestSrc = srcsetCandidates.length
+      ? (srcsetCandidates.some((candidate) => candidate.score > 0)
+        ? srcsetCandidates.sort((a, b) => b.score - a.score)[0].url
+        : srcsetCandidates.at(-1).url)
+      : '';
+    const candidates = [
+      /\.(?:avif|gif|jpe?g|png|webp)(?:[?#]|$)/i.test(linkedImage) ? linkedImage : '',
+      image.getAttribute('data-original'),
+      image.getAttribute('data-original-src'),
+      image.getAttribute('data-full'),
+      image.getAttribute('data-zoom-image'),
+      image.getAttribute('data-large'),
+      image.getAttribute('data-src'),
+      image.getAttribute('data-lazy-src'),
+      image.getAttribute('data-url'),
+      largestSrc,
+      image.getAttribute('data-cfsrc'),
+      image.getAttribute('src'),
+      image.getAttribute('content')
+    ];
+    for (const candidate of candidates) {
+      const value = clean(candidate);
+      if (!value || /^(?:data:|javascript:|about:|#)/i.test(value)) continue;
+      if (/(?:placeholder|no[-_]?image|default[-_]?cover|blank\.gif|transparent\.gif|pixel\.(?:gif|png)|spacer\.(?:gif|png)|\/logo(?:[./_-]|$))/i.test(value)) continue;
+      const resolved = abs(value);
+      if (resolved) return resolved;
+    }
+    return '';
+  };
+  const coverFrom = (doc) => {
+    const selectors = [
+      '.manga-cover img',
+      'img[class*="cover" i]',
+      'img[id*="cover" i]',
+      '[data-cover] img',
+      '[data-thumbnail] img',
+      'img[src*="/i/m/" i]',
+      'img[data-src*="/i/m/" i]',
+      'img[data-original*="/i/m/" i]',
+      'img[src*="/thumbnails/manga/" i]',
+      'img[data-src*="/thumbnails/manga/" i]',
+      'img[src*="/images/manga/" i]',
+      'img[data-src*="/images/manga/" i]',
+      'img[data-original*="/images/manga/" i]'
+    ];
+    for (const selector of selectors) {
+      const image = doc.querySelector(selector);
+      const source = imageUrl(image);
+      if (source) return source;
+    }
+    const metaCover = doc.querySelector('meta[property="og:image"]')?.getAttribute('content');
+    if (metaCover) {
+      const source = imageUrl({ getAttribute: (name) => name === 'content' ? metaCover : null });
+      if (source) return source;
+    }
+    return '';
+  };
+  const isSeoSynopsis = (value, title) => {
+    const content = normalized(value);
+    if (!content) return true;
+    const titleKey = normalized(title);
+    const titleMentions = titleKey ? content.split(titleKey).length - 1 : 0;
+    return /\b(?:online|gratis|leer)\b/.test(content) && titleMentions >= 2;
+  };
+  const synopsisFrom = (doc, title) => {
+    const selectors = [
+      '[itemprop="description"]',
+      '[class*="synopsis" i]', '[id*="synopsis" i]',
+      '[class*="sinopsis" i]', '[id*="sinopsis" i]',
+      '[class*="manga-description" i]', '[id*="manga-description" i]'
+    ];
+    const candidates = [];
+    for (const selector of selectors) {
+      for (const element of doc.querySelectorAll(selector)) candidates.push(clean(element.textContent));
+    }
+    for (const element of doc.querySelectorAll('main p, article p, p')) candidates.push(clean(element.textContent));
+    for (const element of doc.querySelectorAll('[class*="description" i], [id*="description" i]')) candidates.push(clean(element.textContent));
+    const content = candidates.find((value) => value.length > 60 && !isSeoSynopsis(value, title));
+    if (content) return content;
+    const meta = clean(doc.querySelector('meta[property="og:description"]')?.getAttribute('content')
+      || doc.querySelector('meta[name="description"]')?.getAttribute('content'));
+    return isSeoSynopsis(meta, title) ? '' : meta;
+  };
+  const factValue = (doc, labels) => {
+    const wanted = new Set(labels.map(normalized));
+    for (const label of doc.querySelectorAll('label, dt, th, strong, b, span, div, p')) {
+      if (normalized(label.textContent) && wanted.has(normalized(label.textContent))) {
+        const adjacent = [label.previousElementSibling, label.nextElementSibling]
+          .map((element) => clean(element?.textContent))
+          .find((value) => value && !wanted.has(normalized(value)));
+        if (adjacent) return adjacent;
+        const parentText = clean(label.parentElement?.textContent);
+        const [before, after] = parentText.split(new RegExp(label.textContent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+        const siblingValue = clean(before) || clean(after);
+        if (siblingValue && !wanted.has(normalized(siblingValue))) return siblingValue;
+      }
+    }
+    return '';
+  };
   const mangaData = (url) => {
     const parsed = new URL(url, BASE);
     const parts = parsed.pathname.split('/').filter(Boolean);
@@ -34,12 +150,17 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const data = JSON.parse(await fetchText(`${CHAPTERS}?mangaIdentification=${encodeURIComponent(mangaId)}`));
     let payload = data?.data ?? data;
     if (typeof payload === 'string') payload = JSON.parse(payload);
-    return (payload?.result || []).filter((item) => item?.identification != null);
+    const chapters = payload?.result || payload?.Result || [];
+    return chapters.map((item) => ({
+      ...item,
+      identification: item.identification ?? item.Identification,
+      number: item.number ?? item.Number,
+      date: item.date ?? item.Date ?? item.publishDate ?? item.PublishDate
+    })).filter((item) => item.identification != null);
   }
 
-  async function catalog({ q = '', page = 1 } = {}) {
+  async function catalog({ q = '', page = 1, __cytlexRequestId } = {}) {
     const query = clean(q);
-    if (!query) return { items: [], totalPages: 1, hasMore: false, totalText: '' };
     const skip = (Math.max(1, Number(page) || 1) - 1) * PAGE_SIZE;
     const form = new URLSearchParams();
     form.set('hfilter[generes][]', '-1');
@@ -60,17 +181,22 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
         Referer: `${BASE}/manga/consult?suggestion=${encodeURIComponent(query)}`,
         'X-Requested-With': 'XMLHttpRequest'
       }
-    });
+    }, __cytlexRequestId);
     const doc = parse(html);
     const seen = new Set();
     const items = [...doc.querySelectorAll('a[href*="/ver/manga/"]')].map((anchor) => {
       const url = abs(anchor.getAttribute('href'));
       const card = anchor.closest('article, li') || anchor;
       const image = anchor.querySelector('img') || card.querySelector('img');
+      const cover = imageUrl(image)
+        || imageUrl(anchor)
+        || imageUrl(card)
+        || abs(anchor.getAttribute('data-cover') || anchor.getAttribute('data-thumbnail')
+          || card.getAttribute('data-cover') || card.getAttribute('data-thumbnail'));
       return {
         url,
         title: text(anchor, 'h4, h3, .title') || clean(anchor.getAttribute('title')) || clean(image?.getAttribute('alt')) || clean(anchor.textContent),
-        cover: abs(image?.getAttribute('data-src') || image?.getAttribute('data-original') || image?.getAttribute('src')),
+        cover,
         type: 'Manga',
         lastChapter: text(anchor, '[class*="chapter"], [class*="Chapter"]').replace(/[^\d.,]/g, '')
       };
@@ -88,20 +214,10 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const manga = mangaData(url);
     const doc = parse(await fetchText(manga.url));
     const title = text(doc, 'h1') || clean(doc.querySelector('meta[property="og:title"]')?.getAttribute('content')) || clean(doc.title);
-    const cover = abs(doc.querySelector('meta[property="og:image"]')?.getAttribute('content')
-      || doc.querySelector('img[class*="cover"], img[id*="cover"], .manga-cover img, img')?.getAttribute('data-src')
-      || doc.querySelector('img[class*="cover"], img[id*="cover"], .manga-cover img, img')?.getAttribute('src'));
-    const synopsis = clean(doc.querySelector('meta[name="description"]')?.getAttribute('content')
-      || doc.querySelector('meta[property="og:description"]')?.getAttribute('content')
-      || doc.querySelector('[class*="sinopsis"], [class*="synopsis"], [id*="sinopsis"], [id*="synopsis"]')?.textContent);
+    const cover = coverFrom(doc);
+    const synopsis = synopsisFrom(doc, title);
     const genres = [...doc.querySelectorAll('a[href*="genre"], a[href*="genero"], [class*="genre"] a, [class*="genero"] a')]
       .map((element) => clean(element.textContent)).filter(Boolean);
-    const facts = [...doc.querySelectorAll('dt, th, .label, strong, b')].map((label) => {
-      const key = clean(label.textContent).replace(/:$/, '').toLowerCase();
-      const value = clean(label.nextElementSibling?.textContent || label.parentElement?.textContent?.replace(label.textContent, ''));
-      return [key, value];
-    });
-    const fact = (pattern) => facts.find(([key]) => pattern.test(key))?.[1] || '';
     const chaptersData = await chapterList(manga.id);
     const chapters = chaptersData
       .sort((a, b) => Number(a.number) - Number(b.number))
@@ -118,11 +234,14 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       altTitles: clean(doc.querySelector('[class*="alternative"], [class*="alternate"], [class*="sinonimo"]')?.textContent),
       genres: [...new Set(genres)],
       facts: {
-        estado: fact(/estado|status/),
-        status: fact(/estado|status/),
-        tipo: fact(/tipo|type/) || 'Manga',
-        autor: fact(/autor|author|artist/),
-        vistas: fact(/vista|view/)
+        estado: factValue(doc, ['Estado', 'Status']),
+        status: factValue(doc, ['Estado', 'Status']),
+        tipo: factValue(doc, ['Tipo', 'Type']) || 'Manga',
+        autor: factValue(doc, ['Autor', 'Author', 'Artist']),
+        vistas: factValue(doc, ['Vistas', 'Views']),
+        publicacion: factValue(doc, ['Publicación', 'Publication']),
+        periodicidad: factValue(doc, ['Periodicidad', 'Frequency']),
+        proximo: factValue(doc, ['Próximo capítulo', 'Next chapter'])
       },
       sinopsis: synopsis,
       chapters

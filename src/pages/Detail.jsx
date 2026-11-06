@@ -1,14 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Link2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
-import { extensions, isAdultExtension } from '../lib/extensions.js';
-import { getSearchCover, makeCoverThumb } from '../lib/covers.js';
-import { chapterOrder, detailScroll, recallCover } from '../lib/searchState.js';
+import { reconcileMihonProgress } from '../lib/mihonProgress.js';
+import { extensions, isExtensionAllowed } from '../lib/extensions.js';
+import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover } from '../lib/covers.js';
+import { chapterOrder, detailScroll, recallCover, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
@@ -63,39 +62,42 @@ function DuplicateRow({ cover, title, author, sourceId, scale }) {
   );
 }
 
-function useQueryUrl() {
-  const loc = useLocation();
+function queryUrl(loc) {
   return new URLSearchParams(loc.search).get('u') || '';
 }
 
-function useSourceId() {
-  const loc = useLocation();
+function querySourceId(loc) {
   return new URLSearchParams(loc.search).get('s') || 'leercapitulo';
 }
 
-function useBackTo() {
-  const loc = useLocation();
+function backToFor(loc) {
   const params = new URLSearchParams(loc.search);
   const from = params.get('from');
   if (from === 'resultados') return `/resultados?s=${encodeURIComponent(params.get('s') || 'leercapitulo')}`;
+  if (from === 'fuentes') return `/explorar?tab=fuentes&source=${encodeURIComponent(params.get('s') || '')}`;
   return from === 'explorar' ? '/explorar' : '/biblioteca';
 }
 
-
-export default function Detail() {
-
-  const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
+const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const navigate = useNavigate();
-  const loc = useLocation();
-  const mangaUrl = useQueryUrl();
-  const sourceId = useSourceId();
+  const loc = locationOverride;
+  const mangaUrl = queryUrl(loc);
+  const sourceId = querySourceId(loc);
   const sourceManifest = extensions.manifest(sourceId);
-  const backTo = useBackTo();
+  const backTo = backToFor(loc);
   const fromParam = new URLSearchParams(loc.search).get('from') || 'biblioteca';
+  useEffect(() => {
+    if (fromParam === 'fuentes') sourceCatalogState.requestRestore();
+  }, [fromParam]);
   const sourceAvailable = extensions.isInstalled(sourceId);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
-  const adultExtensionDisabled = !showAdultExtensions && isAdultExtension(extensions.manifest(sourceId));
-  const [d, setD] = useState(() => api.peekDetail(mangaUrl, sourceId));
+  const adultExtensionDisabled = !isExtensionAllowed(extensions.manifest(sourceId), showAdultExtensions);
+  const detailKey = `${sourceId}|${mangaUrl}`;
+  const [detailState, setDetailState] = useState(() => ({
+    key: detailKey,
+    data: api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId)
+  }));
+  const d = detailState.key === detailKey ? detailState.data : api.peekStaleDetail(mangaUrl, sourceId);
   const [err, setErr] = useState('');
   const [fav, setFav] = useState(false);
   const [asc, setAsc] = useState(() => chapterOrder.get(mangaUrl));
@@ -124,7 +126,7 @@ export default function Detail() {
   const [animate, setAnimate] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [overflow, setOverflow] = useState(false);
-  const [progressTick, setProgressTick] = useState(0);
+  const [, setProgressTick] = useState(0);
   const [coverTick, setCoverTick] = useState(0);
   const [markBefore, setMarkBefore] = useState(null);
   const [aniListOpen, setAniListOpen] = useState(false);
@@ -140,28 +142,27 @@ export default function Detail() {
     const tLocal = t?.coverLocal;
     const tCover = t?.cover;
     if (anilistCover && tLocal) return tLocal;
-    if (anilistCover && tCover) return tCover;
+    if (anilistCover && tCover) return getLibraryCover(tCover) || tCover;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
-    const recalled = recallCover(mangaUrl);
+    const recalled = recallCover(mangaUrl, sourceId);
     const remoteCover = fav?.cover || tCover || recalled;
-    return getSearchCover(remoteCover) || remoteCover || '';
-  }, [mangaUrl, sourceId, progressTick, anilistCover, coverTick]);
+    return getLibraryCover(remoteCover) || getSearchCover(remoteCover) || remoteCover || '';
+  }, [mangaUrl, sourceId, anilistCover, coverTick]);
 
   const coverSrc = useMemo(() => {
     const t = tracking.get(mangaUrl, sourceId);
     const tLocal = t?.coverLocal;
     const tCover = t?.cover;
-    if (anilistCover && tLocal) return tLocal;
     if (anilistCover && tCover) return tCover;
+    if (anilistCover && tLocal) return tLocal;
+    if (d?.cover) return d.cover;
     const local = lib.fav(mangaUrl, sourceId)?.coverLocal;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
     if (knownCover) return knownCover;
-    return d?.cover || '';
+    return '';
   }, [d?.cover, knownCover, mangaUrl, sourceId, anilistCover, coverTick]);
 
   const [coverError, setCoverError] = useState(false);
-  useEffect(() => { setCoverError(false); }, [coverSrc]);
-  
   const coverKey = `${sourceId}|${mangaUrl}`;
   const [displayedCover, setDisplayedCover] = useState(() => ({
     key: coverKey,
@@ -175,20 +176,46 @@ export default function Detail() {
     setCoverError(false);
     setFailedCover('');
   }, [coverSrc]);
-  
   const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
-
   const coverImg = (alt) => (
-    <img
-      className="w-full h-full object-cover"
-      src={finalCover}
-      alt={alt}
-      referrerPolicy="no-referrer"
-      onError={() => { if (finalCover !== knownCover) setCoverError(true); }}
-    />
+    <>
+      {visibleCover && visibleCover !== finalCover && (
+        <img
+          className="absolute inset-0 w-full h-full object-cover"
+          src={visibleCover}
+          alt={alt}
+          referrerPolicy="no-referrer"
+        />
+      )}
+      {finalCover && failedCover !== finalCover && (
+        <img
+          className="absolute inset-0 w-full h-full object-cover"
+          src={finalCover}
+          alt={alt}
+          referrerPolicy="no-referrer"
+          onLoad={() => {
+            if (!/^https?:\/\//i.test(finalCover || '')) markLibraryCoverLoaded(finalCover);
+            setDisplayedCover({ key: coverKey, src: finalCover });
+            setFailedCover('');
+            if (/^https?:\/\//i.test(finalCover || '')) preloadLibraryCover(finalCover);
+          }}
+          onError={async () => {
+            if (/^https?:\/\//i.test(finalCover || '')) {
+              const local = await preloadLibraryCover(finalCover);
+              if (local) {
+                setDisplayedCover({ key: coverKey, src: local });
+                setFailedCover('');
+                return;
+              }
+            }
+            if (knownCover && finalCover !== knownCover) setCoverError(true);
+            else setFailedCover(finalCover);
+          }}
+        />
+      )}
+    </>
   );
 
-  useEffect(() => progress.subscribe(() => setProgressTick((t) => t + 1)), []);
   useEffect(() => tracking.subscribe(() => { setAniLinked(!!tracking.get(mangaUrl, sourceId)); setCoverTick((t) => t + 1); }), []);
   useEffect(() => settings.subscribe((s) => setAnilistCover(!!s.anilistCover)), []);
   useEffect(() => settings.subscribe((s) => setShowAdultExtensions(!!s.showAdultExtensions)), []);
@@ -203,15 +230,13 @@ export default function Detail() {
 
   useEffect(() => {
     const main = document.querySelector('main');
-
-    if (!main) return undefined;
-
     if (!main || !active || !activeRef.current) return undefined;
 
     const requestedRestore = detailScroll.takeRestore(mangaUrl);
     const saved = requestedRestore;
     let restoring = saved > 0;
     const apply = () => {
+      if (!activeRef.current) return;
       const max = main.scrollHeight - main.clientHeight;
       main.scrollTop = restoring ? Math.min(saved, Math.max(0, max)) : 0;
     };
@@ -224,6 +249,7 @@ export default function Detail() {
     let lastH = -1;
     let settleTimer = null;
     const settle = () => {
+      if (!activeRef.current) { restoring = false; return; }
       if (ticks > 8) { restoring = false; return; }
       ticks += 1;
       const h = main.scrollHeight;
@@ -234,7 +260,7 @@ export default function Detail() {
     };
     settleTimer = setTimeout(settle, 120);
 
-    const save = () => { if (!restoring) detailScroll.set(mangaUrl, main.scrollTop); };
+    const save = () => { if (activeRef.current && !restoring) detailScroll.set(mangaUrl, main.scrollTop); };
     main.addEventListener('scroll', save, { passive: true });
     return () => {
       cancelAnimationFrame(raf1);
@@ -259,17 +285,53 @@ export default function Detail() {
     setAniLinked(!!tracking.get(mangaUrl, sourceId));
 
     const cached = api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId);
-    if (cached) setD(cached);
-    else setD(null);
+    setDetailState({ key: `${sourceId}|${mangaUrl}`, data: cached || null });
+    if (cached?.chapters?.length) reconcileMihonProgress(mangaUrl, sourceId, cached.chapters);
 
     let alive = true;
     api
       .detail(mangaUrl, sourceId)
       .then((r) => {
         if (!alive) return;
-        setD(r);
+        setDetailState({ key: `${sourceId}|${mangaUrl}`, data: r });
+        reconcileMihonProgress(mangaUrl, sourceId, r?.chapters);
+        const favorite = lib.fav(mangaUrl, sourceId);
+        if (r?.cover && favorite && (
+          r.cover !== favorite.cover
+          || favorite.coverLocal
+          || favorite.coverCached
+        )) {
+          lib.updateFav(mangaUrl, { cover: r.cover, coverLocal: '', coverCached: '' }, sourceId);
+          setCoverTick((tick) => tick + 1);
+        }
       })
-      .catch((e) => { if (alive && !cached) setErr(String(e)); });
+      .catch(async (e) => {
+        if (!alive) return;
+        const message = String(e?.message || e);
+        if (/\bHTTP 404\b/.test(message)) {
+          const favorite = lib.fav(mangaUrl, sourceId);
+          const title = favorite?.title || d?.title || decodeURIComponent(mangaUrl.split('/').filter(Boolean).at(-1) || '').replace(/-/g, ' ');
+          if (title) {
+            try {
+              const recovered = await api.findManga({ url: mangaUrl, title, author: favorite?.author || d?.facts?.autor || '' }, sourceId);
+              if (alive && activeRef.current && recovered) {
+                const updates = { url: recovered.url };
+                if (recovered.detail?.cover && !favorite?.cover && !favorite?.coverLocal) {
+                  updates.cover = recovered.detail.cover;
+                }
+                lib.updateFav(mangaUrl, updates, sourceId);
+                tracking.move(mangaUrl, recovered.url, sourceId);
+                chapterOrder.move(mangaUrl, recovered.url);
+                const params = new URLSearchParams(loc.search);
+                params.set('u', recovered.url);
+                navigate({ pathname: loc.pathname, search: params.toString() }, { replace: true });
+                return;
+              }
+            } catch {}
+          }
+        }
+        if (alive && !cached) setErr(message);
+      });
 
     return () => { alive = false; };
   }, [mangaUrl, sourceId]);
@@ -282,6 +344,7 @@ export default function Detail() {
     const update = () => {
       const c = cover.getBoundingClientRect();
       const s = syn.getBoundingClientRect();
+      if (c.height === 0 || s.width === 0) return;
       const avail = Math.max(0, c.bottom - s.top - EXPAND_CTRL_H);
       setFullH(syn.scrollHeight);
       setAvailH(avail);
@@ -290,6 +353,11 @@ export default function Detail() {
 
     update();
     const raf = requestAnimationFrame(update);
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(update)
+      : null;
+    resizeObserver?.observe(cover);
+    resizeObserver?.observe(syn);
     let raf2 = 0;
     if (document.fonts?.ready) {
       document.fonts.ready.then(() => {
@@ -300,6 +368,7 @@ export default function Detail() {
     return () => {
       cancelAnimationFrame(raf);
       cancelAnimationFrame(raf2);
+      resizeObserver?.disconnect();
       window.removeEventListener('resize', update);
     };
   }, [d, scale]);
@@ -317,7 +386,9 @@ export default function Detail() {
 
   const addToLibrary = (manga, catIds) => {
     if (!Array.isArray(catIds) || catIds.length === 0) return;
-    lib.toggleFav(manga, catIds);
+    const chapterUrls = (d?.chapters || []).map((chapter) => chapter.url).filter(Boolean);
+    chapterIndex.set(manga.url, manga.sourceId, chapterUrls);
+    lib.toggleFav({ ...manga, chapterTotal: chapterUrls.length }, catIds);
     setFav(true);
     makeCoverThumb(manga.cover).then((local) => {
       if (local) lib.updateFav(manga.url, { coverLocal: local }, manga.sourceId);
@@ -453,11 +524,12 @@ export default function Detail() {
           className="flex flex-col md:flex-row"
           style={{ gap: px(24, scale, 19) }}
         >
-          {knownCover ? (
+          {coverSrc ? (
             <div
-              className="aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
+              className="relative aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
               style={{ width: `${coverSize}px` }}
             >
+              {!visibleCover && failedCover !== finalCover && <Skeleton className="absolute inset-0 rounded-xl" />}
               {coverImg('')}
             </div>
           ) : (
@@ -535,7 +607,12 @@ export default function Detail() {
     : [];
   const chaptersToMark = chaptersBefore.filter((chapter) => !progress.get(chapter.url, sourceId)?.read);
 
-  const pendiente = ordered.find((c) => !progress.get(c.url, sourceId)?.read) || null;
+  const chaptersOldestFirst = [...d.chapters].sort((a, b) => byNumber(a, b, 1));
+  const mangaStatus = norm(d.facts.estado || d.facts.status).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const isCompleted = /finaliz|complet|concluid|terminad|finished|ended/.test(mangaStatus);
+  const pendiente = isCompleted
+    ? chaptersOldestFirst.at(-1) || null
+    : chaptersOldestFirst.find((c) => !progress.get(c.url, sourceId)?.read) || chaptersOldestFirst[0] || null;
   const cap = pendiente ? progress.get(pendiente.url, sourceId) : null;
   const enMarcha = !!(cap && !cap.read && Number.isInteger(cap.page));
   const resume = pendiente ? { ...pendiente, cap } : null;
@@ -571,18 +648,23 @@ export default function Detail() {
 
       <div
         className="flex flex-col md:flex-row"
-        style={{ gap: px(24, scale, 19) }}
+        style={{
+          gap: px(24, scale, 19),
+          minHeight: `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})`
+        }}
       >
         <div
           ref={coverRef}
-          className="aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
           className="relative aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
           style={{ width: `${coverSize}px` }}
         >
           {coverSrc ? (
-            coverImg(d.title)
+            <>
+              {!visibleCover && failedCover !== finalCover && <Skeleton className="absolute inset-0 rounded-xl" />}
+              {coverImg(d.title)}
+            </>
           ) : (
-            <div className="w-full h-full animate-pulse bg-muted/40" />
+            <Skeleton className="absolute inset-0 rounded-xl" />
           )}
         </div>
         <div className="flex-1 min-w-0">
@@ -618,6 +700,14 @@ export default function Detail() {
               </Badge>
             ))}
           </div>
+
+          {(d.facts.publicacion || d.facts.periodicidad || d.facts.proximo) && (
+            <div className="mt-2 flex flex-wrap gap-x-2 text-muted-foreground" style={{ fontSize: `${Math.round(13 * scale)}px` }}>
+              {d.facts.publicacion && <span>Publicado: {d.facts.publicacion}</span>}
+              {d.facts.periodicidad && <span>Periodicidad: {d.facts.periodicidad}</span>}
+              {d.facts.proximo && <span>Próximo capítulo: {d.facts.proximo}</span>}
+            </div>
+          )}
 
           <div style={{ marginTop: px(12, scale, 9) }}>
             <div
@@ -665,7 +755,11 @@ export default function Detail() {
 
       <div
         className="flex flex-wrap items-center border-t border-border"
-        style={{ gap: px(12, scale, 8), marginTop: px(24, scale, 16), paddingTop: px(20, scale, 14) }}
+        style={{
+          gap: px(12, scale, 8),
+          marginTop: px(24, scale, 16),
+          paddingTop: px(overflow ? 20 : 19, scale, 14)
+        }}
       >
         {resume ? (
           <Button
@@ -675,7 +769,10 @@ export default function Detail() {
               window.location.hash = `#/leer?u=${encodeURIComponent(resume.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
             }}
             style={{
-              height: px(40, scale, 33),
+              height: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
+              minHeight: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
+              translate: overflow ? undefined : '0 1px',
+              flexShrink: 0,
               paddingLeft: px(16, scale, 13),
               paddingRight: px(16, scale, 13),
               fontSize: px(14, scale, 12)
@@ -723,8 +820,10 @@ export default function Detail() {
               onAddClick();
             }}
             style={{
-              transform: 'none',
-              height: px(40, scale, 33),
+              height: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
+              minHeight: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
+              translate: overflow ? undefined : '0 1px',
+              flexShrink: 0,
               paddingLeft: px(16, scale, 13),
               paddingRight: px(16, scale, 13),
               fontSize: px(14, scale, 12)
@@ -817,8 +916,10 @@ export default function Detail() {
           onClick={() => setAniListOpen(true)}
           title="Vincular con AniList"
           style={{
-            transform: 'none',
-            height: px(40, scale, 33),
+            height: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
+            minHeight: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
+            translate: overflow ? undefined : '0 1px',
+            flexShrink: 0,
             paddingLeft: px(16, scale, 13),
             paddingRight: px(16, scale, 13),
             fontSize: px(14, scale, 12)
@@ -840,7 +941,7 @@ export default function Detail() {
         onClose={() => setAniListOpen(false)}
       />
 
-      <div className="mt-6 border-t border-border pt-3">
+      <div className="border-t border-border pt-3" style={{ marginTop: px(20, scale, 14) }}>
         <div className="mb-2 flex items-center gap-2">
           <button
             type="button"
@@ -957,7 +1058,11 @@ export default function Detail() {
                 </span>
                 <span
                   className={cn('block text-muted-foreground', chaptersPerRow === 3 && 'truncate')}
-                  style={{ fontSize: `${Math.round(13 * scale)}px` }}
+                  style={{
+                    fontSize: `${Math.round(13 * scale)}px`,
+                    lineHeight: `${Math.round(20 * scale)}px`,
+                    minHeight: `${Math.round(20 * scale)}px`
+                  }}
                 >
                   {c.date}
                   {c.group ? ` · ${c.group}` : ''}
@@ -975,9 +1080,9 @@ export default function Detail() {
                     aria-label={`Marcar ${c.title} como no leído`}
                     className="order-2 shrink-0 flex items-center gap-1 text-primary rounded-md hover:bg-accent"
                     style={{ fontSize: `${Math.round(13 * scale)}px` }}
-                    onClick={(e) => { e.preventDefault(); progress.markUnread(c.url, sourceId); setProgressTick((t) => t + 1); }}
+                    onClick={(e) => { e.preventDefault(); progress.markUnread(c.url, sourceId, mangaUrl); setProgressTick((t) => t + 1); }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markUnread(c.url, sourceId); setProgressTick((t) => t + 1); }
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markUnread(c.url, sourceId, mangaUrl); setProgressTick((t) => t + 1); }
                     }}
                   >
                     <CheckCircle2 className="w-4 h-4" />
@@ -991,9 +1096,9 @@ export default function Detail() {
                     aria-label={`Marcar ${c.title} como leído`}
                     className="order-2 shrink-0 flex items-center gap-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded-md hover:bg-accent hover:text-foreground transition-opacity"
                     style={{ fontSize: `${Math.round(13 * scale)}px` }}
-                    onClick={(e) => { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0); setProgressTick((t) => t + 1); }}
+                    onClick={(e) => { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0, mangaUrl); setProgressTick((t) => t + 1); }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0); setProgressTick((t) => t + 1); }
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0, mangaUrl); setProgressTick((t) => t + 1); }
                     }}
                   >
                     <Check className="w-4 h-4" />
@@ -1044,7 +1149,7 @@ export default function Detail() {
                 size="sm"
                 style={{ height: px(36, scale, 30), padding: `${px(4, scale, 3)}px ${px(12, scale, 10)}px`, fontSize: px(14, scale, 12), lineHeight: px(20, scale, 17) }}
                 onClick={() => {
-                  progress.markMany(chaptersToMark.map((chapter) => chapter.url), sourceId);
+                  progress.markMany(chaptersToMark.map((chapter) => chapter.url), sourceId, null, mangaUrl);
                   setProgressTick((t) => t + 1);
                   setMarkBefore(null);
                 }}
@@ -1100,7 +1205,6 @@ export default function Detail() {
 
     </div>
   );
-}
 }, (previous, next) => previous.active === next.active
   && previous.activeRef === next.activeRef
   && previous.locationOverride.pathname === next.locationOverride.pathname

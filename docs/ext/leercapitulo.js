@@ -1,11 +1,51 @@
-const BASE = 'https://leercapitulo.co';
+const BASE = 'https://www.leercapitulo.co';
 
 const abs = (u) => {
   if (!u) return '';
-  try { return new URL(u, BASE).href; } catch { return u; }
+  try {
+    const url = new URL(u, BASE);
+    if (url.hostname === 'leercapitulo.co') url.hostname = 'www.leercapitulo.co';
+    return url.href;
+  } catch { return u; }
 };
 
 const text = (el, sel) => (el.querySelector(sel)?.textContent || '').replace(/\s+/g, ' ').trim();
+
+function highestResolutionImage(img) {
+  if (!img) return '';
+  const linkedImage = img.closest?.('a[href]')?.getAttribute('href') || '';
+  if (/\.(?:avif|gif|jpe?g|png|webp)(?:[?#]|$)/i.test(linkedImage)) return linkedImage;
+
+  // Sites often put the full cover in a lazy-load attribute while `srcset`
+  // only contains responsive thumbnails. Prefer explicit original/zoom URLs.
+  const original = [
+    img.getAttribute('data-original'),
+    img.getAttribute('data-full'),
+    img.getAttribute('data-zoom-image'),
+    img.getAttribute('data-large'),
+    img.getAttribute('data-src'),
+    img.getAttribute('data-lazy-src')
+  ].find(Boolean);
+  if (original) return original;
+
+  const picture = img.closest('picture');
+  const srcsets = [
+    ...[...(picture?.querySelectorAll('source[srcset], source[data-srcset]') || [])]
+      .flatMap((source) => [source.getAttribute('srcset'), source.getAttribute('data-srcset')]),
+    img.getAttribute('srcset'),
+    img.getAttribute('data-srcset')
+  ].filter(Boolean);
+  const candidates = srcsets.flatMap((srcset) => srcset.split(',').map((entry) => {
+    const [url, descriptor = ''] = entry.trim().split(/\s+/);
+    const amount = Number.parseFloat(descriptor);
+    const score = descriptor.endsWith('w') ? amount : descriptor.endsWith('x') ? amount * 1000 : 0;
+    return { url, score };
+  })).filter((candidate) => candidate.url);
+  if (candidates.length) {
+    return candidates.sort((a, b) => b.score - a.score)[0].url;
+  }
+  return img.getAttribute('src') || '';
+}
 
 function parseMangaUrl(url) {
   const m = String(url || '').match(/\/manga\/([^/]+)\/([^/]+)\/?/);
@@ -64,7 +104,7 @@ export default function createSource({ fetchText, parse, head }) {
     return {
       title: text(el, '.lc-card-name'),
       url: abs(link?.getAttribute('href')),
-      cover: abs(img?.getAttribute('src')),
+      cover: abs(highestResolutionImage(img)),
       author: text(el, '.lc-card-author, .lc-author, [class*="author"]'),
       type: text(el, '.lc-card-badge'),
       lastChapter: text(el, '.lc-chapter-link'),
@@ -206,15 +246,15 @@ export default function createSource({ fetchText, parse, head }) {
     return pages;
   }
 
-  async function catalog({ q = '', genre = '', page = 1 } = {}) {
+  async function catalog({ q = '', genre = '', sort = 'az', page = 1, __cytlexRequestId } = {}) {
     const params = new URLSearchParams();
     if (q) params.set('q', q);
     if (genre) params.set('genre', genre);
-    params.set('sort', 'az');
+    params.set('sort', sort === 'za' ? 'za' : 'az');
     if (page > 1) params.set('page', String(page));
     const url = `${BASE}/manga/?${params.toString()}`;
 
-    const doc = parse(await fetchText(url));
+    const doc = parse(await fetchText(url, __cytlexRequestId));
     const items = [...doc.querySelectorAll('.lc-card')].map(parseCard).filter((c) => c.title);
 
     let totalPages = 1;
@@ -224,6 +264,19 @@ export default function createSource({ fetchText, parse, head }) {
     }
 
     return { items, totalPages, totalText: text(doc, '.lc-section-title .lc-more') };
+  }
+
+  async function catalogFilters() {
+    const doc = parse(await fetchText(BASE));
+    const genres = new Map();
+    for (const link of doc.querySelectorAll('a[href*="genre="]')) {
+      const url = new URL(link.getAttribute('href') || '', BASE);
+      const slug = url.searchParams.get('genre') || url.pathname.match(/\/genre\/([^/]+)/)?.[1];
+      const label = (link.textContent || '').replace(/\s+/g, ' ').trim();
+      if (slug && label && !genres.has(slug)) genres.set(slug, { value: slug, label });
+    }
+    const options = [...genres.values()].sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }));
+    return [{ id: 'genre', label: 'Género', type: 'select', options }];
   }
 
   async function detail(mangaUrl) {
@@ -263,7 +316,7 @@ export default function createSource({ fetchText, parse, head }) {
     const info = parseMangaUrl(full) || {};
     return {
       title,
-      cover: abs(coverImg?.getAttribute('src')),
+      cover: abs(highestResolutionImage(coverImg)),
       altTitles,
       genres,
       themes,
@@ -296,5 +349,5 @@ export default function createSource({ fetchText, parse, head }) {
     throw new Error(`No se pudo cargar el capítulo en ${chapterUrl}`);
   }
 
-  return { id: 'leercapitulo', name: 'LeerCapitulo', catalog, detail, chapter };
+  return { id: 'leercapitulo', name: 'LeerCapitulo', catalog, catalogFilters, detail, chapter };
 }

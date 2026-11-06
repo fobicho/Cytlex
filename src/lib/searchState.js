@@ -1,17 +1,76 @@
 export const lastSearch = { q: '', genre: '', results: null };
 export const MAX_SEARCH_RESULTS = 30;
+export const SOURCE_CATALOG_HOME_EVENT = 'cytlex:source-catalog-home';
 
 const seenCovers = new Map();
+const MAX_SEEN_COVERS = 120;
 
-export function rememberCover(url, cover) {
-  if (url && cover) seenCovers.set(url, cover);
+const coverCacheKey = (url, sourceId = '') => `${sourceId || ''}|${url || ''}`;
+
+export function rememberCover(url, cover, sourceId = '') {
+  if (!url || !cover) return;
+  const key = coverCacheKey(url, sourceId);
+  seenCovers.delete(key);
+  seenCovers.set(key, cover);
+  while (seenCovers.size > MAX_SEEN_COVERS) seenCovers.delete(seenCovers.keys().next().value);
 }
 
-export function recallCover(url) {
-  return seenCovers.get(url || '') || '';
+export function recallCover(url, sourceId = '') {
+  const key = coverCacheKey(url, sourceId);
+  const cover = seenCovers.get(key) || '';
+  if (cover) {
+    seenCovers.delete(key);
+    seenCovers.set(key, cover);
+  }
+  return cover;
 }
 
 export const scrollMemory = { catalog: 0 };
+
+const libraryScrollMap = new Map();
+
+export const libraryScroll = {
+  get(categoryId) {
+    return libraryScrollMap.get(categoryId || '') ?? 0;
+  },
+  set(categoryId, top) {
+    if (!Number.isFinite(top) || top < 0) return;
+    libraryScrollMap.set(categoryId || '', top);
+  }
+};
+
+let sourceCatalogSnapshot = null;
+let restoreSourceCatalog = false;
+
+export const sourceCatalogState = {
+  save(snapshot) {
+    if (!snapshot?.sourceId) return;
+    const scrollTop = sourceCatalogSnapshot?.sourceId === snapshot.sourceId
+      ? sourceCatalogSnapshot.scrollTop || 0
+      : 0;
+    sourceCatalogSnapshot = { ...snapshot, scrollTop };
+  },
+  saveScroll(scrollTop) {
+    if (sourceCatalogSnapshot && Number.isFinite(scrollTop) && scrollTop >= 0) {
+      sourceCatalogSnapshot.scrollTop = scrollTop;
+    }
+  },
+  getScrollTop() {
+    return sourceCatalogSnapshot?.scrollTop ?? 0;
+  },
+  requestRestore() {
+    restoreSourceCatalog = true;
+  },
+  takeRestore() {
+    if (!restoreSourceCatalog) return null;
+    restoreSourceCatalog = false;
+    return sourceCatalogSnapshot;
+  },
+  clear() {
+    sourceCatalogSnapshot = null;
+    restoreSourceCatalog = false;
+  }
+};
 
 const catalogScrollMap = new Map();
 
@@ -86,6 +145,16 @@ export const chapterOrder = {
     if (!mangaUrl) return;
     try {
       localStorage.setItem(ORDER_KEY, JSON.stringify({ ...readOrder(), [mangaUrl]: asc ? 'asc' : 'desc' }));
+    } catch {}
+  },
+  move(mangaUrl, nextUrl) {
+    if (!mangaUrl || !nextUrl || mangaUrl === nextUrl) return;
+    try {
+      const order = readOrder();
+      if (order[mangaUrl] === undefined) return;
+      if (order[nextUrl] === undefined) order[nextUrl] = order[mangaUrl];
+      delete order[mangaUrl];
+      localStorage.setItem(ORDER_KEY, JSON.stringify(order));
     } catch {}
   }
 };

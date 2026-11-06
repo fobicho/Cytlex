@@ -50,9 +50,9 @@ export default function createSource({ fetchText, parse }) {
       .filter((x) => x.url);
   }
 
-  async function catalog({ q = '' } = {}) {
+  async function catalog({ q = '', __cytlexRequestId } = {}) {
     const url = q ? `${base}/buscar.php?q=${encodeURIComponent(q)}` : `${base}/`;
-    const doc = parse(await fetchText(url));
+    const doc = parse(await fetchText(url, __cytlexRequestId));
     return { items: mapCards(doc), totalPages: 1, totalText: '' };
   }
 

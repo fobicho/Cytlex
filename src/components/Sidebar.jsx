@@ -4,6 +4,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { BookOpen, Compass, Settings as SettingsIcon, ChevronsRight } from 'lucide-react';
 import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
+import { SOURCE_CATALOG_HOME_EVENT } from '../lib/searchState.js';
 import { settings } from '../lib/settings.js';
 import { useScale } from '../lib/useScale.js';
 
@@ -18,6 +19,22 @@ const DURATION = 0.3;
 const SIDEBAR_WIDTH = { expanded: 196, collapsed: 72 };
 const SIDEBAR_SCALE_MIN = 0.72;
 
+let lastLibraryRoute = '/biblioteca';
+let lastExploreRoute = '/explorar?tab=mangas';
+let lastLibraryListRoute = '/biblioteca';
+let lastExploreListRoute = '/explorar?tab=mangas';
+
+function routeSection(location) {
+  if (location.pathname === '/biblioteca') return '/biblioteca';
+  if (location.pathname === '/explorar' || location.pathname === '/resultados') return '/explorar';
+  if (location.pathname.startsWith('/manga')) {
+    const from = new URLSearchParams(location.search).get('from');
+    if (from === 'biblioteca') return '/biblioteca';
+    if (from === 'explorar' || from === 'fuentes') return '/explorar';
+  }
+  return '';
+}
+
 export default function Sidebar({ tutorialNavOnly = false }) {
   const [collapsed, setCollapsed] = useState(settings.get().sidebarCollapsed);
   const location = useLocation();
@@ -26,6 +43,19 @@ export default function Sidebar({ tutorialNavOnly = false }) {
   const scale = useScale(SIDEBAR_SCALE_MIN);
 
   useEffect(() => settings.subscribe((s) => setCollapsed(s.sidebarCollapsed)), []);
+
+  useEffect(() => {
+    const section = routeSection(location);
+    const route = `${location.pathname}${location.search}`;
+    if (section === '/biblioteca') {
+      lastLibraryRoute = route;
+      if (!location.pathname.startsWith('/manga')) lastLibraryListRoute = route;
+    }
+    if (section === '/explorar') {
+      lastExploreRoute = route;
+      if (!location.pathname.startsWith('/manga')) lastExploreListRoute = route;
+    }
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     if (!pendingQuickSearchReset.current || new URLSearchParams(location.search).has('quick')) return;
@@ -51,7 +81,12 @@ export default function Sidebar({ tutorialNavOnly = false }) {
         }}
       >
         {navItems.map((item) => {
-          const isActive = location.pathname === item.to;
+          const isActive = routeSection(location) === item.to || location.pathname === item.to;
+          const destination = item.to === '/biblioteca'
+            ? lastLibraryRoute
+            : item.to === '/explorar'
+              ? lastExploreRoute
+              : item.to;
           return (
             <NavLink
               key={item.to}
@@ -59,10 +94,19 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                 ? '/explorar?tab=mangas'
                 : tutorialNavOnly && item.to === '/ajustes'
                   ? '/ajustes?tutorial=1&section=apariencia'
-                  : item.to}
+                  : destination}
               onClick={(event) => {
                 if (tutorialNavOnly) return;
-                if (location.pathname === item.to) {
+                if (isActive) {
+                  if (location.pathname.startsWith('/manga')
+                    && (item.to === '/biblioteca' || item.to === '/explorar')) {
+                    event.preventDefault();
+                    const listRoute = item.to === '/biblioteca' ? lastLibraryListRoute : lastExploreListRoute;
+                    if (item.to === '/biblioteca') lastLibraryRoute = listRoute;
+                    else lastExploreRoute = listRoute;
+                    navigate(listRoute);
+                    return;
+                  }
                   if (item.to === '/explorar' && new URLSearchParams(location.search).has('quick')) {
                     event.preventDefault();
                     pendingQuickSearchReset.current = true;
@@ -71,6 +115,15 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                   }
                   if (item.to === '/explorar' || item.to === '/biblioteca') {
                     const main = document.querySelector('main');
+                    if (item.to === '/explorar' && main?.querySelector('[data-source-catalog-active="true"]')) {
+                      event.preventDefault();
+                      if (main.scrollTop > 1) {
+                        main.scrollTo({ top: 0, behavior: 'smooth' });
+                        return;
+                      }
+                      window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
+                      return;
+                    }
                     if (item.to === '/explorar' && main?.querySelector('[data-explore-start="true"]')) {
                       event.preventDefault();
                       return;

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown, Settings as SettingsIcon } from 'lucide-react';
-import { extensions, isAdultExtension } from '../lib/extensions.js';
+import { extensions, isAdultExtension, isExtensionAllowed, isNewer } from '../lib/extensions.js';
 import { extUpdates } from '../lib/extUpdates.js';
 import { settings } from '../lib/settings.js';
 import { Card } from './ui/card.jsx';
@@ -130,6 +130,10 @@ const writeExtConfig = (cfg) => {
   try { localStorage.setItem(EXT_CONFIG_KEY, JSON.stringify(cfg)); } catch {}
 };
 const extensionSortModes = ['title-asc', 'title-desc', 'added'];
+let manualExtensionCheckInFlight = false;
+let manualExtensionCheckCooldownUntil = 0;
+
+const remainingExtensionCheckCooldown = () => Math.max(0, Math.ceil((manualExtensionCheckCooldownUntil - Date.now()) / 1000));
 
 function sortLabel(sortBy) {
   return sortBy === 'title-desc' ? 'Z-A' : sortBy === 'added' ? 'Adición' : 'A-Z';
@@ -147,7 +151,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   const [loading, setLoading] = useState(() => !cacheHit);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState('');
-  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [checkingUpdates, setCheckingUpdates] = useState(manualExtensionCheckInFlight);
+  const [checkCooldown, setCheckCooldown] = useState(remainingExtensionCheckCooldown);
   const [confirmRemove, setConfirmRemove] = useState(null);
   const [confirmInstall, setConfirmInstall] = useState(null);
   const [confirmUpdate, setConfirmUpdate] = useState(null);
@@ -181,12 +186,13 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     setLangConfig({ ...cfg });
     extensions.invalidate(subId);
   };
-  const visibleInstalled = installed;
-  const visibleAvailable = tutorialPreview || showAdultExtensions
-    ? available
-    : available?.filter((manifest) => !isAdultExtension(manifest));
-  const visibleUpdates = updates;
-  const sortedInstalled = [...visibleInstalled].sort((a, b) => {
+  const visibleAvailable = available?.filter((manifest) => isExtensionAllowed(manifest, showAdultExtensions));
+  const installedById = new Map(installed.map((record) => [record.manifest.id, record.manifest]));
+  const visibleUpdates = updates.filter((update) => {
+    const manifest = installedById.get(update.id);
+    return manifest && isExtensionAllowed(manifest, showAdultExtensions) && isNewer(update.to, manifest.version);
+  });
+  const sortedInstalled = [...installed].sort((a, b) => {
     if (sortBy === 'added') return (a.installedAt || 0) - (b.installedAt || 0);
     const order = String(a.manifest.name || '').localeCompare(String(b.manifest.name || ''), 'es', { sensitivity: 'base', numeric: true });
     return sortBy === 'title-desc' ? -order : order;
@@ -274,10 +280,12 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   };
 
   const searchUpdates = async () => {
+    if (manualExtensionCheckInFlight || remainingExtensionCheckCooldown() > 0) return;
     if (!repoUrl) {
       toast({ title: 'No hay un repositorio configurado', description: 'Configura un repositorio para buscar actualizaciones.', variant: 'error' });
       return;
     }
+    manualExtensionCheckInFlight = true;
     setCheckingUpdates(true);
     setErr('');
     try {
@@ -300,9 +308,21 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     } catch (error) {
       toast({ title: 'No se pudieron buscar actualizaciones', description: String(error?.message || error), variant: 'error' });
     } finally {
+      manualExtensionCheckInFlight = false;
+      manualExtensionCheckCooldownUntil = Date.now() + 3_000;
       setCheckingUpdates(false);
+      setCheckCooldown(3);
     }
   };
+
+  useEffect(() => {
+    if (!checkingUpdates && !checkCooldown) return undefined;
+    const timer = window.setInterval(() => {
+      setCheckingUpdates(manualExtensionCheckInFlight);
+      setCheckCooldown(remainingExtensionCheckCooldown());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [checkingUpdates, checkCooldown]);
 
   const loadAvailable = async (url = repoUrl) => {
     if (!url) {
@@ -423,6 +443,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
       await extensions.install(m, repoUrl);
       refresh();
       setAvailable((a) => (a ? a.filter((x) => x.id !== m.id) : a));
+      setUpdates((current) => current.filter((update) => update.id !== m.id));
     } catch (e) {
       setErr(String(e?.message || e));
     }
@@ -480,6 +501,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     if (isInstall) {
       refresh();
       setAvailable((current) => current?.filter((manifest) => !succeededIds.has(manifest.id)) ?? current);
+      setUpdates((current) => current.filter((update) => !succeededIds.has(update.id)));
       setSelectedAvailableIds(new Set(failed));
     } else {
       refresh();
@@ -543,10 +565,10 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             variant="secondary"
             size="sm"
             onClick={searchUpdates}
-            disabled={checkingUpdates}
-            title="Buscar actualizaciones"
+            title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
             aria-label="Buscar actualizaciones"
             style={{
+              opacity: 1,
               height: px(36, scale, 30),
               fontSize: px(14, scale, 12),
               paddingLeft: px(12, scale, 9),
@@ -725,7 +747,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             face="（・_・）"
             title="No hay extensiones instaladas"
           />
-        ) : visibleInstalled.length > 0 ? (
+        ) : installed.length > 0 ? (
           <div className="grid">
           <div className="invisible col-start-1 row-start-1 pointer-events-none" aria-hidden="true">
             <EmptyState compact face="（・_・）" title="No hay extensiones instaladas" animateFace={false} />
@@ -733,7 +755,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
           <div className="grid col-start-1 row-start-1" style={{ ...grid, alignContent: 'start' }}>
             {sortedInstalled.map(({ manifest: m }) => {
               const upd = visibleUpdates.find((u) => u.id === m.id);
-              const blocked = !showAdultExtensions && isAdultExtension(m);
+              const blocked = !isExtensionAllowed(m, showAdultExtensions);
               return (
                 <div key={m.id}>
                   <ExtensionCard

@@ -2,6 +2,7 @@ import { api } from './api.js';
 import { lib } from './library.js';
 import { settings } from './settings.js';
 import { extUpdates } from './extUpdates.js';
+import { chapterIndex } from './chapterIndex.js';
 
 const key = (url, sourceId) => `${sourceId}|${url}`;
 
@@ -23,7 +24,7 @@ async function avisarExtensiones() {
 
   const titulo =
     nuevos.length === 1
-      ? `${nuevos[0].name} tiene actualización`
+      ? `Nueva actualización para ${nuevos[0].name} disponible`
       : `${nuevos.length} extensiones tienen actualización`;
   const cuerpo =
     nuevos.length === 1
@@ -40,11 +41,14 @@ async function avisarExtensiones() {
 }
 
 async function countChapters(manga) {
-  const d = await api.detail(manga.url, manga.sourceId || 'leercapitulo');
-  return Array.isArray(d?.chapters) ? d.chapters.length : null;
+  const sourceId = manga.sourceId || 'leercapitulo';
+  const d = await api.detail(manga.url, sourceId, { cacheResult: false });
+  if (!Array.isArray(d?.chapters)) return null;
+  chapterIndex.set(manga.url, sourceId, d.chapters.map((chapter) => chapter.url));
+  return d.chapters.length;
 }
 
-export async function checkLibrary({ silent = false, force = false, notifyFound = !silent } = {}) {
+export async function checkLibrary({ silent = false, force = false, notifyFound = !silent, onProgress } = {}) {
   if (running) return [];
   if (typeof window === 'undefined' || !window.cytlex?.notify) return [];
   const cfg = settings.get();
@@ -58,32 +62,34 @@ export async function checkLibrary({ silent = false, force = false, notifyFound 
 
   const favs = lib.favs();
   if (!favs.length) {
+    onProgress?.({ current: 0, total: 0 });
     await finishIfBackground();
     return [];
   }
 
   running = true;
+  onProgress?.({ current: 0, total: favs.length });
   const baseline = { ...(cfg.notifyBaseline || {}) };
   const found = [];
   let checked = 0;
 
-  for (const m of favs) {
-    const sourceId = m.sourceId || 'leercapitulo';
-    const k = key(m.url, sourceId);
-    let total = null;
+  for (let i = 0; i < favs.length; i += 1) {
+    const m = favs[i];
     try {
-      total = await countChapters({ ...m, sourceId });
-    } catch {
-      continue;
-    }
-    if (total == null) continue;
+      const sourceId = m.sourceId || 'leercapitulo';
+      const k = key(m.url, sourceId);
+      const total = await countChapters({ ...m, sourceId });
+      if (total != null) {
+        checked++;
+        const prev = baseline[k];
+        baseline[k] = total;
 
-    checked++;
-    const prev = baseline[k];
-    baseline[k] = total;
-
-    if (prev != null && total > prev) {
-      found.push({ url: m.url, sourceId, title: m.title, count: total - prev, last: total });
+        if (prev != null && total > prev) {
+          found.push({ url: m.url, sourceId, title: m.title, count: total - prev, last: total });
+        }
+      }
+    } catch {} finally {
+      onProgress?.({ current: i + 1, total: favs.length });
     }
   }
 
@@ -101,16 +107,27 @@ export async function checkLibrary({ silent = false, force = false, notifyFound 
     }
   }
 
-  for (const f of found) {
-    if (!notifyFound) continue;
-    const n = f.count;
+  if (notifyFound && found.length === 1) {
+    const f = found[0];
     try {
       await window.cytlex.notify({
         title: f.title || 'Manga de tu biblioteca',
-        body: n === 1 ? '1 capítulo nuevo disponible' : `${n} capítulos nuevos disponibles`,
+        body: f.count === 1 ? '1 capítulo nuevo disponible' : `${f.count} capítulos nuevos disponibles`,
         key: key(f.url, f.sourceId),
         url: f.url,
         sourceId: f.sourceId
+      });
+    } catch {}
+  } else if (notifyFound && found.length > 1) {
+    const mangaNames = found.slice(0, 3).map((f) => f.title || 'Manga de tu biblioteca');
+    const totalChapters = found.reduce((sum, f) => sum + f.count, 0);
+    const listed = mangaNames.join(' · ');
+    const remaining = found.length - mangaNames.length;
+    try {
+      await window.cytlex.notify({
+        title: `${found.length} mangas tienen capítulos nuevos`,
+        body: `${totalChapters} capítulos nuevos: ${listed}${remaining > 0 ? ` y ${remaining} más` : ''}`,
+        tipo: 'biblioteca'
       });
     } catch {}
   }
