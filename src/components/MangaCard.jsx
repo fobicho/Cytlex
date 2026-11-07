@@ -20,7 +20,7 @@ function prefetch(url, sourceId) {
   api.prefetchDetail(url, sourceId);
 }
 
-function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', coverSize, chapterCount }) {
+function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', coverSize, chapterCount, useLibraryCoverCache = false }) {
   const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}`;
   const sourceManifest = extensions.manifest(sourceId);
   const savedSourceName = String(m.sourceName || '');
@@ -74,7 +74,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
     if (!/^https?:\/\//i.test(preferredCover || '')) return undefined;
     let alive = true;
     if (proxyCover) {
-      const prepare = from === 'biblioteca'
+      const prepare = from === 'biblioteca' || useLibraryCoverCache
         ? restoreLibraryCover(preferredCover).then((local) => local || preloadLibraryCover(preferredCover))
         : preloadSearchCover(preferredCover);
       prepare.then((local) => {
@@ -84,7 +84,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
       });
       return () => { alive = false; };
     }
-    if (from !== 'biblioteca') return undefined;
+    if (from !== 'biblioteca' && !useLibraryCoverCache) return undefined;
     const restore = () => restoreLibraryCover(preferredCover).then((local) => {
       if (alive && loadedCoverKey.current !== preferredCover) {
         setCoverState({ key: preferredCover, src: local || preferredCover });
@@ -106,7 +106,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
       alive = false;
       observer.disconnect();
     };
-  }, [from, m.cover, preferredCover, proxyCover, unavailable, unavailableCachedCover]);
+  }, [from, m.cover, preferredCover, proxyCover, unavailable, unavailableCachedCover, useLibraryCoverCache]);
 
   const schedulePrefetch = () => {
     if (unavailable || from === 'biblioteca') return;
@@ -159,15 +159,15 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
         <div ref={coverRef} className="relative rounded-xl overflow-hidden bg-muted/50 border border-border/50 shadow-sm aspect-[2/3]" style={box}>
           {src ? (
             <img
-              loading={from === 'biblioteca' ? 'eager' : 'lazy'}
-              decoding={from === 'biblioteca' ? 'sync' : 'async'}
-              fetchPriority={from === 'biblioteca' ? 'high' : undefined}
+              loading={from === 'biblioteca' || useLibraryCoverCache ? 'eager' : 'lazy'}
+              decoding={from === 'biblioteca' || useLibraryCoverCache ? 'sync' : 'async'}
+              fetchPriority={from === 'biblioteca' || useLibraryCoverCache ? 'high' : undefined}
               src={src}
               alt={m.title}
               referrerPolicy="no-referrer"
               onLoad={() => {
                 loadedCoverKey.current = preferredCover;
-                if (from === 'biblioteca') {
+                if (from === 'biblioteca' || useLibraryCoverCache) {
                   markLibraryCoverLoaded(src);
                   if (!unavailable && /^https?:\/\//i.test(preferredCover || '')) preloadLibraryCover(preferredCover);
                 }

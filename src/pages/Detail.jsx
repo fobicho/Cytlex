@@ -23,6 +23,37 @@ import { tracking } from '../lib/tracking.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
+function reconcileChapterProgress(previousChapters, nextChapters, sourceId, mangaUrl) {
+  if (!Array.isArray(previousChapters) || !Array.isArray(nextChapters)) return;
+  const indexUniqueTitles = (chapters) => {
+    const grouped = new Map();
+    chapters.forEach((chapter) => {
+      const title = norm(chapter.title || chapter.name).normalize('NFKC').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      if (!title || !chapter.url) return;
+      const matches = grouped.get(title) || [];
+      matches.push(chapter);
+      grouped.set(title, matches);
+    });
+    return new Map([...grouped].filter(([, matches]) => matches.length === 1).map(([title, [chapter]]) => [title, chapter]));
+  };
+  const previousByTitle = indexUniqueTitles(previousChapters);
+  const nextByTitle = indexUniqueTitles(nextChapters);
+  const readUrls = [];
+
+  previousByTitle.forEach((previous, title) => {
+    const next = nextByTitle.get(title);
+    if (!next || next.url === previous.url) return;
+    const previousProgress = progress.get(previous.url, sourceId);
+    const nextProgress = progress.get(next.url, sourceId);
+    if (previousProgress?.read && !nextProgress?.read) readUrls.push(next.url);
+    else if (!nextProgress && Number.isInteger(previousProgress?.page) && previousProgress.page > 0) {
+      progress.savePage(next.url, sourceId, previousProgress.page, previousProgress.total || 0);
+    }
+  });
+
+  if (readUrls.length) progress.markMany(readUrls, sourceId, null, mangaUrl);
+}
+
 const EXPAND_CTRL_H = 16;
 const COVER_BASE = 184;
 
@@ -164,14 +195,18 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
 
   const [coverError, setCoverError] = useState(false);
   const coverKey = `${sourceId}|${mangaUrl}`;
+  const coverKeyRef = useRef(coverKey);
+  coverKeyRef.current = coverKey;
+  const warmCover = getLibraryCover(knownCover)
+    || getSearchCover(knownCover)
+    || (hasLibraryCoverLoaded(knownCover) ? knownCover : '');
   const [displayedCover, setDisplayedCover] = useState(() => ({
     key: coverKey,
-    src: hasLibraryCoverLoaded(coverSrc) ? coverSrc : ''
+    src: getLibraryCover(coverSrc) || getSearchCover(coverSrc) || (hasLibraryCoverLoaded(coverSrc) ? coverSrc : '')
   }));
   const [failedCover, setFailedCover] = useState('');
-  const visibleCover = displayedCover.key === coverKey
-    ? displayedCover.src
-    : (hasLibraryCoverLoaded(coverSrc) ? coverSrc : '');
+  const visibleCover = (displayedCover.key === coverKey && displayedCover.src)
+    || warmCover;
   useEffect(() => {
     setCoverError(false);
     setFailedCover('');
@@ -192,6 +227,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     <>
       {visibleCover && visibleCover !== finalCover && (
         <img
+          key={`${coverKey}|cached|${visibleCover}`}
           className="absolute inset-0 w-full h-full object-cover"
           src={visibleCover}
           alt={alt}
@@ -200,19 +236,23 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       )}
       {finalCover && !proxyCover && failedCover !== finalCover && (
         <img
+          key={`${coverKey}|source|${finalCover}`}
           className="absolute inset-0 w-full h-full object-cover"
           src={finalCover}
           alt={alt}
           referrerPolicy="no-referrer"
           onLoad={() => {
+            if (coverKeyRef.current !== coverKey) return;
             if (!/^https?:\/\//i.test(finalCover || '')) markLibraryCoverLoaded(finalCover);
             setDisplayedCover({ key: coverKey, src: finalCover });
             setFailedCover('');
             if (/^https?:\/\//i.test(finalCover || '')) preloadLibraryCover(finalCover);
           }}
           onError={async () => {
+            if (coverKeyRef.current !== coverKey) return;
             if (/^https?:\/\//i.test(finalCover || '')) {
               const local = await preloadLibraryCover(finalCover);
+              if (coverKeyRef.current !== coverKey) return;
               if (local) {
                 setDisplayedCover({ key: coverKey, src: local });
                 setFailedCover('');
@@ -304,6 +344,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       .detail(mangaUrl, sourceId)
       .then((r) => {
         if (!alive) return;
+        if (cached && cached !== r) reconcileChapterProgress(cached.chapters, r?.chapters, sourceId, mangaUrl);
         setDetailState({ key: `${sourceId}|${mangaUrl}`, data: r });
         reconcileMihonProgress(mangaUrl, sourceId, r?.chapters);
         const favorite = lib.fav(mangaUrl, sourceId);
@@ -348,6 +389,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   }, [mangaUrl, sourceId]);
 
   useLayoutEffect(() => {
+    if (!active) return undefined;
     const cover = coverRef.current;
     const syn = synRef.current;
     if (!cover || !syn) return undefined;
@@ -382,18 +424,12 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       resizeObserver?.disconnect();
       window.removeEventListener('resize', update);
     };
-  }, [d, scale]);
+  }, [active, d, scale]);
 
   useEffect(() => {
     if (!synRef.current) return;
     setFullH(synRef.current.scrollHeight);
   }, [d, expanded]);
-
-  useEffect(() => {
-    if (animate) return undefined;
-    const id = requestAnimationFrame(() => setAnimate(true));
-    return () => cancelAnimationFrame(id);
-  }, [animate]);
 
   const addToLibrary = (manga, catIds) => {
     if (!Array.isArray(catIds) || catIds.length === 0) return;
@@ -661,7 +697,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         className="flex flex-col md:flex-row"
         style={{
           gap: px(24, scale, 19),
-          minHeight: `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})`
+          minHeight: `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})`,
+          maxHeight: expanded || animate ? undefined : `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})`,
+          overflow: expanded || animate ? undefined : 'hidden'
         }}
       >
         <div
@@ -724,7 +762,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             <div
               ref={synRef}
               style={{
-                maxHeight: expanded ? (fullH || undefined) : (overflow ? availH : undefined),
+                maxHeight: expanded ? (fullH || undefined) : (availH || undefined),
                 overflow: 'hidden',
                 transition: animate ? 'max-height 320ms cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
                 WebkitMaskImage: synMask,
@@ -732,6 +770,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 fontSize: `${Math.round(15 * scale)}px`
               }}
               className="relative text-muted-foreground leading-relaxed"
+              onTransitionEnd={(event) => {
+                if (event.propertyName === 'max-height') setAnimate(false);
+              }}
             >
               <p>{d.sinopsis}</p>
               {!expanded && overflow && (
@@ -751,7 +792,10 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 <span className="h-px flex-1 bg-border" />
                 <button
                   type="button"
-                  onClick={() => setExpanded((v) => !v)}
+                  onClick={() => {
+                    setAnimate(true);
+                    setExpanded((v) => !v);
+                  }}
                   aria-label={expanded ? 'Ver menos' : 'Ver más'}
                   className="grid place-items-center w-6 h-6 rounded-full text-muted-foreground transition-colors hover:bg-accent"
                 >
@@ -769,7 +813,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         style={{
           gap: px(12, scale, 8),
           marginTop: px(24, scale, 16),
-          paddingTop: px(overflow ? 20 : 19, scale, 14)
+          paddingTop: px(20, scale, 14)
         }}
       >
         {resume ? (
@@ -780,9 +824,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               window.location.hash = `#/leer?u=${encodeURIComponent(resume.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
             }}
             style={{
-              height: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
-              minHeight: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
-              translate: overflow ? undefined : '0 1px',
+              height: px(40, scale, 33),
+              minHeight: px(40, scale, 33),
               flexShrink: 0,
               paddingLeft: px(16, scale, 13),
               paddingRight: px(16, scale, 13),
@@ -831,9 +874,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               onAddClick();
             }}
             style={{
-              height: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
-              minHeight: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
-              translate: overflow ? undefined : '0 1px',
+              height: px(40, scale, 33),
+              minHeight: px(40, scale, 33),
               flexShrink: 0,
               paddingLeft: px(16, scale, 13),
               paddingRight: px(16, scale, 13),
@@ -927,9 +969,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           onClick={() => setAniListOpen(true)}
           title="Vincular con AniList"
           style={{
-            height: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
-            minHeight: px(overflow ? 40 : 41, scale, overflow ? 33 : 34),
-            translate: overflow ? undefined : '0 1px',
+            height: px(40, scale, 33),
+            minHeight: px(40, scale, 33),
             flexShrink: 0,
             paddingLeft: px(16, scale, 13),
             paddingRight: px(16, scale, 13),

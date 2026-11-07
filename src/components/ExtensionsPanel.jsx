@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown, Settings as SettingsIcon } from 'lucide-react';
+import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown, Settings as SettingsIcon, X } from 'lucide-react';
 import { extensions, isAdultExtension, isExtensionAllowed, isNewer } from '../lib/extensions.js';
 import { extUpdates } from '../lib/extUpdates.js';
 import { settings } from '../lib/settings.js';
@@ -614,6 +614,27 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             <AnimatePresence initial={false}>
               {!tutorialPreview && selectedInstalledIds.size > 0 && (
                 <motion.div
+                  key="bulk-uninstall-clear-button"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="flex"
+                >
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => { setSelectedInstalledIds(new Set()); setConfirmBulk(null); }}
+                    disabled={busy !== '' || updating !== ''}
+                    style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+                  >
+                    <X className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    Limpiar selecciones
+                  </Button>
+                </motion.div>
+              )}
+              {!tutorialPreview && selectedInstalledIds.size > 0 && (
+                <motion.div
                   key="bulk-uninstall-button"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -898,6 +919,27 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
           </h3>
           <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
             <AnimatePresence initial={false}>
+              {!tutorialPreview && selectedAvailableIds.size > 0 && (
+                <motion.div
+                  key="bulk-install-clear-button"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="flex"
+                >
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => { setSelectedAvailableIds(new Set()); setConfirmBulk(null); }}
+                    disabled={busy !== '' || loading || updating !== ''}
+                    style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+                  >
+                    <X className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    Limpiar selecciones
+                  </Button>
+                </motion.div>
+              )}
               {!tutorialPreview && selectedAvailableIds.size > 0 && (
                 <motion.div
                   key="bulk-install-button"

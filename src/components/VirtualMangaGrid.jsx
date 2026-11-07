@@ -1,19 +1,21 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import MangaCard from './MangaCard.jsx';
 
-export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, renderCard, active = true, overscanRows = 1 }) {
+export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, renderCard, active = true, overscanRows = 1, responsiveCards = false }) {
   const gridRef = useRef(null);
   const frameRef = useRef(0);
   const layoutRef = useRef(null);
   const gridTopRef = useRef(0);
   const shouldMeasureRef = useRef(false);
-  const wasActive = useRef(active);
   const [gridWidth, setGridWidth] = useState(0);
   const [cardHeight, setCardHeight] = useState(coverSize * 1.5 + 28);
   const [range, setRange] = useState({ start: 0, end: 6 });
   const gapX = Math.max(12, Math.round(20 * scale));
   const gapY = Math.max(16, Math.round(20 * scale));
   const columns = Math.max(1, Math.floor((gridWidth + gapX) / (coverSize + gapX)));
+  const cardWidth = responsiveCards && gridWidth > 0
+    ? Math.floor((gridWidth - gapX * (columns - 1)) / columns)
+    : coverSize;
   const rowStep = cardHeight + gapY;
   const totalRows = Math.ceil(items.length / columns);
   const startRow = Math.min(range.start, Math.max(0, totalRows - 1));
@@ -27,8 +29,6 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, re
   layoutRef.current = { columns, rowStep, totalRows };
 
   useLayoutEffect(() => {
-    const restoreAfterHide = active && !wasActive.current;
-    wasActive.current = active;
     if (!active) return undefined;
     const updateRange = (measureLayout = false) => {
       frameRef.current = 0;
@@ -43,7 +43,7 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, re
 
       if (measureLayout) {
         const firstCard = grid.querySelector('[data-virtual-card]');
-        const measuredHeight = firstCard?.getBoundingClientRect().height || 0;
+        const measuredHeight = firstCard?.firstElementChild?.getBoundingClientRect().height || firstCard?.getBoundingClientRect().height || 0;
         if (measuredHeight) setCardHeight((current) => Math.abs(current - measuredHeight) < 1 ? current : measuredHeight);
 
         const mainRect = main.getBoundingClientRect();
@@ -77,15 +77,14 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, re
     const observer = new ResizeObserver(() => scheduleUpdate(true));
     observer.observe(main);
     if (gridRef.current?.parentElement) observer.observe(gridRef.current.parentElement);
-    if (restoreAfterHide) scheduleUpdate(true);
-    else updateRange(true);
+    updateRange(true);
     return () => {
       main.removeEventListener('scroll', scheduleUpdate);
       observer.disconnect();
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       frameRef.current = 0;
     };
-  }, [items.length, coverSize, scale, columns, rowStep, gridWidth, active, overscanRows]);
+  }, [items.length, coverSize, scale, columns, rowStep, gridWidth, active, overscanRows, responsiveCards]);
 
   const height = totalRows ? totalRows * rowStep - gapY : 0;
   return (
@@ -94,7 +93,7 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, re
         className="grid absolute inset-x-0 top-0"
         style={{
           transform: `translate3d(0, ${startRow * rowStep}px, 0)`,
-          gridTemplateColumns: `repeat(${columns}, ${coverSize}px)`,
+          gridTemplateColumns: responsiveCards ? `repeat(${columns}, minmax(0, 1fr))` : `repeat(${columns}, ${coverSize}px)`,
           gridAutoRows: `${cardHeight}px`,
           gap: `${gapY}px ${gapX}px`,
         }}
@@ -102,8 +101,8 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, re
         {visibleItems.map((manga, index) => (
           <div key={`${manga.sourceId || sourceId || ''}|${manga.url}`} data-virtual-card={index === 0 ? '' : undefined}>
             {renderCard
-              ? renderCard(manga)
-              : <MangaCard m={manga} sourceId={sourceId} from="fuentes" coverSize={coverSize} showAuthor={false} />}
+              ? renderCard(manga, cardWidth)
+              : <MangaCard m={manga} sourceId={sourceId} from="fuentes" coverSize={cardWidth} showAuthor={false} />}
           </div>
         ))}
       </div>

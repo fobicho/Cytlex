@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Loader2, ChevronRight, ChevronLeft, CircleHelp } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -44,6 +44,7 @@ const sourceLangSubtitle = (manifest) => {
 function SourceSection({ r, coverSize, scale = 1, first = false, animate = false, active = true }) {
   const trackRef = useRef(null);
   const mainRef = useRef(null);
+  const [trackWidth, setTrackWidth] = useState(0);
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(false);
 
@@ -71,11 +72,12 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
   const measure = () => {
     const el = trackRef.current;
     if (!el) return;
+    setTrackWidth(el.clientWidth);
     setCanLeft(el.scrollLeft > 1);
     setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     measure();
     const el = trackRef.current;
     if (!el) return undefined;
@@ -83,6 +85,11 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
     ro.observe(el);
     return () => ro.disconnect();
   }, [r.items.length, coverSize]);
+
+  const columns = Math.max(1, Math.floor((trackWidth + gap) / (coverSize + gap)));
+  const cardWidth = trackWidth > 0
+    ? Math.floor((trackWidth - gap * (columns - 1)) / columns)
+    : coverSize;
 
   useEffect(() => {
     const el = trackRef.current;
@@ -102,7 +109,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
   const step = (dir) => {
     const el = trackRef.current;
     if (!el) return;
-    el.scrollBy({ left: dir * (coverSize + 20) * 2, behavior: 'smooth' });
+    el.scrollBy({ left: dir * (cardWidth + gap) * 2, behavior: 'smooth' });
   };
 
   const visible = r.items.slice(0, 15);
@@ -161,9 +168,9 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
             <div
               key={i}
               className="shrink-0"
-              style={{ scrollSnapAlign: 'start', width: coverSize || 150 }}
+              style={{ scrollSnapAlign: 'start', width: cardWidth || 150 }}
             >
-              <MangaCard m={m} sourceId={r.id} from="explorar" coverSize={coverSize} showAuthor={false} />
+              <MangaCard m={m} sourceId={r.id} from="explorar" coverSize={cardWidth} showAuthor={false} />
             </div>
           ))}
         </div>

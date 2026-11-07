@@ -614,7 +614,8 @@ const Library = memo(function Library({ active = true }) {
                 scale={scale}
                 active={active && selected}
                 overscanRows={2}
-                renderCard={(m) => {
+                responsiveCards
+                renderCard={(m, cardWidth) => {
                   const sid = sourceIdFor(m);
                   const adultBlocked = !isExtensionAllowed(extensions.manifest(sid), showAdultExtensions);
                   const cover = m.cover || recallCover(m.url, sid);
@@ -627,7 +628,7 @@ const Library = memo(function Library({ active = true }) {
                       unavailableLabel={adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}
                       minimal
                       from="biblioteca"
-                      coverSize={cs}
+                      coverSize={cardWidth}
                       chapterCount={showUnread ? unread[unreadKeyFor(m, sid)] ?? unreadCountCache.get(unreadKeyFor(m, sid)) ?? null : null}
                     />
                   );

@@ -706,8 +706,16 @@ ipcMain.handle('image:fetch', async (_e, url) => {
     const urlStr = parsed.toString();
     const host = parsed.hostname.toLowerCase();
     const mangaDexImage = host === 'uploads.mangadex.org';
-    const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1' };
-    if (!mangaDexImage) headers.Referer = refererFor(urlStr);
+    const headers = mangaDexImage
+      ? {
+          'User-Agent': 'Cytlex/0.1.0 (+https://github.com/fobicho/Cytlex)',
+          Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          Referer: 'https://mangadex.org/'
+        }
+      : {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
+          Referer: refererFor(urlStr)
+        };
     const res = await requestPublic(urlStr, {
       method: 'GET',
       headers,

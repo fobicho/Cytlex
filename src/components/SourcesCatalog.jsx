@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowUpDown, Filter, Loader2, Search, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import MangaCard from './MangaCard.jsx';
 import VirtualMangaGrid from './VirtualMangaGrid.jsx';
 import { SourceBadge } from './SourceBadge.jsx';
 import { api } from '../lib/api.js';
@@ -8,6 +9,7 @@ import { extensions } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { SOURCE_CATALOG_HOME_EVENT, rememberCover, sourceCatalogState } from '../lib/searchState.js';
 import { Button } from './ui/button.jsx';
+import { Card } from './ui/card.jsx';
 import { Dropdown } from './ui/dropdown.jsx';
 import { EmptyState } from './ui/empty-state.jsx';
 import { Input } from './ui/input.jsx';
@@ -252,11 +254,14 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     };
   }, [active, sourceId]);
 
-  const search = () => loadCatalog(sourceId, {
-    q: query.trim(),
-    ...filterValues,
-    ...(sourceId === 'leercapitulo' ? { sort: loadedParams.sort || 'az' } : {})
-  });
+  const search = () => {
+    setFiltersOpen(false);
+    loadCatalog(sourceId, {
+      q: query.trim(),
+      ...filterValues,
+      ...(sourceId === 'leercapitulo' ? { sort: loadedParams.sort || 'az' } : {})
+    });
+  };
   const hasActiveFilters = !!query.trim() || Object.values(filterValues).some((value) => Array.isArray(value) ? value.length > 0 : Boolean(value));
   const reset = () => {
     setQuery('');
@@ -361,27 +366,27 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     return (
       <div
         className="grid items-start"
-        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${px(250, scale, 210)}, ${px(340, scale, 280)}))`, justifyContent: 'start', gap: px(12, scale, 9) }}
+        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${px(240, scale, 200)}, 1fr))`, gap: px(12, scale, 9) }}
       >
         {sources.map(({ manifest }) => (
-          <button
-            key={manifest.id}
-            type="button"
-            onClick={() => {
-              sourceCatalogState.clear();
-              setSourceId(manifest.id);
-            }}
-            className="group rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            aria-label={`Abrir catálogo de ${manifest.name}`}
-          >
-            <div className="flex items-center rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-colors group-hover:border-primary/40 group-hover:bg-accent/30" style={{ minHeight: px(78, scale, 64), padding: px(14, scale, 11), gap: px(12, scale, 9) }}>
+          <Card key={manifest.id} className="group hover:shadow-sm">
+            <button
+              type="button"
+              onClick={() => {
+                sourceCatalogState.clear();
+                setSourceId(manifest.id);
+              }}
+              className="flex w-full items-center rounded-xl text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+              style={{ minHeight: px(68, scale, 56), padding: px(14, scale, 11), gap: px(12, scale, 9) }}
+              aria-label={`Abrir catálogo de ${manifest.name}`}
+            >
               <SourceBadge m={manifest} style={{ width: px(40, scale, 32), height: px(40, scale, 32), borderRadius: px(12, scale, 9) }} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-semibold text-foreground" style={{ fontSize: px(15, scale, 13) }}>{manifest.name}</span>
                 {manifest.version && <span className="mt-0.5 block text-muted-foreground" style={{ fontSize: px(11, scale, 9) }}>v{manifest.version}</span>}
               </span>
-            </div>
-          </button>
+            </button>
+          </Card>
         ))}
       </div>
     );
@@ -420,7 +425,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                     <Dropdown
                       scale={scale}
                       value={filterValues.genre || ''}
-                      options={genreFilter.options}
+                      options={[{ value: '', label: 'Todos' }, ...genreFilter.options]}
                       ariaLabel="Filtrar por género"
                       placeholder="Género"
                       menuMaxHeight={288}
@@ -532,7 +537,17 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
             </div>
           ) : items.length ? (
             <>
-              <VirtualMangaGrid items={items} sourceId={sourceId} coverSize={cs} scale={scale} />
+              <VirtualMangaGrid
+                items={items}
+                sourceId={sourceId}
+                coverSize={cs}
+                scale={scale}
+                active={active && !!sourceId}
+                responsiveCards
+                renderCard={(manga, cardWidth) => (
+                  <MangaCard m={manga} sourceId={sourceId} from="fuentes" coverSize={cardWidth} showAuthor={false} useLibraryCoverCache />
+                )}
+              />
               {hasMore && (
                 <div className="flex flex-col items-center" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 8) }}>
                   <Button variant="secondary" onClick={() => loadCatalog(sourceId, { ...loadedParams, q: query.trim(), ...filterValues }, true)} disabled={loadingMore}>

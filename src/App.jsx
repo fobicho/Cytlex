@@ -327,7 +327,12 @@ export default function App({ isVisible = true, tutorialMode = false }) {
                 if (!detailLocation) return null;
                 return (
                   <div key={origin} className={active ? '' : 'hidden'} aria-hidden={!active} inert={!active}>
-                    <Detail locationOverride={detailLocation} active={active} activeRef={detailActivityRefs.current[origin]} />
+                    <Detail
+                      key={`${detailLocation.pathname}${detailLocation.search}`}
+                      locationOverride={detailLocation}
+                      active={active}
+                      activeRef={detailActivityRefs.current[origin]}
+                    />
                   </div>
                 );
               })}
