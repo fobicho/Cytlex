@@ -20,7 +20,7 @@ function prefetch(url, sourceId) {
   api.prefetchDetail(url, sourceId);
 }
 
-function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', coverSize, chapterCount, useLibraryCoverCache = false }) {
+function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', coverSize, scale: uiScale = 1, chapterCount, useLibraryCoverCache = false }) {
   const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}`;
   const sourceManifest = extensions.manifest(sourceId);
   const savedSourceName = String(m.sourceName || '');
@@ -123,24 +123,18 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
   const inner = coverSize ? 'h-full w-full object-cover block' : 'w-full h-full aspect-[2/3] object-cover block';
   const ph = coverSize ? 'h-full w-full' : 'w-full aspect-[2/3]';
 
-  const scale = coverSize ? coverSize / 160 : 1;
+  const scale = coverSize ? coverSize / 160 : uiScale;
   const px = (n, min) => Math.max(min, Math.round(n * scale));
-  const titleStyle = coverSize
-    ? { fontSize: `${px(13.5, 11)}px` }
-    : { fontSize: '13.5px' };
-  const subStyle = coverSize
-    ? { fontSize: `${px(12, 10)}px` }
-    : { fontSize: '12px' };
-  const badgeStyle = coverSize
-    ? {
-        fontSize: `${Math.max(9, Math.round(11 * scale))}px`,
-        top: `${Math.max(8, Math.round(10 * scale))}px`,
-        right: `${Math.max(8, Math.round(10 * scale))}px`,
-        paddingLeft: `${Math.max(4, Math.round(6 * scale))}px`,
-        paddingRight: `${Math.max(4, Math.round(6 * scale))}px`,
-        minWidth: `${Math.max(18, Math.round(24 * scale))}px`
-      }
-    : undefined;
+  const titleStyle = { fontSize: `${px(13.5, 11)}px` };
+  const subStyle = { fontSize: `${px(12, 10)}px` };
+  const badgeStyle = {
+    fontSize: `${Math.max(9, Math.round(11 * scale))}px`,
+    top: `${Math.max(8, Math.round(10 * scale))}px`,
+    right: `${Math.max(8, Math.round(10 * scale))}px`,
+    paddingLeft: `${Math.max(4, Math.round(6 * scale))}px`,
+    paddingRight: `${Math.max(4, Math.round(6 * scale))}px`,
+    minWidth: `${Math.max(18, Math.round(24 * scale))}px`
+  };
 
   return (
     <div className={cn(unavailable && 'opacity-60')}>
@@ -228,7 +222,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
           )}
           {unavailable && (
             <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 px-2">
-              <span className="rounded-full bg-black/80 px-2.5 py-1 text-[10px] font-semibold text-white">
+              <span className="rounded-full bg-black/80 px-2.5 py-1 font-semibold text-white" style={{ fontSize: `${px(10, 8)}px` }}>
                 {unavailableLabel}
               </span>
               <span className="flex max-w-full min-w-0 items-center rounded-full bg-black/80 py-1 pl-1 pr-2 text-white" style={{ gap: px(6, 5) }} title={sourceInfo.name}>

@@ -5,7 +5,7 @@ import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon, Minu
 import { THEMES, MODES } from '../lib/themes.js';
 import { resolveMode, settings } from '../lib/settings.js';
 import { cn } from '../lib/utils.js';
-import { useScale } from '../lib/useScale.js';
+import { px, useScale } from '../lib/useScale.js';
 import { Button } from './ui/button.jsx';
 
 const STEPS = [
@@ -202,7 +202,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 animate="center"
                 exit="exit"
                 transition={{ duration: 0.25, ease: 'easeOut' }}
-                className="h-[320px]"
+                style={{ height: px(320, scale, 256) }}
               >
                 {step === 0 ? (
                   <div className="mb-6 flex items-center gap-3">

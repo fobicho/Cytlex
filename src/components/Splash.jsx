@@ -1,19 +1,21 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { px, useScale } from '../lib/useScale.js';
 
 const APPEAR = 400;
 const BEAT = 500;
 const EXIT = 800;
 
-function Logo() {
+function Logo({ scale }) {
   return (
     <svg
       viewBox="0 0 512 512"
-      width="72"
-      height="72"
+      width={px(72, scale, 58)}
+      height={px(72, scale, 58)}
       role="img"
       aria-label="Cytlex"
-      className="shrink-0 rounded-[18px] shadow-lg shadow-black/20"
+      className="shrink-0 shadow-lg shadow-black/20"
+      style={{ borderRadius: px(18, scale, 14) }}
     >
       <rect width="512" height="512" rx="112" fill="#ffffff" />
       <text
@@ -33,6 +35,7 @@ function Logo() {
 }
 
 export default function Splash({ trigger = 0, onDone = null, onExitStart = null }) {
+  const scale = useScale();
   const [exiting, setExiting] = useState(false);
   const [gone, setGone] = useState(false);
 
@@ -68,7 +71,7 @@ export default function Splash({ trigger = 0, onDone = null, onExitStart = null 
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: APPEAR / 1000, ease: 'easeOut' }}
       >
-        <Logo />
+        <Logo scale={scale} />
         <span className="font-display text-3xl font-semibold tracking-tight text-foreground">Cytlex</span>
       </motion.div>
     </motion.div>

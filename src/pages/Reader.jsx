@@ -127,7 +127,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const barH = Number(px(32, scale, 27).replace('px', ''));
   const barPad = Number(px(4, scale, 3).replace('px', ''));
   const arrowH = Number(px(24, scale, 20).replace('px', ''));
-  const titleH = isFullscreen ? 0 : 36;
+  const titleH = isFullscreen ? 0 : Number.parseInt(px(36, scale, 30), 10);
   const barLeft = Number(px(12, scale, 8).replace('px', ''));
   const barTop = titleH + Number(px(10, scale, 8).replace('px', ''));
   const arrowLeft = barLeft + barPad;
@@ -745,7 +745,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     ? page >= ch.pages.length - 1
     : (lastSeen >= (ch?.pages?.length || 1) - 1);
   const zoomPct = mode === 'vertical' ? scalePct + (scalePct * wheelZoom) / 100 : scalePct;
-  let pageStyle = { width: `${zoomPct}%`, maxHeight: 'calc(100vh - 60px)' };
+  let pageStyle = { width: `${zoomPct}%`, maxHeight: `calc(100vh - ${px(60, scale, 50)})` };
   if ((mode === 'paginado' || mode === 'paginado-rtl') && nat && area.w > 0 && nat.w > nat.h) {
     const aspect = nat.w / nat.h;
     const zoomW = (zoomPct / 100) * area.w;
@@ -880,7 +880,8 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                 remember(src, e.currentTarget);
                 if (i === ch.pages.length - 1) requestAnimationFrame(updateVerticalEnd);
               }}
-              wrapperClassName="mb-2.5 w-full min-h-[120px]"
+              wrapperClassName="mb-2.5 w-full"
+              wrapperStyle={{ minHeight: px(120, scale, 100) }}
               imageClassName="w-full block mx-auto"
             />
           ))}
@@ -1080,12 +1081,12 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
          <div
            className="fixed z-50"
           style={{
-            left: Math.min(menu.x, window.innerWidth - 196),
-            top: Math.min(menu.y, window.innerHeight - 56)
+            left: Math.min(menu.x, window.innerWidth - Number.parseInt(px(196, scale, 160), 10)),
+            top: Math.min(menu.y, window.innerHeight - Number.parseInt(px(56, scale, 46), 10))
           }}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <div className="min-w-[188px] rounded-lg border border-border bg-card p-1 shadow-2xl">
+          <div className="rounded-lg border border-border bg-card p-1 shadow-2xl" style={{ minWidth: px(188, scale, 154) }}>
             <button
               type="button"
               onClick={downloadPanel}

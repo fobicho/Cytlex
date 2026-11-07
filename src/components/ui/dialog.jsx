@@ -3,7 +3,8 @@ import { cn } from '../../lib/utils.js';
 import { useScale, px } from '../../lib/useScale.js';
 
 export function Dialog({ open, onClose, title, description, children, className, dialogStyle, hideDivider, bodyClassName, bodyPaddingTop = 12, scrollableBody = true, scale }) {
-  const sc = scale ?? 1;
+  const currentScale = useScale();
+  const sc = scale ?? currentScale;
   return (
     <AnimatePresence>
       {open && (

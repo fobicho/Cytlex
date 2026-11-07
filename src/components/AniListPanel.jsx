@@ -12,6 +12,7 @@ import { Button } from './ui/button.jsx';
 import { Input } from './ui/input.jsx';
 import { Dropdown } from './ui/dropdown.jsx';
 import { cn } from '../lib/utils.js';
+import { px, useScale } from '../lib/useScale.js';
 
 const STATUS_ES = {
   FINISHED: 'Finalizado',
@@ -76,6 +77,7 @@ const formatDate = (iso) => {
 const sameDay = (a, b) => a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
 function Calendar({ value, onChange }) {
+  const scale = useScale();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const today = useMemo(() => new Date(), []);
@@ -91,11 +93,13 @@ function Calendar({ value, onChange }) {
     const b = btnRef.current;
     if (!b) return;
     const r = b.getBoundingClientRect();
-    const width = Math.max(r.width, 224);
+    const width = Math.max(r.width, Number.parseInt(px(224, scale, 184), 10));
     const height = panelRef.current?.offsetHeight || 300;
+    const gap = Number.parseInt(px(4, scale, 3), 10);
     const below = window.innerHeight - r.bottom;
-    const top = below < height + 8 && r.top > below ? r.top - height - 4 : r.bottom + 4;
-    const left = Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
+    const top = below < height + gap * 2 && r.top > below ? r.top - height - gap : r.bottom + gap;
+    const edge = Number.parseInt(px(8, scale, 6), 10);
+    const left = Math.min(Math.max(edge, r.left), window.innerWidth - width - edge);
     setPos({ top, left, width });
   };
 
@@ -172,7 +176,7 @@ function Calendar({ value, onChange }) {
 
       <div className="grid grid-cols-7 gap-0.5">
         {WEEKDAYS.map((d, i) => (
-          <span key={d + i} className="grid place-items-center h-7 text-[11px] text-muted-foreground">
+          <span key={d + i} className="grid place-items-center h-7 text-muted-foreground" style={{ fontSize: px(11, scale, 9) }}>
             {d}
           </span>
         ))}
@@ -291,6 +295,7 @@ function DateField({ value, onChange }) {
 const compact = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
 
 function SearchDialog({ open, onClose, mangaTitle, onPick }) {
+  const scale = useScale();
   const listRef = useRef(null);
   const [term, setTerm] = useState(mangaTitle || '');
   const [results, setResults] = useState(null);
@@ -338,6 +343,7 @@ function SearchDialog({ open, onClose, mangaTitle, onPick }) {
     <Dialog
       open={open}
       onClose={onClose}
+      scale={scale}
       className="max-w-2xl h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] flex flex-col"
       bodyClassName="p-4 flex-1 min-h-0 flex flex-col"
       scrollableBody={false}
@@ -413,7 +419,7 @@ function SearchDialog({ open, onClose, mangaTitle, onPick }) {
                   </div>
                 )}
                 {m.popularity != null && (
-                  <div className="text-[11px] text-muted-foreground" title="Personas con esta obra en su lista">
+                  <div className="text-muted-foreground" style={{ fontSize: px(11, scale, 9) }} title="Personas con esta obra en su lista">
                     {compact(m.popularity)}
                   </div>
                 )}
@@ -535,6 +541,7 @@ const CHAR_ROLE_ES = {
 };
 
 function CharactersDialog({ open, onClose, mediaId, connected }) {
+  const scale = useScale();
   const [list, setList] = useState([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -617,6 +624,7 @@ function CharactersDialog({ open, onClose, mediaId, connected }) {
     <Dialog
       open={open}
       onClose={onClose}
+      scale={scale}
       className="max-w-2xl max-h-[calc(100vh-3rem)] flex flex-col"
       bodyClassName="p-5 overflow-y-auto"
       bodyPaddingTop={24}
@@ -710,7 +718,7 @@ function CharactersDialog({ open, onClose, mediaId, connected }) {
                 )}
                 <span className="text-xs font-medium truncate">{c.name}</span>
                 {c.role && (
-                  <span className="text-[11px] text-muted-foreground">{CHAR_ROLE_ES[c.role] || c.role}</span>
+                  <span className="text-muted-foreground" style={{ fontSize: px(11, scale, 9) }}>{CHAR_ROLE_ES[c.role] || c.role}</span>
                 )}
               </button>
             ))}
@@ -742,6 +750,7 @@ function CharactersDialog({ open, onClose, mediaId, connected }) {
 }
 
 export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose }) {
+  const scale = useScale();
   const [linkedId, setLinkedId] = useState(() => tracking.get(mangaUrl, sourceId)?.id || null);
   const [data, setData] = useState(null);
   const [entry, setEntry] = useState(null);
@@ -858,6 +867,7 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
     <Dialog
       open
       onClose={requestClose}
+      scale={scale}
       className="max-w-2xl max-h-[calc(100vh-3rem)] flex flex-col"
       bodyClassName="p-5 overflow-y-auto"
       bodyPaddingTop={24}
@@ -979,6 +989,7 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
         <Dialog
           open
           onClose={() => setConfirmDiscard(false)}
+          scale={scale}
           title="Guardar cambios"
           hideDivider
           bodyClassName="p-5"

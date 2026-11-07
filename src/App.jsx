@@ -17,16 +17,42 @@ import { announceExtUpdates } from './lib/extUpdates.js';
 import { useToast } from './components/Toast.jsx';
 import { appWindow } from './lib/appWindow.js';
 import { px, useScale } from './lib/useScale.js';
-import { ArrowUpCircle, Search } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpCircle, ExternalLink, LoaderCircle, Search, ScrollText } from 'lucide-react';
 import { Input } from './components/ui/input.jsx';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { Dialog } from './components/ui/dialog.jsx';
+import { Button } from './components/ui/button.jsx';
 
-function quickSearchPosition(x, y) {
-  const width = Math.min(420, Math.max(0, window.innerWidth - 32));
+function releaseNotesText(notes) {
+  if (Array.isArray(notes)) return notes.map((entry) => entry?.note || '').filter(Boolean).join('\n\n');
+  return typeof notes === 'string' ? notes.trim() : '';
+}
+
+function releaseSummary(notes) {
+  const lines = notes.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const bullets = lines.filter((line) => /^[-*•]\s+/.test(line)).map((line) => line.replace(/^[-*•]\s+/, ''));
+  if (bullets.length) return bullets.slice(0, 3);
+  const text = lines.filter((line) => !/^#{1,6}\s/.test(line)).join(' ');
+  return text ? [text.slice(0, 240)] : [];
+}
+
+function scaledUpdateButtonStyle(scale) {
+  return {
+    height: px(40, scale, 34),
+    padding: `0 ${px(16, scale, 12)}`,
+    gap: px(8, scale, 6),
+    fontSize: px(14, scale, 12),
+    lineHeight: px(20, scale, 17),
+    borderRadius: px(8, scale, 7)
+  };
+}
+
+function quickSearchPosition(x, y, scale = 1) {
+  const width = Math.min(420 * scale, Math.max(0, window.innerWidth - 32 * scale));
   const halfWidth = width / 2;
   return {
-    x: Math.max(halfWidth + 16, Math.min(x, window.innerWidth - halfWidth - 16)),
-    y: Math.max(96, Math.min(y - 8, window.innerHeight - 16))
+    x: Math.max(halfWidth + 16 * scale, Math.min(x, window.innerWidth - halfWidth - 16 * scale)),
+    y: Math.max(96 * scale, Math.min(y - 8 * scale, window.innerHeight - 16 * scale))
   };
 }
 
@@ -85,8 +111,15 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   const [retainedExploreLocation, setRetainedExploreLocation] = useState(null);
   const [hasVisitedLibrary, setHasVisitedLibrary] = useState(() => window.location.hash.includes('/biblioteca'));
   const [quickSearchOpen, setQuickSearchOpen] = useState(false);
+  const [appUpdate, setAppUpdate] = useState(null);
+  const [appUpdateOpen, setAppUpdateOpen] = useState(false);
+  const [appUpdateDetails, setAppUpdateDetails] = useState(false);
+  const [appUpdateStatus, setAppUpdateStatus] = useState('available');
+  const [appUpdateProgress, setAppUpdateProgress] = useState(0);
+  const [appUpdateError, setAppUpdateError] = useState('');
+  const appUpdateChecked = useRef(false);
   const [quickSearchQuery, setQuickSearchQuery] = useState('');
-  const [quickSearchPoint, setQuickSearchPoint] = useState(() => quickSearchPosition(window.innerWidth / 2, window.innerHeight / 2));
+  const [quickSearchPoint, setQuickSearchPoint] = useState(() => quickSearchPosition(window.innerWidth / 2, window.innerHeight / 2, scale));
   const quickSearchInput = useRef(null);
   const quickSearchPanel = useRef(null);
   const pointerPosition = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
@@ -176,6 +209,44 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   }, []);
 
   useEffect(() => startNotifier(), []);
+
+  useEffect(() => {
+    if (!isVisible || tutorialMode || appUpdateChecked.current || !window.cytlex?.checkAppUpdate) return undefined;
+    const timer = window.setTimeout(async () => {
+      appUpdateChecked.current = true;
+      try {
+        const result = await window.cytlex.checkAppUpdate();
+        if (!result?.available) return;
+        const notes = releaseNotesText(result.releaseNotes);
+        setAppUpdate({ version: result.version, notes, summary: releaseSummary(notes) });
+        setAppUpdateOpen(true);
+      } catch {}
+    }, 2200);
+    return () => window.clearTimeout(timer);
+  }, [isVisible, tutorialMode]);
+
+  useEffect(() => window.cytlex?.onAppUpdate?.((event) => {
+    if (event?.status === 'downloading') {
+      setAppUpdateStatus('downloading');
+      setAppUpdateProgress(Math.round(event.percent || 0));
+    } else if (event?.status === 'downloaded') {
+      setAppUpdateStatus('downloaded');
+      setAppUpdateProgress(100);
+    } else if (event?.status === 'error') {
+      setAppUpdateStatus('available');
+      setAppUpdateError(event.message || 'No se pudo completar la actualización.');
+    }
+  }), []);
+
+  const downloadAppUpdate = async () => {
+    setAppUpdateError('');
+    setAppUpdateStatus('downloading');
+    const result = await window.cytlex?.downloadAppUpdate?.();
+    if (result && !result.ok) {
+      setAppUpdateStatus('available');
+      setAppUpdateError(result.error || 'No se pudo descargar la actualización.');
+    }
+  };
 
   useEffect(() => {
     if (!isVisible || initialLibraryCheck.current || !settings.get().notifyEnabled) return;
@@ -284,7 +355,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
           setQuickSearchOpen(false);
         } else if (extensions.installed().length > 0) {
           setQuickSearchQuery('');
-          setQuickSearchPoint(quickSearchPosition(pointerPosition.current.x, pointerPosition.current.y));
+          setQuickSearchPoint(quickSearchPosition(pointerPosition.current.x, pointerPosition.current.y, scale));
           setQuickSearchOpen(true);
         }
         return;
@@ -293,7 +364,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isReader, location.pathname, navigate, quickSearchOpen, tutorialMode]);
+  }, [isReader, location.pathname, navigate, quickSearchOpen, scale, tutorialMode]);
 
   const submitQuickSearch = (e) => {
     e.preventDefault();
@@ -376,8 +447,8 @@ export default function App({ isVisible = true, tutorialMode = false }) {
                 transition={reduceMotion
                   ? { duration: 0.1 }
                   : { duration: 0.18, ease: [0.23, 1, 0.32, 1] }}
-                className="pointer-events-auto w-[min(420px,calc(100vw-32px))] rounded-xl border border-border bg-card p-1.5 shadow-lg"
-                style={{ transformOrigin: 'center' }}
+                className="pointer-events-auto rounded-xl border border-border bg-card p-1.5 shadow-lg"
+                style={{ transformOrigin: 'center', width: `min(${px(420, scale, 336)}, calc(100vw - ${px(32, scale, 26)}))` }}
               >
                 <form onSubmit={submitQuickSearch} className="flex items-center gap-3 pl-1">
                   <Search className="shrink-0 text-muted-foreground" aria-hidden="true" style={{ width: px(18, scale, 15), height: px(18, scale, 15) }} />
@@ -396,6 +467,95 @@ export default function App({ isVisible = true, tutorialMode = false }) {
           </div>
         )}
       </AnimatePresence>
+      <Dialog
+        open={appUpdateOpen && !!appUpdate}
+        onClose={() => {
+          if (appUpdateStatus === 'downloading') return;
+          if (appUpdateStatus === 'downloaded') window.cytlex?.deferAppUpdate?.();
+          setAppUpdateOpen(false);
+        }}
+        title={`Cytlex ${appUpdate?.version ? `v${appUpdate.version}` : ''} está disponible`}
+        description="Hay una nueva versión lista para descargar. Tus mangas, progreso y ajustes se conservarán."
+        dialogStyle={{ width: '100%', maxWidth: px(512, scale, 400), maxHeight: '90vh', borderRadius: px(16, scale, 14) }}
+        scale={scale}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: px(16, scale, 12) }}>
+          <section className="border border-border bg-secondary/40" style={{ borderRadius: px(12, scale, 10), padding: px(16, scale, 12) }}>
+            <h3 className="flex items-center font-semibold" style={{ marginBottom: px(8, scale, 6), gap: px(8, scale, 6), fontSize: px(14, scale, 12), lineHeight: px(20, scale, 17) }}>
+              <ArrowUpCircle className="shrink-0 text-primary" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Cambios de esta versión
+            </h3>
+            {appUpdate?.summary?.length ? (
+              <ul className="list-disc text-muted-foreground" style={{ display: 'flex', flexDirection: 'column', gap: px(4, scale, 3), paddingLeft: px(20, scale, 16), fontSize: px(14, scale, 12), lineHeight: px(20, scale, 17) }}>
+                {appUpdate.summary.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground" style={{ fontSize: px(14, scale, 12), lineHeight: px(20, scale, 17) }}>La publicación no incluye un resumen de cambios.</p>
+            )}
+            <button
+              type="button"
+              className="inline-flex items-center font-medium text-primary hover:underline"
+              style={{ marginTop: px(12, scale, 9), gap: px(6, scale, 5), fontSize: px(14, scale, 12), lineHeight: px(20, scale, 17) }}
+              onClick={() => setAppUpdateDetails((open) => !open)}
+              aria-expanded={appUpdateDetails}
+            >
+              <ScrollText style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+              {appUpdateDetails ? 'Ocultar logs' : 'Ver logs con más información'}
+            </button>
+            {appUpdateDetails && (
+              <div className="overflow-y-auto bg-background/70 text-muted-foreground" style={{ marginTop: px(12, scale, 9), maxHeight: px(192, scale, 150), borderRadius: px(8, scale, 7), padding: px(12, scale, 9), fontSize: px(13, scale, 11), lineHeight: px(19, scale, 16) }}>
+                {appUpdate?.notes ? (
+                  <pre className="whitespace-pre-wrap break-words font-sans">{appUpdate.notes}</pre>
+                ) : (
+                  <p>Esta versión no tiene logs detallados en la publicación.</p>
+                )}
+                <button
+                  type="button"
+                  className="inline-flex items-center text-primary hover:underline"
+                  style={{ marginTop: px(12, scale, 9), gap: px(4, scale, 3), fontSize: px(13, scale, 11), lineHeight: px(19, scale, 16) }}
+                  onClick={() => window.cytlex?.openExternal?.('https://github.com/fobicho/Cytlex/releases/latest')}
+                >
+                  Abrir publicación completa <ExternalLink style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
+                </button>
+              </div>
+            )}
+          </section>
+
+          {appUpdateStatus === 'downloading' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: px(8, scale, 6) }} aria-live="polite">
+              <div className="flex justify-between text-muted-foreground" style={{ fontSize: px(14, scale, 12), lineHeight: px(20, scale, 17) }}>
+                <span>Descargando actualización…</span><span>{appUpdateProgress}%</span>
+              </div>
+              <div className="overflow-hidden rounded-full bg-secondary" style={{ height: px(8, scale, 6) }}>
+                <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${appUpdateProgress}%` }} />
+              </div>
+            </div>
+          )}
+          {appUpdateError && <p role="alert" className="text-destructive" style={{ fontSize: px(14, scale, 12), lineHeight: px(20, scale, 17) }}>{appUpdateError}</p>}
+
+          <div className="flex flex-wrap justify-end" style={{ gap: px(8, scale, 6) }}>
+            {appUpdateStatus === 'downloaded' ? (
+              <Button variant="outline" style={scaledUpdateButtonStyle(scale)} onClick={() => { window.cytlex?.deferAppUpdate?.(); setAppUpdateOpen(false); }}>
+                Instalar al salir
+              </Button>
+            ) : appUpdateStatus === 'downloading' ? (
+              <Button variant="outline" style={scaledUpdateButtonStyle(scale)} disabled>Descargando…</Button>
+            ) : (
+              <Button variant="outline" style={scaledUpdateButtonStyle(scale)} onClick={() => setAppUpdateOpen(false)}>Más tarde</Button>
+            )}
+            {appUpdateStatus === 'downloaded' ? (
+              <Button style={scaledUpdateButtonStyle(scale)} onClick={() => window.cytlex?.installAppUpdate?.()}>
+                <ArrowDownToLine style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Reiniciar e instalar
+              </Button>
+            ) : appUpdateStatus === 'downloading' ? (
+              <Button style={scaledUpdateButtonStyle(scale)} disabled><LoaderCircle className="animate-spin" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Descargando</Button>
+            ) : (
+              <Button style={scaledUpdateButtonStyle(scale)} onClick={downloadAppUpdate}>
+                <ArrowDownToLine style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Descargar actualización
+              </Button>
+            )}
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }

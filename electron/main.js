@@ -15,6 +15,7 @@ import https from 'node:https';
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const auth = require('./auth.cjs');
+let appUpdater = null;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
@@ -460,6 +461,64 @@ async function initialBounds() {
 
 const lastNotifiedAt = new Map();
 let pendingClick = null;
+
+function getAppUpdater() {
+  if (!app.isPackaged || launchedInBackground) return null;
+  if (appUpdater) return appUpdater;
+  const { autoUpdater } = require('electron-updater');
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.on('download-progress', (progress) => {
+    mainWindow?.webContents.send('app-update:status', { status: 'downloading', percent: progress.percent });
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    mainWindow?.webContents.send('app-update:status', { status: 'downloaded', version: info.version });
+  });
+  autoUpdater.on('error', (error) => {
+    mainWindow?.webContents.send('app-update:status', { status: 'error', message: error?.message || 'No se pudo completar la actualización.' });
+  });
+  appUpdater = autoUpdater;
+  return appUpdater;
+}
+
+ipcMain.handle('app-update:check', async () => {
+  const updater = getAppUpdater();
+  if (!updater) return { available: false };
+  try {
+    const result = await updater.checkForUpdates();
+    const info = result?.updateInfo;
+    if (!info || result.isUpdateAvailable === false || info.version === app.getVersion()) return { available: false };
+    return { available: true, version: info.version, releaseNotes: info.releaseNotes || '' };
+  } catch (error) {
+    console.warn('[app-update] No se pudo consultar GitHub Releases:', error?.message || error);
+    return { available: false, error: error?.message || String(error) };
+  }
+});
+
+ipcMain.handle('app-update:download', async () => {
+  const updater = getAppUpdater();
+  if (!updater) return { ok: false, error: 'El actualizador solo está disponible en la app instalada.' };
+  try {
+    await updater.downloadUpdate();
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+});
+
+ipcMain.handle('app-update:install', () => {
+  const updater = getAppUpdater();
+  if (!updater) return false;
+  updater.quitAndInstall(false, true);
+  return true;
+});
+
+ipcMain.handle('app-update:defer', () => {
+  const updater = getAppUpdater();
+  if (!updater) return false;
+  updater.autoInstallOnAppQuit = true;
+  return true;
+});
 
 ipcMain.handle('app:background', () => launchedInBackground);
 

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
-import { px } from '../../lib/useScale.js';
+import { px, useScale } from '../../lib/useScale.js';
 
 export function Dropdown({
   value,
@@ -18,8 +18,10 @@ export function Dropdown({
   menuWidth,
   menuMaxHeight = 256,
   style,
-  scale = 1
+  scale
 }) {
+  const currentScale = useScale();
+  const sc = scale ?? currentScale;
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const rootRef = useRef(null);
@@ -41,7 +43,7 @@ export function Dropdown({
     }
     const gap = 4;
     const viewportPadding = 8;
-    const desiredHeight = Number.parseInt(px(menuMaxHeight, scale, 200), 10);
+    const desiredHeight = Number.parseInt(px(menuMaxHeight, sc, 200), 10);
     const below = Math.max(0, viewportBottom - r.bottom - gap - viewportPadding);
     const above = Math.max(0, r.top - viewportTop - gap - viewportPadding);
     const naturalHeight = menuRef.current?.scrollHeight || desiredHeight;
@@ -98,8 +100,8 @@ export function Dropdown({
       role="listbox"
       style={{
         ...(portal && pos ? { top: pos.top, left: pos.left, maxHeight: `${pos.maxHeight}px`, ...(menuWidth ? { width: pos.width, minWidth: pos.width } : { minWidth: pos.width }) } : null),
-        ...(portal ? null : { marginTop: px(4, scale, 3), maxHeight: px(menuMaxHeight, scale, 200) }),
-        fontSize: px(14, scale, 12)
+        ...(portal ? null : { marginTop: px(4, sc, 3), maxHeight: px(menuMaxHeight, sc, 200) }),
+        fontSize: px(14, sc, 12)
       }}
       className={cn(
         portal ? 'fixed z-[60]' : 'absolute z-40',
@@ -111,8 +113,8 @@ export function Dropdown({
         ref={listRef}
         className="dd-scroll overflow-y-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/40 [&::-webkit-scrollbar-thumb:hover]:bg-primary/60"
         style={{
-          maxHeight: portal && pos ? `${pos.maxHeight}px` : px(menuMaxHeight, scale, 200),
-          padding: `${px(4, scale, 3)} ${px(4, scale, 3)} ${px(4, scale, 3)} ${px(4, scale, 3)}`
+          maxHeight: portal && pos ? `${pos.maxHeight}px` : px(menuMaxHeight, sc, 200),
+          padding: `${px(4, sc, 3)} ${px(4, sc, 3)} ${px(4, sc, 3)} ${px(4, sc, 3)}`
         }}
       >
         {options.map((o) => {
@@ -130,11 +132,11 @@ export function Dropdown({
                 active ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent'
               )}
               style={{
-                paddingLeft: px(10, scale, 8),
-                paddingRight: px(10, scale, 8),
-                paddingTop: px(6, scale, 4),
-                paddingBottom: px(6, scale, 4),
-                fontSize: px(14, scale, 12)
+                paddingLeft: px(10, sc, 8),
+                paddingRight: px(10, sc, 8),
+                paddingTop: px(6, sc, 4),
+                paddingBottom: px(6, sc, 4),
+                fontSize: px(14, sc, 12)
               }}
             >
               {o.label}
@@ -156,19 +158,19 @@ export function Dropdown({
         onClick={() => setOpen((v) => !v)}
         className={cn('flex items-center rounded-lg border border-border bg-background text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', buttonClassName)}
         style={{
-          gap: px(8, scale, 6),
-          height: px(32, scale, 27),
+          gap: px(8, sc, 6),
+          height: px(32, sc, 27),
           width: '100%',
-          paddingLeft: px(12, scale, 10),
-          paddingRight: px(10, scale, 8),
-          fontSize: px(14, scale, 12),
+          paddingLeft: px(12, sc, 10),
+          paddingRight: px(10, sc, 8),
+          fontSize: px(14, sc, 12),
           ...buttonStyle
         }}
       >
         <span className="min-w-0 flex-1 truncate text-left">{current ? current.label : placeholder}</span>
         <ChevronDown
           className={cn('shrink-0 text-muted-foreground transition-transform duration-200', open && 'rotate-180')}
-          style={{ width: px(14, scale, 12), height: px(14, scale, 12) }}
+          style={{ width: px(14, sc, 12), height: px(14, sc, 12) }}
         />
       </button>
 

@@ -15,6 +15,40 @@ import { EmptyState } from './ui/empty-state.jsx';
 import { Input } from './ui/input.jsx';
 import { useScale, px } from '../lib/useScale.js';
 
+const CATALOG_BATCH_SIZE = 20;
+
+async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingItems = [], apiHasMore = true, requestId }) {
+  const batch = [];
+  const queued = [...queuedItems];
+  const knownUrls = new Set([...existingItems, ...queued].map((item) => item.url).filter(Boolean));
+  let currentPage = page;
+  let canFetchNextPage = apiHasMore;
+  let pagesFetched = 0;
+
+  const addUnique = (items) => {
+    for (const item of items || []) {
+      if (!item?.url || knownUrls.has(item.url)) continue;
+      knownUrls.add(item.url);
+      queued.push(item);
+    }
+  };
+
+  while (batch.length < CATALOG_BATCH_SIZE && queued.length) batch.push(queued.shift());
+
+  while (batch.length < CATALOG_BATCH_SIZE && canFetchNextPage && pagesFetched < CATALOG_BATCH_SIZE) {
+    currentPage += 1;
+    pagesFetched += 1;
+    const result = await api.catalog({ ...params, page: currentPage, __cytlexRequestId: requestId }, id);
+    const received = result.items || [];
+    received.forEach((item) => rememberCover(item.url, item.cover, id));
+    addUnique(received);
+    canFetchNextPage = result.hasMore ?? currentPage < (result.totalPages || 1);
+    while (batch.length < CATALOG_BATCH_SIZE && queued.length) batch.push(queued.shift());
+  }
+
+  return { items: batch, queuedItems: queued, page: currentPage, apiHasMore: canFetchNextPage, hasMore: queued.length > 0 || canFetchNextPage };
+}
+
 export default function SourcesCatalog({ sources, initialSourceId = '', active = true }) {
   const scale = useScale();
   const reduceMotion = useReducedMotion();
@@ -27,7 +61,9 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const [filtersOpen, setFiltersOpen] = useState(() => !!restore?.filtersOpen);
   const [query, setQuery] = useState(() => restore?.query || '');
   const [items, setItems] = useState(() => restore?.items || []);
+  const [queuedItems, setQueuedItems] = useState(() => restore?.queuedItems || []);
   const [page, setPage] = useState(() => restore?.page || 1);
+  const [apiHasMore, setApiHasMore] = useState(() => restore?.apiHasMore ?? !!restore?.hasMore);
   const [hasMore, setHasMore] = useState(() => !!restore?.hasMore);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -94,25 +130,25 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     else {
       setLoading(true);
       setItems([]);
+      setQueuedItems([]);
     }
     try {
-      const nextPage = append ? page + 1 : 1;
-      const result = await api.catalog({ ...params, page: nextPage, __cytlexRequestId: httpRequestId }, id);
+      const result = await fetchCatalogBatch({
+        id,
+        params,
+        page: append ? page : 0,
+        queuedItems: append ? queuedItems : [],
+        existingItems: append ? items : [],
+        apiHasMore: append ? apiHasMore : true,
+        requestId: httpRequestId
+      });
       if (runId !== requestId.current) return;
-      const received = result.items || [];
-      received.forEach((item) => rememberCover(item.url, item.cover, id));
-      const merged = append ? [...items] : [];
-      const urls = new Set(merged.map((item) => item.url));
-      for (const item of received) {
-        if (item.url && !urls.has(item.url)) {
-          urls.add(item.url);
-          merged.push(item);
-        }
-      }
-      setItems(merged);
+      setItems((current) => append ? [...current, ...result.items] : result.items);
+      setQueuedItems(result.queuedItems);
       setLoadedParams({ ...params, q: params.q?.trim?.() || '' });
-      setPage(nextPage);
-      setHasMore(result.hasMore ?? nextPage < (result.totalPages || 1));
+      setPage(result.page);
+      setApiHasMore(result.apiHasMore);
+      setHasMore(result.hasMore);
     } catch (loadError) {
       if (runId === requestId.current) setError(String(loadError?.message || 'No se pudo cargar el catálogo de esta fuente.'));
     } finally {
@@ -137,8 +173,10 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         setFiltersOpen(!!snapshot.filtersOpen);
         setQuery(snapshot.query || '');
         setItems(snapshot.items);
+        setQueuedItems(snapshot.queuedItems || []);
         setLoadedParams(snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) });
         setPage(snapshot.page || 1);
+        setApiHasMore(snapshot.apiHasMore ?? !!snapshot.hasMore);
         setHasMore(!!snapshot.hasMore);
         setRestoring(false);
         setLoading(false);
@@ -169,10 +207,12 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           }
           if (!active || runId !== requestId.current) return;
           setFilters(Array.isArray(nextFilters) ? nextFilters : []);
-          setItems(restoredItems);
+          setItems(restoredItems.slice(0, CATALOG_BATCH_SIZE));
+          setQueuedItems([...(snapshot.queuedItems || []), ...restoredItems.slice(CATALOG_BATCH_SIZE)]);
           setLoadedParams(snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) });
           setPage(Math.max(1, snapshot.page || 1));
-          setHasMore(snapshot.hasMore ?? (result.hasMore ?? ((snapshot.page || 1) < (result.totalPages || 1))));
+          setApiHasMore(snapshot.apiHasMore ?? (result.hasMore ?? ((snapshot.page || 1) < (result.totalPages || 1))));
+          setHasMore((snapshot.queuedItems || []).length > 0 || restoredItems.length > CATALOG_BATCH_SIZE || (snapshot.hasMore ?? (result.hasMore ?? ((snapshot.page || 1) < (result.totalPages || 1)))));
           setRestoring(false);
           setLoading(false);
         } catch (loadError) {
@@ -196,8 +236,10 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     setFilterValues({});
     setFiltersOpen(false);
     setItems([]);
+    setQueuedItems([]);
     setLoadedParams({ q: '' });
     setPage(1);
+    setApiHasMore(false);
     setHasMore(false);
     setError('');
     setLoading(true);
@@ -210,15 +252,16 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           if (active) setFilters(safeFilters);
           return safeFilters;
         });
-        const resultPromise = api.catalog({ q: '', page: 1, __cytlexRequestId: httpRequestId }, sourceId);
+        const resultPromise = fetchCatalogBatch({ id: sourceId, params: { q: '', ...(sourceId === 'leercapitulo' ? { sort: 'az' } : {}) }, page: 0, requestId: httpRequestId });
         loadFilters();
         const result = await resultPromise;
         if (!active) return;
-        (result.items || []).forEach((item) => rememberCover(item.url, item.cover, sourceId));
-        setItems(result.items || []);
+        setItems(result.items);
+        setQueuedItems(result.queuedItems);
         setLoadedParams({ q: '', ...(sourceId === 'leercapitulo' ? { sort: 'az' } : {}) });
-        setPage(1);
-        setHasMore(result.hasMore ?? (result.totalPages > 1));
+        setPage(result.page);
+        setApiHasMore(result.apiHasMore);
+        setHasMore(result.hasMore);
       } catch (loadError) {
         if (active) setError(String(loadError?.message || 'No se pudo cargar el catálogo de esta fuente.'));
       } finally {
@@ -232,8 +275,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   useEffect(() => {
     if (restoring) return;
     if (!sourceId) return;
-    sourceCatalogState.save({ sourceId, filters, filterValues, filtersOpen, query, loadedParams, page, hasMore, items });
-  }, [sourceId, filters, filterValues, filtersOpen, query, loadedParams, page, hasMore, items, restoring]);
+    sourceCatalogState.save({ sourceId, filters, filterValues, filtersOpen, query, loadedParams, page, hasMore, apiHasMore, items, queuedItems });
+  }, [sourceId, filters, filterValues, filtersOpen, query, loadedParams, page, hasMore, apiHasMore, items, queuedItems, restoring]);
 
   useLayoutEffect(() => {
     if (!active || restoring || loading || pendingScrollTop.current == null || !sourceId) return;
@@ -357,7 +400,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
   const catalogGapX = Math.max(12, Math.round(20 * scale));
   const catalogColumns = catalogWidth > 0 ? Math.max(1, Math.floor((catalogWidth + catalogGapX) / (cs + catalogGapX))) : 1;
-  const minSearchWidth = Math.max(420, Math.round(520 * scale));
+  const minSearchWidth = Math.max(Number.parseInt(px(420, scale, 336), 10), Math.round(520 * scale));
   const searchWidth = catalogWidth > 0
     ? Math.min(catalogWidth, Math.max(minSearchWidth, catalogColumns * cs + (catalogColumns - 1) * catalogGapX))
     : '100%';
@@ -473,7 +516,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                       )}
                       {filterGroups.sorting.length > 0 && (
                         <div className="flex flex-wrap items-end justify-end" style={{ gap: px(10, scale, 7) }}>
-                          {filterGroups.sorting.map((filter) => <div key={filter.id} className="w-full sm:w-[180px]" style={{ maxWidth: '100%' }}>{renderFilter(filter)}</div>)}
+                          {filterGroups.sorting.map((filter) => <div key={filter.id} className="w-full sm:w-auto" style={{ width: '100%', maxWidth: px(180, scale, 150) }}>{renderFilter(filter)}</div>)}
                           <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
                             <Button type="button" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
                             <Button type="button" variant="ghost" size="sm" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
@@ -484,7 +527,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                         </div>
                       )}
                       {filterGroups.other.length > 0 && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(170px,1fr))]" style={{ gap: px(12, scale, 9) }}>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(10.625rem,1fr))]" style={{ gap: px(12, scale, 9) }}>
                           {filterGroups.other.map(renderFilter)}
                         </div>
                       )}
@@ -550,8 +593,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
               />
               {hasMore && (
                 <div className="flex flex-col items-center" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 8) }}>
-                  <Button variant="secondary" onClick={() => loadCatalog(sourceId, { ...loadedParams, q: query.trim(), ...filterValues }, true)} disabled={loadingMore}>
-                    {loadingMore && <Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />}
+                  <Button variant="secondary" onClick={() => loadCatalog(sourceId, { ...loadedParams, q: query.trim(), ...filterValues }, true)} disabled={loadingMore} style={{ height: px(40, scale, 33), fontSize: px(14, scale, 12), paddingLeft: px(16, scale, 12), paddingRight: px(16, scale, 12), gap: px(8, scale, 6) }}>
+                    {loadingMore && <Loader2 className="animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />}
                     {loadingMore ? 'Cargando…' : 'Cargar más mangas'}
                   </Button>
                 </div>

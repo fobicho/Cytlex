@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState } fro
 import { AnimatePresence, motion } from 'framer-motion';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { cn } from '../lib/utils.js';
+import { px, useScale } from '../lib/useScale.js';
 
 const ToastCtx = createContext(null);
 
@@ -20,6 +21,7 @@ const TONES = {
 let seq = 0;
 
 export function ToastProvider({ children }) {
+  const scale = useScale();
   const [items, setItems] = useState([]);
   const timers = useRef(new Map());
 
@@ -47,7 +49,10 @@ export function ToastProvider({ children }) {
   return (
     <ToastCtx.Provider value={api}>
       {children}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-[100] flex flex-col gap-2 w-[340px] max-w-[calc(100vw-2rem)]">
+      <div
+        className="pointer-events-none fixed z-[100] flex flex-col"
+        style={{ bottom: px(16, scale, 12), right: px(16, scale, 12), gap: px(8, scale, 6), width: px(340, scale, 272), maxWidth: `calc(100vw - ${px(32, scale, 24)})` }}
+      >
         <AnimatePresence initial={false}>
           {items.map((t) => {
             const Icon = t.icon || ICONS[t.variant] || Info;

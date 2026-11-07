@@ -48,18 +48,17 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     mainRef.current = document.querySelector('main');
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (active && scrollMemory.catalog > 0 && mainRef.current) {
       mainRef.current.scrollTop = scrollMemory.catalog;
-      scrollMemory.catalog = 0;
     }
   }, [r.id, active]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const main = mainRef.current;
     if (!active || !main) return undefined;
     const save = () => { scrollMemory.catalog = main.scrollTop; };
@@ -72,19 +71,23 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
   const measure = () => {
     const el = trackRef.current;
     if (!el) return;
-    setTrackWidth(el.clientWidth);
+    // The catalog remains mounted while its route is hidden. Keep the last
+    // usable width there; display:none reports 0 and would cause a visible
+    // cover-size jump when the page becomes active again.
+    if (el.clientWidth > 0) setTrackWidth(el.clientWidth);
     setCanLeft(el.scrollLeft > 1);
     setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
   };
 
   useLayoutEffect(() => {
+    if (!active) return undefined;
     measure();
     const el = trackRef.current;
     if (!el) return undefined;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [r.items.length, coverSize]);
+  }, [r.items.length, coverSize, active]);
 
   const columns = Math.max(1, Math.floor((trackWidth + gap) / (coverSize + gap)));
   const cardWidth = trackWidth > 0
@@ -204,7 +207,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
             <ChevronRight style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
           </button>
         )}
-        {(r.items.length > 15 || r.hasMore) && (
+        {r.items.length > 1 && (r.items.length > 15 || r.hasMore) && (
           <a
             className={cn(
               buttonVariants({ variant: 'ghost', size: 'sm' }),
@@ -276,6 +279,9 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     const adultExtensionsEnabled = !!settings.get().showAdultExtensions;
     const list = enabledSources(adultExtensionsEnabled);
     if (!list.length) return;
+    scrollMemory.catalog = 0;
+    const main = document.querySelector('main');
+    if (main) main.scrollTop = 0;
     const runId = ++activeSearchRun;
     catalogScroll.clear();
     clearSearchCoverCache();
@@ -345,7 +351,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     if (t === 'mangas' || t === 'extensiones' || t === 'fuentes') setTab(t);
   }, [loc.search]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const params = new URLSearchParams(loc.search);
     const nq = params.get('q') || '';
     if (nq && params.get('tab') !== 'fuentes') {

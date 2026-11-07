@@ -672,7 +672,7 @@ const Library = memo(function Library({ active = true }) {
                             <CachedLibraryCover cover={cover} title={m.title} className="w-full h-full object-cover bg-black" cachedOnly={unavailable} cachedCover={m.coverCached || m.coverLocal || ''} />
                           )}
                           {unavailable && (
-                            <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 px-0.5 text-center text-[8px] font-semibold leading-tight text-white">
+                            <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 px-0.5 text-center font-semibold leading-tight text-white" style={{ fontSize: px(8, scale, 7) }}>
                               <span>{adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}</span>
                               <span className="flex max-w-full min-w-0 items-center rounded-full bg-black/80 py-0.5 pl-0.5 pr-1 text-left" style={{ gap: px(4, scale, 3) }} title={sourceInfo.name}>
                                 <SourceBadge m={sourceInfo} className="rounded-full bg-white shadow-sm" style={{ width: px(18, scale, 16), height: px(18, scale, 16), fontSize: px(8, scale, 7) }} />

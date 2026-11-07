@@ -4,6 +4,7 @@
 
 @layer base {
   :root {
+    font-size: var(--ui-rem-size, 16px);
     --background: 240 10% 3.9%;
     --foreground: 0 0% 98%;
     --card: 240 10% 5.9%;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -7,6 +7,7 @@ import { settings } from '../lib/settings.js';
 import { api } from '../lib/api.js';
 import { lastSearch, resultsScroll, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import MangaCard from '../components/MangaCard.jsx';
+import VirtualMangaGrid from '../components/VirtualMangaGrid.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
@@ -68,7 +69,7 @@ export default function Results() {
     }
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const main = document.querySelector('main');
     if (!main) return undefined;
 
@@ -178,18 +179,26 @@ export default function Results() {
       </div>
 
       <motion.div
-        className="grid gap-x-5 gap-y-8"
-        style={{
-          gridTemplateColumns: `repeat(auto-fill, ${cs}px)`,
-          gap: `${Math.max(16, Math.round(20 * scale))}px ${Math.max(12, Math.round(20 * scale))}px`
-        }}
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease: 'easeOut' }}
       >
-        {items.map((m, i) => (
-          <MangaCard key={i} m={m} sourceId={sourceId} from="resultados" coverSize={cs} showAuthor={false} />
-        ))}
+        <VirtualMangaGrid
+          items={items}
+          sourceId={sourceId}
+          coverSize={cs}
+          scale={scale}
+          responsiveCards
+          renderCard={(m, cardWidth) => (
+            <MangaCard
+              m={m}
+              sourceId={sourceId}
+              from="resultados"
+              coverSize={cardWidth}
+              showAuthor={false}
+            />
+          )}
+        />
       </motion.div>
 
       {currentGroup?.hasMore && (
