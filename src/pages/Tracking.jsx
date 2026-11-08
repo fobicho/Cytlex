@@ -9,6 +9,7 @@ import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
+import { settings } from '../lib/settings.js';
 
 const STATUS_ES = {
   CURRENT: 'Leyendo',
@@ -27,7 +28,10 @@ export default function Tracking() {
   const [entries, setEntries] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [coverScale, setCoverScale] = useState(() => settings.get().coverSize / 160);
   const scale = useScale();
+
+  useEffect(() => settings.subscribe((s) => setCoverScale(s.coverSize / 160)), []);
 
   const load = async () => {
     setBusy(true);
@@ -210,12 +214,12 @@ export default function Tracking() {
                       alt=""
                       referrerPolicy="no-referrer"
                       className="object-cover rounded-lg bg-black shrink-0"
-                      style={{ width: `${Math.round(40 * scale)}px`, height: `${Math.round(56 * scale)}px` }}
+                      style={{ width: px(40 * coverScale, scale, 27), height: px(56 * coverScale, scale, 38) }}
                     />
                   ) : (
                     <div
                       className="rounded-lg bg-secondary shrink-0"
-                      style={{ width: `${Math.round(40 * scale)}px`, height: `${Math.round(56 * scale)}px` }}
+                      style={{ width: px(40 * coverScale, scale, 27), height: px(56 * coverScale, scale, 38) }}
                     />
                   )}
                   <div className="flex-1 min-w-0">

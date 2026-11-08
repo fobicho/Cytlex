@@ -17,7 +17,7 @@ const defaults = {
   readerZoom: 100,
   readerDoublePage: false,
   libraryView: 'grid',
-  libraryCoverSize: 160,
+  coverSize: 160,
   libraryShowUnread: true,
   showAdultExtensions: false,
   adultContentRatings: CONTENT_WARNING_RATINGS,
@@ -37,7 +37,8 @@ const defaults = {
 
 function normalize(s) {
   let { theme, mode } = s;
-  const { showAdultManga, anilistClientSecret, anilistClientId, uiScale, ...rest } = s;
+  const { showAdultManga, anilistClientSecret, anilistClientId, uiScale, libraryCoverSize, ...rest } = s;
+  rest.coverSize = Math.min(Math.max(Math.round(Number(rest.coverSize ?? libraryCoverSize) || 160), 100), 240);
   rest.adultContentRatings = Array.isArray(rest.adultContentRatings)
     ? [...new Set(rest.adultContentRatings.map((rating) => String(rating).toUpperCase()).filter((rating) => CONTENT_WARNING_RATINGS.includes(rating)))]
     : [...CONTENT_WARNING_RATINGS];
@@ -56,6 +57,10 @@ function read() {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...defaults };
     const stored = JSON.parse(raw);
+    if (stored.coverSize === undefined && stored.libraryCoverSize !== undefined) {
+      stored.coverSize = stored.libraryCoverSize;
+    }
+    delete stored.libraryCoverSize;
     if (stored.showAdultExtensions === undefined && stored.showAdultManga !== undefined) {
       stored.showAdultExtensions = stored.showAdultManga;
     }

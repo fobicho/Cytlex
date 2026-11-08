@@ -399,9 +399,9 @@ function SearchDialog({ open, onClose, mangaTitle, onPick }) {
               className="flex w-full items-start gap-3 rounded-xl border border-border bg-card p-2.5 mb-2 text-left transition-colors hover:bg-accent"
             >
               {m.cover ? (
-                <img src={m.cover} alt="" referrerPolicy="no-referrer" className="w-12 h-16 object-cover rounded-lg bg-black shrink-0" />
+                <img src={m.cover} alt="" referrerPolicy="no-referrer" className="object-cover rounded-lg bg-black shrink-0" style={{ width: px(48 * coverScale, scale, 32), height: px(64 * coverScale, scale, 42) }} />
               ) : (
-                <div className="w-12 h-16 rounded-lg bg-secondary shrink-0" />
+                <div className="rounded-lg bg-secondary shrink-0" style={{ width: px(48 * coverScale, scale, 32), height: px(64 * coverScale, scale, 42) }} />
               )}
               <div className="min-w-0 flex-1">
                 <div className="font-semibold text-sm truncate">{m.title}</div>
@@ -751,6 +751,7 @@ function CharactersDialog({ open, onClose, mediaId, connected }) {
 
 export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose }) {
   const scale = useScale();
+  const [coverScale, setCoverScale] = useState(() => settings.get().coverSize / 160);
   const [linkedId, setLinkedId] = useState(() => tracking.get(mangaUrl, sourceId)?.id || null);
   const [data, setData] = useState(null);
   const [entry, setEntry] = useState(null);
@@ -774,6 +775,7 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
     () => tracking.subscribe(() => setLinkedId(tracking.get(mangaUrl, sourceId)?.id || null)),
     [mangaUrl, sourceId]
   );
+  useEffect(() => settings.subscribe((s) => setCoverScale(s.coverSize / 160)), []);
 
   useEffect(() => {
     let alive = true;
@@ -894,7 +896,7 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
 
       {data && !loading && !err && (
         <div className="flex gap-5">
-          <div className="w-36 shrink-0">
+          <div className="shrink-0" style={{ width: px(144 * coverScale, scale, 96) }}>
             {data.cover ? (
               <img
                 src={data.cover}

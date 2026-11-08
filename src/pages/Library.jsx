@@ -242,7 +242,7 @@ const Library = memo(function Library({ active = true }) {
   const [checkProgress, setCheckProgress] = useState(libraryCheckProgress);
   const [checkCooldown, setCheckCooldown] = useState(remainingLibraryCheckCooldown);
   const { toast } = useToast();
-  const coverSize = 160;
+  const [coverSize, setCoverSize] = useState(() => settings.get().coverSize);
   const [showUnread, setShowUnread] = useState(() => settings.get().libraryShowUnread);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('cytlex:librarySort') || 'title-asc');
@@ -253,6 +253,7 @@ const Library = memo(function Library({ active = true }) {
     () => settings.subscribe((s) => {
       setShowUnread(s.libraryShowUnread);
       setShowAdultExtensions(!!s.showAdultExtensions);
+      setCoverSize(s.coverSize);
     }),
     []
   );
@@ -665,7 +666,7 @@ const Library = memo(function Library({ active = true }) {
                       >
                         <span
                           className="relative rounded-lg shrink-0 overflow-hidden bg-muted"
-                          style={{ width: px(68, scale, 56), height: px(102, scale, 82) }}
+                          style={{ width: px(68 * coverSize / 160, scale, 56), height: px(102 * coverSize / 160, scale, 82) }}
                         >
                           {cover && (
                             <CachedLibraryCover cover={cover} title={m.title} className="w-full h-full object-cover bg-black" cachedOnly={unavailable} cachedCover={m.coverCached || m.coverLocal || ''} />

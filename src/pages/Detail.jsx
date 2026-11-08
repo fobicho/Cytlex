@@ -56,7 +56,6 @@ function reconcileChapterProgress(previousChapters, nextChapters, sourceId, mang
 
 const EXPAND_CTRL_H = 16;
 const COVER_BASE = 184;
-
 function SourceLine({ sourceId, scale }) {
   const m = extensions.manifest(sourceId);
   const [ok, setOk] = useState(true);
@@ -74,13 +73,13 @@ function SourceLine({ sourceId, scale }) {
   );
 }
 
-function DuplicateRow({ cover, title, author, sourceId, scale }) {
+function DuplicateRow({ cover, title, author, sourceId, scale, coverScale = 1 }) {
   return (
     <div className="flex items-end border-b border-border" style={{ gap: px(16, scale, 12), paddingTop: px(16, scale, 12), paddingBottom: px(16, scale, 12) }}>
       {cover ? (
-        <img src={cover} alt="" referrerPolicy="no-referrer" className="aspect-[5/7] object-cover shrink-0 bg-black" style={{ width: px(128, scale, 100), borderRadius: px(12, scale, 9) }} />
+        <img src={cover} alt="" referrerPolicy="no-referrer" className="aspect-[5/7] object-cover shrink-0 bg-black" style={{ width: px(128 * coverScale, scale, 80), borderRadius: px(12, scale, 9) }} />
       ) : (
-        <div className="aspect-[5/7] shrink-0 bg-secondary" style={{ width: px(128, scale, 100), borderRadius: px(12, scale, 9) }} />
+        <div className="aspect-[5/7] shrink-0 bg-secondary" style={{ width: px(128 * coverScale, scale, 80), borderRadius: px(12, scale, 9) }} />
       )}
       <div className="flex-1 min-w-0">
         <div className="font-semibold leading-snug line-clamp-2" style={{ fontSize: px(18, scale, 15) }}>{title}</div>
@@ -122,6 +121,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   }, [fromParam]);
   const sourceAvailable = extensions.isInstalled(sourceId);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
+  const [coverSetting, setCoverSetting] = useState(() => settings.get().coverSize);
   const adultExtensionDisabled = !isExtensionAllowed(extensions.manifest(sourceId), showAdultExtensions);
   const detailKey = `${sourceId}|${mangaUrl}`;
   const [detailState, setDetailState] = useState(() => ({
@@ -270,6 +270,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   useEffect(() => tracking.subscribe(() => { setAniLinked(!!tracking.get(mangaUrl, sourceId)); setCoverTick((t) => t + 1); }), []);
   useEffect(() => settings.subscribe((s) => setAnilistCover(!!s.anilistCover)), []);
   useEffect(() => settings.subscribe((s) => setShowAdultExtensions(!!s.showAdultExtensions)), []);
+  useEffect(() => settings.subscribe((s) => setCoverSetting(s.coverSize)), []);
   useEffect(() => settings.subscribe((s) => {
     try {
       const map = JSON.parse(localStorage.getItem('cytlex:chaptersPerRowByManga') || '{}');
@@ -1233,7 +1234,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           <>
             <div>
               {dup.list.map((f, i) => (
-                <DuplicateRow key={i} cover={f.cover} title={f.title} author={f.author} sourceId={f.sourceId} scale={scale} />
+                <DuplicateRow key={i} cover={f.cover} title={f.title} author={f.author} sourceId={f.sourceId} scale={scale} coverScale={coverSetting / 160} />
               ))}
             </div>
             <div className="flex justify-end" style={{ gap: px(8, scale, 6), paddingTop: px(20, scale, 15) }}>

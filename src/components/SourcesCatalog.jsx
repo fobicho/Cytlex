@@ -53,6 +53,7 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
 export default function SourcesCatalog({ sources, initialSourceId = '', active = true }) {
   const scale = useScale();
   const reduceMotion = useReducedMotion();
+  const [coverSize, setCoverSize] = useState(() => settings.get().coverSize);
   const [restore] = useState(() => sourceCatalogState.takeRestore());
   const [sourceId, setSourceId] = useState(() => restore?.sourceId || initialSourceId);
   const [catalogReadySourceId, setCatalogReadySourceId] = useState(() =>
@@ -92,6 +93,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     const order = String(a.manifest.name || '').localeCompare(String(b.manifest.name || ''), 'es', { sensitivity: 'base', numeric: true });
     return sourceSort === 'title-desc' ? -order : order;
   }), [sources, sourceSort]);
+
+  useEffect(() => settings.subscribe((s) => setCoverSize(s.coverSize)), []);
 
   useLayoutEffect(() => {
     setToolbarTarget(document.getElementById('sources-toolbar'));
@@ -410,7 +413,6 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     );
   }
 
-  const coverSize = 160;
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
 
   if (!selected) {

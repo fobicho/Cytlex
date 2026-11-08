@@ -43,7 +43,16 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, re
 
       if (measureLayout) {
         const firstCard = grid.querySelector('[data-virtual-card]');
-        const measuredHeight = firstCard?.firstElementChild?.getBoundingClientRect().height || firstCard?.getBoundingClientRect().height || 0;
+        const zoomValue = getComputedStyle(document.documentElement).zoom;
+        const parsedZoom = Number.parseFloat(zoomValue);
+        const numericZoom = zoomValue.trim().endsWith('%') || parsedZoom > 10 ? parsedZoom / 100 : parsedZoom;
+        const zoomFactor = Number.isFinite(parsedZoom)
+          ? numericZoom
+          : 1;
+        const measuredRectHeight = firstCard?.firstElementChild?.getBoundingClientRect().height
+          || firstCard?.getBoundingClientRect().height
+          || 0;
+        const measuredHeight = measuredRectHeight / Math.max(zoomFactor, 0.01);
         if (measuredHeight) setCardHeight((current) => Math.abs(current - measuredHeight) < 1 ? current : measuredHeight);
 
         const mainRect = main.getBoundingClientRect();

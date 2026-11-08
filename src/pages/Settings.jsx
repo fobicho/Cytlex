@@ -751,7 +751,10 @@ export default function Settings({ tutorialPreview = false }) {
       const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
       const installedSourceId = (manga) => extensions.resolveInstalledSource(manga.sourceId, manga.sourceName, manga.url) || manga.sourceId;
       const notInstalled = mihonCandidate.entries.filter(({ manga }) => !extensions.isInstalled(installedSourceId(manga)));
-      const repository = notInstalled.length ? await extensions.repoIndex(indexUrl) : [];
+      let repository = [];
+      if (notInstalled.length) {
+        try { repository = await extensions.repoIndex(indexUrl); } catch {}
+      }
       const showAdultExtensions = !!settings.get().showAdultExtensions;
       const sourceManifest = (manga) => {
         const sourceId = installedSourceId(manga);
@@ -872,6 +875,53 @@ export default function Settings({ tutorialPreview = false }) {
               onChange={(m) => setAppearance({ mode: m })}
               options={MODES.map(({ id, name }) => [id, name])}
             />
+          }
+        />
+        <Row
+          scale={scale}
+          title="Tamaño de portadas"
+          desc="Ajusta las portadas en Biblioteca, Explorar, Fuentes y fichas de manga"
+          right={
+            <div className="flex items-center" style={{ gap: px(10, scale, 7) }}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Reducir tamaño de portadas"
+                className="hover:bg-transparent hover:text-foreground"
+                disabled={s.coverSize <= 100}
+                onClick={() => set({ coverSize: Math.max(100, s.coverSize - 10) })}
+                style={{ width: px(28, scale, 24), height: px(28, scale, 24), fontSize: px(18, scale, 15), lineHeight: 1, alignSelf: 'center' }}
+              >
+                −
+              </Button>
+              <input
+                type="range"
+                min="100"
+                max="240"
+                step="10"
+                value={s.coverSize}
+                aria-label="Tamaño de portadas"
+                onChange={(event) => set({ coverSize: Number(event.target.value) })}
+                className="cursor-pointer accent-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+                style={{ width: px(160, scale, 120), display: 'block', alignSelf: 'center' }}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Aumentar tamaño de portadas"
+                className="hover:bg-transparent hover:text-foreground"
+                disabled={s.coverSize >= 240}
+                onClick={() => set({ coverSize: Math.min(240, s.coverSize + 10) })}
+                style={{ width: px(28, scale, 24), height: px(28, scale, 24), fontSize: px(18, scale, 15), lineHeight: 1, alignSelf: 'center' }}
+              >
+                +
+              </Button>
+              <span className="tabular-nums text-muted-foreground" style={{ minWidth: px(42, scale, 36), fontSize: px(12, scale, 10) }}>
+                {s.coverSize}px
+              </span>
+            </div>
           }
         />
         <div style={{ paddingTop: px(16, scale, 11) }}>
