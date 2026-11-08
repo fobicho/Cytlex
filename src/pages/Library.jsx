@@ -242,7 +242,7 @@ const Library = memo(function Library({ active = true }) {
   const [checkProgress, setCheckProgress] = useState(libraryCheckProgress);
   const [checkCooldown, setCheckCooldown] = useState(remainingLibraryCheckCooldown);
   const { toast } = useToast();
-  const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
+  const coverSize = 160;
   const [showUnread, setShowUnread] = useState(() => settings.get().libraryShowUnread);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('cytlex:librarySort') || 'title-asc');
@@ -251,7 +251,6 @@ const Library = memo(function Library({ active = true }) {
   const scale = useScale();
   useEffect(
     () => settings.subscribe((s) => {
-      setCoverSize(Math.round(160 * (s.uiScale || 1)));
       setShowUnread(s.libraryShowUnread);
       setShowAdultExtensions(!!s.showAdultExtensions);
     }),

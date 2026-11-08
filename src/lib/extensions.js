@@ -1,6 +1,7 @@
 import { buildSelectorSource } from './selectorSource.js';
 import { chapterIndex } from './chapterIndex.js';
 import { settings } from './settings.js';
+import { httpGet, httpHead, httpPost } from './browserHttp.js';
 import defaultExtensionIndex from '../../docs/index.json';
 
 const KEY = 'cytlex:extensions:v1';
@@ -47,17 +48,9 @@ function ctx(manifest = {}) {
     id: manifest.id,
     config: manifest.config,
     languageSelections,
-    fetchText: (url, requestId) => {
-      if (typeof window === 'undefined' || !window.cytlex?.httpGet) {
-        throw new Error('Sin puente Electron para hacer peticiones');
-      }
-      return window.cytlex.httpGet(url, requestId);
-    },
+    fetchText: (url, requestId) => httpGet(url, requestId),
     parse: (html) => new DOMParser().parseFromString(html, 'text/html'),
-    head: async (url) => {
-      if (typeof window === 'undefined' || !window.cytlex?.httpHead) return { ok: false, status: 0, length: 0, type: '' };
-      return window.cytlex.httpHead(url);
-    }
+    head: (url) => httpHead(url)
   };
 }
 
@@ -187,11 +180,11 @@ async function loadModule(code, manifest) {
     }
     if (message.kind === 'host-call') {
       const action = message.method === 'fetchText'
-        ? (url, requestId) => window.cytlex.httpGet(url, requestId)
+        ? (url, requestId) => httpGet(url, requestId)
         : message.method === 'fetchPostText'
-          ? (payload, requestId) => window.cytlex.httpPost({ ...payload, responseType: 'text' }, requestId)
+          ? (payload, requestId) => httpPost({ ...payload, responseType: 'text' }, requestId)
         : message.method === 'head'
-          ? (url) => window.cytlex.httpHead(url)
+          ? (url) => httpHead(url)
           : null;
       Promise.resolve().then(() => {
         if (!action) throw new Error('Operación de extensión no permitida');

@@ -1,4 +1,5 @@
 import { session } from './session.js';
+import { httpPost } from './browserHttp.js';
 
 const API = 'https://graphql.anilist.co';
 
@@ -28,12 +29,9 @@ const MEDIA_FIELDS = `
 
 const cache = new Map();
 
-const noBridge = () =>
-  new Error('Sin puente Electron para consultar AniList. Abre la app con "npm run dev:electron".');
-
 async function gql(query, variables = {}) {
-  if (typeof window === 'undefined' || !window.cytlex?.httpPost) throw noBridge();
-  const res = await window.cytlex.httpPost({ url: API, body: { query, variables } });
+  if (typeof window === 'undefined') throw new Error('AniList requiere un navegador.');
+  const res = await httpPost({ url: API, body: { query, variables } });
   if (res?.errors?.length) throw new Error(res.errors[0].message || 'Error de AniList');
   return res?.data;
 }

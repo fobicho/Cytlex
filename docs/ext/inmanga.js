@@ -1,7 +1,7 @@
 const BASE = 'https://inmanga.com';
 const CHAPTERS = `${BASE}/chapter/getall`;
 const PAGE_LIST = `${BASE}/chapter/chapterIndexControls`;
-const PAGES = 'https://pack-yak.intomanga.com/images/manga/ms/chapter/ch/page/p';
+const IMAGE_CDN = 'https://cdn1.intomanga.com/i/m';
 const PAGE_SIZE = 20;
 
 export default function createSource({ fetchText, fetchPostText, parse }) {
@@ -256,15 +256,27 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     if (!chapterId || !mangaId) throw new Error('No se pudo identificar el manga y el capítulo de InManga');
     const chapterHtml = await fetchText(`${PAGE_LIST}?identification=${encodeURIComponent(chapterId)}`);
     const doc = parse(chapterHtml);
-    const pages = [...doc.querySelectorAll('select.PageListClass option[value]')]
-      .map((option) => clean(option.getAttribute('value')))
+    const chapterUuid = clean(doc.querySelector('#ChapterIdentification')?.value) || chapterId.toLowerCase();
+    const chapterNumber = clean(doc.querySelector('#ChapterNumber')?.value) || parsed.searchParams.get('number') || '';
+    const mangaSlug = parsed.searchParams.get('slug') || cached?.manga.slug || '';
+    const pageList = doc.querySelector('#PageList');
+    const pageElements = pageList?.children.length
+      ? [...pageList.children]
+      : [...doc.querySelectorAll('select.PageListClass option[value]')];
+    const pageIds = pageElements
+      .map((element) => clean(element.getAttribute('value') || element.value))
       .filter((value) => /^[\w-]+$/.test(value))
-      .map((id) => `${PAGES}/${encodeURIComponent(id)}`);
+      .filter((value, index, values) => values.indexOf(value) === index);
+    const imageReferer = mangaSlug && chapterNumber
+      ? `${BASE}/ver/manga/${encodeURIComponent(mangaSlug)}/${encodeURIComponent(chapterNumber)}/${encodeURIComponent(chapterUuid)}`
+      : `${BASE}/`;
+    const pages = pageIds.map((id) => `${IMAGE_CDN}/${encodeURIComponent(mangaId)}/c/${encodeURIComponent(chapterUuid)}/o/${encodeURIComponent(id)}.jpg`);
     const options = cached?.chapters || [];
     const index = options.findIndex((item) => item.url === url || new URL(item.url).searchParams.get('identification') === chapterId);
     return {
       label: options[index]?.title || text(doc, 'h1, h2') || 'Capítulo',
       mangaUrl: cached?.manga.url || `${BASE}/ver/manga/${encodeURIComponent(parsed.searchParams.get('slug') || '')}/${encodeURIComponent(mangaId)}`,
+      imageReferer,
       pages: [...new Set(pages)],
       options,
       prev: index > 0 ? { title: options[index - 1].title, url: options[index - 1].url } : null,

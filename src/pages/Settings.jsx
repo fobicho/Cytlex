@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
-import { Minus, Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, X, Database, Download, Upload, CircleHelp, Settings as SettingsIcon } from 'lucide-react';
+import { Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, X, Database, Download, Upload, CircleHelp, Settings as SettingsIcon } from 'lucide-react';
 import { CONTENT_WARNING_RATINGS, resolveMode, settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
 import { anilist } from '../lib/anilist.js';
@@ -24,7 +24,7 @@ import { useToast } from '../components/Toast.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
-import { invalidateLibraryCovers } from '../lib/covers.js';
+import { clearPersistentLibraryCoverCache, invalidateLibraryCovers } from '../lib/covers.js';
 
 function clearLibraryUnreadCache() {
   localStorage.removeItem('cytlex:libraryUnread:v1');
@@ -282,17 +282,41 @@ export default function Settings({ tutorialPreview = false }) {
   const [mihonInstallOpen, setMihonInstallOpen] = useState(false);
   const [mihonBusy, setMihonBusy] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [confirmWebDataReset, setConfirmWebDataReset] = useState(false);
+  const [webDataResetBusy, setWebDataResetBusy] = useState(false);
   const backupFileInputRef = useRef(null);
   const mihonFileInputRef = useRef(null);
   const mihonImportControllerRef = useRef(null);
   const removeRepoRef = useRef(null);
-  const settingsRootRef = useRef(null);
-  const scaleTransitionTimeoutRef = useRef(null);
   const [showDonate, setShowDonate] = useState(
     () => !document.body.classList.contains('tutorial-open') && !settings.get().donationSeen
   );
   const scale = useScale();
   const reduceMotion = useReducedMotion();
+  const isBrowserApp = typeof window !== 'undefined' && !window.cytlex;
+
+  const resetWebData = async () => {
+    setWebDataResetBusy(true);
+    try {
+      await clearPersistentLibraryCoverCache();
+      const keys = [];
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (key?.startsWith('cytlex:')) keys.push(key);
+      }
+      keys.forEach((key) => localStorage.removeItem(key));
+      ['fobi:favs', 'fobi:cats:v1', 'fobi:settings:v1', 'fobi:extensions:v1', 'fobi:theme']
+        .forEach((key) => localStorage.removeItem(key));
+      window.location.reload();
+    } catch (error) {
+      setWebDataResetBusy(false);
+      toast({
+        title: 'No se pudieron restablecer todos los datos',
+        description: error?.message || 'Inténtalo de nuevo.',
+        variant: 'error'
+      });
+    }
+  };
 
   const applyBackgroundSetting = async (on) => {
     const previous = settings.get().notifyBackground;
@@ -332,10 +356,6 @@ export default function Settings({ tutorialPreview = false }) {
     setSection(nextSection);
     sessionSeccion = nextSection;
   }, [location.search]);
-  useEffect(() => () => {
-    window.clearTimeout(scaleTransitionTimeoutRef.current);
-    settingsRootRef.current?.classList.remove('ui-scale-transition');
-  }, []);
   useEffect(() => tracking.subscribe(() => setLinkedCount(tracking.linkedCount())), []);
   useEffect(() => {
     if (!connectHintFor) return;
@@ -384,17 +404,6 @@ export default function Settings({ tutorialPreview = false }) {
   };
 
   const set = (patch) => setS(settings.set(patch));
-  const setUiScale = (value) => {
-    const root = settingsRootRef.current;
-    if (!reduceMotion && root) {
-      root.classList.add('ui-scale-transition');
-      window.clearTimeout(scaleTransitionTimeoutRef.current);
-      scaleTransitionTimeoutRef.current = window.setTimeout(() => {
-        root.classList.remove('ui-scale-transition');
-      }, 240);
-    }
-    set({ uiScale: value });
-  };
   const setAppearance = (patch) => {
     const run = () => flushSync(() => set(patch));
     if (typeof document !== 'undefined' && typeof document.startViewTransition === 'function') {
@@ -905,50 +914,6 @@ export default function Settings({ tutorialPreview = false }) {
             })}
           </div>
         </div>
-        <div className="border-t border-border" style={{ marginTop: px(16, scale, 11) }} />
-        <Row
-          scale={scale}
-          last
-          title="Tamaño de la interfaz"
-          desc="Ajusta el tamaño general de la UI"
-          right={
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setUiScale(Math.max(0.8, (s.uiScale || 1) - 0.05))}
-                className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                aria-label="Reducir escala"
-              >
-                <Minus style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
-              </button>
-              <input
-                type="range"
-                min={0.8}
-                max={1.2}
-                step={0.05}
-                value={s.uiScale || 1}
-                onChange={(e) => setUiScale(Number(e.target.value))}
-                aria-label="Tamaño de la interfaz"
-                className="rounded-full bg-muted accent-primary cursor-pointer"
-                style={{ width: px(160, scale, 110), height: px(6, scale, 4) }}
-              />
-              <button
-                type="button"
-                onClick={() => setUiScale(Math.min(1.2, (s.uiScale || 1) + 0.05))}
-                className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                aria-label="Aumentar escala"
-              >
-                <Plus style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
-              </button>
-              <span
-                className="text-muted-foreground text-center"
-                style={{ fontSize: px(14, scale, 12), minWidth: px(46, scale, 38) }}
-              >
-                {Math.round((s.uiScale || 1) * 100)}%
-              </span>
-            </div>
-          }
-        />
       </div>
     );
   } else if (section === 'biblioteca') {
@@ -1598,7 +1563,7 @@ export default function Settings({ tutorialPreview = false }) {
         />
         <Row
           scale={scale}
-          last
+          last={!isBrowserApp}
           title="Importar desde Mihon"
           desc="Fusiona mangas, categorías y progreso de lectura sin reemplazar tus datos de Cytlex"
           right={
@@ -1614,6 +1579,26 @@ export default function Settings({ tutorialPreview = false }) {
             </Button>
           }
         />
+        {isBrowserApp && (
+          <Row
+            scale={scale}
+            last
+            title="Restablecer datos de Cytlex"
+            desc="Borra la biblioteca, el progreso, los ajustes, las extensiones y la caché guardados en este navegador"
+            right={
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => setConfirmWebDataReset(true)}
+                disabled={webDataResetBusy}
+                style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+              >
+                <Trash2 className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                Restablecer
+              </Button>
+            }
+          />
+        )}
       </div>
     );
   } else {
@@ -1648,7 +1633,7 @@ export default function Settings({ tutorialPreview = false }) {
   }
 
   return (
-    <div ref={settingsRootRef} className="min-h-full flex flex-col">
+    <div className="min-h-full flex flex-col">
       <AnimatePresence initial={false}>
         {showDonate && (
           <motion.div
@@ -1794,6 +1779,35 @@ export default function Settings({ tutorialPreview = false }) {
             style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
             Permitir
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={confirmWebDataReset}
+        onClose={() => { if (!webDataResetBusy) setConfirmWebDataReset(false); }}
+        title="Restablecer datos de Cytlex"
+        description="Se borrarán permanentemente la biblioteca, las categorías, el progreso, los ajustes, las extensiones instaladas y las portadas guardadas en este navegador. La página se recargará y volverá a mostrar la introducción. Exporta un respaldo antes si quieres conservar tus datos."
+        hideDivider
+        bodyClassName="pb-6"
+        scrollableBody={false}
+        scale={scale}
+      >
+        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+          <Button
+            variant="outline"
+            onClick={() => setConfirmWebDataReset(false)}
+            disabled={webDataResetBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={resetWebData}
+            disabled={webDataResetBusy}
+            style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
+          >
+            {webDataResetBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Restableciendo</> : 'Borrar datos'}
           </Button>
         </div>
       </Dialog>

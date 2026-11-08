@@ -396,7 +396,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     );
   }
 
-  const coverSize = Math.round(160 * (settings.get().uiScale || 1));
+  const coverSize = 160;
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
   const catalogGapX = Math.max(12, Math.round(20 * scale));
   const catalogColumns = catalogWidth > 0 ? Math.max(1, Math.floor((catalogWidth + catalogGapX) / (cs + catalogGapX))) : 1;

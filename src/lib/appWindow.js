@@ -29,10 +29,15 @@ export const appWindow = {
     return window.cytlex.onMaximizedChange(cb);
   },
   canDownload() {
-    return typeof window !== 'undefined' && !!window.cytlex?.downloadImage;
+    return typeof window !== 'undefined';
   },
   async downloadImage(url, suggested) {
-    if (!this.canDownload()) return { ok: false, error: 'Descarga no disponible.' };
-    return window.cytlex.downloadImage({ url, suggested });
-  }
+    if (window.cytlex?.downloadImage) return window.cytlex.downloadImage({ url, suggested });
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = suggested || 'panel';
+    link.rel = 'noopener';
+    link.click();
+    return { ok: true };
+  },
 };

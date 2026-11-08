@@ -22,12 +22,11 @@ export default function Results() {
   const [groupOverride, setGroupOverride] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState('');
-  const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
+  const coverSize = 160;
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const scale = useScale();
 
   useEffect(() => settings.subscribe((s) => {
-    setCoverSize(Math.round(160 * (s.uiScale || 1)));
     setShowAdultExtensions(!!s.showAdultExtensions);
   }), []);
 

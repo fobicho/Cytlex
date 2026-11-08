@@ -239,12 +239,11 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const [sources, setSources] = useState(() => enabledSources(!!settings.get().showAdultExtensions));
   const [q, setQ] = useState(() => lastSearch.q);
   const [results, setResults] = useState(() => lastSearch.results);
-  const [coverSize, setCoverSize] = useState(() => Math.round(160 * (settings.get().uiScale || 1)));
+  const coverSize = 160;
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const scale = useScale();
 
   useEffect(() => settings.subscribe((s) => {
-    setCoverSize(Math.round(160 * (s.uiScale || 1)));
     setShowAdultExtensions(!!s.showAdultExtensions);
     setSources(enabledSources(!!s.showAdultExtensions));
   }), []);
