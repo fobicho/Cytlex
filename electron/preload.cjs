@@ -34,15 +34,6 @@ if (process.isMainFrame) contextBridge.exposeInMainWorld('cytlex', {
   isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
   close: () => ipcRenderer.invoke('window:close'),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
-  checkAppUpdate: () => ipcRenderer.invoke('app-update:check'),
-  downloadAppUpdate: () => ipcRenderer.invoke('app-update:download'),
-  installAppUpdate: () => ipcRenderer.invoke('app-update:install'),
-  deferAppUpdate: () => ipcRenderer.invoke('app-update:defer'),
-  onAppUpdate: (cb) => {
-    const handler = (_e, payload) => cb(payload);
-    ipcRenderer.on('app-update:status', handler);
-    return () => ipcRenderer.removeListener('app-update:status', handler);
-  },
   onMaximizedChange: (cb) => {
     const handler = (_e, value) => cb(value);
     ipcRenderer.on('window:maximized-changed', handler);

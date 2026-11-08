@@ -37,7 +37,6 @@
     "cheerio": "^1.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "electron-updater": "^6.6.2",
     "framer-motion": "^13.4.4",
     "lucide-react": "^1.48.0",
     "react": "^19.3.0",
@@ -49,12 +48,6 @@
   "build": {
     "appId": "com.fobicho.cytlex",
     "productName": "Cytlex",
-    "publish": {
-      "provider": "github",
-      "owner": "fobicho",
-      "repo": "Cytlex",
-      "releaseType": "release"
-    },
     "win": {
       "target": [
         "nsis"
