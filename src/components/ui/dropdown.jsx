@@ -111,7 +111,7 @@ export function Dropdown({
     >
       <div
         ref={listRef}
-        className="dd-scroll overflow-y-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/40 [&::-webkit-scrollbar-thumb:hover]:bg-primary/60"
+        className="dd-scroll overflow-y-auto"
         style={{
           maxHeight: portal && pos ? `${pos.maxHeight}px` : px(menuMaxHeight, sc, 200),
           padding: `${px(4, sc, 3)} ${px(4, sc, 3)} ${px(4, sc, 3)} ${px(4, sc, 3)}`

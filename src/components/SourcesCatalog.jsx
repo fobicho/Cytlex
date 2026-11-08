@@ -17,6 +17,97 @@ import { Input } from './ui/input.jsx';
 import { useScale, px } from '../lib/useScale.js';
 
 const CATALOG_BATCH_SIZE = 20;
+const GENRE_TRANSLATIONS = new Map([
+  ['+15', 'Clasificación +15'], ['+18', 'Clasificación +18'], ['+19', 'Clasificación +19'],
+  ['adaptation', 'Adaptación'], ['adaptación', 'Adaptación'],
+  ['action', 'Acción'], ['acción', 'Acción'],
+  ['adult cast', 'Reparto adulto'],
+  ['adult', 'Adulto'], ['adulto', 'Adulto'],
+  ['adventure', 'Aventura'], ['aventura', 'Aventura'],
+  ['age gap', 'Diferencia de edad'], ['diferencia de edad', 'Diferencia de edad'],
+  ['aliens', 'Alienígenas'], ['alienígenas', 'Alienígenas'],
+  ['animation', 'Animación'], ['animación', 'Animación'],
+  ['animals', 'Animales'], ['animales', 'Animales'],
+  ['anthology', 'Antología'], ['antología', 'Antología'],
+  ['anti-heroe', 'Antihéroe'], ['anti-hero', 'Antihéroe'], ['antihéroe', 'Antihéroe'],
+  ['apocalyptic', 'Apocalíptico'], ['apocalíptico', 'Apocalíptico'],
+  ['award winning', 'Premiados'], ['premiados', 'Premiados'],
+  ['bl', 'Boys Love'], ['bl (boys love)', 'Boys Love'],
+  ['boys love', 'Boys Love'], ['boyslove', 'Boys Love'],
+  ['martial arts', 'Artes Marciales'], ['artes marciales', 'Artes Marciales'],
+  ['comedy', 'Comedia'], ['comedia', 'Comedia'],
+  ['cooking', 'Cocina'], ['cocina', 'Cocina'],
+  ['crime', 'Crimen'], ['crimen', 'Crimen'],
+  ['crossdressing', 'Travestismo'], ['travestismo', 'Travestismo'],
+  ['delinquents', 'Delincuentes'], ['delincuentes', 'Delincuentes'],
+  ['demons', 'Demonios'], ['demonios', 'Demonios'],
+  ['childcare', 'Cuidado infantil'], ['cuidado infantil', 'Cuidado infantil'],
+  ['army', 'Ejército'], ['ejercito', 'Ejército'], ['ejército', 'Ejército'],
+  ['erotica', 'Erótica'], ['erótica', 'Erótica'],
+  ['era', 'Época'], ['epoca', 'Época'], ['época', 'Época'],
+  ['ghosts', 'Fantasmas'], ['fantasmas', 'Fantasmas'],
+  ['fantasy', 'Fantasía'], ['fantasía', 'Fantasía'],
+  ['fiction', 'Ficción'], ['ficcion', 'Ficción'], ['ficción', 'Ficción'],
+  ['gag humor', 'Humor absurdo'], ['girls love', 'Girls Love'],
+  ['gender bender', 'Cambio de género'], ['cambio de género', 'Cambio de género'],
+  ['género bender', 'Cambio de género'],
+  ['historical', 'Histórico'], ['histórico', 'Histórico'],
+  ['history', 'Historia'], ['historia', 'Historia'],
+  ['incest', 'Incesto'], ['incesto', 'Incesto'],
+  ['long strip', 'Tira larga'], ['tira larga', 'Tira larga'],
+  ['magical girls', 'Chicas mágicas'], ['chicas mágicas', 'Chicas mágicas'],
+  ['military', 'Militar'], ['militar', 'Militar'],
+  ['monsters', 'Monstruos'], ['monstruos', 'Monstruos'],
+  ['music', 'Música'], ['música', 'Música'],
+  ['mythology', 'Mitología'], ['mitología', 'Mitología'],
+  ['horror', 'Terror'], ['terror', 'Terror'],
+  ['magic', 'Magia'], ['magia', 'Magia'],
+  ['mystery', 'Misterio'], ['misterio', 'Misterio'],
+  ['office', 'Oficina'], ['oficina', 'Oficina'],
+  ['office workers', 'Trabajadores de oficina'], ['trabajadores de oficina', 'Trabajadores de oficina'],
+  ['police', 'Policial'], ['policial', 'Policial'],
+  ['post-apocalyptic', 'Postapocalíptico'], ['postapocalíptico', 'Postapocalíptico'],
+  ['psychological', 'Psicológico'], ['psicológico', 'Psicológico'],
+  ['reincarnation', 'Reencarnación'], ['reencarnación', 'Reencarnación'],
+  ['science fiction', 'Ciencia ficción'], ['sci-fi', 'Ciencia ficción'], ['ciencia ficción', 'Ciencia ficción'],
+  ['school', 'Escolar'], ['escolar', 'Escolar'],
+  ['school life', 'Vida escolar'], ['vida escolar', 'Vida escolar'],
+  ['sexual violence', 'Violencia sexual'], ['violencia sexual', 'Violencia sexual'],
+  ['showbiz', 'Espectáculo'], ['espectáculo', 'Espectáculo'],
+  ['slice of life', 'Vida cotidiana'], ['vida cotidiana', 'Vida cotidiana'],
+  ['shonen', 'Shōnen'], ['shounen', 'Shōnen'], ['shōnen', 'Shōnen'],
+  ['shoujo', 'Shōjo'], ['shōjo', 'Shōjo'],
+  ['shonen-ai', 'Shōnen-ai'], ['shounen ai', 'Shōnen-ai'], ['shonen-ai (yaoi soft)', 'Shōnen-ai'],
+  ['sports', 'Deportes'], ['deporte', 'Deportes'], ['deportes', 'Deportes'], ['team sports', 'Deportes de equipo'],
+  ['superhero', 'Superhéroes'], ['superhéroes', 'Superhéroes'],
+  ['super natural', 'Sobrenatural'], ['supernatural', 'Sobrenatural'], ['sobre natural', 'Sobrenatural'], ['sobrenatural', 'Sobrenatural'],
+  ['survival', 'Supervivencia'], ['supervivencia', 'Supervivencia'],
+  ['time travel', 'Viaje en el tiempo'], ['viaje en el tiempo', 'Viaje en el tiempo'],
+  ['tragedy', 'Tragedia'], ['tragedia', 'Tragedia'],
+  ['traps', 'Trampas'], ['trampas', 'Trampas'],
+  ['vampire', 'Vampiros'], ['vampires', 'Vampiros'], ['vampiros', 'Vampiros'],
+  ['video game', 'Videojuegos'], ['video games', 'Videojuegos'], ['videojuego', 'Videojuegos'], ['videojuegos', 'Videojuegos'],
+  ['villainess', 'Villana'], ['villana', 'Villana'],
+  ['virtual reality', 'Realidad virtual'], ['realidad virtual', 'Realidad virtual'],
+  ['workplace', 'Trabajo'], ['trabajo', 'Trabajo'],
+  ['yaoi (soft)', 'Yaoi suave'], ['zombies', 'Zombis'], ['zombis', 'Zombis']
+].map(([label, translated]) => [normalizeGenreLabel(label), translated]));
+
+function normalizeGenreLabel(label) {
+  return String(label || '').trim().toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function uniqueSortedGenres(options) {
+  const unique = new Map();
+  for (const option of options || []) {
+    const label = String(option?.label || '').trim();
+    const canonicalLabel = GENRE_TRANSLATIONS.get(normalizeGenreLabel(label)) || label;
+    const key = normalizeGenreLabel(canonicalLabel);
+    if (!option?.value || !key) continue;
+    if (!unique.has(key)) unique.set(key, { ...option, label: canonicalLabel });
+  }
+  return [...unique.values()].sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }));
+}
 
 async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingItems = [], apiHasMore = true, requestId }) {
   const batch = [];
@@ -330,7 +421,12 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     loadCatalog(sourceId, { q: '', ...(sourceId === 'leercapitulo' ? { sort: loadedParams.sort || 'az' } : {}) });
   };
   const leercapituloSort = loadedParams.sort === 'za' ? 'za' : 'az';
-  const genreFilter = sourceId === 'leercapitulo' ? filters.find((filter) => filter.id === 'genre') : null;
+  const displayFilters = useMemo(() => filters.map((filter) => {
+    const isSourceGenreFilter = sourceId === 'leercapitulo' && filter.id === 'genre'
+      || sourceId === 'zonatmo' && ['gender', 'excludeGender'].includes(filter.id);
+    return isSourceGenreFilter ? { ...filter, options: uniqueSortedGenres(filter.options) } : filter;
+  }), [filters, sourceId]);
+  const genreFilter = sourceId === 'leercapitulo' ? displayFilters.find((filter) => filter.id === 'genre') : null;
   const filterGroups = useMemo(() => {
     const groupFor = (filter) => {
       if (filter.group) return filter.group;
@@ -342,13 +438,13 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     };
     return Object.fromEntries(['primary', 'genres', 'sorting', 'other'].map((group) => [
       group,
-      filters.filter((filter) => groupFor(filter) === group)
+      displayFilters.filter((filter) => groupFor(filter) === group)
     ]));
-  }, [filters, sourceId]);
+  }, [displayFilters, sourceId]);
 
   const renderFilter = (filter) => (
-    <div key={filter.id} className="flex min-w-0 flex-col text-muted-foreground" style={{ gap: px(5, scale, 4), fontSize: px(12, scale, 10) }}>
-      <span className="truncate">{filter.label}</span>
+    <div key={filter.id} className={`flex min-w-0 flex-col text-muted-foreground ${sourceId === 'zonatmo' && filter.id === 'author' ? 'sm:col-span-2' : ''}`} style={{ gap: px(5, scale, 4), fontSize: px(12, scale, 10) }}>
+      <span className="leading-tight">{filter.label}</span>
       {filter.type === 'text' ? (
         <Input
           value={filterValues[filter.id] ?? filter.defaultValue ?? ''}
@@ -508,8 +604,6 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                       ariaLabel="Filtrar por género"
                       placeholder="Género"
                       menuMaxHeight={288}
-                      menuWidth={190}
-                      portal
                       buttonClassName="rounded-md border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80"
                       buttonStyle={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
                       style={{ width: px(190, scale, 160) }}
@@ -541,7 +635,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                   >
                     <div className="grid grid-cols-1 items-start" style={{ gap: px(14, scale, 10) }}>
                       {filterGroups.primary.length > 0 && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5" style={{ gap: px(12, scale, 9) }}>
+                        <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: px(12, scale, 9) }}>
                           {filterGroups.primary.map(renderFilter)}
                         </div>
                       )}

@@ -9,6 +9,30 @@ export default function createSource({ fetchText, parse }) {
   const text = (el, sel) => (el.querySelector(sel)?.textContent || '').replace(/\s+/g, ' ').trim();
   const typeOf = (url) => (String(url || '').match(/\/library\/([^/]+)\//) || [])[1] || '';
 
+  function imageUrl(el) {
+    if (!el) return '';
+    const lazySrcset = el.getAttribute('data-srcset') || '';
+    const lazyCandidates = lazySrcset.split(',').map((part) => part.trim().split(/\s+/)[0]).filter(Boolean);
+    if (lazyCandidates.length) return lazyCandidates.at(-1);
+
+    const attrs = ['data-src', 'data-lazy-src', 'data-original', 'data-url', 'data-bg', 'src'];
+    for (const attr of attrs) {
+      let value = el.getAttribute(attr) || '';
+      if (attr === 'data-bg') value = value.match(/url\(["']?(.*?)["']?\)/i)?.[1] || value;
+      value = value.trim();
+      if (value && !/^(?:data:|blob:|#)/i.test(value) && !/(?:default|placeholder|no-image)\.gif(?:$|[?#])/i.test(value)) return value;
+    }
+    const srcset = el.getAttribute('data-srcset') || el.getAttribute('srcset') || '';
+    const candidates = srcset.split(',').map((part) => part.trim().split(/\s+/)[0]).filter(Boolean);
+    return candidates.at(-1) || '';
+  }
+
+  function coverUrl(root) {
+    const image = root?.querySelector('img.cover-bg-img, img[data-src], img[data-lazy-src], img[data-original], img')
+      || root?.querySelector('.lazy-cover, [data-bg]');
+    return imageUrl(image);
+  }
+
   const READABLE = new Set(['manga', 'manhwa', 'manhua']);
 
   const caps = (el) => (el?.textContent || '').match(/([\d.,]+)\s*cap/i)?.[1] || '';
@@ -19,8 +43,7 @@ export default function createSource({ fetchText, parse }) {
         const a = el.querySelector('a[href*="/library/"]');
         const url = abs(a?.getAttribute('href'));
         if (!url || !READABLE.has(typeOf(url))) return null;
-        const img = el.querySelector('img.cover-bg-img');
-        const cover = img?.getAttribute('src') || el.querySelector('.lazy-cover')?.getAttribute('data-bg');
+        const cover = coverUrl(el);
         return {
           url,
           title: text(el, '.thumbnail-title h4'),
@@ -139,9 +162,12 @@ export default function createSource({ fetchText, parse }) {
       .filter(Boolean)
       .sort((x, y) => (Number.isNaN(x.num) ? 1 : Number.isNaN(y.num) ? -1 : x.num - y.num));
 
+    const coverElement = doc.querySelector('.book-thumbnail');
+    const coverImage = coverElement?.matches('img') ? coverElement : coverElement?.querySelector('img') || coverElement;
+
     return {
       title,
-      cover: abs(doc.querySelector('img.book-thumbnail')?.getAttribute('src')),
+      cover: abs(imageUrl(coverImage)),
       altTitles,
       genres,
       facts: { estado: status, status, tipo: text(doc, 'h1.book-type'), autor: author, vistas: '' },
