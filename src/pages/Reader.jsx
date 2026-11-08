@@ -10,13 +10,14 @@ import { tracking } from '../lib/tracking.js';
 import { detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
+import { browserImageUrl } from '../lib/browserHttp.js';
 import { Button } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 
-function ReaderPanel({ id, src, alt, loading = 'eager', imageClassName, imageStyle, wrapperClassName, wrapperStyle, onContextMenu, onLoaded, onFailed }) {
+function ReaderPanel({ id, src, alt, loading = 'eager', imageReferer, imageClassName, imageStyle, wrapperClassName, wrapperStyle, onContextMenu, onLoaded, onFailed }) {
   const [status, setStatus] = useState('loading');
   const [attempt, setAttempt] = useState(0);
   const autoRetried = useRef(false);
@@ -68,7 +69,7 @@ function ReaderPanel({ id, src, alt, loading = 'eager', imageClassName, imageSty
       )}
       <img
         key={attempt}
-        src={src}
+        src={browserImageUrl(src, imageReferer)}
         alt={alt}
         loading={loading}
         draggable={false}
@@ -499,7 +500,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         img.onload = () => finish(true);
         img.onerror = () => finish(false);
         active.set(img, timeout);
-        img.src = src;
+        img.src = browserImageUrl(src, ch.imageReferer);
       }
     };
     pump();
@@ -874,6 +875,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
               id={`pg-${i}`}
               src={src}
               alt={`Página ${i + 1}`}
+              imageReferer={ch.imageReferer}
               loading="lazy"
               onContextMenu={(e) => openPanelMenu(e, src, `Página ${i + 1}`)}
               onLoaded={(e) => {
@@ -993,6 +995,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                        key={`${chReload}:${idx}`}
                        src={src}
                        alt={`Página ${idx + 1}`}
+                       imageReferer={ch.imageReferer}
                        onContextMenu={(e) => openPanelMenu(e, src, `Página ${idx + 1}`)}
                        onLoaded={(e) => {
                          remember(src, e.currentTarget);
@@ -1015,6 +1018,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                 key={`${chReload}:${page}`}
                 src={ch.pages[page]}
                 alt={`Página ${page + 1}`}
+                imageReferer={ch.imageReferer}
                 onContextMenu={(e) => openPanelMenu(e, ch.pages[page], `Página ${page + 1}`)}
                 onLoaded={(e) => {
                   remember(ch.pages[page], e.currentTarget);

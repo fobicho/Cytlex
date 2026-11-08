@@ -46,7 +46,8 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
   const aniLocal = anilistCoverOn ? (t?.coverLocal || '') : '';
   const aniCover = anilistCoverOn ? (t?.cover || '') : '';
   const preferredCover = unavailable ? unavailableCachedCover || m.cover : aniLocal || aniCover || cachedCover || localCover || m.cover;
-  const proxyCover = requiresImageProxy(preferredCover);
+  const hasElectronImageProxy = typeof window !== 'undefined' && !!window.cytlex?.fetchImage;
+  const proxyCover = requiresImageProxy(preferredCover) && hasElectronImageProxy;
   const coverRef = useRef(null);
   const [coverState, setCoverState] = useState(() => {
     const cached = unavailable ? unavailableCachedCover : getLibraryCover(preferredCover);
@@ -158,7 +159,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
               fetchPriority={from === 'biblioteca' || useLibraryCoverCache ? 'high' : undefined}
               src={src}
               alt={m.title}
-              referrerPolicy="no-referrer"
+              referrerPolicy={hasElectronImageProxy ? 'no-referrer' : undefined}
               onLoad={() => {
                 loadedCoverKey.current = preferredCover;
                 if (from === 'biblioteca' || useLibraryCoverCache) {

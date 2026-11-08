@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, Component } from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar.jsx';
+import BrowserMobileNav from './components/BrowserMobileNav.jsx';
 import TitleBar from './components/TitleBar.jsx';
 import Library from './pages/Library.jsx';
 import Catalog from './pages/Catalog.jsx';
@@ -129,6 +130,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   const navigate = useNavigate();
   const previousLocation = useRef(location);
   const isReader = location.pathname.startsWith('/leer');
+  const isElectronApp = typeof window !== 'undefined' && !!window.cytlex;
   const isMangaPage = location.pathname.startsWith('/manga');
   const isExplorePage = location.pathname === '/explorar';
   const currentDetailOrigin = isMangaPage ? detailOrigin(location) : '';
@@ -376,15 +378,17 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   };
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden" data-extension-metadata-revision={extensionMetadataRevision}>
-      {!isFullscreen && <div inert={tutorialMode}><TitleBar /></div>}
-      <div className="flex flex-1 overflow-hidden">
-        {!isReader && <Sidebar tutorialNavOnly={tutorialMode} />}
-        <div className="flex-1 flex flex-col overflow-hidden">
+    <div className={`app-shell flex flex-col overflow-hidden${isElectronApp ? '' : ' app-shell--web'}`} data-extension-metadata-revision={extensionMetadataRevision}>
+      {isElectronApp && !isFullscreen && <div inert={tutorialMode}><TitleBar /></div>}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {!isReader && <div className={isElectronApp ? 'flex shrink-0' : 'hidden shrink-0 md:flex'}><Sidebar tutorialNavOnly={tutorialMode} /></div>}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <main
             inert={tutorialMode}
-            className={isReader ? 'min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]' : 'flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]'}
-            style={isReader ? undefined : { padding: `${Math.max(16, Math.round(24 * scale))}px` }}
+            className={`min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]${isElectronApp ? '' : ` browser-main${isReader ? ' browser-main--reader' : ''}`}`}
+            style={isReader ? undefined : isElectronApp
+              ? { padding: `${Math.max(16, Math.round(24 * scale))}px` }
+              : { '--web-page-padding': `${Math.max(14, Math.round(24 * scale))}px` }}
           >
             <PageBoundary>
               {catalogLocation && (
@@ -430,6 +434,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
           </main>
         </div>
       </div>
+      {!isElectronApp && !isReader && <BrowserMobileNav />}
       <AnimatePresence>
         {quickSearchOpen && (
           <div

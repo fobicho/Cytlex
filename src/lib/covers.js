@@ -1,3 +1,5 @@
+import { fetchImage } from './browserHttp.js';
+
 const THUMB_WIDTH = 240;
 const SEARCH_THUMB_WIDTH = 320;
 const MAX_DATAURL = 120000;
@@ -101,6 +103,27 @@ function openLibraryCoverDb() {
     });
   }
   return libraryCoverDbPromise;
+}
+
+export async function clearPersistentLibraryCoverCache() {
+  const db = await openLibraryCoverDb();
+  db?.close();
+  libraryCoverDbPromise = null;
+
+  for (const value of libraryCoverCache.values()) {
+    if (typeof value === 'string' && value.startsWith('blob:')) URL.revokeObjectURL(value);
+  }
+  libraryCoverCache.clear();
+  loadedLibraryCovers.clear();
+  libraryCoverVersions.clear();
+
+  if (!globalThis.indexedDB) return;
+  await new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(LIBRARY_COVER_DB);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error || new Error('No se pudo borrar la caché de portadas.'));
+    request.onblocked = () => reject(new Error('Cierra otras pestañas de Cytlex e inténtalo de nuevo.'));
+  });
 }
 
 function idbRequest(request) {
@@ -214,7 +237,7 @@ export function getLibraryCover(url) {
 }
 
 export async function preloadLibraryCover(url) {
-  if (!url || typeof window === 'undefined' || !window.cytlex?.fetchImage) return '';
+  if (!url || typeof window === 'undefined') return '';
   const cached = libraryCoverCache.get(url);
   if (cached) {
     libraryCoverCache.delete(url);
@@ -233,7 +256,7 @@ export async function preloadLibraryCover(url) {
       acquired = true;
       let original = url;
       if (!url.startsWith('data:')) {
-        const fetched = await window.cytlex.fetchImage(url);
+        const fetched = await fetchImage(url);
         if (!fetched?.base64) return '';
         original = `data:${fetched.mime};base64,${fetched.base64}`;
       }
@@ -289,7 +312,7 @@ export function discardLibraryCover(url, objectUrl) {
 }
 
 export function preloadSearchCover(url) {
-  if (!url || typeof window === 'undefined' || !window.cytlex?.fetchImage) return Promise.resolve('');
+  if (!url || typeof window === 'undefined') return Promise.resolve('');
   const cached = searchCoverCache.get(url);
   if (cached) return Promise.resolve(cached);
 
@@ -335,9 +358,9 @@ export function preloadSearchCover(url) {
 }
 
 export async function makeCoverThumb(url, maxWidth = THUMB_WIDTH) {
-  if (typeof window === 'undefined' || !window.cytlex?.fetchImage || !url) return '';
+  if (typeof window === 'undefined' || !url) return '';
   try {
-    const fetched = await window.cytlex.fetchImage(url);
+    const fetched = await fetchImage(url);
     if (!fetched?.base64) return '';
 
     const blob = await (await fetch(`data:${fetched.mime};base64,${fetched.base64}`)).blob();

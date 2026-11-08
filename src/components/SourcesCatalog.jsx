@@ -410,7 +410,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     );
   }
 
-  const coverSize = Math.round(160 * (settings.get().uiScale || 1));
+  const coverSize = 160;
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
 
   if (!selected) {

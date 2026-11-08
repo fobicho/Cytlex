@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon, Minus, Plus, Check, LoaderCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon, Check, LoaderCircle } from 'lucide-react';
 import { THEMES, MODES } from '../lib/themes.js';
 import { resolveMode, settings } from '../lib/settings.js';
 import { cn } from '../lib/utils.js';
@@ -18,7 +18,7 @@ const STEPS = [
   },
   {
     title: 'Configura la apariencia',
-    body: 'Selecciona tus colores favoritos y la escala a la que quieras ver todo. Puedes cambiarlo cuando quieras en **Ajustes**.'
+    body: 'Selecciona tus colores favoritos. Puedes cambiarlos cuando quieras en **Ajustes**.'
   },
   {
     title: 'Repositorio de extensiones',
@@ -154,7 +154,6 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const isRepository = step === 3;
   const isReady = step === STEPS.length - 1;
   const progress = ((step + 1) / STEPS.length) * 100;
-  const uiScale = settings.get().uiScale || 1;
   const hasOfficialRepository = repoUrl === DEFAULT_EXTENSION_REPOSITORY;
   const hasOtherRepository = !!repoUrl && !hasOfficialRepository;
 
@@ -315,41 +314,6 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                         );
                       })}
                     </div>
-                  </div>
-                )}
-
-                {isTheme && (
-                  <div className="mt-4 flex items-center gap-2 rounded-xl border border-border bg-muted/30 px-4 py-2">
-                    <span className="shrink-0 text-sm font-medium">Tamaño de la interfaz</span>
-                    <button
-                      type="button"
-                      onClick={() => settings.set({ uiScale: Math.max(0.8, uiScale - 0.05) })}
-                      className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-                      aria-label="Reducir escala"
-                    >
-                      <Minus className="h-4 w-4" />
-                    </button>
-                    <input
-                      type="range"
-                      min={0.8}
-                      max={1.2}
-                      step={0.05}
-                      value={uiScale}
-                      onChange={(e) => settings.set({ uiScale: Number(e.target.value) })}
-                      aria-label="Tamaño de la interfaz"
-                      className="h-1.5 min-w-0 flex-1 cursor-pointer rounded-full bg-muted accent-primary"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => settings.set({ uiScale: Math.min(1.2, uiScale + 0.05) })}
-                      className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-                      aria-label="Aumentar escala"
-                    >
-                      <Plus className="h-4 w-4" />
-                    </button>
-                    <span className="min-w-10 text-right text-sm text-muted-foreground">
-                      {Math.round(uiScale * 100)}%
-                    </span>
                   </div>
                 )}
 

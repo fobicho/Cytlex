@@ -1,13 +1,16 @@
 {
   "name": "cytlex",
   "version": "0.1.0",
-  "description": "Cytlex — lector de manga de escritorio (Electron)",
+  "description": "Cytlex — biblioteca y lector de manga para escritorio y navegador",
   "main": "electron/main.js",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:web": "vite --host 0.0.0.0",
     "build": "vite build",
+    "build:web": "vite build",
     "preview": "vite preview",
+    "preview:web": "vite preview",
     "dev:electron": "node scripts/dev-electron.mjs",
     "eb:dev": "electron .",
     "dist": "vite build && electron-builder"

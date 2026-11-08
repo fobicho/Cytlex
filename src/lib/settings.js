@@ -23,7 +23,6 @@ const defaults = {
   adultContentRatings: CONTENT_WARNING_RATINGS,
   chaptersPerRow: 1,
   sidebarCollapsed: false,
-  uiScale: 1,
   extIndexUrl: '',
   anilistSynopsisLang: 'romaji',
   anilistCover: false,
@@ -38,7 +37,7 @@ const defaults = {
 
 function normalize(s) {
   let { theme, mode } = s;
-  const { showAdultManga, anilistClientSecret, anilistClientId, ...rest } = s;
+  const { showAdultManga, anilistClientSecret, anilistClientId, uiScale, ...rest } = s;
   rest.adultContentRatings = Array.isArray(rest.adultContentRatings)
     ? [...new Set(rest.adultContentRatings.map((rating) => String(rating).toUpperCase()).filter((rating) => CONTENT_WARNING_RATINGS.includes(rating)))]
     : [...CONTENT_WARNING_RATINGS];
@@ -72,11 +71,6 @@ function read() {
 
 let cache = read();
 
-function applyUiScale() {
-  const scale = Math.min(1.35, Math.max(0.78, (cache.uiScale || 1) * 0.95));
-  document.documentElement.style.setProperty('--ui-rem-size', `${16 * scale}px`);
-}
-
 export const settings = {
   get() { return { ...cache }; },
   set(patch) {
@@ -85,7 +79,6 @@ export const settings = {
     const applyDom = () => {
       if (patch.theme) document.documentElement.setAttribute('data-theme', cache.theme);
       if (patch.theme || patch.mode) document.documentElement.setAttribute('data-mode', resolveMode(cache.mode));
-      if (patch.uiScale !== undefined) applyUiScale();
     };
     applyDom();
     if ((patch.theme || patch.mode) && typeof window !== 'undefined' && window.cytlex?.saveTheme) {
@@ -102,8 +95,6 @@ export const settings = {
 };
 
 if (typeof window !== 'undefined') {
-  applyUiScale();
-
   window.addEventListener('pointerdown', (e) => {
     document.documentElement.style.setProperty('--vt-x', `${e.clientX}px`);
     document.documentElement.style.setProperty('--vt-y', `${e.clientY}px`);

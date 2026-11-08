@@ -1,0 +1,13 @@
+{
+  "name": "Cytlex — lector de manga",
+  "short_name": "Cytlex",
+  "description": "Biblioteca, catálogo y lector de manga.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f2f8f5",
+  "theme_color": "#f2f8f5",
+  "icons": [
+    { "src": "./logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
