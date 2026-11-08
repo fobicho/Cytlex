@@ -12,10 +12,12 @@ import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
 import SourcesCatalog from '../components/SourcesCatalog.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
 import { Button, buttonVariants } from '../components/ui/button.jsx';
+import { Dialog } from '../components/ui/dialog.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
+import { migrateSavedManga } from '../lib/mangaMigration.js';
 
 const TABS = [
   { id: 'mangas', label: 'Mangas' },
@@ -41,7 +43,7 @@ const sourceLangSubtitle = (manifest) => {
   return codes.map((c) => options.find((l) => l.code === c)?.label || c).join(' · ');
 };
 
-function SourceSection({ r, coverSize, scale = 1, first = false, animate = false, active = true }) {
+function SourceSection({ r, coverSize, scale = 1, first = false, animate = false, active = true, onMangaSelect, returnTo = '' }) {
   const trackRef = useRef(null);
   const mainRef = useRef(null);
   const [trackWidth, setTrackWidth] = useState(0);
@@ -173,7 +175,15 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
               className="shrink-0"
               style={{ scrollSnapAlign: 'start', width: cardWidth || 150 }}
             >
-              <MangaCard m={m} sourceId={r.id} from="explorar" coverSize={cardWidth} showAuthor={false} />
+              <MangaCard
+                m={m}
+                sourceId={r.id}
+                from="explorar"
+                returnTo={returnTo}
+                onSelect={onMangaSelect}
+                coverSize={cardWidth}
+                showAuthor={false}
+              />
             </div>
           ))}
         </div>
@@ -229,9 +239,14 @@ let sessionTab = 'mangas';
 let animateSearch = false;
 let activeSearchRun = 0;
 
-const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = false, active = true }) {
+const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = false, active = true, migrationInline = null }) {
   const loc = locationOverride;
   const navigate = useNavigate();
+  const searchParams = new URLSearchParams(loc.search);
+  const migrationFromUrl = searchParams.get('migrationFrom') || '';
+  const migrationFromSource = searchParams.get('migrationSource') || '';
+  const migrationSourceIds = (searchParams.get('migrationTargets') || '').split(',').filter(Boolean);
+  const migrationMode = !!(migrationFromUrl && migrationFromSource && migrationSourceIds.length);
   const [tab, setTab] = useState(() => {
     const t = new URLSearchParams(loc.search).get('tab');
     return t === 'mangas' || t === 'extensiones' || t === 'fuentes' ? t : sessionTab;
@@ -241,6 +256,9 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const [results, setResults] = useState(() => lastSearch.results);
   const [coverSize, setCoverSize] = useState(() => settings.get().coverSize);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
+  const [migrationSelection, setMigrationSelection] = useState(null);
+  const [migrationBusy, setMigrationBusy] = useState(false);
+  const [migrationError, setMigrationError] = useState('');
   const scale = useScale();
 
   useEffect(() => settings.subscribe((s) => {
@@ -273,9 +291,14 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     setSources(enabledSources(!!settings.get().showAdultExtensions));
   }, [tab]);
 
+  const catalogSources = migrationMode
+    ? extensions.sources().filter(({ manifest }) => migrationSourceIds.includes(manifest.id))
+    : sources;
   const searching = !!results && results.some((r) => r.status === 'loading');
   const completed = results ? results.filter((r) => r.status !== 'loading') : [];
-  const visibleCompleted = completed.filter((r) => isExtensionAllowed(r.manifest, showAdultExtensions));
+  const visibleCompleted = migrationMode
+    ? completed.filter((r) => migrationSourceIds.includes(r.id))
+    : completed.filter((r) => isExtensionAllowed(r.manifest, showAdultExtensions));
   const done = !!results && !searching;
 
   useEffect(() => { if (done) animateSearch = false; }, [done]);
@@ -287,7 +310,10 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
 
   const runSearch = (query = q) => {
     const adultExtensionsEnabled = !!settings.get().showAdultExtensions;
-    const list = enabledSources(adultExtensionsEnabled);
+    const migrationSources = new Set(migrationSourceIds);
+    const list = migrationMode
+      ? extensions.sources().filter(({ manifest }) => migrationSources.has(manifest.id))
+      : enabledSources(adultExtensionsEnabled);
     if (!list.length) return;
     scrollMemory.catalog = 0;
     const main = document.querySelector('main');
@@ -342,19 +368,55 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     });
   };
 
+  const openMangaDetail = (manga, sourceId) => {
+    const params = new URLSearchParams({ u: manga.url, s: sourceId, from: migrationInline?.origin || 'explorar' });
+    if (migrationMode) params.set('back', migrationInline?.returnTo || `/explorar?${loc.search.replace(/^\?/, '')}`);
+    setMigrationSelection(null);
+    setMigrationError('');
+    navigate(`/manga?${params.toString()}`);
+  };
+
+  const confirmMigration = async () => {
+    if (!migrationSelection || migrationBusy || !migrationFromUrl || !migrationFromSource) return;
+    setMigrationBusy(true);
+    setMigrationError('');
+    try {
+      const targetSourceId = migrationSelection.sourceId;
+      const [fromDetail, targetDetail] = await Promise.all([
+        api.detail(migrationFromUrl, migrationFromSource),
+        api.detail(migrationSelection.manga.url, targetSourceId)
+      ]);
+      if (!fromDetail || !targetDetail) throw new Error('No se pudieron cargar los detalles para migrar este manga.');
+      migrateSavedManga({
+        fromUrl: migrationFromUrl,
+        fromSourceId: migrationFromSource,
+        fromDetail,
+        targetUrl: migrationSelection.manga.url,
+        targetSourceId,
+        targetDetail
+      });
+      setMigrationSelection(null);
+      navigate(`/manga?${new URLSearchParams({ u: migrationSelection.manga.url, s: targetSourceId, from: migrationInline?.origin || 'biblioteca' })}`);
+    } catch (error) {
+      setMigrationError(String(error?.message || error));
+    } finally {
+      setMigrationBusy(false);
+    }
+  };
+
   useEffect(() => {
-    if (tab === 'mangas' && results && (
+    if (!migrationMode && tab === 'mangas' && results && (
       lastSearch.adultExtensionsEnabled !== showAdultExtensions
     )) {
       runSearch(lastSearch.q);
     }
-  }, [showAdultExtensions, tab]);
+  }, [showAdultExtensions, tab, migrationMode]);
 
   useEffect(() => {
-    if (tab !== 'fuentes' && lastSearch.results && lastSearch.results.some((r) => r.status === 'loading')) {
+    if (!migrationMode && tab !== 'fuentes' && lastSearch.results && lastSearch.results.some((r) => r.status === 'loading')) {
       runSearch(lastSearch.q);
     }
-  }, []);
+  }, [migrationMode]);
 
   useEffect(() => {
     const t = new URLSearchParams(loc.search).get('tab');
@@ -384,7 +446,18 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
         }}
       >
         <div className="flex items-center" style={{ gap: `${Math.max(16, Math.round(24 * scale))}px` }}>
-          {TABS.map((t) => {
+          {migrationInline ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="-ml-2 hover:bg-transparent hover:text-foreground"
+              onClick={migrationInline.onBack}
+              style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(8, scale, 6), paddingRight: px(8, scale, 6) }}
+            >
+              <ChevronLeft className="mr-1" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+              Volver
+            </Button>
+          ) : TABS.map((t) => {
             const active = tab === t.id;
             return (
               <button
@@ -403,6 +476,9 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                         params.delete('source');
                         params.delete('q');
                         params.delete('quick');
+                        params.delete('migrationFrom');
+                        params.delete('migrationSource');
+                        params.delete('migrationTargets');
                         navigate({ pathname: loc.pathname, search: `?${params}` }, { replace: true });
                       }
                     }
@@ -412,6 +488,14 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                       lastSearch.genre = '';
                       lastSearch.results = null;
                       setResults(null);
+                      if (migrationMode) {
+                        const params = new URLSearchParams(loc.search);
+                        params.delete('q');
+                        params.delete('migrationFrom');
+                        params.delete('migrationSource');
+                        params.delete('migrationTargets');
+                        navigate({ pathname: loc.pathname, search: `?${params}` }, { replace: true });
+                      }
                     }
                     main?.scrollTo({ top: 0, behavior: 'smooth' });
                     return;
@@ -422,6 +506,9 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                   params.delete('source');
                   params.delete('q');
                   params.delete('quick');
+                  params.delete('migrationFrom');
+                  params.delete('migrationSource');
+                  params.delete('migrationTargets');
                   navigate({ pathname: loc.pathname, search: `?${params}` }, { replace: true });
                 }}
                 className={cn(
@@ -480,7 +567,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
           />
         )}
 
-        {tab === 'mangas' && sources.length > 0 && (
+        {tab === 'mangas' && catalogSources.length > 0 && (
           <div className="ml-auto self-center flex items-center" style={{ gap: px(12, scale, 9) }}>
             <div className="relative w-full sm:w-auto" style={{ width: px(288, scale, 190) }}>
               <Search
@@ -493,7 +580,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
               />
               <Input
                 className="bg-muted/50 border-none"
-                placeholder="Buscar en todas las extensiones..."
+                placeholder={migrationMode ? 'Buscar en las extensiones seleccionadas...' : 'Buscar en todas las extensiones...'}
                 value={q}
                 onChange={(e) => { setQ(e.target.value); lastSearch.q = e.target.value; }}
                 onKeyDown={(e) => e.key === 'Enter' && q.trim() && runSearch()}
@@ -524,7 +611,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
       </div>
 
       {tab === 'mangas' ? (
-        sources.length === 0 ? (
+        catalogSources.length === 0 ? (
           <EmptyState
             face="（눈﹏눈）"
             title="No hay extensiones instaladas"
@@ -551,7 +638,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                   >
                     <Loader2 className="animate-spin text-muted-foreground" style={{ width: px(20, scale, 16), height: px(20, scale, 16) }} />
                     <p className="text-sm text-muted-foreground">
-                      Buscando en {sources.length} {sources.length === 1 ? 'extensión' : 'extensiones'}...
+                      Buscando en {catalogSources.length} {catalogSources.length === 1 ? 'extensión' : 'extensiones'}...
                     </p>
                   </div>
                 )}
@@ -563,7 +650,17 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                     description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para mostrarlas."
                   />
                 ) : visibleCompleted.map((r, i) => (
-                  <SourceSection key={r.id} r={r} coverSize={cs} scale={scale} first={i === 0} animate={animateSearch} active={active} />
+                  <SourceSection
+                    key={r.id}
+                    r={r}
+                    coverSize={cs}
+                    scale={scale}
+                    first={i === 0}
+                    animate={animateSearch}
+                    active={active}
+                    onMangaSelect={migrationMode ? (manga, sourceId) => { setMigrationError(''); setMigrationSelection({ manga, sourceId }); } : undefined}
+                    returnTo={migrationMode ? migrationInline?.returnTo || `/explorar?${loc.search.replace(/^\?/, '')}` : ''}
+                  />
                 ))}
               </>
             )}
@@ -574,6 +671,48 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
       ) : (
         <SourcesCatalog sources={sources} initialSourceId={new URLSearchParams(loc.search).get('source') || ''} active={active} />
       )}
+
+      <Dialog
+        open={!!migrationSelection}
+        onClose={() => { if (!migrationBusy) { setMigrationSelection(null); setMigrationError(''); } }}
+        scale={scale}
+        dialogStyle={{ maxWidth: px(480, scale, 380) }}
+        title="Manga encontrado"
+        description="Confirma que es el manga que quieres migrar o abre su ficha para revisarlo."
+      >
+        {migrationSelection && (
+          <>
+            <div className="flex items-center border-b border-border" style={{ gap: px(14, scale, 10), paddingBottom: px(16, scale, 12) }}>
+              {migrationSelection.manga.cover ? (
+                <img src={migrationSelection.manga.cover} alt="" className="aspect-[5/7] shrink-0 rounded-lg object-cover" style={{ width: px(72, scale, 58) }} />
+              ) : <div className="aspect-[5/7] shrink-0 rounded-lg bg-muted" style={{ width: px(72, scale, 58) }} />}
+              <div className="min-w-0 flex-1">
+                <div className="line-clamp-2 font-semibold" style={{ fontSize: px(17, scale, 14) }}>{migrationSelection.manga.title}</div>
+                {migrationSelection.manga.author && <div className="mt-1 truncate text-muted-foreground" style={{ fontSize: px(13, scale, 11) }}>{migrationSelection.manga.author}</div>}
+                <div className="mt-2"><SourceBadge m={extensions.manifest(migrationSelection.sourceId)} /></div>
+              </div>
+            </div>
+            {migrationError && <p role="alert" className="text-destructive" style={{ marginTop: px(12, scale, 9), fontSize: px(13, scale, 11) }}>{migrationError}</p>}
+            <div className="flex justify-end" style={{ gap: px(8, scale, 6), paddingTop: px(16, scale, 12) }}>
+              <Button
+                variant="secondary"
+                disabled={migrationBusy}
+                onClick={() => openMangaDetail(migrationSelection.manga, migrationSelection.sourceId)}
+                style={{ height: px(38, scale, 31), padding: `0 ${px(12, scale, 10)}`, fontSize: px(14, scale, 12) }}
+              >
+                Ver manga
+              </Button>
+              <Button
+                disabled={migrationBusy}
+                onClick={confirmMigration}
+                style={{ height: px(38, scale, 31), padding: `0 ${px(12, scale, 10)}`, fontSize: px(14, scale, 12) }}
+              >
+                {migrationBusy ? 'Migrando…' : 'Confirmar migración'}
+              </Button>
+            </div>
+          </>
+        )}
+      </Dialog>
     </div>
   );
 });

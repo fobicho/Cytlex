@@ -21,8 +21,8 @@ function prefetch(url, sourceId) {
   api.prefetchDetail(url, sourceId);
 }
 
-function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', coverSize, scale: uiScale = 1, chapterCount, useLibraryCoverCache = false }) {
-  const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}`;
+function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', returnTo = '', onSelect, coverSize, scale: uiScale = 1, chapterCount, useLibraryCoverCache = false }) {
+  const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}${returnTo ? `&back=${encodeURIComponent(returnTo)}` : ''}`;
   const sourceManifest = extensions.manifest(sourceId);
   const savedSourceName = String(m.sourceName || '');
   const manifestSourceName = String(sourceManifest.name || '');
@@ -120,6 +120,11 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
     const main = document.querySelector('main');
     if (main) sourceCatalogState.saveScroll(main.scrollTop);
   };
+  const handleSelect = (event) => {
+    if (!onSelect || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    onSelect(m, sourceId);
+  };
   useEffect(() => () => clearTimeout(hoverTimer.current), []);
   const box = coverSize ? { width: `${coverSize}px` } : { aspectRatio: '2 / 3' };
   const inner = coverSize ? 'h-full w-full object-cover block' : 'w-full h-full aspect-[2/3] object-cover block';
@@ -145,7 +150,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
         aria-label={m.title}
         title={m.title}
         className={linkCls}
-        onClick={from === 'fuentes' ? saveSourceScroll : undefined}
+        onClick={onSelect ? handleSelect : from === 'fuentes' ? saveSourceScroll : undefined}
         onMouseEnter={schedulePrefetch}
         onMouseLeave={cancelPrefetch}
         onFocus={schedulePrefetch}
@@ -250,7 +255,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
           style={titleStyle}
           href={detailHash}
           title={m.title}
-          onClick={from === 'fuentes' ? saveSourceScroll : undefined}
+          onClick={onSelect ? handleSelect : from === 'fuentes' ? saveSourceScroll : undefined}
           {...linkA11y}
         >
           {m.title}

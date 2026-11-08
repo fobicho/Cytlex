@@ -674,8 +674,17 @@
   animation: cx-update-pulse 1.8s ease-in-out infinite;
 }
 
+.cx-chapter-pulse {
+  animation: cx-update-pulse 1.8s ease-in-out 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cx-update-pulse {
+    animation: none;
+    border-color: hsl(var(--primary));
+  }
+
+  .cx-chapter-pulse {
     animation: none;
     border-color: hsl(var(--primary));
   }

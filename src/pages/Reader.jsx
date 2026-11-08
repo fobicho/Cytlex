@@ -44,16 +44,6 @@ function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageR
     return () => clearTimeout(timeout);
   }, [attempt, loading, src, status, usingFallback]);
 
-  const retryOrShowError = () => {
-    if (!autoRetried.current) {
-      autoRetried.current = true;
-      setAttempt((current) => current + 1);
-      return;
-    }
-    setStatus('error');
-    onFailed?.(src);
-  };
-
   return (
     <div id={id} className={cn('relative grid place-items-center', wrapperClassName)} style={wrapperStyle}>
       {status === 'loading' && (
@@ -87,7 +77,8 @@ function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageR
             setStatus('loading');
             return;
           }
-          retryOrShowError();
+          setStatus('error');
+          onFailed?.(src);
         }}
         className={cn(imageClassName, 'transition-opacity duration-150', status === 'loaded' ? 'opacity-100' : 'opacity-0')}
         style={imageStyle}
@@ -106,11 +97,13 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const adultExtensionDisabled = !isExtensionAllowed(extensions.manifest(sourceId), showAdultExtensions);
   const fromParam = params.get('from') || '';
   const fromQS = fromParam ? `&from=${encodeURIComponent(fromParam)}` : '';
+  const backHash = `#/manga?u=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}`;
+  const goBack = useCallback(() => {
+    detailScroll.requestRestore();
+    window.location.hash = backHash;
+  }, [backHash]);
   const [ch, setCh] = useState(null);
   const [chUrl, setChUrl] = useState('');
-  const [chReload, setChReload] = useState(0);
-  const reloadTimerRef = useRef(null);
-  const reloadCountRef = useRef(0);
   const [err, setErr] = useState('');
   const [mode, setMode] = useState(() => {
     try {
@@ -289,7 +282,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   useEffect(() => () => {
     clearTimeout(barTimer.current);
     clearTimeout(hideTimer.current);
-    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
     if (zoomResetFrame.current) cancelAnimationFrame(zoomResetFrame.current);
   }, []);
 
@@ -302,25 +294,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const remember = (src, img) => {
     if (src && img.naturalWidth) sizesRef.current.set(src, { w: img.naturalWidth, h: img.naturalHeight });
   };
-
-  const scheduleReload = () => {
-    if (reloadTimerRef.current || reloadCountRef.current >= 3) return;
-    reloadTimerRef.current = setTimeout(() => {
-      reloadTimerRef.current = null;
-      reloadCountRef.current += 1;
-      setChReload((n) => n + 1);
-    }, 2000);
-  };
-
-  useEffect(() => {
-    if (!chReload || !chapterUrl) return undefined;
-    let active = true;
-    setPgLoaded(false);
-    api.chapter(chapterUrl, sourceId, { fresh: true })
-      .then((r) => { if (active && chUrl === chapterUrl) setCh(r); })
-      .catch(() => {});
-    return () => { active = false; };
-  }, [chReload]);
 
   const scrollToTop = () => {
     const main = document.querySelector('main');
@@ -347,9 +320,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     setNat(null);
     setCh(null);
     setChUrl('');
-    setChReload(0);
-    reloadCountRef.current = 0;
-    if (reloadTimerRef.current) { clearTimeout(reloadTimerRef.current); reloadTimerRef.current = null; }
     pendingScrollRef.current = null;
     api
       .chapter(chapterUrl, sourceId)
@@ -481,6 +451,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     for (let index = start; index >= 0 && index < ch.pages.length; index += direction) {
       const src = ch.pages[index];
       if (src && !sizesRef.current.has(src)) queue.push(src);
+      if (queue.length === 2) break;
     }
 
     let cancelled = false;
@@ -649,6 +620,13 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
 
   useEffect(() => {
     const onKey = (e) => {
+      if (e.key === 'Escape') {
+        if (!chapterUrl) return;
+        if (menu || document.querySelector('[aria-haspopup="listbox"][aria-expanded="true"]')) return;
+        e.preventDefault();
+        goBack();
+        return;
+      }
       if (!ch) return;
       const rtl = mode === 'paginado-rtl';
       const step = useDouble ? 2 : 1;
@@ -664,7 +642,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mode, ch, page, useDouble]);
+  }, [mode, ch, page, useDouble, chapterUrl, menu, goBack]);
 
   useEffect(() => {
     if (!menu) return undefined;
@@ -685,12 +663,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     const id = setTimeout(() => setToast(''), 2600);
     return () => clearTimeout(id);
   }, [toast]);
-
-  const backHash = `#/manga?u=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}`;
-  const goBack = () => {
-    detailScroll.requestRestore();
-    window.location.hash = backHash;
-  };
 
   if (adultExtensionDisabled)
     return (
@@ -1019,7 +991,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                    if (!src) return null;
                    return (
                      <ReaderPanel
-                       key={`${chReload}:${idx}`}
+                       key={idx}
                        src={src}
                        fallbackSrc={ch.pageFallbacks?.[idx]}
                        alt={`Página ${idx + 1}`}
@@ -1032,7 +1004,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                            setPgLoaded(true);
                          }
                        }}
-                       onFailed={() => { if (idx === page) { setPgLoaded(true); scheduleReload(); } }}
+                       onFailed={() => { if (idx === page) setPgLoaded(true); }}
                        wrapperClassName={cn('grid-rows-[minmax(0,1fr)] h-full min-h-0 min-w-0 flex-1', idx === indices[indices.length - 1] && 'translate-x-[6px]')}
                        imageClassName={cn('block object-contain max-w-full', mode !== 'vertical' && wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                        imageStyle={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto' }}
@@ -1043,7 +1015,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
              </div>
            ) : (
               <ReaderPanel
-                key={`${chReload}:${page}`}
+                key={page}
                 src={ch.pages[page]}
                 fallbackSrc={ch.pageFallbacks?.[page]}
                 alt={`Página ${page + 1}`}
@@ -1056,7 +1028,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                   }
                   setPgLoaded(true);
                 }}
-                onFailed={() => { setPgLoaded(true); scheduleReload(); }}
+                onFailed={() => setPgLoaded(true)}
                 wrapperClassName="grid-rows-[minmax(0,1fr)] h-full min-h-0 w-full"
                 imageClassName={cn('block max-w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                 imageStyle={{ ...pageStyle, maxHeight: '100%', height: 'auto' }}

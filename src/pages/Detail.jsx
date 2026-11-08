@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Link2 } from 'lucide-react';
+import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Link2, ArrowRightLeft, Crosshair } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
@@ -9,6 +9,7 @@ import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
+import { reconcileChapterProgress } from '../lib/mangaMigration.js';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 import { Button } from '../components/ui/button.jsx';
@@ -20,42 +21,12 @@ import { Dropdown } from '../components/ui/dropdown.jsx';
 import AniListPanel from '../components/AniListPanel.jsx';
 import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
-
-const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
-
-function reconcileChapterProgress(previousChapters, nextChapters, sourceId, mangaUrl) {
-  if (!Array.isArray(previousChapters) || !Array.isArray(nextChapters)) return;
-  const indexUniqueTitles = (chapters) => {
-    const grouped = new Map();
-    chapters.forEach((chapter) => {
-      const title = norm(chapter.title || chapter.name).normalize('NFKC').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      if (!title || !chapter.url) return;
-      const matches = grouped.get(title) || [];
-      matches.push(chapter);
-      grouped.set(title, matches);
-    });
-    return new Map([...grouped].filter(([, matches]) => matches.length === 1).map(([title, [chapter]]) => [title, chapter]));
-  };
-  const previousByTitle = indexUniqueTitles(previousChapters);
-  const nextByTitle = indexUniqueTitles(nextChapters);
-  const readUrls = [];
-
-  previousByTitle.forEach((previous, title) => {
-    const next = nextByTitle.get(title);
-    if (!next || next.url === previous.url) return;
-    const previousProgress = progress.get(previous.url, sourceId);
-    const nextProgress = progress.get(next.url, sourceId);
-    if (previousProgress?.read && !nextProgress?.read) readUrls.push(next.url);
-    else if (!nextProgress && Number.isInteger(previousProgress?.page) && previousProgress.page > 0) {
-      progress.savePage(next.url, sourceId, previousProgress.page, previousProgress.total || 0);
-    }
-  });
-
-  if (readUrls.length) progress.markMany(readUrls, sourceId, null, mangaUrl);
-}
+import Catalog from './Catalog.jsx';
 
 const EXPAND_CTRL_H = 16;
 const COVER_BASE = 184;
+const norm = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
 function SourceLine({ sourceId, scale }) {
   const m = extensions.manifest(sourceId);
   const [ok, setOk] = useState(true);
@@ -70,6 +41,35 @@ function SourceLine({ sourceId, scale }) {
       </span>
       <span className="flex items-center self-stretch">{m.name}</span>
     </span>
+  );
+}
+
+function ExtensionChoice({ manifest, current, checked, onChange, scale }) {
+  const [logoUnavailable, setLogoUnavailable] = useState(false);
+  return (
+    <label className={cn(
+      'flex items-center rounded-lg border border-border px-3 py-2.5',
+      current ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-accent/50',
+      checked && !current && 'bg-accent/40'
+    )} style={{ gap: px(12, scale, 9), minHeight: px(56, scale, 46) }}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={current}
+        onChange={onChange}
+        aria-label={current ? `${manifest.name}, fuente actual` : `Buscar en ${manifest.name}`}
+        style={{ accentColor: 'hsl(var(--primary))', width: px(16, scale, 13), height: px(16, scale, 13), flexShrink: 0 }}
+      />
+      <span className="grid shrink-0 place-items-center overflow-hidden rounded-md bg-secondary text-secondary-foreground font-semibold" style={{ width: px(36, scale, 30), height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
+        {manifest.icon && !logoUnavailable
+          ? <img src={manifest.icon} alt="" className="h-full w-full object-cover" onError={() => setLogoUnavailable(true)} />
+          : (manifest.name?.[0] || '?').toUpperCase()}
+      </span>
+      <span className="min-w-0 flex-1 truncate font-medium" style={{ fontSize: px(14, scale, 12) }}>{manifest.name}</span>
+      <span className="shrink-0 text-muted-foreground" style={{ fontSize: px(12, scale, 10) }}>
+        {current ? 'Fuente actual' : ''}
+      </span>
+    </label>
   );
 }
 
@@ -112,6 +112,8 @@ function querySourceId(loc) {
 
 function backToFor(loc) {
   const params = new URLSearchParams(loc.search);
+  const back = params.get('back');
+  if (back?.startsWith('/explorar?') || back?.startsWith('/manga?')) return back;
   const from = params.get('from');
   if (from === 'resultados') return `/resultados?s=${encodeURIComponent(params.get('s') || 'leercapitulo')}`;
   if (from === 'fuentes') return `/explorar?tab=fuentes&source=${encodeURIComponent(params.get('s') || '')}`;
@@ -126,6 +128,23 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const sourceManifest = extensions.manifest(sourceId);
   const backTo = backToFor(loc);
   const fromParam = new URLSearchParams(loc.search).get('from') || 'biblioteca';
+  const routeParams = new URLSearchParams(loc.search);
+  const migrationSearchMode = routeParams.get('migrationSearch') === '1';
+  const migrationSearchTargets = (routeParams.get('migrationTargets') || '').split(',').filter(Boolean);
+  const migrationSearchQuery = routeParams.get('migrationQuery') || '';
+  const migrationSearchRoute = `${loc.pathname}${loc.search}`;
+  const migrationReturnParams = new URLSearchParams(loc.search);
+  migrationReturnParams.delete('migrationSearch');
+  migrationReturnParams.delete('migrationTargets');
+  migrationReturnParams.delete('migrationQuery');
+  const migrationReturnTo = `${loc.pathname}?${migrationReturnParams}`;
+  const migrationCatalogParams = new URLSearchParams({
+    tab: 'mangas',
+    q: migrationSearchQuery,
+    migrationFrom: mangaUrl,
+    migrationSource: sourceId,
+    migrationTargets: migrationSearchTargets.join(',')
+  });
   useEffect(() => {
     if (fromParam === 'fuentes') sourceCatalogState.requestRestore();
   }, [fromParam]);
@@ -157,7 +176,14 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     const v = settings.get().chaptersPerRow;
     return [1, 2, 3].includes(v) ? v : 1;
   });
+  const chapterWindowKey = [detailKey, groupFilter, chapterSort, asc, chaptersPerRow].join('|');
+  const [chapterWindow, setChapterWindow] = useState({ key: '', count: 0 });
+  const initialChapterCount = (d?.chapters?.length || 0) >= 500
+    ? Math.ceil(d.chapters.length / 2)
+    : (d?.chapters?.length || 0);
+  const visibleChapterCount = chapterWindow.key === chapterWindowKey ? chapterWindow.count : initialChapterCount;
   const [dup, setDup] = useState(null);
+  const [migration, setMigration] = useState(null);
   const [catPick, setCatPick] = useState(null);
   const catMenuRef = useRef(null);
   const coverRef = useRef(null);
@@ -170,11 +196,21 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const [, setProgressTick] = useState(0);
   const [coverTick, setCoverTick] = useState(0);
   const [markBefore, setMarkBefore] = useState(null);
+  const [pendingChapterJump, setPendingChapterJump] = useState('');
+  const [highlightedChapter, setHighlightedChapter] = useState('');
+  const chapterRefs = useRef(new Map());
+  const chapterHighlightTimer = useRef(null);
+  const chapterJumpContext = useRef(null);
   const [aniListOpen, setAniListOpen] = useState(false);
   const [aniLinked, setAniLinked] = useState(() => !!tracking.get(mangaUrl, sourceId));
   const [anilistCover, setAnilistCover] = useState(() => !!settings.get().anilistCover);
+
   const scale = useScale();
   const coverSize = Math.round(COVER_BASE * scale);
+  const installedExtensions = extensions.sources()
+    .map(({ manifest }) => manifest)
+    .filter((manifest, index, sources) => sources.findIndex((source) => source.id === manifest.id) === index);
+  const migrationTargets = installedExtensions.filter((manifest) => manifest.id !== sourceId);
 
   const knownCover = useMemo(() => {
     const fav = lib.fav(mangaUrl, sourceId);
@@ -292,7 +328,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
 
   useEffect(() => {
     const main = document.querySelector('main');
-    if (!main || !active || !activeRef.current) return undefined;
+    if (migrationSearchMode || !main || !active || !activeRef.current) return undefined;
 
     const requestedRestore = detailScroll.takeRestore(mangaUrl);
     const saved = requestedRestore;
@@ -330,13 +366,14 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       cover?.removeEventListener('load', apply);
       main.removeEventListener('scroll', save);
     };
-  }, [active, mangaUrl, d?.chapters?.length]);
+  }, [active, mangaUrl, d?.chapters?.length, migrationSearchMode]);
   useEffect(
     () => tracking.subscribe(() => setAniLinked(!!tracking.get(mangaUrl, sourceId))),
     [mangaUrl, sourceId]
   );
 
   useEffect(() => {
+    if (migrationSearchMode) return undefined;
     if (!mangaUrl) return undefined;
     if (!extensions.isInstalled(sourceId)) return undefined;
     setErr('');
@@ -355,7 +392,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       .detail(mangaUrl, sourceId)
       .then((r) => {
         if (!alive) return;
-        if (cached && cached !== r) reconcileChapterProgress(cached.chapters, r?.chapters, sourceId, mangaUrl);
+        if (cached && cached !== r) reconcileChapterProgress(cached.chapters, r?.chapters, sourceId, sourceId, mangaUrl);
         setDetailState({ key: `${sourceId}|${mangaUrl}`, data: r });
         reconcileMihonProgress(mangaUrl, sourceId, r?.chapters);
         const favorite = lib.fav(mangaUrl, sourceId);
@@ -397,7 +434,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       });
 
     return () => { alive = false; };
-  }, [mangaUrl, sourceId]);
+  }, [mangaUrl, sourceId, migrationSearchMode]);
 
   useLayoutEffect(() => {
     if (!active) return undefined;
@@ -542,10 +579,51 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     else openCatMenu(manga);
   };
 
+  useEffect(() => () => clearTimeout(chapterHighlightTimer.current), []);
+  useEffect(() => {
+    if (!pendingChapterJump) return;
+    const context = chapterJumpContext.current;
+    if (!context || context.detailKey !== detailKey) return;
+    if (context.groupFilter !== 'all' && !context.chapters.some((chapter) => chapter.url === pendingChapterJump)) return;
+    const index = context.chapters.findIndex((chapter) => chapter.url === pendingChapterJump);
+    if (index < 0) return;
+    if (context.visibleChapterCount <= index) {
+      setChapterWindow({ key: context.chapterWindowKey, count: context.chapters.length });
+      return;
+    }
+    const element = chapterRefs.current.get(pendingChapterJump);
+    if (!element) return;
+    setPendingChapterJump('');
+    element.scrollIntoView({
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      block: 'center'
+    });
+    setHighlightedChapter(pendingChapterJump);
+    clearTimeout(chapterHighlightTimer.current);
+    chapterHighlightTimer.current = setTimeout(() => setHighlightedChapter(''), 1800);
+  }, [pendingChapterJump, detailKey, chapterWindow, groupFilter, d]);
+
   useEffect(() => {
     if (!d?.chapters?.length) return;
     chapterIndex.set(mangaUrl, sourceId, d.chapters.map((c) => c.url));
   }, [mangaUrl, sourceId, d]);
+
+  if (migrationSearchMode)
+    return (
+      <Catalog
+        locationOverride={{ pathname: '/explorar', search: `?${migrationCatalogParams}` }}
+        active={active}
+        migrationInline={{
+          origin: fromParam,
+          backTo: migrationReturnTo,
+          returnTo: migrationSearchRoute,
+          onBack: () => {
+            detailScroll.requestRestore();
+            navigate(migrationReturnTo);
+          }
+        }}
+      />
+    );
 
   if (!mangaUrl)
     return <EmptyState face="¯\\_(ツ)_/¯" title="Sin manga seleccionado." />;
@@ -663,6 +741,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   } else {
     chapters = [...chapters].sort((a, b) => byNumber(a, b, asc ? 1 : -1));
   }
+  chapterJumpContext.current = { detailKey, chapters, visibleChapterCount, chapterWindowKey, groupFilter };
 
   const changeGroupFilter = (v) => {
     setGroupFilter(v);
@@ -697,6 +776,19 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const cap = pendiente ? progress.get(pendiente.url, sourceId) : null;
   const enMarcha = !!(cap && !cap.read && Number.isInteger(cap.page));
   const resume = pendiente ? { ...pendiente, cap } : null;
+  const currentChapter = chaptersOldestFirst.reduce((latest, chapter) => {
+    const chapterProgress = progress.get(chapter.url, sourceId);
+    if (!chapterProgress || chapterProgress.read || !Number.isInteger(chapterProgress.page)) return latest;
+    return !latest || (chapterProgress.updatedAt || 0) > (latest.progress.updatedAt || 0)
+      ? { chapter, progress: chapterProgress }
+      : latest;
+  }, null)?.chapter || resume;
+
+  const goToCurrentChapter = () => {
+    if (!currentChapter) return;
+    if (groupFilter !== 'all') changeGroupFilter('all');
+    setPendingChapterJump(currentChapter.url);
+  };
 
   const fade = Math.min(48, (overflow ? availH : 0) * 0.4);
   const synMask = !expanded && overflow && fade > 4
@@ -997,6 +1089,30 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           )}
 
         </div>
+        {fav && migrationTargets.length > 0 && (
+          <Button
+            variant="secondary"
+            className="active:scale-100"
+            onClick={() => {
+              setCatPick(null);
+              setMigration({
+                targetIds: migrationTargets.map((manifest) => manifest.id),
+              });
+            }}
+            title="Migrar manga a otra extensión"
+            style={{
+              height: px(40, scale, 33),
+              minHeight: px(40, scale, 33),
+              flexShrink: 0,
+              paddingLeft: px(16, scale, 13),
+              paddingRight: px(16, scale, 13),
+              fontSize: px(14, scale, 12)
+            }}
+          >
+            <ArrowRightLeft className="mr-2 shrink-0" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+            Migrar fuente
+          </Button>
+        )}
         <Button
           variant="secondary"
           className="active:scale-100"
@@ -1078,6 +1194,18 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           >
             {chaptersPerRow} por fila
           </Button>
+          <Button
+            size="icon"
+            variant="secondary"
+            className="rounded-lg"
+            title={currentChapter ? `Ir a ${currentChapter.title}` : 'No hay un capítulo actual'}
+            aria-label={currentChapter ? `Ir al capítulo actual: ${currentChapter.title}` : 'No hay un capítulo actual'}
+            disabled={!currentChapter}
+            onClick={goToCurrentChapter}
+            style={{ width: px(32, scale, 27), height: px(32, scale, 27), flexShrink: 0 }}
+          >
+            <Crosshair style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+          </Button>
           {chapterGroups.length > 1 && (
             <span className="flex items-center gap-2">
               <span className="text-muted-foreground" style={{ fontSize: px(13, scale, 11) }}>
@@ -1120,15 +1248,20 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         className={chaptersPerRow > 1 ? 'grid gap-2' : 'flex flex-col gap-2'}
         style={chaptersPerRow > 1 ? { gridTemplateColumns: `repeat(${chaptersPerRow}, minmax(0, 1fr))` } : undefined}
       >
-        {chapters.map((c, i) => {
+        {chapters.slice(0, visibleChapterCount).map((c, i) => {
           const cap = progress.get(c.url, sourceId);
           const read = !!cap?.read;
           const inCourse = !read && cap && Number.isInteger(cap?.page) && cap.page > 0;
           return (
             <a
               key={i}
+              ref={(element) => {
+                if (element) chapterRefs.current.set(c.url, element);
+                else chapterRefs.current.delete(c.url);
+              }}
               className={cn(
                 'group relative flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-2.5 hover:bg-accent/50 transition-colors',
+                highlightedChapter === c.url && 'cx-chapter-pulse',
                 read && 'opacity-45 hover:opacity-70'
               )}
               style={{ minHeight: `${Math.round(52 * scale)}px` }}
@@ -1209,6 +1342,18 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         })}
       </div>
 
+      {visibleChapterCount < chapters.length && (
+        <div className="flex justify-center" style={{ paddingTop: px(16, scale, 12) }}>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setChapterWindow({ key: chapterWindowKey, count: chapters.length })}
+          >
+            Mostrar siguientes {chapters.length - visibleChapterCount} capítulos
+          </Button>
+        </div>
+      )}
+
       <Dialog
         open={!!markBefore}
         onClose={() => setMarkBefore(null)}
@@ -1287,6 +1432,87 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               </Button>
               <Button onClick={() => setDup(null)} style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: px(14, scale, 12) }}>
                 Cancelar
+              </Button>
+            </div>
+          </>
+        )}
+      </Dialog>
+
+      <Dialog
+        open={!!migration}
+        onClose={() => setMigration(null)}
+        scale={scale}
+        dialogStyle={{ maxWidth: px(560, scale, 440) }}
+      >
+        {migration && (
+          <>
+            <div className="mb-2 flex items-center justify-between" style={{ fontSize: px(13, scale, 11) }}>
+              <span className="text-muted-foreground">
+                {migration.targetIds.length} de {migrationTargets.length} fuentes seleccionadas
+              </span>
+              <div className="flex items-center" style={{ gap: px(12, scale, 9) }}>
+                <button
+                  type="button"
+                  className="text-primary hover:underline disabled:opacity-50"
+                  disabled={migration.targetIds.length === migrationTargets.length}
+                  onClick={() => setMigration((current) => current ? { ...current, targetIds: migrationTargets.map((manifest) => manifest.id) } : current)}
+                >
+                  Todas
+                </button>
+                <button
+                  type="button"
+                  className="text-primary hover:underline disabled:opacity-50"
+                  disabled={migration.targetIds.length === 0}
+                  onClick={() => setMigration((current) => current ? { ...current, targetIds: [] } : current)}
+                >
+                  Ninguna
+                </button>
+              </div>
+            </div>
+            <div className="dd-scroll flex flex-col overflow-y-auto pr-1" style={{ maxHeight: px(300, scale, 240), gap: px(6, scale, 4) }}>
+              {installedExtensions.map((manifest) => {
+                const current = manifest.id === sourceId;
+                const checked = !current && migration.targetIds.includes(manifest.id);
+                return (
+                  <ExtensionChoice
+                    key={manifest.id}
+                    manifest={manifest}
+                    current={current}
+                    checked={checked}
+                    onChange={() => setMigration((state) => state ? {
+                      ...state,
+                      targetIds: checked
+                        ? state.targetIds.filter((id) => id !== manifest.id)
+                        : [...state.targetIds, manifest.id]
+                    } : state)}
+                    scale={scale}
+                  />
+                );
+              })}
+            </div>
+            <div className="flex justify-end" style={{ gap: px(8, scale, 6), paddingTop: px(16, scale, 12) }}>
+              <Button
+                variant="secondary"
+                onClick={() => setMigration(null)}
+                style={{ height: px(36, scale, 30), padding: `0 ${px(12, scale, 10)}`, fontSize: px(14, scale, 12) }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => {
+                  const main = document.querySelector('main');
+                  if (main) detailScroll.set(mangaUrl, main.scrollTop);
+                  const params = new URLSearchParams(loc.search);
+                  params.set('migrationSearch', '1');
+                  params.set('migrationTargets', migration.targetIds.join(','));
+                  params.set('migrationQuery', d.title);
+                  setMigration(null);
+                  navigate({ pathname: loc.pathname, search: `?${params.toString()}` });
+                }}
+                disabled={!migration.targetIds.length}
+                style={{ height: px(36, scale, 30), padding: `0 ${px(12, scale, 10)}`, fontSize: px(14, scale, 12) }}
+              >
+                Buscar
               </Button>
             </div>
           </>
