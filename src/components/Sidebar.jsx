@@ -5,7 +5,7 @@ import { BookOpen, Compass, Settings as SettingsIcon, ChevronsRight } from 'luci
 import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
 import { SOURCE_CATALOG_HOME_EVENT } from '../lib/searchState.js';
-import { settings } from '../lib/settings.js';
+import { settings, SIDEBAR_WIDTH } from '../lib/settings.js';
 import { useScale } from '../lib/useScale.js';
 
 const navItems = [
@@ -16,7 +16,6 @@ const navItems = [
 
 const EASE = [0.25, 0.1, 0.25, 1];
 const DURATION = 0.3;
-const SIDEBAR_WIDTH = { expanded: 196, collapsed: 72 };
 const SIDEBAR_SCALE_MIN = 0.72;
 
 let lastLibraryRoute = '/biblioteca';
@@ -37,12 +36,19 @@ function routeSection(location) {
 
 export default function Sidebar({ tutorialNavOnly = false }) {
   const [collapsed, setCollapsed] = useState(settings.get().sidebarCollapsed);
+  const [width, setWidth] = useState(settings.get().sidebarWidth);
+  const [resizing, setResizing] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const pendingQuickSearchReset = useRef(false);
+  const resizeStart = useRef(null);
+  const resizeWidth = useRef(width);
   const scale = useScale(SIDEBAR_SCALE_MIN);
 
-  useEffect(() => settings.subscribe((s) => setCollapsed(s.sidebarCollapsed)), []);
+  useEffect(() => settings.subscribe((s) => {
+    setCollapsed(s.sidebarCollapsed);
+    setWidth(s.sidebarWidth);
+  }), []);
 
   useEffect(() => {
     const section = routeSection(location);
@@ -64,13 +70,26 @@ export default function Sidebar({ tutorialNavOnly = false }) {
   }, [location.search]);
 
   const toggle = () => settings.set({ sidebarCollapsed: !collapsed });
+  const resizedWidth = (clientX, start, snap = true) => {
+    const raw = Math.min(SIDEBAR_WIDTH.max, Math.max(SIDEBAR_WIDTH.min, start.width + (clientX - start.x) / scale));
+    return snap && Math.abs(raw - SIDEBAR_WIDTH.default) <= 12 ? SIDEBAR_WIDTH.default : Math.round(raw);
+  };
+  const finishResize = (clientX, canceled = false) => {
+    if (!resizeStart.current) return;
+    const nextWidth = canceled ? resizeWidth.current : resizedWidth(clientX, resizeStart.current);
+    resizeStart.current = null;
+    resizeWidth.current = nextWidth;
+    setWidth(nextWidth);
+    settings.set({ sidebarWidth: nextWidth });
+    setResizing(false);
+  };
 
   return (
     <motion.aside
       initial={false}
-      animate={{ width: Math.round((collapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.expanded) * scale) }}
-      transition={{ duration: DURATION, ease: EASE }}
-      className="h-full flex flex-col border-r border-border bg-sidebar overflow-hidden"
+      animate={{ width: Math.round((collapsed ? SIDEBAR_WIDTH.collapsed : width) * scale) }}
+      transition={resizing ? { duration: 0 } : { duration: DURATION, ease: EASE }}
+      className="relative z-20 h-full flex flex-col border-r border-border bg-sidebar overflow-visible"
     >
       <nav
         inert={tutorialNavOnly}
@@ -141,11 +160,9 @@ export default function Sidebar({ tutorialNavOnly = false }) {
             >
               <div
                 className={cn(
-                  'flex items-center rounded-lg font-medium',
-                  'transition-[gap,color,background-color,border-color,text-decoration-color,fill,stroke] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
-                  'relative',
+                  'flex items-center rounded-lg font-medium transition-colors',
                   isActive
-                    ? 'text-sidebar-accent-foreground'
+                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
                     : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/50'
                 )}
                 style={{
@@ -158,15 +175,8 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                   fontSize: `${Math.max(11, Math.round(14 * scale))}px`
                 }}
               >
-                {isActive && (
-                  <motion.div
-                    layoutId="active-pill"
-                    className="absolute inset-0 rounded-lg bg-sidebar-accent"
-                    transition={{ type: 'spring', stiffness: 340, damping: 34, mass: 0.9 }}
-                  />
-                )}
                 <div
-                  className="relative z-10 shrink-0 grid place-items-center"
+                  className="shrink-0 grid place-items-center"
                   style={{
                     width: `${Math.max(20, Math.round(32 * scale))}px`,
                     height: `${Math.max(14, Math.round(20 * scale))}px`
@@ -181,7 +191,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                 </div>
                 <span
                   className={cn(
-                    'relative z-10 whitespace-nowrap overflow-hidden transition-[max-width,opacity,transform] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
+                    'whitespace-nowrap overflow-hidden leading-none transition-[max-width,opacity,transform] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
                     collapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'opacity-100 translate-x-0'
                   )}
                   style={{
@@ -249,7 +259,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
             </div>
             <span
               className={cn(
-                'whitespace-nowrap overflow-hidden transition-[max-width,opacity,transform,margin-left] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
+                'whitespace-nowrap overflow-hidden leading-none transition-[max-width,opacity,transform,margin-left] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
                 collapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'opacity-100 translate-x-0'
               )}
               style={{
@@ -288,6 +298,57 @@ export default function Sidebar({ tutorialNavOnly = false }) {
           </motion.span>
         </motion.button>
       </div>
+      {!collapsed && (
+        <div
+          role="separator"
+          aria-label="Ancho de la barra lateral"
+          aria-orientation="vertical"
+          aria-valuemin={SIDEBAR_WIDTH.min}
+          aria-valuemax={SIDEBAR_WIDTH.max}
+          aria-valuenow={width}
+          tabIndex={0}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            resizeStart.current = { x: event.clientX, width };
+            resizeWidth.current = width;
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setResizing(true);
+          }}
+          onPointerMove={(event) => {
+            if (resizeStart.current) {
+              const nextWidth = resizedWidth(event.clientX, resizeStart.current);
+              resizeWidth.current = nextWidth;
+              setWidth(nextWidth);
+            }
+          }}
+          onPointerUp={(event) => finishResize(event.clientX)}
+          onPointerCancel={() => finishResize(0, true)}
+          onLostPointerCapture={() => finishResize(0, true)}
+          onDoubleClick={() => {
+            resizeStart.current = null;
+            resizeWidth.current = SIDEBAR_WIDTH.default;
+            setWidth(SIDEBAR_WIDTH.default);
+            settings.set({ sidebarWidth: SIDEBAR_WIDTH.default });
+            setResizing(false);
+          }}
+          onKeyDown={(event) => {
+            const step = event.shiftKey ? 32 : 12;
+            let nextWidth;
+            if (event.key === 'ArrowLeft') nextWidth = width - step;
+            else if (event.key === 'ArrowRight') nextWidth = width + step;
+            else if (event.key === 'Home' || event.key === 'Enter') nextWidth = SIDEBAR_WIDTH.default;
+            else if (event.key === 'End') nextWidth = SIDEBAR_WIDTH.max;
+            else return;
+            event.preventDefault();
+            nextWidth = Math.min(SIDEBAR_WIDTH.max, Math.max(SIDEBAR_WIDTH.min, nextWidth));
+            resizeWidth.current = nextWidth;
+            setWidth(nextWidth);
+            settings.set({ sidebarWidth: nextWidth });
+          }}
+          className="absolute inset-y-0 right-0 z-20 w-2 cursor-col-resize touch-none outline-none transition-colors hover:bg-primary/20 focus-visible:bg-primary/20"
+          style={{ right: '-4px' }}
+        />
+      )}
     </motion.aside>
   );
 }

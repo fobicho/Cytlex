@@ -2,6 +2,7 @@ import { THEME_IDS, MODE_IDS } from './themes.js';
 
 const KEY = 'cytlex:settings:v1';
 export const CONTENT_WARNING_RATINGS = ['SAFE', 'MIXED', 'NSFW'];
+export const SIDEBAR_WIDTH = { default: 196, min: 150, max: 360, collapsed: 72 };
 
 export function resolveMode(mode) {
   if (mode !== 'system') return mode;
@@ -23,6 +24,7 @@ const defaults = {
   adultContentRatings: CONTENT_WARNING_RATINGS,
   chaptersPerRow: 1,
   sidebarCollapsed: false,
+  sidebarWidth: SIDEBAR_WIDTH.default,
   extIndexUrl: '',
   anilistSynopsisLang: 'romaji',
   anilistCover: false,
@@ -39,6 +41,7 @@ function normalize(s) {
   let { theme, mode } = s;
   const { showAdultManga, anilistClientSecret, anilistClientId, uiScale, libraryCoverSize, ...rest } = s;
   rest.coverSize = Math.min(Math.max(Math.round(Number(rest.coverSize ?? libraryCoverSize) || 160), 100), 240);
+  rest.sidebarWidth = Math.min(Math.max(Math.round(Number(rest.sidebarWidth) || SIDEBAR_WIDTH.default), SIDEBAR_WIDTH.min), SIDEBAR_WIDTH.max);
   rest.adultContentRatings = Array.isArray(rest.adultContentRatings)
     ? [...new Set(rest.adultContentRatings.map((rating) => String(rating).toUpperCase()).filter((rating) => CONTENT_WARNING_RATINGS.includes(rating)))]
     : [...CONTENT_WARNING_RATINGS];

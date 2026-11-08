@@ -673,7 +673,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     } catch {}
   };
 
-  const ordered = [...d.chapters].reverse();
+  const chaptersOldestFirst = [...d.chapters].sort((a, b) => byNumber(a, b, 1));
+  const ordered = chaptersOldestFirst;
   const saveDetailScroll = () => {
     const main = document.querySelector('main');
     if (main) detailScroll.set(mangaUrl, main.scrollTop);
@@ -682,12 +683,12 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     setMarkBefore({ chapter });
   };
 
-  const chaptersBefore = markBefore
-    ? ordered.slice(0, ordered.findIndex((chapter) => chapter.url === markBefore.chapter.url))
-    : [];
+  const markBeforeIndex = markBefore
+    ? ordered.findIndex((chapter) => chapter.url === markBefore.chapter.url)
+    : -1;
+  const chaptersBefore = markBeforeIndex > 0 ? ordered.slice(0, markBeforeIndex) : [];
   const chaptersToMark = chaptersBefore.filter((chapter) => !progress.get(chapter.url, sourceId)?.read);
 
-  const chaptersOldestFirst = [...d.chapters].sort((a, b) => byNumber(a, b, 1));
   const mangaStatus = norm(d.facts.estado || d.facts.status).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const isCompleted = /finaliz|complet|concluid|terminad|finished|ended/.test(mangaStatus);
   const pendiente = isCompleted

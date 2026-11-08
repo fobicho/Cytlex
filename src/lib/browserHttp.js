@@ -12,7 +12,7 @@ export function browserImageUrl(url, referer = '') {
   if (electronBridge()?.fetchImage) return url;
   try {
     const { hostname } = new URL(url);
-    if (hostname === 'intomanga.com' || hostname.endsWith('.intomanga.com') || /^storage\d*\.zonatmo\.org$/i.test(hostname) || hostname === 'd33y4i2dmzjqjh.cloudfront.net' || (hostname === 'onfmangas.com' && referer)) {
+    if (hostname === 'intomanga.com' || hostname.endsWith('.intomanga.com') || /^storage\d*\.zonatmo\.org$/i.test(hostname) || (hostname === 'd33y4i2dmzjqjh.cloudfront.net' && referer) || (hostname === 'onfmangas.com' && referer)) {
       const proxy = new URL(proxyUrl(url));
       if (referer) proxy.searchParams.set('referer', referer);
       return proxy.href;

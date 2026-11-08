@@ -259,18 +259,24 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const chapterUuid = clean(doc.querySelector('#ChapterIdentification')?.value) || chapterId.toLowerCase();
     const chapterNumber = clean(doc.querySelector('#ChapterNumber')?.value) || parsed.searchParams.get('number') || '';
     const mangaSlug = parsed.searchParams.get('slug') || cached?.manga.slug || '';
+    const mangaUuid = clean(doc.querySelector('#MangaIdentification')?.value) || mangaId;
     const pageList = doc.querySelector('#PageList');
     const pageElements = pageList?.children.length
       ? [...pageList.children]
       : [...doc.querySelectorAll('select.PageListClass option[value]')];
-    const pageIds = pageElements
+    const listedPageIds = pageElements
       .map((element) => clean(element.getAttribute('value') || element.value))
       .filter((value) => /^[\w-]+$/.test(value))
       .filter((value, index, values) => values.indexOf(value) === index);
+    const imagePageIds = [...doc.querySelectorAll('img.ImageContainer[id]')]
+      .map((image) => clean(image.id))
+      .filter((value) => /^[\w-]+$/.test(value))
+      .filter((value, index, values) => values.indexOf(value) === index);
+    const pageIds = imagePageIds.length ? imagePageIds : listedPageIds;
     const imageReferer = mangaSlug && chapterNumber
       ? `${BASE}/ver/manga/${encodeURIComponent(mangaSlug)}/${encodeURIComponent(chapterNumber)}/${encodeURIComponent(chapterUuid)}`
       : `${BASE}/`;
-    const pages = pageIds.map((id) => `${IMAGE_CDN}/${encodeURIComponent(mangaId)}/c/${encodeURIComponent(chapterUuid)}/o/${encodeURIComponent(id)}.jpg`);
+    const pages = pageIds.map((id) => `${IMAGE_CDN}/${encodeURIComponent(mangaUuid)}/c/${encodeURIComponent(chapterUuid)}/o/${encodeURIComponent(id)}.jpg`);
     const options = cached?.chapters || [];
     const index = options.findIndex((item) => item.url === url || new URL(item.url).searchParams.get('identification') === chapterId);
     return {

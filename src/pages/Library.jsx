@@ -26,7 +26,17 @@ let libraryCheckCooldownUntil = 0;
 let libraryCheckProgress = { current: 0, total: 0 };
 const libraryCheckProgressListeners = new Set();
 const UNREAD_CACHE_KEY = 'cytlex:libraryUnread:v2';
+const LIBRARY_CATEGORY_KEY = 'cytlex:libraryCategory';
 const libraryTitleCollator = new Intl.Collator('es', { sensitivity: 'base', numeric: true });
+const initialLibraryCategory = (categories) => {
+  try {
+    const saved = localStorage.getItem(LIBRARY_CATEGORY_KEY);
+    if (saved && categories.some((category) => category.id === saved)) return saved;
+  } catch {}
+  return sessionCategoria && categories.some((category) => category.id === sessionCategoria)
+    ? sessionCategoria
+    : categories[0]?.id || '';
+};
 const unreadCountCache = (() => {
   try {
     const saved = JSON.parse(localStorage.getItem(UNREAD_CACHE_KEY) || '{}');
@@ -227,15 +237,8 @@ function CachedLibraryCover({ cover, title, className, cachedOnly = false, cache
 
 const Library = memo(function Library({ active = true }) {
   const [cats, setCats] = useState(() => lib.cats());
-  const [sel, setSel] = useState(() => {
-    const list = lib.cats();
-    return sessionCategoria && list.some((c) => c.id === sessionCategoria) ? sessionCategoria : list[0]?.id || '';
-  });
-  const [visitedCategoryIds, setVisitedCategoryIds] = useState(() => [
-    sessionCategoria && lib.cats().some((category) => category.id === sessionCategoria)
-      ? sessionCategoria
-      : lib.cats()[0]?.id || ''
-  ]);
+  const [sel, setSel] = useState(() => initialLibraryCategory(lib.cats()));
+  const [visitedCategoryIds, setVisitedCategoryIds] = useState(() => [initialLibraryCategory(lib.cats())]);
   const [favs, setFavs] = useState(() => lib.favs());
   const [view, setView] = useState(settings.get().libraryView);
   const [checking, setChecking] = useState(libraryCheckInFlight);
@@ -344,6 +347,7 @@ const Library = memo(function Library({ active = true }) {
   useEffect(() => {
     if (cats.some((c) => c.id === sel)) {
       sessionCategoria = sel;
+      try { localStorage.setItem(LIBRARY_CATEGORY_KEY, sel); } catch {}
       return;
     }
     const fallback = cats[0]?.id || '';
