@@ -36,11 +36,11 @@ export const tracking = {
     notify();
   },
 
-  move(mangaUrl, nextUrl, sourceId) {
-    if (!mangaUrl || !nextUrl || mangaUrl === nextUrl) return;
+  move(mangaUrl, nextUrl, sourceId, nextSourceId = sourceId) {
+    if (!mangaUrl || !nextUrl || (mangaUrl === nextUrl && sourceId === nextSourceId)) return;
     const data = read();
     const currentKey = cap(mangaUrl, sourceId);
-    const nextKey = cap(nextUrl, sourceId);
+    const nextKey = cap(nextUrl, nextSourceId);
     if (!data[currentKey]) return;
     if (!data[nextKey]) data[nextKey] = data[currentKey];
     delete data[currentKey];

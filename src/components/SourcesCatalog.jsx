@@ -155,6 +155,9 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const [filterSearches, setFilterSearches] = useState({});
   const [loadedParams, setLoadedParams] = useState(() => restore?.loadedParams || { q: restore?.query || '', ...(restore?.filterValues || {}) });
   const [filtersOpen, setFiltersOpen] = useState(() => !!restore?.filtersOpen);
+  const [filterPanelPosition, setFilterPanelPosition] = useState(null);
+  const filterRootRef = useRef(null);
+  const filterPanelRef = useRef(null);
   const [query, setQuery] = useState(() => restore?.query || '');
   const [items, setItems] = useState(() => restore?.items || []);
   const [queuedItems, setQueuedItems] = useState(() => restore?.queuedItems || []);
@@ -178,6 +181,60 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const initialRestore = useRef(restore);
   const pendingScrollTop = useRef(restore?.scrollTop ?? null);
   const selected = useMemo(() => sources.find((source) => source.manifest.id === sourceId), [sources, sourceId]);
+
+  useLayoutEffect(() => {
+    if (!filtersOpen) {
+      setFilterPanelPosition(null);
+      return undefined;
+    }
+    const positionPanel = () => {
+      const trigger = filterRootRef.current?.querySelector('button');
+      const panel = filterPanelRef.current;
+      if (!trigger || !panel) return;
+      const rect = trigger.getBoundingClientRect();
+      const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+      const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+      const width = Math.min(parseFloat(px(360, scale, 300)), viewportWidth - 32);
+      const left = Math.max(16, Math.min(rect.left, viewportWidth - width - 16));
+      const desiredHeight = Math.min(panel.scrollHeight, viewportHeight - 32);
+      const below = Math.max(0, viewportHeight - rect.bottom - 24);
+      const above = Math.max(0, rect.top - 24);
+      const openAbove = below < desiredHeight && above > below;
+      const maxHeight = Math.max(96, Math.min(desiredHeight, openAbove ? above : below));
+      const top = Math.max(16, Math.min(
+        openAbove ? rect.top - maxHeight - 8 : rect.bottom + 8,
+        viewportHeight - maxHeight - 16
+      ));
+      const next = { left: Math.round(left), top: Math.round(top), width: Math.round(width), maxHeight: Math.round(maxHeight) };
+      setFilterPanelPosition((current) => current && Object.keys(next).every((key) => current[key] === next[key]) ? current : next);
+    };
+    positionPanel();
+    window.addEventListener('resize', positionPanel);
+    window.addEventListener('scroll', positionPanel, true);
+    return () => {
+      window.removeEventListener('resize', positionPanel);
+      window.removeEventListener('scroll', positionPanel, true);
+    };
+  }, [filtersOpen, scale, sourceId]);
+
+  useEffect(() => {
+    if (!filtersOpen) return undefined;
+    const onPointerDown = (event) => {
+      if (!filterRootRef.current?.contains(event.target) && !filterPanelRef.current?.contains(event.target)) setFiltersOpen(false);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setFiltersOpen(false);
+        filterRootRef.current?.querySelector('button')?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [filtersOpen]);
   const allSources = extensions.sources();
   const sortedSources = useMemo(() => [...sources].sort((a, b) => {
     if (sourceSort === 'added') return (a.installedAt || 0) - (b.installedAt || 0);
@@ -357,13 +414,14 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           if (active) setFilters(safeFilters);
           return safeFilters;
         });
-        const resultPromise = fetchCatalogBatch({ id: sourceId, params: { q: '', ...(sourceId === 'leercapitulo' ? { sort: 'az' } : {}) }, page: 0, requestId: httpRequestId });
+        const params = { q: '', ...(sourceId === 'leercapitulo' ? { sort: 'az' } : {}) };
+        const resultPromise = fetchCatalogBatch({ id: sourceId, params, page: 0, requestId: httpRequestId });
         loadFilters();
         const result = await resultPromise;
         if (!active) return;
         setItems(result.items);
         setQueuedItems(result.queuedItems);
-        setLoadedParams({ q: '', ...(sourceId === 'leercapitulo' ? { sort: 'az' } : {}) });
+        setLoadedParams(params);
         setPage(result.page);
         setApiHasMore(result.apiHasMore);
         setHasMore(result.hasMore);
@@ -426,6 +484,12 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       || sourceId === 'zonatmo' && ['gender', 'excludeGender'].includes(filter.id);
     return isSourceGenreFilter ? { ...filter, options: uniqueSortedGenres(filter.options) } : filter;
   }), [filters, sourceId]);
+  const activeFilterCount = displayFilters.reduce((count, filter) => {
+    if (['orderItem', 'orderDirection'].includes(filter.id)) return count;
+    const value = filterValues[filter.id];
+    if (Array.isArray(value)) return count + value.length;
+    return count + (value != null && value !== '' && value !== filter.defaultValue ? 1 : 0);
+  }, 0);
   const genreFilter = sourceId === 'leercapitulo' ? displayFilters.find((filter) => filter.id === 'genre') : null;
   const filterGroups = useMemo(() => {
     const groupFor = (filter) => {
@@ -468,7 +532,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
               .map((option) => {
               const selectedValues = Array.isArray(filterValues[filter.id]) ? filterValues[filter.id] : [];
               return (
-                <label key={option.value} className="flex cursor-pointer items-center gap-2 py-1 text-foreground">
+                <label key={option.value} className="flex min-h-11 cursor-pointer items-center gap-2 py-1 text-foreground sm:min-h-9">
                   <input
                     type="checkbox"
                     checked={selectedValues.includes(option.value)}
@@ -616,64 +680,88 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                 </>
               )}
               {sourceId !== 'leercapitulo' && filters.length > 0 && (
-                <Button type="button" variant="outline" className="shrink-0" onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen} aria-controls="source-filters" style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
-                  <Filter className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
-                  Filtros
-                </Button>
-              )}
-              <AnimatePresence initial={false}>
-                {sourceId !== 'leercapitulo' && filtersOpen && filters.length > 0 && (
-                  <motion.div
-                    id="source-filters"
-                    key="source-filters"
-                    initial={{ opacity: 0, y: -4, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -4, scale: 0.98 }}
-                    transition={{ duration: reduceMotion ? 0 : 0.16, ease: [0.22, 1, 0.36, 1] }}
-                    className="absolute left-0 top-full z-50 rounded-xl border border-border bg-card p-3 shadow-xl"
-                    style={{ width: px(360, scale, 300), maxWidth: 'calc(100vw - 32px)', marginTop: px(8, scale, 6), transformOrigin: 'top left' }}
+                <div ref={filterRootRef} className="shrink-0">
+                  <Button
+                    type="button"
+                    variant={filtersOpen || activeFilterCount ? 'secondary' : 'outline'}
+                    className="min-h-11 shrink-0 sm:min-h-9"
+                    onClick={() => setFiltersOpen((open) => !open)}
+                    aria-label={activeFilterCount ? `Filtros, ${activeFilterCount} seleccionados` : 'Filtros'}
+                    aria-expanded={filtersOpen}
+                    aria-controls="source-filters"
+                    style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}
                   >
-                    <div className="grid grid-cols-1 items-start" style={{ gap: px(14, scale, 10) }}>
-                      {filterGroups.primary.length > 0 && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: px(12, scale, 9) }}>
-                          {filterGroups.primary.map(renderFilter)}
+                    <Filter className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
+                    Filtros{activeFilterCount > 0 && <span className="ml-1 tabular-nums">{activeFilterCount}</span>}
+                  </Button>
+                  {createPortal(
+                    <AnimatePresence initial={false}>
+                    {filtersOpen && (
+                      <motion.div
+                        ref={filterPanelRef}
+                        id="source-filters"
+                        key="source-filters"
+                        role="dialog"
+                        aria-label="Filtros de búsqueda"
+                        initial={{ opacity: 0, y: -4, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                        transition={{ duration: reduceMotion ? 0 : 0.16, ease: [0.22, 1, 0.36, 1] }}
+                        className="fixed z-50 overflow-y-auto rounded-xl border border-border bg-card p-3 shadow-lg"
+                        style={{
+                          width: filterPanelPosition?.width || px(360, scale, 300),
+                          maxWidth: 'calc(100vw - 32px)',
+                          maxHeight: filterPanelPosition?.maxHeight || 'calc(100dvh - 32px)',
+                          left: filterPanelPosition?.left ?? 16,
+                          top: filterPanelPosition?.top ?? 16,
+                          transformOrigin: 'top left'
+                        }}
+                      >
+                        <div className="grid grid-cols-1 items-start" style={{ gap: px(14, scale, 10) }}>
+                          {filterGroups.primary.length > 0 && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: px(12, scale, 9) }}>
+                              {filterGroups.primary.map(renderFilter)}
+                            </div>
+                          )}
+                          {filterGroups.genres.length > 0 && (
+                            <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2" style={{ gap: px(12, scale, 9) }}>
+                              {filterGroups.genres.map(renderFilter)}
+                            </div>
+                          )}
+                          {filterGroups.sorting.length > 0 && (
+                            <div className="flex flex-wrap items-end justify-end" style={{ gap: px(10, scale, 7) }}>
+                              {filterGroups.sorting.map((filter) => <div key={filter.id} className="w-full sm:w-auto" style={{ width: '100%', maxWidth: px(180, scale, 150) }}>{renderFilter(filter)}</div>)}
+                              <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
+                                <Button type="button" className="min-h-11 sm:min-h-9" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
+                                <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-9" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
+                                  <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
+                                  Limpiar
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                          {filterGroups.other.length > 0 && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(10.625rem,1fr))]" style={{ gap: px(12, scale, 9) }}>
+                              {filterGroups.other.map(renderFilter)}
+                            </div>
+                          )}
+                          {filterGroups.sorting.length === 0 && (
+                            <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
+                              <Button type="button" className="min-h-11 sm:min-h-9" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
+                              <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-9" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
+                                <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
+                                Limpiar
+                              </Button>
+                            </div>
+                          )}
                         </div>
-                      )}
-                      {filterGroups.genres.length > 0 && (
-                        <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2" style={{ gap: px(12, scale, 9) }}>
-                          {filterGroups.genres.map(renderFilter)}
-                        </div>
-                      )}
-                      {filterGroups.sorting.length > 0 && (
-                        <div className="flex flex-wrap items-end justify-end" style={{ gap: px(10, scale, 7) }}>
-                          {filterGroups.sorting.map((filter) => <div key={filter.id} className="w-full sm:w-auto" style={{ width: '100%', maxWidth: px(180, scale, 150) }}>{renderFilter(filter)}</div>)}
-                          <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
-                            <Button type="button" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
-                            <Button type="button" variant="ghost" size="sm" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
-                              <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
-                              Limpiar
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                      {filterGroups.other.length > 0 && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(10.625rem,1fr))]" style={{ gap: px(12, scale, 9) }}>
-                          {filterGroups.other.map(renderFilter)}
-                        </div>
-                      )}
-                      {filterGroups.sorting.length === 0 && (
-                        <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
-                          <Button type="button" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
-                          <Button type="button" variant="ghost" size="sm" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
-                            <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
-                            Limpiar
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                      </motion.div>
+                    )}
+                    </AnimatePresence>,
+                    document.body
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -719,7 +807,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                 active={active && !!sourceId}
                 responsiveCards
                 renderCard={(manga, cardWidth) => (
-                  <MangaCard m={manga} sourceId={sourceId} from="fuentes" coverSize={cardWidth} showAuthor={false} useLibraryCoverCache />
+                  <MangaCard m={manga} sourceId={sourceId} from="fuentes" coverSize={cardWidth} showAuthor={false} />
                 )}
               />
               {hasMore && (

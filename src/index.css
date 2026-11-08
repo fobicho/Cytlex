@@ -547,6 +547,10 @@
   padding: var(--web-page-padding, 16px);
 }
 
+.browser-main--reader {
+  padding: 0;
+}
+
 .browser-mobile-nav {
   position: fixed;
   z-index: 50;
@@ -587,10 +591,6 @@
   .browser-main {
     padding-bottom: calc(var(--web-page-padding, 16px) + 60px + env(safe-area-inset-bottom));
     overscroll-behavior-y: contain;
-  }
-
-  .browser-main--reader {
-    padding-bottom: var(--web-page-padding, 16px);
   }
 
   .app-shell--web {

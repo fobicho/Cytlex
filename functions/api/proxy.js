@@ -1,6 +1,7 @@
 const ALLOWED_HOSTS = new Set([
   'api.anilist.co',
   'api.mangadex.org',
+  'd33y4i2dmzjqjh.cloudfront.net',
   'fobicho.github.io',
   'images.mangalect.org',
   'inmanga.com',
@@ -24,6 +25,7 @@ function isAllowedHost(hostname) {
   const host = hostname.toLowerCase().replace(/\.$/, '');
   return ALLOWED_HOSTS.has(host)
     || /^cdn\d+\.intomanga\.com$/.test(host)
+    || /^storage\d*\.zonatmo\.org$/.test(host)
     || ALLOWED_SUFFIXES.some(suffix => host.endsWith(`.${suffix}`) || host === suffix);
 }
 
@@ -46,10 +48,12 @@ function validateTarget(value) {
   return target;
 }
 
-function errorResponse(message, status) {
+function errorResponse(message, status, deniedTarget = false) {
+  const headers = { 'cache-control': 'no-store', 'x-cytlex-proxy': '1' };
+  if (deniedTarget) headers['x-cytlex-proxy-denied'] = '1';
   return Response.json({ error: message }, {
     status,
-    headers: { 'cache-control': 'no-store', 'x-cytlex-proxy': '1' }
+    headers
   });
 }
 
@@ -62,6 +66,17 @@ function inmangaReferer(request) {
     } catch {}
   }
   return 'https://inmanga.com/';
+}
+
+function onfReferer(request) {
+  const value = new URL(request.url).searchParams.get('referer');
+  if (value) {
+    try {
+      const referer = new URL(value);
+      if (referer.origin === 'https://onfmangas.com' && referer.pathname.startsWith('/lector/')) return referer.href;
+    } catch {}
+  }
+  return 'https://onfmangas.com/';
 }
 
 function forwardedHeaders(request, target) {
@@ -86,6 +101,17 @@ function forwardedHeaders(request, target) {
 
   if (target.hostname === 'intomanga.com' || target.hostname.endsWith('.intomanga.com')) {
     headers.set('referer', inmangaReferer(request));
+  }
+  if (target.hostname === 'onfmangas.com') {
+    headers.set('referer', onfReferer(request));
+  }
+  if (target.hostname === 'd33y4i2dmzjqjh.cloudfront.net') {
+    headers.set('referer', onfReferer(request));
+    headers.set('accept', 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8');
+    headers.set('user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1');
+  }
+  if (/^storage\d*\.zonatmo\.org$/.test(target.hostname)) {
+    headers.set('referer', 'https://zonatmo.org/');
   }
 
   return headers;
@@ -128,7 +154,7 @@ export async function onRequest(context) {
   }
 
   const target = validateTarget(new URL(request.url).searchParams.get('url'));
-  if (!target) return errorResponse('Target is not allowed', 403);
+  if (!target) return errorResponse('Target is not allowed', 403, true);
 
   let body;
   if (method === 'POST') {
@@ -144,7 +170,7 @@ export async function onRequest(context) {
       'cache-control': 'no-store',
       'x-cytlex-proxy': '1'
     });
-    for (const name of ['content-type', 'content-length', 'last-modified', 'accept-ranges']) {
+    for (const name of ['content-type', 'last-modified', 'accept-ranges']) {
       const value = upstream.headers.get(name);
       if (value) headers.set(name, value);
     }

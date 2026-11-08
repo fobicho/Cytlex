@@ -7,7 +7,7 @@ import { settings } from '../lib/settings.js';
 import { progress } from '../lib/progress.js';
 import { lib } from '../lib/library.js';
 import { tracking } from '../lib/tracking.js';
-import { detailScroll } from '../lib/searchState.js';
+import { chapterOrder, detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
 import { browserImageUrl } from '../lib/browserHttp.js';
@@ -128,7 +128,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const barH = Number(px(32, scale, 27).replace('px', ''));
   const barPad = Number(px(4, scale, 3).replace('px', ''));
   const arrowH = Number(px(24, scale, 20).replace('px', ''));
-  const titleH = isFullscreen ? 0 : Number.parseInt(px(36, scale, 30), 10);
+  const titleH = window.cytlex && !isFullscreen ? Number.parseInt(px(36, scale, 30), 10) : 0;
   const barLeft = Number(px(12, scale, 8).replace('px', ''));
   const barTop = titleH + Number(px(10, scale, 8).replace('px', ''));
   const arrowLeft = barLeft + barPad;
@@ -734,13 +734,30 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const allPages = [...Array(ch.pages.length).keys()];
 
   const chapterOptions = ch?.options?.length ? ch.options : [{ title: ch.label, url: chapterUrl }];
-  const chapterIndex = chapterOptions.findIndex((option) => option.url === chapterUrl);
-  const previousChapter = ch?.prev?.url
-    ? ch.prev
-    : chapterIndex >= 0 && chapterIndex < chapterOptions.length - 1 ? chapterOptions[chapterIndex + 1] : null;
-  const nextChapter = ch?.next?.url
-    ? ch.next
-    : chapterIndex > 0 ? chapterOptions[chapterIndex - 1] : null;
+  const oldestFirst = chapterOrder.get(mangaUrl);
+  const orderedChapterOptions = chapterOptions
+    .map((option, index) => ({ option, index, number: Number.parseFloat(String(option.title || '').match(/[\d.]+/)?.[0]) }))
+    .sort((a, b) => {
+      const aMissing = Number.isNaN(a.number);
+      const bMissing = Number.isNaN(b.number);
+      if (aMissing !== bMissing) return (aMissing ? 1 : -1) * (oldestFirst ? 1 : -1);
+      if (!aMissing && a.number !== b.number) return (a.number - b.number) * (oldestFirst ? 1 : -1);
+      return a.index - b.index;
+    })
+    .map(({ option }) => option);
+  const chapterIndex = orderedChapterOptions.findIndex((option) => option.url === chapterUrl);
+  const olderChapterIndex = oldestFirst ? chapterIndex - 1 : chapterIndex + 1;
+  const newerChapterIndex = oldestFirst ? chapterIndex + 1 : chapterIndex - 1;
+  const previousChapter = chapterIndex >= 0
+    ? olderChapterIndex >= 0 && olderChapterIndex < orderedChapterOptions.length
+      ? ch?.prev?.url ? ch.prev : orderedChapterOptions[olderChapterIndex]
+      : null
+    : ch?.prev || null;
+  const nextChapter = chapterIndex >= 0
+    ? newerChapterIndex >= 0 && newerChapterIndex < orderedChapterOptions.length
+      ? ch?.next?.url ? ch.next : orderedChapterOptions[newerChapterIndex]
+      : null
+    : ch?.next || null;
   const atStart = paginated ? page <= 0 : lastSeen <= 0;
   const atEnd = paginated
     ? page >= ch.pages.length - 1
@@ -809,9 +826,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                 value={chapterUrl}
                 onChange={(url) => { if (url !== chapterUrl) window.location.hash = go(url); }}
                 ariaLabel="Capítulo"
-                options={[...(ch.options.length ? ch.options : [{ title: ch.label, url: chapterUrl }])]
-                  .reverse()
-                  .map((o) => ({ value: o.url, label: o.title }))}
+                options={orderedChapterOptions.map((o) => ({ value: o.url, label: o.title }))}
               />
 
               <Dropdown
@@ -1037,7 +1052,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
            { (rtl ? (page + (useDouble ? 2 : 1) <= ch.pages.length - 1) : page > 0) && (
             <button
               type="button"
-              className={`${navBtn} left-1`}
+              className={`${navBtn} left-0`}
               aria-label="Página anterior"
               onClick={(e) => { e.stopPropagation(); goPage(rtl ? (useDouble ? Math.min(page + 2, ch.pages.length - 1) : page + 1) : (useDouble ? Math.max(page - 2, 0) : page - 1)); }}
             >
@@ -1060,7 +1075,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
        {previousChapter && atStart && (
          <button
            type="button"
-           className={`${navBtn} ${rtl ? 'right-3' : 'left-4'}`}
+            className={`${navBtn} ${rtl ? 'right-3' : 'left-3'}`}
            title={`Capítulo anterior: ${previousChapter.title}`}
            aria-label="Capítulo anterior"
            onClick={() => { window.location.hash = go(previousChapter.url); }}
@@ -1072,7 +1087,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
        {nextChapter && atEnd && (
          <button
            type="button"
-           className={`${navBtn} ${rtl ? 'left-4' : 'right-3'}`}
+            className={`${navBtn} ${rtl ? 'left-3' : 'right-3'}`}
            title={`Siguiente capítulo: ${nextChapter.title}`}
            aria-label="Siguiente capítulo"
            onClick={() => { window.location.hash = go(nextChapter.url); }}

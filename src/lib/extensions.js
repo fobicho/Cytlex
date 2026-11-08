@@ -16,6 +16,28 @@ function freshIndexUrl(indexUrl) {
   return url.href;
 }
 
+function parseRepositoryIndex(text, indexUrl) {
+  let list;
+  try {
+    list = JSON.parse(text);
+  } catch (error) {
+    const position = Number(error?.message?.match(/position\s+(\d+)/i)?.[1]);
+    const excerpt = Number.isInteger(position)
+      ? text.slice(Math.max(0, position - 45), position + 45).replace(/\s+/g, ' ')
+      : text.slice(0, 90).replace(/\s+/g, ' ');
+    let displayUrl = indexUrl;
+    try {
+      const url = new URL(indexUrl);
+      url.search = '';
+      url.hash = '';
+      displayUrl = url.href;
+    } catch {}
+    throw new Error(`No se pudo leer el índice ${displayUrl}. Respuesta cerca del error: “${excerpt}” (${error.message})`);
+  }
+  if (!Array.isArray(list)) throw new Error('El índice no es un array JSON');
+  return list;
+}
+
 export function isAdultExtension(source) {
   const manifest = source?.manifest || source;
   return ADULT_CONTENT_WARNINGS.includes(String(manifest?.contentWarning || '').toUpperCase());
@@ -316,9 +338,7 @@ export const extensions = {
 
   async repoIndex(indexUrl) {
     const text = await ctx().fetchText(freshIndexUrl(indexUrl));
-    const list = JSON.parse(text);
-    if (!Array.isArray(list)) throw new Error('El índice no es un array JSON');
-    return list;
+    return parseRepositoryIndex(text, indexUrl);
   },
 
   async checkUpdates(indexUrl) {
@@ -398,8 +418,7 @@ export const extensions = {
     let repo = [];
     try {
       const text = await ctx().fetchText(freshIndexUrl(indexUrl));
-      const list = JSON.parse(text);
-      if (Array.isArray(list)) repo = list;
+      repo = parseRepositoryIndex(text, indexUrl);
     } catch {}
 
     const byId = new Map(repo.map((m) => [m.id, m]));
@@ -428,9 +447,7 @@ export const extensions = {
     let repo = [];
     try {
       const text = await ctx().fetchText(freshIndexUrl(indexUrl));
-      const list = JSON.parse(text);
-      if (!Array.isArray(list)) throw new Error('El índice no es un array JSON');
-      repo = list;
+      repo = parseRepositoryIndex(text, indexUrl);
     } catch (e) {
       console.warn('[Cytlex] no se pudo leer el repositorio de extensiones:', e?.message || e);
     }

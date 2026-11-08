@@ -167,7 +167,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
             paddingBottom: `${Math.max(6, Math.round(8 * scale))}px`
           }}
         >
-          {visible.map((m, i) => (
+          {active && visible.map((m, i) => (
             <div
               key={i}
               className="shrink-0"
@@ -249,6 +249,16 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     setCoverSize(s.coverSize);
   }), []);
   useEffect(() => { sessionTab = tab; }, [tab]);
+  useEffect(() => {
+    if (active && tab === 'mangas') return;
+    clearSearchCoverCache();
+    if (!lastSearch.results) return;
+    lastSearch.results = lastSearch.results.map((result) => ({
+      ...result,
+      items: result.items.map(({ coverCached, ...item }) => item)
+    }));
+    setResults(lastSearch.results);
+  }, [active, tab]);
   useEffect(() => () => {
     if (tab === 'fuentes') sourceCatalogState.requestRestore();
   }, [tab]);

@@ -8,6 +8,7 @@ import { lib } from '../lib/library.js';
 import { discardLibraryCover, getLibraryCover, markLibraryCoverLoaded, preloadLibraryCover, preloadSearchCover, requiresImageProxy, restoreLibraryCover } from '../lib/covers.js';
 import { rememberCover, sourceCatalogState } from '../lib/searchState.js';
 import { SourceBadge } from './SourceBadge.jsx';
+import { browserImageUrl } from '../lib/browserHttp.js';
 
 const prefetched = new Set();
 const MAX_PREFETCHED = 80;
@@ -157,7 +158,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
               loading={from === 'biblioteca' || useLibraryCoverCache ? 'eager' : 'lazy'}
               decoding={from === 'biblioteca' || useLibraryCoverCache ? 'sync' : 'async'}
               fetchPriority={from === 'biblioteca' || useLibraryCoverCache ? 'high' : undefined}
-              src={src}
+              src={browserImageUrl(src)}
               alt={m.title}
               referrerPolicy={hasElectronImageProxy ? 'no-referrer' : undefined}
               onLoad={() => {

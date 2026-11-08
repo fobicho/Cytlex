@@ -75,16 +75,43 @@ export default function createSource({ fetchText, parse }) {
   }
 
   async function chapter(chapterUrl) {
-    const html = await fetchText(abs(chapterUrl));
+    const url = abs(chapterUrl);
+    const html = await fetchText(url);
     const outer = parse(html);
-    const ns = html.match(/<noscript[^>]*>([\s\S]*?)<\/noscript>/i);
-    const reader = parse(ns ? ns[1] : html);
-    const pages = [...reader.querySelectorAll('img.manga-page')]
-      .map((el) => abs(el.getAttribute('src') || el.getAttribute('data-src')))
-      .filter(Boolean);
+    const resolvePageUrl = (pageUrl) => {
+      if (!pageUrl) return '';
+      try { return new URL(pageUrl, url).href; } catch { return ''; }
+    };
+    let pageList;
+    const encodedPages = outer.querySelector('#viewerContainer')?.getAttribute('data-reader-pages');
+    if (encodedPages) {
+      try {
+        const bytes = Uint8Array.from(atob(encodedPages), (char) => char.charCodeAt(0));
+        pageList = JSON.parse(new TextDecoder().decode(bytes));
+      } catch {}
+    }
+    if (!Array.isArray(pageList)) {
+      const hexPages = html.match(/(?:const|let|var)\s+_hexP\s*=\s*["']([0-9a-fA-F]+)["']/);
+      if (hexPages) {
+        try {
+          const bytes = Uint8Array.from(hexPages[1].match(/.{2}/g) || [], (byte) => parseInt(byte, 16));
+          pageList = JSON.parse(new TextDecoder().decode(bytes));
+        } catch {}
+      }
+    }
+    const pages = Array.isArray(pageList)
+      ? pageList.map((page) => {
+          if (typeof page === 'string') return page;
+          if (!page || typeof page !== 'object') return '';
+          return page.url || page.src || page.image || page.srcUrl || page.pageUrl || '';
+        }).map(resolvePageUrl).filter(Boolean)
+      : [...parse(html.match(/<noscript[^>]*>([\s\S]*?)<\/noscript>/i)?.[1] || html).querySelectorAll('img.manga-page')]
+          .map((el) => resolvePageUrl(el.getAttribute('src') || el.getAttribute('data-src')))
+          .filter(Boolean);
     return {
       label: text(outer, 'h1') || '',
       mangaUrl: '',
+      imageReferer: url,
       pages: [...new Set(pages)],
       options: [],
       prev: null,

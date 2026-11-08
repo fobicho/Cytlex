@@ -12,7 +12,7 @@ export function browserImageUrl(url, referer = '') {
   if (electronBridge()?.fetchImage) return url;
   try {
     const { hostname } = new URL(url);
-    if (hostname === 'intomanga.com' || hostname.endsWith('.intomanga.com')) {
+    if (hostname === 'intomanga.com' || hostname.endsWith('.intomanga.com') || /^storage\d*\.zonatmo\.org$/i.test(hostname) || hostname === 'd33y4i2dmzjqjh.cloudfront.net' || (hostname === 'onfmangas.com' && referer)) {
       const proxy = new URL(proxyUrl(url));
       if (referer) proxy.searchParams.set('referer', referer);
       return proxy.href;
@@ -48,8 +48,10 @@ async function browserRequest(url, options = {}) {
   try {
     const proxied = await fetch(proxyUrl(url), proxyRequestOptions(url, requestOptions));
     const proxyIsLive = proxied.headers.get('x-cytlex-proxy') === '1';
-    response = proxyIsLive && proxied.status !== 403 ? proxied : await fetch(url, requestOptions);
-  } catch {
+    const proxyDeniedTarget = proxied.headers.get('x-cytlex-proxy-denied') === '1';
+    response = proxyIsLive && !proxyDeniedTarget ? proxied : await fetch(url, requestOptions);
+  } catch (error) {
+    if (requestOptions.signal?.aborted) throw error;
     throw new Error('El navegador bloqueó la conexión a esta fuente. Para fuentes sin acceso CORS, publica Cytlex con su proxy web habilitado.');
   }
   if (!response.ok) throw new Error(`HTTP ${response.status} al pedir ${url}`);
@@ -86,10 +88,13 @@ export async function httpPost(payload, requestId) {
   return payload.responseType === 'text' ? text : JSON.parse(text);
 }
 
-export async function fetchImage(url) {
+export async function fetchImage(url, signal) {
   const bridge = electronBridge();
-  if (bridge?.fetchImage) return bridge.fetchImage(url);
-  const response = await browserRequest(url);
+  if (bridge?.fetchImage) {
+    const image = await bridge.fetchImage(url);
+    return signal?.aborted ? null : image;
+  }
+  const response = await browserRequest(url, { signal });
   const blob = await response.blob();
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let binary = '';

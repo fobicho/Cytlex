@@ -73,9 +73,19 @@ function SourceLine({ sourceId, scale }) {
   );
 }
 
-function DuplicateRow({ cover, title, author, sourceId, scale, coverScale = 1 }) {
+function DuplicateRow({ cover, title, author, sourceId, scale, coverScale = 1, selected, selectable, onSelect }) {
   return (
-    <div className="flex items-end border-b border-border" style={{ gap: px(16, scale, 12), paddingTop: px(16, scale, 12), paddingBottom: px(16, scale, 12) }}>
+    <div className={`flex items-center border-b border-border ${selected && selectable ? 'bg-accent/50' : ''}`} style={{ gap: px(16, scale, 12), paddingTop: px(16, scale, 12), paddingBottom: px(16, scale, 12) }}>
+      {selectable && (
+        <input
+          type="radio"
+          name="duplicate-entry"
+          checked={selected}
+          onChange={onSelect}
+          aria-label={`Reemplazar ${title}`}
+          style={{ accentColor: 'hsl(var(--primary))', flexShrink: 0 }}
+        />
+      )}
       {cover ? (
         <img src={cover} alt="" referrerPolicy="no-referrer" className="aspect-[5/7] object-cover shrink-0 bg-black" style={{ width: px(128 * coverScale, scale, 80), borderRadius: px(12, scale, 9) }} />
       ) : (
@@ -443,6 +453,28 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     });
   };
 
+  const replaceLibraryEntry = (existing, manga) => {
+    const existingSourceId = existing.sourceId || 'leercapitulo';
+    const chapterUrls = (d?.chapters || []).map((chapter) => chapter.url).filter(Boolean);
+    chapterIndex.drop(existing.url, existingSourceId);
+    chapterIndex.set(manga.url, manga.sourceId, chapterUrls);
+    lib.updateFav(existing.url, {
+      ...manga,
+      cats: existing.cats || [],
+      savedAt: existing.savedAt || Date.now(),
+      chapterTotal: chapterUrls.length,
+      coverLocal: '',
+      coverCached: ''
+    }, existingSourceId);
+    tracking.move(existing.url, manga.url, existingSourceId, manga.sourceId);
+    chapterOrder.move(existing.url, manga.url);
+    setFav(true);
+    makeCoverThumb(manga.cover).then((local) => {
+      if (local) lib.updateFav(manga.url, { coverLocal: local }, manga.sourceId);
+    });
+    setDup(null);
+  };
+
   const openCatMenu = (manga, selected) => {
     const allCats = lib.cats();
     const initialSelection = selected ?? (allCats[0] ? [allCats[0].id] : []);
@@ -506,7 +538,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     const duplicates = lib
       .favs()
       .filter((f) => norm(f.title) === key && !lib.isFav(mangaUrl, sourceId));
-    if (duplicates.length) setDup({ list: duplicates, pending: manga });
+    if (duplicates.length) setDup({ list: duplicates, pending: manga, selectedIndex: 0 });
     else openCatMenu(manga);
   };
 
@@ -1228,28 +1260,32 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         scale={scale}
         dialogStyle={{ maxWidth: px(512, scale, 400) }}
         title="Posible duplicado"
-        description="Ya tienes un manga con este título en la biblioteca."
+        description="Reemplaza una entrada existente; se conservarán sus categorías."
       >
         {dup && (
           <>
             <div>
               {dup.list.map((f, i) => (
-                <DuplicateRow key={i} cover={f.cover} title={f.title} author={f.author} sourceId={f.sourceId} scale={scale} coverScale={coverSetting / 160} />
+                <DuplicateRow
+                  key={`${f.sourceId || 'leercapitulo'}|${f.url}`}
+                  cover={f.cover}
+                  title={f.title}
+                  author={f.author}
+                  sourceId={f.sourceId}
+                  scale={scale}
+                  coverScale={coverSetting / 160}
+                  selected={dup.selectedIndex === i}
+                  selectable={dup.list.length > 1}
+                  onSelect={() => setDup((current) => current ? { ...current, selectedIndex: i } : current)}
+                />
               ))}
             </div>
             <div className="flex justify-end" style={{ gap: px(8, scale, 6), paddingTop: px(20, scale, 15) }}>
-              <Button variant="secondary" onClick={() => setDup(null)} style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: px(14, scale, 12) }}>
-                Cancelar
+              <Button variant="secondary" onClick={() => replaceLibraryEntry(dup.list[dup.selectedIndex], dup.pending)} style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: px(14, scale, 12) }}>
+                Reemplazar
               </Button>
-              <Button
-                style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: px(14, scale, 12) }}
-                onClick={() => {
-                  const manga = dup.pending;
-                  setDup(null);
-                  openCatMenu(manga);
-                }}
-              >
-                Añadir de todos modos
+              <Button onClick={() => setDup(null)} style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: px(14, scale, 12) }}>
+                Cancelar
               </Button>
             </div>
           </>
