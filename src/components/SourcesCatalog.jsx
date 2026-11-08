@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowUpDown, Filter, Loader2, Search, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import MangaCard from './MangaCard.jsx';
@@ -54,6 +55,9 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const reduceMotion = useReducedMotion();
   const [restore] = useState(() => sourceCatalogState.takeRestore());
   const [sourceId, setSourceId] = useState(() => restore?.sourceId || initialSourceId);
+  const [catalogReadySourceId, setCatalogReadySourceId] = useState(() =>
+    restore?.sourceId && Array.isArray(restore.items) ? restore.sourceId : ''
+  );
   const [filters, setFilters] = useState(() => restore?.filters || []);
   const [filterValues, setFilterValues] = useState(() => restore?.filterValues || {});
   const [filterSearches, setFilterSearches] = useState({});
@@ -72,22 +76,26 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const requestId = useRef(0);
   const requestSequence = useRef(0);
   const activeHttpRequest = useRef('');
-  const catalogRef = useRef(null);
-  const [catalogWidth, setCatalogWidth] = useState(0);
+  const [sourceSort, setSourceSort] = useState(() => {
+    try {
+      const stored = localStorage.getItem('cytlex:sourcesSort');
+      return ['title-asc', 'title-desc', 'added'].includes(stored) ? stored : 'title-asc';
+    } catch { return 'title-asc'; }
+  });
+  const [toolbarTarget, setToolbarTarget] = useState(null);
   const initialRestore = useRef(restore);
   const pendingScrollTop = useRef(restore?.scrollTop ?? null);
   const selected = useMemo(() => sources.find((source) => source.manifest.id === sourceId), [sources, sourceId]);
   const allSources = extensions.sources();
+  const sortedSources = useMemo(() => [...sources].sort((a, b) => {
+    if (sourceSort === 'added') return (a.installedAt || 0) - (b.installedAt || 0);
+    const order = String(a.manifest.name || '').localeCompare(String(b.manifest.name || ''), 'es', { sensitivity: 'base', numeric: true });
+    return sourceSort === 'title-desc' ? -order : order;
+  }), [sources, sourceSort]);
 
   useLayoutEffect(() => {
-    const element = catalogRef.current;
-    if (!element) return undefined;
-    const updateWidth = () => setCatalogWidth(element.clientWidth);
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [selected]);
+    setToolbarTarget(document.getElementById('sources-toolbar'));
+  }, []);
 
   const cancelActiveRequest = () => {
     const request = activeHttpRequest.current;
@@ -181,6 +189,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         setRestoring(false);
         setLoading(false);
         setError('');
+        setCatalogReadySourceId(sourceId);
         return undefined;
       }
       let active = true;
@@ -215,6 +224,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           setHasMore((snapshot.queuedItems || []).length > 0 || restoredItems.length > CATALOG_BATCH_SIZE || (snapshot.hasMore ?? (result.hasMore ?? ((snapshot.page || 1) < (result.totalPages || 1)))));
           setRestoring(false);
           setLoading(false);
+          setCatalogReadySourceId(sourceId);
         } catch (loadError) {
           if (active && runId === requestId.current) {
             pendingScrollTop.current = null;
@@ -224,6 +234,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           if (active && runId === requestId.current) {
             setLoading(false);
             setRestoring(false);
+            setCatalogReadySourceId(sourceId);
           }
           finishHttpRequest(httpRequestId);
         }
@@ -265,7 +276,10 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       } catch (loadError) {
         if (active) setError(String(loadError?.message || 'No se pudo cargar el catálogo de esta fuente.'));
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          setCatalogReadySourceId(sourceId);
+        }
         finishHttpRequest(httpRequestId);
       }
     })();
@@ -398,45 +412,65 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
 
   const coverSize = Math.round(160 * (settings.get().uiScale || 1));
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
-  const catalogGapX = Math.max(12, Math.round(20 * scale));
-  const catalogColumns = catalogWidth > 0 ? Math.max(1, Math.floor((catalogWidth + catalogGapX) / (cs + catalogGapX))) : 1;
-  const minSearchWidth = Math.max(Number.parseInt(px(420, scale, 336), 10), Math.round(520 * scale));
-  const searchWidth = catalogWidth > 0
-    ? Math.min(catalogWidth, Math.max(minSearchWidth, catalogColumns * cs + (catalogColumns - 1) * catalogGapX))
-    : '100%';
 
   if (!selected) {
     return (
-      <div
-        className="grid items-start"
-        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${px(240, scale, 200)}, 1fr))`, gap: px(12, scale, 9) }}
-      >
-        {sources.map(({ manifest }) => (
-          <Card key={manifest.id} className="group hover:shadow-sm">
-            <button
-              type="button"
-              onClick={() => {
-                sourceCatalogState.clear();
-                setSourceId(manifest.id);
-              }}
-              className="flex w-full items-center rounded-xl text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-              style={{ minHeight: px(68, scale, 56), padding: px(14, scale, 11), gap: px(12, scale, 9) }}
-              aria-label={`Abrir catálogo de ${manifest.name}`}
-            >
-              <SourceBadge m={manifest} style={{ width: px(40, scale, 32), height: px(40, scale, 32), borderRadius: px(12, scale, 9) }} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-semibold text-foreground" style={{ fontSize: px(15, scale, 13) }}>{manifest.name}</span>
-                {manifest.version && <span className="mt-0.5 block text-muted-foreground" style={{ fontSize: px(11, scale, 9) }}>v{manifest.version}</span>}
-              </span>
-            </button>
-          </Card>
-        ))}
-      </div>
+      <>
+        {toolbarTarget && createPortal(
+          <Button
+            variant="secondary"
+            size="sm"
+            title="Ordenar fuentes"
+            aria-label={`Ordenar fuentes: ${sourceSort === 'title-desc' ? 'Z-A' : sourceSort === 'added' ? 'Adición' : 'A-Z'}`}
+            onClick={() => {
+              const modes = ['title-asc', 'title-desc', 'added'];
+              const next = modes[(modes.indexOf(sourceSort) + 1) % modes.length];
+              setSourceSort(next);
+              try { localStorage.setItem('cytlex:sourcesSort', next); } catch {}
+            }}
+            style={{
+              height: px(36, scale, 30),
+              fontSize: px(14, scale, 12),
+              paddingLeft: px(12, scale, 9),
+              paddingRight: px(12, scale, 9)
+            }}
+          >
+            <ArrowUpDown className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+            {sourceSort === 'title-desc' ? 'Z-A' : sourceSort === 'added' ? 'Adición' : 'A-Z'}
+          </Button>,
+          toolbarTarget
+        )}
+        <div
+          className="grid items-start"
+          style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${px(240, scale, 200)}, 1fr))`, gap: px(12, scale, 9) }}
+        >
+          {sortedSources.map(({ manifest }) => (
+            <Card key={manifest.id} className="group hover:shadow-sm">
+              <button
+                type="button"
+                onClick={() => {
+                  sourceCatalogState.clear();
+                  setSourceId(manifest.id);
+                }}
+                className="flex w-full items-center rounded-xl text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                style={{ minHeight: px(68, scale, 56), padding: px(14, scale, 11), gap: px(12, scale, 9) }}
+                aria-label={`Abrir catálogo de ${manifest.name}`}
+              >
+                <SourceBadge m={manifest} style={{ width: px(40, scale, 32), height: px(40, scale, 32), borderRadius: px(12, scale, 9) }} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold text-foreground" style={{ fontSize: px(15, scale, 13) }}>{manifest.name}</span>
+                  {manifest.version && <span className="mt-0.5 block text-muted-foreground" style={{ fontSize: px(11, scale, 9) }}>v{manifest.version}</span>}
+                </span>
+              </button>
+            </Card>
+          ))}
+        </div>
+      </>
     );
   }
 
   return (
-    <div ref={catalogRef} data-source-catalog-active="true" data-source-catalog-selected={sourceId ? 'true' : 'false'} className="flex min-h-full flex-col" style={{ gap: px(16, scale, 12) }}>
+    <div data-source-catalog-active="true" data-source-catalog-selected={sourceId ? 'true' : 'false'} className="flex min-h-full flex-col" style={{ gap: px(16, scale, 12) }}>
       {selected && (
         <>
           <div className="flex min-w-0 items-center" style={{ gap: px(10, scale, 8) }}>
@@ -547,29 +581,30 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
             </div>
           </div>
 
-          <div className="rounded-xl border border-border bg-card" style={{ width: searchWidth, maxWidth: '100%', padding: px(12, scale, 9) }}>
-            <form className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center" onSubmit={(event) => { event.preventDefault(); if (query.trim()) search(); }} style={{ gap: px(8, scale, 6) }}>
-              <div className="relative min-w-0 flex-1">
-                <Search
-                  className="absolute top-1/2 -translate-y-1/2 text-muted-foreground"
-                  style={{ left: px(12, scale, 9), width: px(16, scale, 13), height: px(16, scale, 13) }}
-                />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={`Buscar en ${selected.manifest.name}…`}
-                  aria-label={`Buscar mangas en ${selected.manifest.name}`}
-                  className="bg-muted/50 border-none"
-                  style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(36, scale, 30), paddingRight: px(12, scale, 9) }}
-                />
-              </div>
-              <Button type="submit" disabled={loading || !query.trim()} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
-                <Search className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
-                Buscar
-              </Button>
-            </form>
-
-          </div>
+          {catalogReadySourceId === sourceId && (
+            <div className="w-full">
+              <form className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center" onSubmit={(event) => { event.preventDefault(); if (query.trim()) search(); }} style={{ gap: px(8, scale, 6) }}>
+                <div className="relative min-w-0 flex-1">
+                  <Search
+                    className="absolute top-1/2 -translate-y-1/2 text-muted-foreground"
+                    style={{ left: px(12, scale, 9), width: px(16, scale, 13), height: px(16, scale, 13) }}
+                  />
+                  <Input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder={`Buscar en ${selected.manifest.name}…`}
+                    aria-label={`Buscar mangas en ${selected.manifest.name}`}
+                    className="bg-muted/50 border-none"
+                    style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(36, scale, 30), paddingRight: px(12, scale, 9) }}
+                  />
+                </div>
+                <Button type="submit" disabled={loading || !query.trim()} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
+                  <Search className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
+                  Buscar
+                </Button>
+              </form>
+            </div>
+          )}
 
           {error ? (
             <EmptyState face="(；_；)" tone="error" title="No se pudo cargar esta fuente" description={error} />

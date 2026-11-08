@@ -462,6 +462,14 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
           />
         )}
 
+        {tab === 'fuentes' && (
+          <div
+            id="sources-toolbar"
+            className="ml-auto self-center flex items-center"
+            style={{ gap: px(8, scale, 6) }}
+          />
+        )}
+
         {tab === 'mangas' && sources.length > 0 && (
           <div className="ml-auto self-center flex items-center" style={{ gap: px(12, scale, 9) }}>
             <div className="relative w-full sm:w-auto" style={{ width: px(288, scale, 190) }}>

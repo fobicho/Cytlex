@@ -275,10 +275,10 @@ export const extensions = {
       const subs = subSources(r.manifest);
       if (subs) {
         for (const s of subs) {
-          out.push({ manifest: { ...r.manifest, ...s, config: { languages: s.languages, default: s.default } } });
+          out.push({ manifest: { ...r.manifest, ...s, config: { languages: s.languages, default: s.default } }, installedAt: r.installedAt || 0 });
         }
       } else {
-        out.push({ manifest: r.manifest });
+        out.push({ manifest: r.manifest, installedAt: r.installedAt || 0 });
       }
     }
     return out;
