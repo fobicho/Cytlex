@@ -10,6 +10,12 @@ const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
 const isPlaceholderExtension = (record) => /^mihon-\d+$/i.test(String(record?.manifest?.id || ''));
 let recordsCache = null;
 
+function freshIndexUrl(indexUrl) {
+  const url = new URL(indexUrl);
+  url.searchParams.set('_cytlex', String(Date.now()));
+  return url.href;
+}
+
 export function isAdultExtension(source) {
   const manifest = source?.manifest || source;
   return ADULT_CONTENT_WARNINGS.includes(String(manifest?.contentWarning || '').toUpperCase());
@@ -309,7 +315,7 @@ export const extensions = {
   },
 
   async repoIndex(indexUrl) {
-    const text = await ctx().fetchText(indexUrl);
+    const text = await ctx().fetchText(freshIndexUrl(indexUrl));
     const list = JSON.parse(text);
     if (!Array.isArray(list)) throw new Error('El índice no es un array JSON');
     return list;
@@ -391,7 +397,7 @@ export const extensions = {
   async sync(indexUrl) {
     let repo = [];
     try {
-      const text = await ctx().fetchText(indexUrl);
+      const text = await ctx().fetchText(freshIndexUrl(indexUrl));
       const list = JSON.parse(text);
       if (Array.isArray(list)) repo = list;
     } catch {}
@@ -421,7 +427,7 @@ export const extensions = {
     const installedIds = new Set(extensions.installed().map((e) => e.manifest.id));
     let repo = [];
     try {
-      const text = await ctx().fetchText(indexUrl);
+      const text = await ctx().fetchText(freshIndexUrl(indexUrl));
       const list = JSON.parse(text);
       if (!Array.isArray(list)) throw new Error('El índice no es un array JSON');
       repo = list;
