@@ -17,9 +17,11 @@ import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 
-function ReaderPanel({ id, src, alt, loading = 'eager', imageReferer, imageClassName, imageStyle, wrapperClassName, wrapperStyle, onContextMenu, onLoaded, onFailed }) {
+function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageReferer, imageClassName, imageStyle, wrapperClassName, wrapperStyle, onContextMenu, onLoaded, onFailed }) {
   const [status, setStatus] = useState('loading');
   const [attempt, setAttempt] = useState(0);
+  const [fallbackState, setFallbackState] = useState({ src, enabled: false });
+  const usingFallback = fallbackState.src === src && fallbackState.enabled;
   const autoRetried = useRef(false);
 
   useEffect(() => {
@@ -40,7 +42,7 @@ function ReaderPanel({ id, src, alt, loading = 'eager', imageReferer, imageClass
       }
     }, 15_000);
     return () => clearTimeout(timeout);
-  }, [attempt, loading, src, status]);
+  }, [attempt, loading, src, status, usingFallback]);
 
   const retryOrShowError = () => {
     if (!autoRetried.current) {
@@ -69,7 +71,7 @@ function ReaderPanel({ id, src, alt, loading = 'eager', imageReferer, imageClass
       )}
       <img
         key={attempt}
-        src={browserImageUrl(src, imageReferer)}
+        src={browserImageUrl(usingFallback ? fallbackSrc : src, imageReferer)}
         alt={alt}
         loading={loading}
         draggable={false}
@@ -77,7 +79,16 @@ function ReaderPanel({ id, src, alt, loading = 'eager', imageReferer, imageClass
         onDragStart={(e) => e.preventDefault()}
         onContextMenu={onContextMenu}
         onLoad={(e) => { setStatus('loaded'); onLoaded?.(e); }}
-        onError={retryOrShowError}
+        onError={() => {
+          if (!usingFallback && fallbackSrc && fallbackSrc !== src) {
+            autoRetried.current = false;
+            setFallbackState({ src, enabled: true });
+            setAttempt(0);
+            setStatus('loading');
+            return;
+          }
+          retryOrShowError();
+        }}
         className={cn(imageClassName, 'transition-opacity duration-150', status === 'loaded' ? 'opacity-100' : 'opacity-0')}
         style={imageStyle}
       />
@@ -889,6 +900,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
               key={i}
               id={`pg-${i}`}
               src={src}
+              fallbackSrc={ch.pageFallbacks?.[i]}
               alt={`Página ${i + 1}`}
               imageReferer={ch.imageReferer}
               loading="lazy"
@@ -1009,6 +1021,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                      <ReaderPanel
                        key={`${chReload}:${idx}`}
                        src={src}
+                       fallbackSrc={ch.pageFallbacks?.[idx]}
                        alt={`Página ${idx + 1}`}
                        imageReferer={ch.imageReferer}
                        onContextMenu={(e) => openPanelMenu(e, src, `Página ${idx + 1}`)}
@@ -1032,6 +1045,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
               <ReaderPanel
                 key={`${chReload}:${page}`}
                 src={ch.pages[page]}
+                fallbackSrc={ch.pageFallbacks?.[page]}
                 alt={`Página ${page + 1}`}
                 imageReferer={ch.imageReferer}
                 onContextMenu={(e) => openPanelMenu(e, ch.pages[page], `Página ${page + 1}`)}

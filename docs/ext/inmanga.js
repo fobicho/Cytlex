@@ -260,6 +260,8 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const chapterNumber = clean(doc.querySelector('#ChapterNumber')?.value) || parsed.searchParams.get('number') || '';
     const mangaSlug = parsed.searchParams.get('slug') || cached?.manga.slug || '';
     const mangaUuid = clean(doc.querySelector('#MangaIdentification')?.value) || mangaId;
+    const legacyMangaName = clean(doc.querySelector('#FriendlyMangaName')?.value) || mangaSlug;
+    const legacyChapterNumber = clean(doc.querySelector('#FriendlyChapterNumberUrl')?.value) || chapterNumber;
     const pageList = doc.querySelector('#PageList');
     const pageElements = pageList?.children.length
       ? [...pageList.children]
@@ -277,6 +279,9 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       ? `${BASE}/ver/manga/${encodeURIComponent(mangaSlug)}/${encodeURIComponent(chapterNumber)}/${encodeURIComponent(chapterUuid)}`
       : `${BASE}/`;
     const pages = pageIds.map((id) => `${IMAGE_CDN}/${encodeURIComponent(mangaUuid)}/c/${encodeURIComponent(chapterUuid)}/o/${encodeURIComponent(id)}.jpg`);
+    const pageFallbacks = pageIds.map((id, index) => legacyMangaName && legacyChapterNumber
+      ? `https://pack-yak.intomanga.com/images/manga/${encodeURIComponent(legacyMangaName)}/chapter/${encodeURIComponent(legacyChapterNumber)}/page/${index + 1}/${encodeURIComponent(id)}`
+      : '');
     const options = cached?.chapters || [];
     const index = options.findIndex((item) => item.url === url || new URL(item.url).searchParams.get('identification') === chapterId);
     return {
@@ -284,6 +289,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       mangaUrl: cached?.manga.url || `${BASE}/ver/manga/${encodeURIComponent(parsed.searchParams.get('slug') || '')}/${encodeURIComponent(mangaId)}`,
       imageReferer,
       pages: [...new Set(pages)],
+      pageFallbacks,
       options,
       prev: index > 0 ? { title: options[index - 1].title, url: options[index - 1].url } : null,
       next: index >= 0 && index + 1 < options.length ? { title: options[index + 1].title, url: options[index + 1].url } : null

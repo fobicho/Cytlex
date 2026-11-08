@@ -152,7 +152,7 @@ const REFERER_RULES = [
   { hosts: ['zonatmo.org'], referer: 'https://zonatmo.org/' },
   { hosts: ['ntr-files.online'], referer: 'https://manga-oni.com/' },
   { hosts: ['plotnofansub.com'], referer: 'https://plotnofansub.com/' },
-  { hosts: ['inmanga.com', 'intomanga.com'], referer: 'https://inmanga.com/' }
+  { hosts: ['inmanga.com', 'intomanga.com', 'pack-yak.intomanga.com'], referer: 'https://inmanga.com/' }
 ];
 
 const ALLOWED_PROTOCOLS = ['http:', 'https:'];
