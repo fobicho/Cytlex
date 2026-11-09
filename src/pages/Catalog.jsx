@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, Loader2, ChevronRight, ChevronLeft, CircleHelp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
-import { lib, libraryKey } from '../lib/library.js';
+import { isLibraryManga, lib, libraryIdentityKey, libraryKey } from '../lib/library.js';
 import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { lastSearch, scrollMemory, rememberCover, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
@@ -121,7 +121,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
   };
 
   const visibleItems = hideSavedManga
-    ? r.items.filter((manga) => !savedMangaKeys.has(libraryKey(manga.url, r.id)))
+    ? r.items.filter((manga) => !isLibraryManga(manga, r.id, savedMangaKeys))
     : r.items;
   if (hideSavedManga && r.items.length && !visibleItems.length && !r.hasMore) return null;
   const visible = visibleItems.slice(0, 15);
@@ -194,7 +194,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
                 onSelect={onMangaSelect}
                 coverSize={cardWidth}
                 showAuthor={false}
-                savedInLibrary={savedMangaKeys.has(libraryKey(m.url, r.id))}
+                savedInLibrary={isLibraryManga(m, r.id, savedMangaKeys)}
               />
             </div>
           ))}
@@ -310,7 +310,10 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
   const savedMangaKeys = useMemo(
-    () => new Set(lib.favs().map((manga) => libraryKey(manga.url, manga.sourceId || 'leercapitulo'))),
+    () => new Set(lib.favs().flatMap((manga) => [
+      libraryKey(manga.url, manga.sourceId || 'leercapitulo'),
+      libraryIdentityKey(manga.url)
+    ])),
     [loc.pathname, loc.search, active]
   );
 
@@ -329,7 +332,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const searchItems = visibleCompleted.flatMap((result) => result.items.map((manga) => ({ manga, sourceId: result.id })));
   const visibleSearchItemCount = migrationMode || !hideSavedManga
     ? searchItems.length
-    : searchItems.filter(({ manga, sourceId }) => !savedMangaKeys.has(libraryKey(manga.url, sourceId))).length;
+    : searchItems.filter(({ manga, sourceId }) => !isLibraryManga(manga, sourceId, savedMangaKeys)).length;
   const done = !!results && !searching;
 
   useEffect(() => { if (done && !migrationMode) animateSearch = false; }, [done, migrationMode]);

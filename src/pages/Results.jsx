@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { api } from '../lib/api.js';
-import { lib, libraryKey } from '../lib/library.js';
+import { isLibraryManga, lib, libraryIdentityKey, libraryKey } from '../lib/library.js';
 import { lastSearch, resultsScroll, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import MangaCard from '../components/MangaCard.jsx';
 import VirtualMangaGrid from '../components/VirtualMangaGrid.jsx';
@@ -28,7 +28,10 @@ export default function Results() {
   const [hideSavedManga, setHideSavedManga] = useState(() => !!settings.get().hideSavedManga);
   const scale = useScale();
   const savedMangaKeys = useMemo(
-    () => new Set(lib.favs().map((manga) => libraryKey(manga.url, manga.sourceId || 'leercapitulo'))),
+    () => new Set(lib.favs().flatMap((manga) => [
+      libraryKey(manga.url, manga.sourceId || 'leercapitulo'),
+      libraryIdentityKey(manga.url)
+    ])),
     [loc.pathname, loc.search]
   );
 
@@ -43,7 +46,7 @@ export default function Results() {
   const currentGroup = groupOverride?.id === sourceId ? groupOverride : group;
   const items = currentGroup?.items || [];
   const visibleItems = hideSavedManga
-    ? items.filter((manga) => !savedMangaKeys.has(libraryKey(manga.url, sourceId)))
+    ? items.filter((manga) => !isLibraryManga(manga, sourceId, savedMangaKeys))
     : items;
 
   useEffect(() => {
@@ -207,7 +210,7 @@ export default function Results() {
                 from="resultados"
                 coverSize={cardWidth}
                 showAuthor={false}
-                savedInLibrary={savedMangaKeys.has(libraryKey(m.url, sourceId))}
+                savedInLibrary={isLibraryManga(m, sourceId, savedMangaKeys)}
               />
             )}
           />

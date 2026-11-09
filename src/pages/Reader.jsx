@@ -33,7 +33,7 @@ const chapterNumberFrom = (value) => {
   return match ? Number(match[0]) : NaN;
 };
 
-function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageReferer, imageClassName, imageStyle, wrapperClassName, wrapperStyle, onContextMenu, onLoaded, onFailed }) {
+function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageReferer, imageClassName, imageStyle, wrapperClassName, wrapperStyle, onContextMenu, onLoaded, onFailed, onRetry }) {
   const [status, setStatus] = useState('loading');
   const [attempt, setAttempt] = useState(0);
   const [fallbackState, setFallbackState] = useState({ src, enabled: false });
@@ -70,7 +70,15 @@ function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageR
       {status === 'error' && (
         <div role="alert" className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/90 px-3 text-center text-sm text-muted-foreground">
           <span>No se pudo cargar {alt.toLowerCase()}.</span>
-          <Button size="sm" variant="secondary" onClick={() => { autoRetried.current = false; setStatus('loading'); setAttempt((n) => n + 1); }}>
+          <Button size="sm" variant="secondary" onClick={async () => {
+            autoRetried.current = false;
+            setStatus('loading');
+            if (onRetry) {
+              if (!(await onRetry())) setStatus('error');
+            } else {
+              setAttempt((n) => n + 1);
+            }
+          }}>
             Reintentar
           </Button>
         </div>
@@ -120,6 +128,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   }, [backHash]);
   const [ch, setCh] = useState(null);
   const [chUrl, setChUrl] = useState('');
+  const [imageSetRevision, setImageSetRevision] = useState(0);
   const [err, setErr] = useState('');
   const [mode, setMode] = useState(() => {
     try {
@@ -317,6 +326,17 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     window.scrollTo(0, 0);
   };
 
+  const retryMangaDexImages = useCallback(async () => {
+    try {
+      const refreshed = await api.chapter(chapterUrl, sourceId, { fresh: true });
+      setCh(refreshed);
+      setImageSetRevision((revision) => revision + 1);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [chapterUrl, sourceId]);
+
   useEffect(() => {
     if (!chapterUrl) return;
     let active = true;
@@ -336,6 +356,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     setNat(null);
     setCh(null);
     setChUrl('');
+    setImageSetRevision(0);
     pendingScrollRef.current = null;
     api
       .chapter(chapterUrl, sourceId)
@@ -893,10 +914,11 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         <div className="mx-auto" onDoubleClick={toggleVerticalZoomAtPointer} style={{ width: `${zoomPct}%` }}>
           {ch.pages.map((src, i) => (
             <ReaderPanel
-              key={i}
+              key={`${i}-${imageSetRevision}`}
               id={`pg-${i}`}
               src={src}
               fallbackSrc={ch.pageFallbacks?.[i]}
+              onRetry={sourceId.startsWith('mangadex') ? retryMangaDexImages : undefined}
               alt={`Página ${i + 1}`}
               imageReferer={ch.imageReferer}
               loading="lazy"
@@ -1015,9 +1037,10 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                    if (!src) return null;
                    return (
                      <ReaderPanel
-                       key={idx}
+                       key={`${idx}-${imageSetRevision}`}
                        src={src}
                        fallbackSrc={ch.pageFallbacks?.[idx]}
+                       onRetry={sourceId.startsWith('mangadex') ? retryMangaDexImages : undefined}
                        alt={`Página ${idx + 1}`}
                        imageReferer={ch.imageReferer}
                        onContextMenu={(e) => openPanelMenu(e, src, `Página ${idx + 1}`)}
@@ -1039,9 +1062,10 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
              </div>
            ) : (
               <ReaderPanel
-                key={page}
+                key={`${page}-${imageSetRevision}`}
                 src={ch.pages[page]}
                 fallbackSrc={ch.pageFallbacks?.[page]}
+                onRetry={sourceId.startsWith('mangadex') ? retryMangaDexImages : undefined}
                 alt={`Página ${page + 1}`}
                 imageReferer={ch.imageReferer}
                 onContextMenu={(e) => openPanelMenu(e, ch.pages[page], `Página ${page + 1}`)}

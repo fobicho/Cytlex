@@ -26,6 +26,19 @@ const sameUrl = (a, b) => {
 
 const sameUrlKey = (u) => String(u || '').replace(/^https?:\/\/[^/]+/i, '').replace(/\/+$/, '') || '/';
 export const libraryKey = (url, sourceId = 'leercapitulo') => `${sourceId}|${sameUrlKey(url)}`;
+const libraryUrlKey = (url) => {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    return `${host}${parsed.pathname.replace(/\/+$/, '') || '/'}`;
+  } catch {
+    return sameUrlKey(url);
+  }
+};
+export const libraryIdentityKey = (url) => `url|${libraryUrlKey(url)}`;
+export const isLibraryManga = (manga, sourceId, keys) =>
+  keys.has(libraryKey(manga.url, sourceId))
+  || keys.has(libraryIdentityKey(manga.url));
 
 const SRC = (x) => x.sourceId || 'leercapitulo';
 const match = (a, url, sourceId = 'leercapitulo') => sameUrl(a.url, url) && SRC(a) === sourceId;

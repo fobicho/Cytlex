@@ -262,11 +262,14 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
         throw new Error('MangaDex no devolvió una asignación válida para las páginas del capítulo.');
       }
       const pages = (chapter.data || []).map((file) => `${baseUrl}/data/${chapter.hash}/${file}`);
+      const pageFallbacks = (Array.isArray(chapter.dataSaver) ? chapter.dataSaver : [])
+        .map((file) => `${baseUrl}/data-saver/${chapter.hash}/${file}`);
 
       return {
         label,
         mangaUrl: mangaId ? mangaUrl(mangaId) : '',
         pages,
+        pageFallbacks,
         options: [],
         prev: null,
         next: null

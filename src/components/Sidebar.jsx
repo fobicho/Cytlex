@@ -102,6 +102,11 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                   if (location.pathname.startsWith('/manga')
                     && (item.to === '/biblioteca' || item.to === '/explorar')) {
                     event.preventDefault();
+                    const main = document.querySelector('main');
+                    if (main?.scrollTop > 1) {
+                      main.scrollTo({ top: 0, behavior: 'smooth' });
+                      return;
+                    }
                     const listRoute = item.to === '/biblioteca' ? lastLibraryListRoute : lastExploreListRoute;
                     if (item.to === '/biblioteca') lastLibraryRoute = listRoute;
                     else lastExploreRoute = listRoute;

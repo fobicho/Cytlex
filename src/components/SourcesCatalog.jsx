@@ -6,7 +6,7 @@ import MangaCard from './MangaCard.jsx';
 import VirtualMangaGrid from './VirtualMangaGrid.jsx';
 import { SourceBadge } from './SourceBadge.jsx';
 import { api } from '../lib/api.js';
-import { libraryKey } from '../lib/library.js';
+import { isLibraryManga } from '../lib/library.js';
 import { extensions } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { SOURCE_CATALOG_HOME_EVENT, rememberCover, sourceCatalogState } from '../lib/searchState.js';
@@ -576,7 +576,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
   const visibleItems = hideSavedManga
-    ? items.filter((manga) => !savedMangaKeys.has(libraryKey(manga.url, sourceId)))
+    ? items.filter((manga) => !isLibraryManga(manga, sourceId, savedMangaKeys))
     : items;
 
   if (!selected) {
@@ -818,7 +818,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                       from="fuentes"
                       coverSize={cardWidth}
                       showAuthor={false}
-                      savedInLibrary={savedMangaKeys.has(libraryKey(manga.url, sourceId))}
+                      savedInLibrary={isLibraryManga(manga, sourceId, savedMangaKeys)}
                     />
                   )}
                 />
