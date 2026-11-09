@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { api } from '../lib/api.js';
+import { lib, libraryKey } from '../lib/library.js';
 import { lastSearch, resultsScroll, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import MangaCard from '../components/MangaCard.jsx';
 import VirtualMangaGrid from '../components/VirtualMangaGrid.jsx';
@@ -24,17 +25,26 @@ export default function Results() {
   const [loadError, setLoadError] = useState('');
   const [coverSize, setCoverSize] = useState(() => settings.get().coverSize);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
+  const [hideSavedManga, setHideSavedManga] = useState(() => !!settings.get().hideSavedManga);
   const scale = useScale();
+  const savedMangaKeys = useMemo(
+    () => new Set(lib.favs().map((manga) => libraryKey(manga.url, manga.sourceId || 'leercapitulo'))),
+    [loc.pathname, loc.search]
+  );
 
   useEffect(() => settings.subscribe((s) => {
     setShowAdultExtensions(!!s.showAdultExtensions);
     setCoverSize(s.coverSize);
+    setHideSavedManga(!!s.hideSavedManga);
   }), []);
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
   const adultExtensionHidden = !isExtensionAllowed(manifest, showAdultExtensions);
   const currentGroup = groupOverride?.id === sourceId ? groupOverride : group;
   const items = currentGroup?.items || [];
+  const visibleItems = hideSavedManga
+    ? items.filter((manga) => !savedMangaKeys.has(libraryKey(manga.url, sourceId)))
+    : items;
 
   useEffect(() => {
     setGroupOverride(null);
@@ -183,22 +193,31 @@ export default function Results() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, ease: 'easeOut' }}
       >
-        <VirtualMangaGrid
-          items={items}
-          sourceId={sourceId}
-          coverSize={cs}
-          scale={scale}
-          responsiveCards
-          renderCard={(m, cardWidth) => (
-            <MangaCard
-              m={m}
-              sourceId={sourceId}
-              from="resultados"
-              coverSize={cardWidth}
-              showAuthor={false}
-            />
-          )}
-        />
+        {visibleItems.length ? (
+          <VirtualMangaGrid
+            items={visibleItems}
+            sourceId={sourceId}
+            coverSize={cs}
+            scale={scale}
+            responsiveCards
+            renderCard={(m, cardWidth) => (
+              <MangaCard
+                m={m}
+                sourceId={sourceId}
+                from="resultados"
+                coverSize={cardWidth}
+                showAuthor={false}
+                savedInLibrary={savedMangaKeys.has(libraryKey(m.url, sourceId))}
+              />
+            )}
+          />
+        ) : (
+          <EmptyState
+            face="（・_・）"
+            title={hideSavedManga ? 'No hay mangas nuevos' : 'Sin resultados'}
+            description={hideSavedManga ? 'Los mangas encontrados ya están en Biblioteca.' : undefined}
+          />
+        )}
       </motion.div>
 
       {currentGroup?.hasMore && (

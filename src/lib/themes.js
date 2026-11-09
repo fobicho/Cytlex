@@ -6,6 +6,12 @@ export const THEMES = [
     swatch: { dark: ['#09090b', '#3b82f6'], light: ['#ffffff', '#2563eb'] }
   },
   {
+    id: 'monocromatico',
+    name: 'Monocromático',
+    desc: 'Blanco y negro',
+    swatch: { dark: ['#141414', '#d4d4d4'], light: ['#f5f5f5', '#404040'] }
+  },
+  {
     id: 'beige',
     name: 'Beige pastel',
     desc: 'Cálido',

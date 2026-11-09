@@ -998,7 +998,6 @@ export default function Settings({ tutorialPreview = false }) {
         />
         <Row
           scale={scale}
-          last
           title={
             <>
               Mostrar capítulos sin leer{' '}
@@ -1025,6 +1024,20 @@ export default function Settings({ tutorialPreview = false }) {
               on={s.libraryShowUnread}
               onChange={(v) => set({ libraryShowUnread: v })}
               label="Mostrar capítulos sin leer"
+            />
+          }
+        />
+        <Row
+          scale={scale}
+          last
+          title="Ocultar mangas ya guardados"
+          desc="Oculta en Explorar los mangas que ya están en Biblioteca"
+          right={
+            <Switch
+              scale={scale}
+              on={s.hideSavedManga}
+              onChange={(v) => set({ hideSavedManga: v })}
+              label="Ocultar mangas ya guardados"
             />
           }
         />

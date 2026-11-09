@@ -17,6 +17,22 @@ import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 
+const chapterUrlKey = (value) => {
+  try {
+    const url = new URL(value, window.location.href);
+    url.hash = '';
+    url.pathname = url.pathname.replace(/\/+$/, '');
+    return `${url.origin}${url.pathname}${url.search}`;
+  } catch {
+    return String(value || '').replace(/\/+$/, '');
+  }
+};
+
+const chapterNumberFrom = (value) => {
+  const match = String(value || '').match(/[\d.]+/);
+  return match ? Number(match[0]) : NaN;
+};
+
 function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageReferer, imageClassName, imageStyle, wrapperClassName, wrapperStyle, onContextMenu, onLoaded, onFailed }) {
   const [status, setStatus] = useState('loading');
   const [attempt, setAttempt] = useState(0);
@@ -728,7 +744,15 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       return a.index - b.index;
     })
     .map(({ option }) => option);
-  const chapterIndex = orderedChapterOptions.findIndex((option) => option.url === chapterUrl);
+  const exactChapterIndex = orderedChapterOptions.findIndex((option) => chapterUrlKey(option.url) === chapterUrlKey(chapterUrl));
+  const currentChapterNumber = chapterNumberFrom(ch?.number ?? ch?.label);
+  const chapterIndex = exactChapterIndex >= 0
+    ? exactChapterIndex
+    : orderedChapterOptions.findIndex((option) => {
+      const optionNumber = chapterNumberFrom(option.title);
+      return Number.isFinite(currentChapterNumber) && optionNumber === currentChapterNumber;
+    });
+  const selectedChapterUrl = chapterIndex >= 0 ? orderedChapterOptions[chapterIndex].url : chapterUrl;
   const olderChapterIndex = oldestFirst ? chapterIndex - 1 : chapterIndex + 1;
   const newerChapterIndex = oldestFirst ? chapterIndex + 1 : chapterIndex - 1;
   const previousChapter = chapterIndex >= 0
@@ -806,7 +830,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
               <Dropdown
                 scale={scale}
                 style={{ width: px(135, scale, 88) }}
-                value={chapterUrl}
+                value={selectedChapterUrl}
                 onChange={(url) => { if (url !== chapterUrl) window.location.hash = go(url); }}
                 ariaLabel="Capítulo"
                 options={orderedChapterOptions.map((o) => ({ value: o.url, label: o.title }))}

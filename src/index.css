@@ -460,6 +460,82 @@
     --success: 160 50% 40%;
     --warning: 38 78% 50%;
   }
+
+  [data-theme='monocromatico'] {
+    --background: 0 0% 8%;
+    --foreground: 0 0% 94%;
+    --card: 0 0% 11%;
+    --card-foreground: 0 0% 94%;
+    --popover: 0 0% 11%;
+    --popover-foreground: 0 0% 94%;
+    --primary: 0 0% 78%;
+    --primary-foreground: 0 0% 10%;
+    --secondary: 0 0% 18%;
+    --secondary-foreground: 0 0% 94%;
+    --muted: 0 0% 18%;
+    --muted-foreground: 0 0% 64%;
+    --accent: 0 0% 18%;
+    --accent-foreground: 0 0% 94%;
+    --destructive: 0 0% 58%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 24%;
+    --input: 0 0% 24%;
+    --ring: 0 0% 78%;
+
+    --sidebar-background: 0 0% 8%;
+    --sidebar-foreground: 0 0% 64%;
+    --sidebar-accent: 0 0% 18%;
+    --sidebar-accent-foreground: 0 0% 94%;
+    --sidebar-border: 0 0% 24%;
+    --sidebar-ring: 0 0% 78%;
+
+    --chart-1: 0 0% 78%;
+    --chart-2: 0 0% 62%;
+    --chart-3: 0 0% 48%;
+    --chart-4: 0 0% 36%;
+    --chart-5: 0 0% 88%;
+
+    --success: 0 0% 68%;
+    --warning: 0 0% 78%;
+  }
+
+  [data-theme='monocromatico'][data-mode='light'] {
+    --background: 0 0% 97%;
+    --foreground: 0 0% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 12%;
+    --primary: 0 0% 26%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 91%;
+    --secondary-foreground: 0 0% 18%;
+    --muted: 0 0% 93%;
+    --muted-foreground: 0 0% 42%;
+    --accent: 0 0% 91%;
+    --accent-foreground: 0 0% 18%;
+    --destructive: 0 0% 38%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 85%;
+    --input: 0 0% 85%;
+    --ring: 0 0% 26%;
+
+    --sidebar-background: 0 0% 94%;
+    --sidebar-foreground: 0 0% 42%;
+    --sidebar-accent: 0 0% 89%;
+    --sidebar-accent-foreground: 0 0% 18%;
+    --sidebar-border: 0 0% 85%;
+    --sidebar-ring: 0 0% 26%;
+
+    --chart-1: 0 0% 26%;
+    --chart-2: 0 0% 42%;
+    --chart-3: 0 0% 56%;
+    --chart-4: 0 0% 68%;
+    --chart-5: 0 0% 16%;
+
+    --success: 0 0% 36%;
+    --warning: 0 0% 26%;
+  }
 }
 
 @font-face {

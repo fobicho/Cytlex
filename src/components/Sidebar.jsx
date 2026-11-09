@@ -36,18 +36,13 @@ function routeSection(location) {
 
 export default function Sidebar({ tutorialNavOnly = false }) {
   const [collapsed, setCollapsed] = useState(settings.get().sidebarCollapsed);
-  const [width, setWidth] = useState(settings.get().sidebarWidth);
-  const [resizing, setResizing] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const pendingQuickSearchReset = useRef(false);
-  const resizeStart = useRef(null);
-  const resizeWidth = useRef(width);
   const scale = useScale(SIDEBAR_SCALE_MIN);
 
   useEffect(() => settings.subscribe((s) => {
     setCollapsed(s.sidebarCollapsed);
-    setWidth(s.sidebarWidth);
   }), []);
 
   useEffect(() => {
@@ -70,25 +65,12 @@ export default function Sidebar({ tutorialNavOnly = false }) {
   }, [location.search]);
 
   const toggle = () => settings.set({ sidebarCollapsed: !collapsed });
-  const resizedWidth = (clientX, start, snap = true) => {
-    const raw = Math.min(SIDEBAR_WIDTH.max, Math.max(SIDEBAR_WIDTH.min, start.width + (clientX - start.x) / scale));
-    return snap && Math.abs(raw - SIDEBAR_WIDTH.default) <= 12 ? SIDEBAR_WIDTH.default : Math.round(raw);
-  };
-  const finishResize = (clientX, canceled = false) => {
-    if (!resizeStart.current) return;
-    const nextWidth = canceled ? resizeWidth.current : resizedWidth(clientX, resizeStart.current);
-    resizeStart.current = null;
-    resizeWidth.current = nextWidth;
-    setWidth(nextWidth);
-    settings.set({ sidebarWidth: nextWidth });
-    setResizing(false);
-  };
 
   return (
     <motion.aside
       initial={false}
-      animate={{ width: Math.round((collapsed ? SIDEBAR_WIDTH.collapsed : width) * scale) }}
-      transition={resizing ? { duration: 0 } : { duration: DURATION, ease: EASE }}
+      animate={{ width: Math.round((collapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.default) * scale) }}
+      transition={{ duration: DURATION, ease: EASE }}
       className="relative z-20 h-full flex flex-col border-r border-border bg-sidebar overflow-visible"
     >
       <nav
@@ -160,7 +142,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
             >
               <div
                 className={cn(
-                  'flex items-center rounded-lg font-medium transition-colors',
+                  'flex items-center rounded-lg font-medium transition-[gap,color,background-color,border-color,text-decoration-color,fill,stroke] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
                   isActive
                     ? 'bg-sidebar-accent text-sidebar-accent-foreground'
                     : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/50'
@@ -195,7 +177,8 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                     collapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'opacity-100 translate-x-0'
                   )}
                   style={{
-                    maxWidth: collapsed ? 0 : `${Math.round(160 * scale)}px`
+                    maxWidth: collapsed ? 0 : `${Math.round(160 * scale)}px`,
+                    transitionDuration: collapsed ? '180ms' : '300ms'
                   }}
                 >
                   {item.label}
@@ -264,7 +247,8 @@ export default function Sidebar({ tutorialNavOnly = false }) {
               )}
               style={{
                 maxWidth: collapsed ? 0 : `${Math.round(160 * scale)}px`,
-                marginLeft: collapsed ? 0 : `${Math.max(3, Math.round(5 * scale))}px`
+                marginLeft: collapsed ? 0 : `${Math.max(3, Math.round(5 * scale))}px`,
+                transitionDuration: collapsed ? '180ms' : '300ms'
               }}
             >
               Apoyar en Ko-fi
@@ -298,57 +282,6 @@ export default function Sidebar({ tutorialNavOnly = false }) {
           </motion.span>
         </motion.button>
       </div>
-      {!collapsed && (
-        <div
-          role="separator"
-          aria-label="Ancho de la barra lateral"
-          aria-orientation="vertical"
-          aria-valuemin={SIDEBAR_WIDTH.min}
-          aria-valuemax={SIDEBAR_WIDTH.max}
-          aria-valuenow={width}
-          tabIndex={0}
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            resizeStart.current = { x: event.clientX, width };
-            resizeWidth.current = width;
-            event.currentTarget.setPointerCapture(event.pointerId);
-            setResizing(true);
-          }}
-          onPointerMove={(event) => {
-            if (resizeStart.current) {
-              const nextWidth = resizedWidth(event.clientX, resizeStart.current);
-              resizeWidth.current = nextWidth;
-              setWidth(nextWidth);
-            }
-          }}
-          onPointerUp={(event) => finishResize(event.clientX)}
-          onPointerCancel={() => finishResize(0, true)}
-          onLostPointerCapture={() => finishResize(0, true)}
-          onDoubleClick={() => {
-            resizeStart.current = null;
-            resizeWidth.current = SIDEBAR_WIDTH.default;
-            setWidth(SIDEBAR_WIDTH.default);
-            settings.set({ sidebarWidth: SIDEBAR_WIDTH.default });
-            setResizing(false);
-          }}
-          onKeyDown={(event) => {
-            const step = event.shiftKey ? 32 : 12;
-            let nextWidth;
-            if (event.key === 'ArrowLeft') nextWidth = width - step;
-            else if (event.key === 'ArrowRight') nextWidth = width + step;
-            else if (event.key === 'Home' || event.key === 'Enter') nextWidth = SIDEBAR_WIDTH.default;
-            else if (event.key === 'End') nextWidth = SIDEBAR_WIDTH.max;
-            else return;
-            event.preventDefault();
-            nextWidth = Math.min(SIDEBAR_WIDTH.max, Math.max(SIDEBAR_WIDTH.min, nextWidth));
-            resizeWidth.current = nextWidth;
-            setWidth(nextWidth);
-            settings.set({ sidebarWidth: nextWidth });
-          }}
-          className="absolute inset-y-0 right-0 z-20 w-2 cursor-col-resize touch-none outline-none transition-colors hover:bg-primary/20 focus-visible:bg-primary/20"
-          style={{ right: '-4px' }}
-        />
-      )}
     </motion.aside>
   );
 }

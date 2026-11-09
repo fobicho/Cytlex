@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
+import { Check } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { api } from '../lib/api.js';
 import { settings } from '../lib/settings.js';
@@ -21,7 +22,7 @@ function prefetch(url, sourceId) {
   api.prefetchDetail(url, sourceId);
 }
 
-function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', returnTo = '', onSelect, coverSize, scale: uiScale = 1, chapterCount, useLibraryCoverCache = false }) {
+function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', returnTo = '', onSelect, coverSize, scale: uiScale = 1, chapterCount, useLibraryCoverCache = false, savedInLibrary = false }) {
   const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}${returnTo ? `&back=${encodeURIComponent(returnTo)}` : ''}`;
   const sourceManifest = extensions.manifest(sourceId);
   const savedSourceName = String(m.sourceName || '');
@@ -245,6 +246,12 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
               className="pointer-events-none absolute top-1.5 right-1.5 z-10 grid place-items-center rounded-full bg-black/75 font-semibold text-white tabular-nums"
             >
               {chapterCount}
+            </span>
+          )}
+          {savedInLibrary && !unavailable && (
+            <span className="pointer-events-none absolute bottom-2 right-2 z-10 inline-flex max-w-[calc(100%-1rem)] items-center gap-1 rounded-full border border-border bg-background/95 px-2 py-1 font-medium text-foreground shadow-sm" style={{ fontSize: `${px(11, 9)}px` }}>
+              <Check aria-hidden="true" style={{ width: `${px(12, 10)}px`, height: `${px(12, 10)}px` }} />
+              <span className="truncate">En biblioteca</span>
             </span>
           )}
         </div>

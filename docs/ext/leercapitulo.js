@@ -66,6 +66,13 @@ function chapterNumber(url) {
   return Number.isFinite(n) ? n : null;
 }
 
+function chapterTitle(title) {
+  return String(title || '').replace(/^(\s*(?:cap[ií]tulo\s*)?)(\d+)\.(\d+)(?=\D|$)/i, (_, prefix, whole, fraction) => {
+    const number = Number(`${whole}.${fraction}`);
+    return `${prefix}${Number.isFinite(number) ? number : `${whole}.${fraction}`}`;
+  });
+}
+
 const isSideTrack = (n) => n != null && !Number.isInteger(n) && Math.round(n * 10) % 10 === 1;
 
 function preferWholeChapters(list) {
@@ -115,7 +122,7 @@ export default function createSource({ fetchText, parse, head }) {
   function construirCapitulo(doc, chapterUrl, pages) {
     const options = [...doc.querySelectorAll('#chapterSelect option')]
       .map((o) => ({
-        title: (o.textContent || '').replace(/\s+/g, ' ').trim(),
+        title: chapterTitle((o.textContent || '').replace(/\s+/g, ' ').trim()),
         url: abs(o.getAttribute('value'))
       }))
       .filter((o) => o.url);
@@ -125,7 +132,12 @@ export default function createSource({ fetchText, parse, head }) {
     const mangaBack = doc.querySelector('.lc-reader-top a')?.getAttribute('href') || '';
     const currentLabel = text(doc, '#lcChapterPill span') || text(doc, 'title');
 
-    const idx = visibleOptions.findIndex((o) => chapterUrl.includes(o.url) || o.url === chapterUrl);
+    const currentNumber = chapterNumber(chapterUrl);
+    const idx = visibleOptions.findIndex((o) => {
+      if (chapterUrl.includes(o.url) || o.url === chapterUrl) return true;
+      const optionNumber = chapterNumber(o.url);
+      return currentNumber != null && optionNumber != null && currentNumber === optionNumber;
+    });
     let prev = null;
     let next = null;
     if (idx >= 0) {

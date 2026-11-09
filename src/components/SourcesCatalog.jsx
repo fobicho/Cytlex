@@ -6,6 +6,7 @@ import MangaCard from './MangaCard.jsx';
 import VirtualMangaGrid from './VirtualMangaGrid.jsx';
 import { SourceBadge } from './SourceBadge.jsx';
 import { api } from '../lib/api.js';
+import { libraryKey } from '../lib/library.js';
 import { extensions } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { SOURCE_CATALOG_HOME_EVENT, rememberCover, sourceCatalogState } from '../lib/searchState.js';
@@ -141,7 +142,7 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
   return { items: batch, queuedItems: queued, page: currentPage, apiHasMore: canFetchNextPage, hasMore: queued.length > 0 || canFetchNextPage };
 }
 
-export default function SourcesCatalog({ sources, initialSourceId = '', active = true }) {
+export default function SourcesCatalog({ sources, initialSourceId = '', active = true, savedMangaKeys = new Set(), hideSavedManga = false }) {
   const scale = useScale();
   const reduceMotion = useReducedMotion();
   const [coverSize, setCoverSize] = useState(() => settings.get().coverSize);
@@ -574,6 +575,9 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   }
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
+  const visibleItems = hideSavedManga
+    ? items.filter((manga) => !savedMangaKeys.has(libraryKey(manga.url, sourceId)))
+    : items;
 
   if (!selected) {
     return (
@@ -797,19 +801,30 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
               <Loader2 className="animate-spin" style={{ width: px(20, scale, 16), height: px(20, scale, 16) }} />
               <span style={{ fontSize: px(14, scale, 12) }}>Cargando mangas…</span>
             </div>
-          ) : items.length ? (
+          ) : visibleItems.length || (hideSavedManga && hasMore) ? (
             <>
-              <VirtualMangaGrid
-                items={items}
-                sourceId={sourceId}
-                coverSize={cs}
-                scale={scale}
-                active={active && !!sourceId}
-                responsiveCards
-                renderCard={(manga, cardWidth) => (
-                  <MangaCard m={manga} sourceId={sourceId} from="fuentes" coverSize={cardWidth} showAuthor={false} />
-                )}
-              />
+              {visibleItems.length ? (
+                <VirtualMangaGrid
+                  items={visibleItems}
+                  sourceId={sourceId}
+                  coverSize={cs}
+                  scale={scale}
+                  active={active && !!sourceId}
+                  responsiveCards
+                  renderCard={(manga, cardWidth) => (
+                    <MangaCard
+                      m={manga}
+                      sourceId={sourceId}
+                      from="fuentes"
+                      coverSize={cardWidth}
+                      showAuthor={false}
+                      savedInLibrary={savedMangaKeys.has(libraryKey(manga.url, sourceId))}
+                    />
+                  )}
+                />
+              ) : (
+                <EmptyState face="（・_・）" title="No hay mangas nuevos" description="Los mangas guardados están ocultos en Explorar." />
+              )}
               {hasMore && (
                 <div className="flex flex-col items-center" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 8) }}>
                   <Button variant="secondary" onClick={() => loadCatalog(sourceId, { ...loadedParams, q: query.trim(), ...filterValues }, true)} disabled={loadingMore} style={{ height: px(40, scale, 33), fontSize: px(14, scale, 12), paddingLeft: px(16, scale, 12), paddingRight: px(16, scale, 12), gap: px(8, scale, 6) }}>
@@ -820,7 +835,11 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
               )}
             </>
           ) : (
-            <EmptyState face="¯\\_(ツ)_/¯" title="No se encontraron mangas" />
+            <EmptyState
+              face="¯\\_(ツ)_/¯"
+              title={hideSavedManga && items.length ? 'No hay mangas nuevos' : 'No se encontraron mangas'}
+              description={hideSavedManga && items.length ? 'Los mangas guardados están ocultos en Explorar.' : undefined}
+            />
           )}
         </>
       )}

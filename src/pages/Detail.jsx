@@ -26,6 +26,19 @@ import Catalog from './Catalog.jsx';
 const EXPAND_CTRL_H = 16;
 const COVER_BASE = 184;
 const norm = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+const chapterNum = (chapter) => {
+  const match = String(chapter?.title || '').match(/[\d.]+/);
+  return match ? parseFloat(match[0]) : NaN;
+};
+const byNumber = (a, b, direction = 1) => {
+  const na = chapterNum(a);
+  const nb = chapterNum(b);
+  if (Number.isNaN(na) !== Number.isNaN(nb)) return (Number.isNaN(na) ? 1 : -1) * direction;
+  if (!Number.isNaN(na) && na !== nb) return (na - nb) * direction;
+  const groupOrder = String(a.group || '').localeCompare(String(b.group || ''), 'es', { sensitivity: 'base', numeric: true });
+  if (groupOrder) return groupOrder;
+  return String(a.date).localeCompare(String(b.date), 'es', { numeric: true }) * direction;
+};
 
 function SourceLine({ sourceId, scale }) {
   const m = extensions.manifest(sourceId);
@@ -132,18 +145,21 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const migrationSearchMode = routeParams.get('migrationSearch') === '1';
   const migrationSearchTargets = (routeParams.get('migrationTargets') || '').split(',').filter(Boolean);
   const migrationSearchQuery = routeParams.get('migrationQuery') || '';
+  const migrationSearchId = routeParams.get('migrationSearchId') || '';
   const migrationSearchRoute = `${loc.pathname}${loc.search}`;
   const migrationReturnParams = new URLSearchParams(loc.search);
   migrationReturnParams.delete('migrationSearch');
   migrationReturnParams.delete('migrationTargets');
   migrationReturnParams.delete('migrationQuery');
+  migrationReturnParams.delete('migrationSearchId');
   const migrationReturnTo = `${loc.pathname}?${migrationReturnParams}`;
   const migrationCatalogParams = new URLSearchParams({
     tab: 'mangas',
     q: migrationSearchQuery,
     migrationFrom: mangaUrl,
     migrationSource: sourceId,
-    migrationTargets: migrationSearchTargets.join(',')
+    migrationTargets: migrationSearchTargets.join(','),
+    migrationSearchId
   });
   useEffect(() => {
     if (fromParam === 'fuentes') sourceCatalogState.requestRestore();
@@ -608,6 +624,29 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     chapterIndex.set(mangaUrl, sourceId, d.chapters.map((c) => c.url));
   }, [mangaUrl, sourceId, d]);
 
+  useEffect(() => {
+    if (migrationSearchMode || !active || !d?.chapters?.length) return undefined;
+    const status = norm(d.facts?.estado || d.facts?.status).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const completed = /finaliz|complet|concluid|terminad|finished|ended/.test(status);
+    const chapters = [...d.chapters].sort(byNumber);
+    const target = completed
+      ? chapters.at(-1)
+      : chapters.find((chapter) => !progress.get(chapter.url, sourceId)?.read) || chapters[0];
+    const saved = target && progress.get(target.url, sourceId);
+    if (!target || !saved || saved.read || !Number.isInteger(saved.page) || saved.total > 0) return undefined;
+
+    let alive = true;
+    api.chapter(target.url, sourceId).then((chapter) => {
+      if (!alive || !Array.isArray(chapter?.pages) || !chapter.pages.length) return;
+      const latest = progress.get(target.url, sourceId);
+      if (!latest || latest.read || latest.page !== saved.page || latest.total > 0) return;
+      progress.savePage(target.url, sourceId, latest.page, chapter.pages.length);
+      setProgressTick((tick) => tick + 1);
+    }).catch(() => {});
+
+    return () => { alive = false; };
+  }, [active, d, mangaUrl, migrationSearchMode, sourceId]);
+
   if (migrationSearchMode)
     return (
       <Catalog
@@ -715,22 +754,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
 
   const chapterGroups = [...new Set((d.chapters || []).map((c) => c.group).filter(Boolean))];
 
-  const chapterNum = (c) => {
-    const m = String(c?.title || '').match(/[\d.]+/);
-    return m ? parseFloat(m[0]) : NaN;
-  };
-
   let chapters = d.chapters;
   if (groupFilter !== 'all') chapters = chapters.filter((c) => c.group === groupFilter);
-  const byNumber = (a, b, direction = 1) => {
-    const na = chapterNum(a);
-    const nb = chapterNum(b);
-    if (Number.isNaN(na) !== Number.isNaN(nb)) return (Number.isNaN(na) ? 1 : -1) * direction;
-    if (!Number.isNaN(na) && na !== nb) return (na - nb) * direction;
-    const groupOrder = String(a.group || '').localeCompare(String(b.group || ''), 'es', { sensitivity: 'base', numeric: true });
-    if (groupOrder) return groupOrder;
-    return String(a.date).localeCompare(String(b.date), 'es', { numeric: true }) * direction;
-  };
   if (chapterSort === 'scanlation') {
     chapters = [...chapters].sort((a, b) => {
       const ga = a.group || '';
@@ -1506,6 +1531,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                   params.set('migrationSearch', '1');
                   params.set('migrationTargets', migration.targetIds.join(','));
                   params.set('migrationQuery', d.title);
+                  params.set('migrationSearchId', `${Date.now()}-${Math.random().toString(36).slice(2)}`);
                   setMigration(null);
                   navigate({ pathname: loc.pathname, search: `?${params.toString()}` });
                 }}

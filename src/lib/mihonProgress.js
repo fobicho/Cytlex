@@ -16,6 +16,11 @@ function chapterNumber(chapter) {
   return null;
 }
 
+function chapterNumberKey(chapter) {
+  const number = chapterNumber(chapter);
+  return number === null ? '' : String(Number(number.toFixed(3)));
+}
+
 function uniqueIndex(chapters, getKey) {
   const groups = new Map();
   chapters.forEach((chapter, index) => {
@@ -35,24 +40,18 @@ export function reconcileMihonProgress(mangaUrl, sourceId, chapters) {
 
   const currentByUrl = uniqueIndex(chapters, (chapter) => chapter.url ? String(chapter.url) : '');
   const currentByName = uniqueIndex(chapters, (chapter) => normalize(chapter.title || chapter.name));
-  const currentByNumber = uniqueIndex(chapters, (chapter) => {
-    const number = chapterNumber(chapter);
-    return number === null ? '' : String(number);
-  });
+  const currentByNumber = uniqueIndex(chapters, chapterNumberKey);
   const pendingByName = uniqueIndex(pending, (chapter) => normalize(chapter.name));
-  const pendingByNumber = uniqueIndex(pending, (chapter) => {
-    const number = chapterNumber(chapter);
-    return number === null ? '' : String(number);
-  });
+  const pendingByNumber = uniqueIndex(pending, chapterNumberKey);
   const matchedIndexes = new Set();
   const remaining = [];
   const readUrls = [];
 
   pending.forEach((saved, pendingIndex) => {
-    const savedNumber = chapterNumber(saved);
+    const savedNumberKey = chapterNumberKey(saved);
     const matchIndex = currentByUrl.get(saved.url)
       ?? (normalize(saved.name) ? currentByName.get(normalize(saved.name)) : undefined)
-      ?? (savedNumber !== null && pendingByNumber.has(String(savedNumber)) ? currentByNumber.get(String(savedNumber)) : undefined)
+      ?? (savedNumberKey && pendingByNumber.has(savedNumberKey) ? currentByNumber.get(savedNumberKey) : undefined)
       ?? (normalize(saved.name) && pendingByName.has(normalize(saved.name)) ? currentByName.get(normalize(saved.name)) : undefined);
     const chapter = matchIndex === undefined ? null : chapters[matchIndex];
     if (!chapter?.url) {

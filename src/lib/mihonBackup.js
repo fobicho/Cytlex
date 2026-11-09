@@ -188,6 +188,10 @@ function normalizeName(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+function normalizeMangaName(value) {
+  return String(value || '').normalize('NFKC').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+}
+
 function sourceLookup(installedSources, mihonSources, availableExtensions) {
   const catalog = installedSources.map(({ manifest }) => ({ manifest, installed: true }));
   const knownIds = new Set(catalog.map(({ manifest }) => manifest.id));
@@ -332,10 +336,15 @@ const pathKey = (value) => {
 };
 const mangaIdentityKey = (manga) => {
   const source = normalizeName(manga.sourceName);
-  const title = normalizeName(manga.title);
+  const title = normalizeMangaName(manga.title);
   if (!source || !title) return '';
-  return `${source}|${title}|${normalizeName(manga.author)}`;
+  return `${source}|${title}|${normalizeMangaName(manga.author)}`;
 };
+const mangaWorkKey = (manga) => {
+  const title = normalizeMangaName(manga.title);
+  return title ? `${title}|${normalizeMangaName(manga.author)}` : '';
+};
+const mangaTitleKey = (manga) => normalizeMangaName(manga.title);
 
 function mergeDuplicateFavorite(kept, duplicate) {
   return {
@@ -424,6 +433,22 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
   const incomingIdentityKeys = new Set(importableEntries
     .map((entry) => mangaIdentityKey(entry.manga))
     .filter(Boolean));
+  const incomingWorkSources = new Map();
+  const incomingTitleSources = new Map();
+  importableEntries.forEach(({ manga }) => {
+    const workKey = mangaWorkKey(manga);
+    if (workKey) {
+      const sourceIds = incomingWorkSources.get(workKey) || new Set();
+      sourceIds.add(manga.sourceId);
+      incomingWorkSources.set(workKey, sourceIds);
+    }
+    const titleKey = mangaTitleKey(manga);
+    if (titleKey) {
+      const sourceIds = incomingTitleSources.get(titleKey) || new Set();
+      sourceIds.add(manga.sourceId);
+      incomingTitleSources.set(titleKey, sourceIds);
+    }
+  });
   const favorites = [];
   const byManga = new Map();
   (Array.isArray(storedFavorites) ? storedFavorites : []).forEach((manga) => {
@@ -436,12 +461,78 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
     const index = favorites.push(manga) - 1;
     if (identityKey && incomingIdentityKeys.has(identityKey)) byManga.set(`identity|${identityKey}`, index);
   });
+  const removedFavorites = new Set();
+  const workCandidates = new Map();
   favorites.forEach((manga, index) => {
-    byManga.set(`${manga.sourceId || 'leercapitulo'}|${urlKey(manga.url)}`, index);
-    byManga.set(`${manga.sourceId || 'leercapitulo'}|${pathKey(manga.url)}`, index);
-    if (String(manga.sourceId || '').startsWith('mihon-')) {
-      byManga.set(`${manga.sourceId}|${pathKey(manga.url)}`, index);
+    const workKey = mangaWorkKey(manga);
+    if (!incomingWorkSources.has(workKey)) return;
+    const matches = workCandidates.get(workKey) || [];
+    matches.push(index);
+    workCandidates.set(workKey, matches);
+  });
+  workCandidates.forEach((indices, workKey) => {
+    if (indices.length === 1) return;
+    const incomingSources = incomingWorkSources.get(workKey);
+    const nonIncoming = indices.filter((index) => !incomingSources.has(favorites[index].sourceId));
+    if (nonIncoming.length !== 1) return;
+    const keptIndex = nonIncoming[0];
+    indices.filter((index) => index !== keptIndex).forEach((index) => {
+      favorites[keptIndex] = mergeDuplicateFavorite(favorites[keptIndex], favorites[index]);
+      removedFavorites.add(index);
+    });
+  });
+  const titleCandidates = new Map();
+  favorites.forEach((manga, index) => {
+    if (removedFavorites.has(index)) return;
+    const titleKey = mangaTitleKey(manga);
+    if (!incomingTitleSources.has(titleKey)) return;
+    const matches = titleCandidates.get(titleKey) || [];
+    matches.push(index);
+    titleCandidates.set(titleKey, matches);
+  });
+  titleCandidates.forEach((indices, titleKey) => {
+    if (indices.length < 2) return;
+    const incomingSources = incomingTitleSources.get(titleKey);
+    const nonIncoming = indices.filter((index) => !incomingSources.has(favorites[index].sourceId));
+    if (nonIncoming.length !== 1) return;
+    const keptIndex = nonIncoming[0];
+    indices.filter((index) => index !== keptIndex).forEach((index) => {
+      favorites[keptIndex] = mergeDuplicateFavorite(favorites[keptIndex], favorites[index]);
+      removedFavorites.add(index);
+    });
+  });
+  if (removedFavorites.size) {
+    const keptFavorites = favorites.filter((_, index) => !removedFavorites.has(index));
+    favorites.splice(0, favorites.length, ...keptFavorites);
+  }
+  byManga.clear();
+  const workIndices = new Map();
+  const titleIndices = new Map();
+  favorites.forEach((manga, index) => {
+    const sourceId = manga.sourceId || 'leercapitulo';
+    byManga.set(`${sourceId}|${urlKey(manga.url)}`, index);
+    byManga.set(`${sourceId}|${pathKey(manga.url)}`, index);
+    if (String(manga.sourceId || '').startsWith('mihon-')) byManga.set(`${manga.sourceId}|${pathKey(manga.url)}`, index);
+    const identityKey = mangaIdentityKey(manga);
+    if (identityKey && incomingIdentityKeys.has(identityKey)) byManga.set(`identity|${identityKey}`, index);
+    const workKey = mangaWorkKey(manga);
+    if (incomingWorkSources.has(workKey)) {
+      const indices = workIndices.get(workKey) || [];
+      indices.push(index);
+      workIndices.set(workKey, indices);
     }
+    const titleKey = mangaTitleKey(manga);
+    if (incomingTitleSources.has(titleKey)) {
+      const indices = titleIndices.get(titleKey) || [];
+      indices.push(index);
+      titleIndices.set(titleKey, indices);
+    }
+  });
+  workIndices.forEach((indices, workKey) => {
+    if (indices.length === 1) byManga.set(`work|${workKey}`, indices[0]);
+  });
+  titleIndices.forEach((indices, titleKey) => {
+    if (indices.length === 1) byManga.set(`title|${titleKey}`, indices[0]);
   });
   const previousMihonCategoryIds = new Set(candidate.categoryNames.map((name) => categoryIds.get(normalizeName(name))).filter(Boolean));
   const defaultCategoryId = categories.find((category) => normalizeName(category.name) === 'todos')?.id;
@@ -456,15 +547,28 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
     const originalKey = entry.originalUrl ? `${manga.sourceId}|${urlKey(entry.originalUrl)}` : '';
     const pathMatchKey = `${manga.sourceId}|${pathKey(manga.url)}`;
     const identityKey = mangaIdentityKey(manga);
+    const workKey = mangaWorkKey(manga);
+    const titleKey = mangaTitleKey(manga);
     const index = byManga.get(key)
       ?? (originalKey ? byManga.get(originalKey) : undefined)
       ?? byManga.get(pathMatchKey)
       ?? byManga.get(legacyKey)
-      ?? (identityKey ? byManga.get(`identity|${identityKey}`) : undefined);
+      ?? (identityKey ? byManga.get(`identity|${identityKey}`) : undefined)
+      ?? (workKey ? byManga.get(`work|${workKey}`) : undefined)
+      ?? (titleKey ? byManga.get(`title|${titleKey}`) : undefined);
+    const matchedByWork = index !== undefined
+      && (byManga.get(`work|${workKey}`) === index || byManga.get(`title|${titleKey}`) === index)
+      && byManga.get(key) !== index
+      && (!originalKey || byManga.get(originalKey) !== index)
+      && byManga.get(pathMatchKey) !== index
+      && byManga.get(legacyKey) !== index
+      && (!identityKey || byManga.get(`identity|${identityKey}`) !== index);
     if (index === undefined) {
       byManga.set(key, favorites.length);
       byManga.set(pathMatchKey, favorites.length);
       if (identityKey) byManga.set(`identity|${identityKey}`, favorites.length);
+      if (workKey) byManga.set(`work|${workKey}`, favorites.length);
+      if (titleKey) byManga.set(`title|${titleKey}`, favorites.length);
       if (originalKey) byManga.set(originalKey, favorites.length);
       byManga.set(legacyKey, favorites.length);
       favorites.push(manga);
@@ -477,24 +581,26 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
       favorites[index] = {
         ...manga,
         ...existing,
-        sourceId: manga.sourceId,
-        sourceName: isPlaceholderSourceName(existing.sourceName) ? manga.sourceName : existing.sourceName,
+        sourceId: matchedByWork ? existing.sourceId : manga.sourceId,
+        sourceName: matchedByWork || !isPlaceholderSourceName(existing.sourceName) ? existing.sourceName : manga.sourceName,
         sourceIcon: existing.sourceIcon || manga.sourceIcon,
-        url: manga.url,
+        url: matchedByWork ? existing.url : manga.url,
         title: existing.title || manga.title,
         author: existing.author || manga.author,
         description: existing.description || manga.description,
         genres: existing.genres?.length ? existing.genres : manga.genres,
-        cover: manga.cover || existing.cover,
+        cover: matchedByWork ? existing.cover || manga.cover : manga.cover || existing.cover,
         chapterTotal: Math.max(Number(existing.chapterTotal) || 0, Number(manga.chapterTotal) || 0),
         chapterReadCount: Math.max(Number(existing.chapterReadCount) || 0, Number(manga.chapterReadCount) || 0),
-        coverLocal: manga.cover ? '' : existing.coverLocal || '',
-        coverCached: manga.cover ? '' : existing.coverCached || '',
+        coverLocal: matchedByWork ? existing.coverLocal || '' : manga.cover ? '' : existing.coverLocal || '',
+        coverCached: matchedByWork ? existing.coverCached || '' : manga.cover ? '' : existing.coverCached || '',
         cats: [...new Set([...keptCategories, ...manga.cats])]
       };
       byManga.set(key, index);
       byManga.set(pathMatchKey, index);
       if (identityKey) byManga.set(`identity|${identityKey}`, index);
+      if (workKey) byManga.set(`work|${workKey}`, index);
+      if (titleKey && incomingTitleSources.has(titleKey)) byManga.set(`title|${titleKey}`, index);
       if (originalKey) byManga.set(originalKey, index);
       byManga.set(legacyKey, index);
       updated += 1;

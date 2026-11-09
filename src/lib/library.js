@@ -25,6 +25,7 @@ const sameUrl = (a, b) => {
 };
 
 const sameUrlKey = (u) => String(u || '').replace(/^https?:\/\/[^/]+/i, '').replace(/\/+$/, '') || '/';
+export const libraryKey = (url, sourceId = 'leercapitulo') => `${sourceId}|${sameUrlKey(url)}`;
 
 const SRC = (x) => x.sourceId || 'leercapitulo';
 const match = (a, url, sourceId = 'leercapitulo') => sameUrl(a.url, url) && SRC(a) === sourceId;

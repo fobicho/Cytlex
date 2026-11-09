@@ -1,8 +1,9 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Loader2, ChevronRight, ChevronLeft, CircleHelp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
+import { lib, libraryKey } from '../lib/library.js';
 import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { lastSearch, scrollMemory, rememberCover, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
@@ -29,6 +30,8 @@ const enabledSources = (showAdultExtensions) => extensions.sources().filter(({ m
   isExtensionAllowed(manifest, showAdultExtensions)
 );
 
+const normalizeMangaTitle = (title) => String(title || '').trim().normalize('NFKC').toLocaleLowerCase();
+
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
 
 const sourceLangSubtitle = (manifest) => {
@@ -43,7 +46,7 @@ const sourceLangSubtitle = (manifest) => {
   return codes.map((c) => options.find((l) => l.code === c)?.label || c).join(' · ');
 };
 
-function SourceSection({ r, coverSize, scale = 1, first = false, animate = false, active = true, onMangaSelect, returnTo = '' }) {
+function SourceSection({ r, coverSize, scale = 1, first = false, animate = false, active = true, onMangaSelect, returnTo = '', savedMangaKeys, hideSavedManga = false }) {
   const trackRef = useRef(null);
   const mainRef = useRef(null);
   const [trackWidth, setTrackWidth] = useState(0);
@@ -117,7 +120,11 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
     el.scrollBy({ left: dir * (cardWidth + gap) * 2, behavior: 'smooth' });
   };
 
-  const visible = r.items.slice(0, 15);
+  const visibleItems = hideSavedManga
+    ? r.items.filter((manga) => !savedMangaKeys.has(libraryKey(manga.url, r.id)))
+    : r.items;
+  if (hideSavedManga && r.items.length && !visibleItems.length && !r.hasMore) return null;
+  const visible = visibleItems.slice(0, 15);
 
   return (
     <motion.section
@@ -150,12 +157,16 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
           })()}
         </div>
         <span className="text-muted-foreground shrink-0" style={{ fontSize: `${Math.round(12 * scale)}px` }}>
-          · {r.items.length}
+          · {visibleItems.length}
         </span>
       </div>
-      {!r.items.length ? (
+      {!visibleItems.length ? (
         <p className="text-sm text-muted-foreground">
-          {r.status === 'error' ? 'No se pudo buscar en esta extensión.' : 'Sin resultados en esta extensión.'}
+          {r.status === 'error'
+            ? 'No se pudo buscar en esta extensión.'
+            : r.items.length
+              ? 'Los resultados de esta página ya están en Biblioteca.'
+              : 'Sin resultados en esta extensión.'}
         </p>
       ) : (
       <div className="relative">
@@ -183,6 +194,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
                 onSelect={onMangaSelect}
                 coverSize={cardWidth}
                 showAuthor={false}
+                savedInLibrary={savedMangaKeys.has(libraryKey(m.url, r.id))}
               />
             </div>
           ))}
@@ -238,6 +250,8 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
 let sessionTab = 'mangas';
 let animateSearch = false;
 let activeSearchRun = 0;
+let activeMigrationSearchRun = 0;
+let migrationSearchSnapshot = null;
 
 const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = false, active = true, migrationInline = null }) {
   const loc = locationOverride;
@@ -246,16 +260,24 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const migrationFromUrl = searchParams.get('migrationFrom') || '';
   const migrationFromSource = searchParams.get('migrationSource') || '';
   const migrationSourceIds = (searchParams.get('migrationTargets') || '').split(',').filter(Boolean);
+  const migrationSearchId = searchParams.get('migrationSearchId') || '';
+  const migrationQuery = searchParams.get('q') || '';
   const migrationMode = !!(migrationFromUrl && migrationFromSource && migrationSourceIds.length);
+  const migrationSearchKey = migrationMode
+    ? JSON.stringify([migrationSearchId, migrationFromUrl, migrationFromSource, migrationQuery, [...migrationSourceIds].sort()])
+    : '';
   const [tab, setTab] = useState(() => {
     const t = new URLSearchParams(loc.search).get('tab');
     return t === 'mangas' || t === 'extensiones' || t === 'fuentes' ? t : sessionTab;
   });
   const [sources, setSources] = useState(() => enabledSources(!!settings.get().showAdultExtensions));
-  const [q, setQ] = useState(() => lastSearch.q);
-  const [results, setResults] = useState(() => lastSearch.results);
+  const [q, setQ] = useState(() => migrationMode ? migrationQuery : lastSearch.q);
+  const [results, setResults] = useState(() => migrationMode
+    ? migrationSearchSnapshot?.key === migrationSearchKey ? migrationSearchSnapshot.results : null
+    : lastSearch.results);
   const [coverSize, setCoverSize] = useState(() => settings.get().coverSize);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
+  const [hideSavedManga, setHideSavedManga] = useState(() => !!settings.get().hideSavedManga);
   const [migrationSelection, setMigrationSelection] = useState(null);
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationError, setMigrationError] = useState('');
@@ -265,6 +287,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     setShowAdultExtensions(!!s.showAdultExtensions);
     setSources(enabledSources(!!s.showAdultExtensions));
     setCoverSize(s.coverSize);
+    setHideSavedManga(!!s.hideSavedManga);
   }), []);
   useEffect(() => { sessionTab = tab; }, [tab]);
   useEffect(() => {
@@ -286,6 +309,10 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   useEffect(() => () => { animateSearch = false; }, []);
 
   const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
+  const savedMangaKeys = useMemo(
+    () => new Set(lib.favs().map((manga) => libraryKey(manga.url, manga.sourceId || 'leercapitulo'))),
+    [loc.pathname, loc.search, active]
+  );
 
   useEffect(() => {
     setSources(enabledSources(!!settings.get().showAdultExtensions));
@@ -299,43 +326,61 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const visibleCompleted = migrationMode
     ? completed.filter((r) => migrationSourceIds.includes(r.id))
     : completed.filter((r) => isExtensionAllowed(r.manifest, showAdultExtensions));
+  const searchItems = visibleCompleted.flatMap((result) => result.items.map((manga) => ({ manga, sourceId: result.id })));
+  const visibleSearchItemCount = migrationMode || !hideSavedManga
+    ? searchItems.length
+    : searchItems.filter(({ manga, sourceId }) => !savedMangaKeys.has(libraryKey(manga.url, sourceId))).length;
   const done = !!results && !searching;
 
-  useEffect(() => { if (done) animateSearch = false; }, [done]);
+  useEffect(() => { if (done && !migrationMode) animateSearch = false; }, [done, migrationMode]);
 
   const updateResults = (fn) => {
+    if (migrationMode) {
+      const current = migrationSearchSnapshot?.key === migrationSearchKey
+        ? migrationSearchSnapshot.results
+        : results;
+      migrationSearchSnapshot = { key: migrationSearchKey, results: fn(current) };
+      setResults(migrationSearchSnapshot.results);
+      return;
+    }
     lastSearch.results = fn(lastSearch.results);
     setResults(lastSearch.results);
   };
 
   const runSearch = (query = q) => {
+    const searchQuery = migrationMode ? migrationQuery : query;
     const adultExtensionsEnabled = !!settings.get().showAdultExtensions;
     const migrationSources = new Set(migrationSourceIds);
     const list = migrationMode
       ? extensions.sources().filter(({ manifest }) => migrationSources.has(manifest.id))
       : enabledSources(adultExtensionsEnabled);
     if (!list.length) return;
-    scrollMemory.catalog = 0;
+    if (!migrationMode) scrollMemory.catalog = 0;
     const main = document.querySelector('main');
     if (main) main.scrollTop = 0;
-    const runId = ++activeSearchRun;
-    catalogScroll.clear();
-    clearSearchCoverCache();
-    animateSearch = true;
-    lastSearch.q = query;
-    lastSearch.genre = '';
-    lastSearch.adultExtensionsEnabled = adultExtensionsEnabled;
-    lastSearch.results = list
+    const runId = migrationMode ? ++activeMigrationSearchRun : ++activeSearchRun;
+    if (!migrationMode) {
+      catalogScroll.clear();
+      clearSearchCoverCache();
+      animateSearch = true;
+      lastSearch.q = searchQuery;
+      lastSearch.genre = '';
+      lastSearch.adultExtensionsEnabled = adultExtensionsEnabled;
+    }
+    const initialResults = list
       .map((s) => ({ id: s.manifest.id, manifest: s.manifest, status: 'loading', items: [], page: 1, totalPages: 1, hasMore: false }))
       .sort((a, b) => a.manifest.name.localeCompare(b.manifest.name, 'es', { sensitivity: 'base' }));
-    setResults(lastSearch.results);
+    if (migrationMode) migrationSearchSnapshot = { key: migrationSearchKey, results: initialResults };
+    else lastSearch.results = initialResults;
+    setResults(initialResults);
 
     list.forEach(async (s) => {
       try {
-        const params = { q: query, genre: '', page: 1 };
+        const params = { q: searchQuery, genre: '', page: 1 };
         const r = await api.catalog(params, s.manifest.id);
         const items = (r.items || []).filter((m) =>
-          s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim()
+          (!migrationMode || normalizeMangaTitle(m.title) === normalizeMangaTitle(migrationQuery)) &&
+          (s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim())
         ).slice(0, MAX_SEARCH_RESULTS);
         const visibleCovers = await Promise.all(items.slice(0, 10).map(async (m) => [
           m.url,
@@ -346,7 +391,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
           ? { ...m, coverCached: cachedCovers.get(m.url) }
           : m);
         items.forEach((m) => rememberCover(m.url, m.cover, s.manifest.id));
-        if (runId !== activeSearchRun) return;
+        if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
         updateResults((prev) =>
           prev ? prev.map((x) => (x.id === s.manifest.id
             ? {
@@ -362,7 +407,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
         );
       } catch (e) {
         console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);
-        if (runId !== activeSearchRun) return;
+        if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
         updateResults((prev) => (prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'error' } : x)) : prev));
       }
     });
@@ -428,6 +473,19 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     const nq = params.get('q') || '';
     if (nq && params.get('tab') !== 'fuentes') {
       setQ(nq);
+      const cached = migrationMode && migrationSearchSnapshot?.key === migrationSearchKey
+        ? migrationSearchSnapshot.results
+        : null;
+      if (cached?.length && cached.every((result) => result.status !== 'loading')) {
+        if (!migrationMode) {
+          lastSearch.q = nq;
+          lastSearch.results = cached;
+        }
+        setResults(cached);
+        const main = document.querySelector('main');
+        if (main) main.scrollTop = scrollMemory.catalog;
+        return;
+      }
       runSearch(nq);
     }
   }, [loc.search]);
@@ -567,7 +625,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
           />
         )}
 
-        {tab === 'mangas' && catalogSources.length > 0 && (
+        {tab === 'mangas' && catalogSources.length > 0 && !migrationMode && (
           <div className="ml-auto self-center flex items-center" style={{ gap: px(12, scale, 9) }}>
             <div className="relative w-full sm:w-auto" style={{ width: px(288, scale, 190) }}>
               <Search
@@ -580,7 +638,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
               />
               <Input
                 className="bg-muted/50 border-none"
-                placeholder={migrationMode ? 'Buscar en las extensiones seleccionadas...' : 'Buscar en todas las extensiones...'}
+                placeholder="Buscar en todas las extensiones..."
                 value={q}
                 onChange={(e) => { setQ(e.target.value); lastSearch.q = e.target.value; }}
                 onKeyDown={(e) => e.key === 'Enter' && q.trim() && runSearch()}
@@ -649,6 +707,12 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                     title="No hay extensiones visibles"
                     description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para mostrarlas."
                   />
+                ) : !migrationMode && hideSavedManga && done && searchItems.length > 0 && visibleSearchItemCount === 0 ? (
+                  <EmptyState
+                    face="（・_・）"
+                    title="No hay mangas nuevos"
+                    description="Los mangas encontrados ya están en Biblioteca. Puedes desactivar «Ocultar mangas ya guardados» en Ajustes > Biblioteca."
+                  />
                 ) : visibleCompleted.map((r, i) => (
                   <SourceSection
                     key={r.id}
@@ -660,6 +724,8 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                     active={active}
                     onMangaSelect={migrationMode ? (manga, sourceId) => { setMigrationError(''); setMigrationSelection({ manga, sourceId }); } : undefined}
                     returnTo={migrationMode ? migrationInline?.returnTo || `/explorar?${loc.search.replace(/^\?/, '')}` : ''}
+                    savedMangaKeys={savedMangaKeys}
+                    hideSavedManga={!migrationMode && hideSavedManga}
                   />
                 ))}
               </>
@@ -669,7 +735,13 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
       ) : tab === 'extensiones' ? (
         <ExtensionsPanel tutorialPreview={tutorialPreview} />
       ) : (
-        <SourcesCatalog sources={sources} initialSourceId={new URLSearchParams(loc.search).get('source') || ''} active={active} />
+        <SourcesCatalog
+          sources={sources}
+          initialSourceId={new URLSearchParams(loc.search).get('source') || ''}
+          active={active}
+          savedMangaKeys={savedMangaKeys}
+          hideSavedManga={hideSavedManga}
+        />
       )}
 
       <Dialog
