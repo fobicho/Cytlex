@@ -659,7 +659,11 @@ ipcMain.handle('http:get', async (_e, url, requestId) => {
     timeout: HTTP_GET_TIMEOUT_MS,
     requestId
   });
-  if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`HTTP ${res.statusCode} al pedir ${parsed.toString()}`);
+  if (res.statusCode < 200 || res.statusCode >= 300) {
+    const retryAfter = res.headers['retry-after'];
+    res.resume();
+    throw new Error(`HTTP ${res.statusCode} al pedir ${parsed.toString()}${retryAfter ? ` (Retry-After: ${retryAfter})` : ''}`);
+  }
   return (await readResponse(res, HTTP_BODY_MAX_BYTES)).toString('utf8');
 });
 

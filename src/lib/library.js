@@ -30,6 +30,10 @@ const libraryUrlKey = (url) => {
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    const mangaDexId = host === 'mangadex.org'
+      ? parsed.pathname.match(/^\/(?:title|manga)\/([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})(?:\/|$)/i)?.[1]
+      : '';
+    if (mangaDexId) return `mangadex.org/title/${mangaDexId.toLowerCase()}`;
     return `${host}${parsed.pathname.replace(/\/+$/, '') || '/'}`;
   } catch {
     return sameUrlKey(url);

@@ -278,13 +278,23 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   useEffect(() => {
     if (!proxyCover || !finalCover) return undefined;
     let alive = true;
-    preloadLibraryCover(finalCover).then((local) => {
-      if (!alive) return;
-      if (local) setDisplayedCover({ key: coverKey, src: local });
-      else setFailedCover(finalCover);
-    });
+    const loadCover = async () => {
+      const candidates = [...new Set([finalCover, knownCover].filter(Boolean))];
+      for (const candidate of candidates) {
+        const cached = getLibraryCover(candidate) || getSearchCover(candidate);
+        const local = cached || await preloadLibraryCover(candidate);
+        if (!alive) return;
+        if (local) {
+          setDisplayedCover({ key: coverKey, src: local });
+          setFailedCover('');
+          return;
+        }
+      }
+      if (alive) setFailedCover(finalCover);
+    };
+    loadCover();
     return () => { alive = false; };
-  }, [coverKey, finalCover, proxyCover]);
+  }, [coverKey, finalCover, knownCover, proxyCover]);
   const coverImg = (alt) => (
     <>
       {visibleCover && visibleCover !== finalCover && (

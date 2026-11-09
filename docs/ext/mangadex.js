@@ -8,17 +8,44 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
   const types = { ja: 'Manga', ko: 'Manhwa', zh: 'Manhua', 'zh-hk': 'Manhua' };
   const requestInterval = 500;
   let requestQueue = Promise.resolve();
+  let activeRequests = 0;
+  let blockedUntil = 0;
   let lastRequestAt = 0;
   let genreOptionsRequest = null;
+  const requestWaiters = [];
+
+  const acquireRequestSlot = async () => {
+    if (activeRequests >= 2) await new Promise((resolve) => requestWaiters.push(resolve));
+    else activeRequests += 1;
+    const slot = requestQueue.then(async () => {
+      let wait;
+      do {
+        wait = Math.max(requestInterval - (Date.now() - lastRequestAt), blockedUntil - Date.now(), 0);
+        if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+      } while (wait);
+      lastRequestAt = Date.now();
+    });
+    requestQueue = slot.catch(() => {});
+    try {
+      await slot;
+    } catch (error) {
+      releaseRequestSlot();
+      throw error;
+    }
+  };
+  const releaseRequestSlot = () => {
+    const next = requestWaiters.shift();
+    if (next) next();
+    else activeRequests -= 1;
+  };
 
   const json = (url, requestId) => {
     const request = async () => {
       let data;
       let response = '';
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        const wait = Math.max(0, requestInterval - (Date.now() - lastRequestAt));
-        if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
-        lastRequestAt = Date.now();
+        let retryDelay = 0;
+        await acquireRequestSlot();
         try {
           response = await fetchText(url, requestId);
           data = JSON.parse(response);
@@ -26,23 +53,33 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
         } catch (error) {
           const message = String(error?.message || error);
           if (/Petición cancelada|HTTP_REQUEST_ABORTED/i.test(message)) throw error;
+          if (/^\s*</.test(response)) {
+            throw new Error(`MangaDex respondió con HTML en lugar de JSON al consultar ${new URL(url).pathname}. La API puede estar temporalmente inaccesible.`);
+          }
           const status = Number(message.match(/HTTP (\d{3})/)?.[1]);
-          const retryable = !status || status === 429 || status >= 500;
-          if (!retryable || attempt === 2) {
-            if (/^\s*</.test(response)) {
-              throw new Error(`MangaDex respondió con HTML en lugar de JSON al consultar ${new URL(url).pathname}. La API puede estar temporalmente inaccesible.`);
-            }
+          if (status === 429) {
+            const retryAfter = message.match(/Retry-After:\s*([^)]+)/i)?.[1]?.trim();
+            const retrySeconds = Number(retryAfter);
+            const retryAt = Number.isFinite(retrySeconds)
+              ? Date.now() + retrySeconds * 1000
+              : Date.parse(retryAfter || '');
+            blockedUntil = Math.max(blockedUntil, Number.isFinite(retryAt) && retryAt > Date.now() ? retryAt : Date.now() + 5000);
             throw error;
           }
-          await new Promise((resolve) => setTimeout(resolve, 700 * (2 ** attempt) + Math.random() * 300));
+          const retryable = !status || status >= 500;
+          if (!retryable || attempt === 2) {
+            throw error;
+          }
+          retryDelay = 700 * (2 ** attempt) + Math.random() * 300;
+        } finally {
+          releaseRequestSlot();
         }
+        if (retryDelay) await new Promise((resolve) => setTimeout(resolve, retryDelay));
       }
       if (data?.result !== 'ok') throw new Error('MangaDex devolvió una respuesta no válida.');
       return data;
     };
-    const pending = requestQueue.then(request);
-    requestQueue = pending.catch(() => {});
-    return pending;
+    return request();
   };
 
   const requestUrl = (path, params) => {

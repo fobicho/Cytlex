@@ -291,7 +291,9 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   }), []);
   useEffect(() => { sessionTab = tab; }, [tab]);
   useEffect(() => {
-    if (active && tab === 'mangas') return;
+    // Catalog stays mounted behind the manga detail page. Keep its blob URLs
+    // alive while those cards are hidden so returning to Explore preserves covers.
+    if (tab === 'mangas') return;
     clearSearchCoverCache();
     if (!lastSearch.results) return;
     lastSearch.results = lastSearch.results.map((result) => ({

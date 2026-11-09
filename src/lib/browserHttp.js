@@ -54,7 +54,10 @@ async function browserRequest(url, options = {}) {
     if (requestOptions.signal?.aborted) throw error;
     throw new Error('El navegador bloqueó la conexión a esta fuente. Para fuentes sin acceso CORS, publica Cytlex con su proxy web habilitado.');
   }
-  if (!response.ok) throw new Error(`HTTP ${response.status} al pedir ${url}`);
+  if (!response.ok) {
+    const retryAfter = response.headers.get('retry-after');
+    throw new Error(`HTTP ${response.status} al pedir ${url}${retryAfter ? ` (Retry-After: ${retryAfter})` : ''}`);
+  }
   return response;
 }
 

@@ -69,7 +69,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
     if (unavailable) {
       if (unavailableCachedCover || !/^https?:\/\//i.test(m.cover || '')) return undefined;
       let alive = true;
-      restoreLibraryCover(m.cover).then((local) => {
+      restoreLibraryCover(m.cover).then((local) => local || preloadLibraryCover(m.cover)).then((local) => {
         if (alive && local) setCoverState({ key: preferredCover, src: local });
       });
       return () => { alive = false; };
@@ -77,15 +77,25 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
     if (!/^https?:\/\//i.test(preferredCover || '')) return undefined;
     let alive = true;
     if (proxyCover) {
-      const prepare = from === 'biblioteca' || useLibraryCoverCache
+      const prepare = () => from === 'biblioteca' || useLibraryCoverCache
         ? restoreLibraryCover(preferredCover).then((local) => local || preloadLibraryCover(preferredCover))
         : preloadSearchCover(preferredCover);
-      prepare.then((local) => {
-        if (alive && loadedCoverKey.current !== preferredCover) {
-          setCoverState({ key: preferredCover, src: local || (proxyCover ? '' : preferredCover) });
-        }
+      const load = () => prepare().then((local) => {
+        if (alive && loadedCoverKey.current !== preferredCover) setCoverState({ key: preferredCover, src: local || '' });
       });
-      return () => { alive = false; };
+      const target = coverRef.current;
+      if (from === 'biblioteca' || useLibraryCoverCache || !target || !('IntersectionObserver' in window)) {
+        load();
+        return () => { alive = false; };
+      }
+      const observer = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          load();
+        }
+      }, { root: document.querySelector('main'), rootMargin: '220px 0px' });
+      observer.observe(target);
+      return () => { alive = false; observer.disconnect(); };
     }
     if (from !== 'biblioteca' && !useLibraryCoverCache) return undefined;
     const restore = () => restoreLibraryCover(preferredCover).then((local) => {

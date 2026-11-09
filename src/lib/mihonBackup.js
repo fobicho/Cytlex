@@ -249,9 +249,9 @@ function sourceLookup(installedSources, mihonSources, availableExtensions) {
   };
 }
 
-function resolveUrl(raw, manifest) {
+function resolveUrl(raw, manifest, fallback) {
   if (!raw) return '';
-  try { return new URL(raw, manifest?.baseUrl).href; } catch { return raw; }
+  try { return new URL(raw, manifest?.baseUrl || fallback).href; } catch { return raw; }
 }
 
 export async function previewMihonBackup(input, installedSources, availableExtensions = []) {
@@ -282,7 +282,7 @@ export async function previewMihonBackup(input, installedSources, availableExten
     const sourceId = manifest?.id || `mihon-${manga.source}`;
     const url = resolveUrl(manga.url, manifest);
     const chapterProgress = manga.chapters.map((chapter) => ({
-      url: resolveUrl(chapter.url, manifest),
+      url: resolveUrl(chapter.url, manifest, url),
       name: chapter.name,
       number: chapter.number,
       read: chapter.read,
@@ -299,7 +299,7 @@ export async function previewMihonBackup(input, installedSources, availableExten
         description: manga.description,
         genres: manga.genres,
         status: manga.status,
-        cover: resolveUrl(manga.cover, manifest),
+        cover: resolveUrl(manga.cover, manifest, url),
         chapterTotal: manga.chapters.length,
         chapterReadCount: manga.chapters.filter((chapter) => chapter.read).length,
         cats: manga.categoryIds.map((index) => categoryByIndex.get(String(index))).filter(Boolean),

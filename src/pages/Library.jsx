@@ -162,7 +162,7 @@ function CachedLibraryCover({ cover, title, className, cachedOnly = false, cache
     if (!/^https?:\/\//i.test(cover || '')) return undefined;
     let alive = true;
     if (cachedOnly) {
-      const restoreCached = () => restoreLibraryCover(cover).then((local) => {
+      const restoreCached = () => restoreLibraryCover(cover).then((local) => local || preloadLibraryCover(cover)).then((local) => {
         if (alive && local && loadedCoverKey.current !== cover) setCoverState({ key: cover, src: local });
       });
       const target = coverRef.current;
