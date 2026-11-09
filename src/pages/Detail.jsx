@@ -36,7 +36,7 @@ const byNumber = (a, b, direction = 1) => {
   if (Number.isNaN(na) !== Number.isNaN(nb)) return (Number.isNaN(na) ? 1 : -1) * direction;
   if (!Number.isNaN(na) && na !== nb) return (na - nb) * direction;
   const groupOrder = String(a.group || '').localeCompare(String(b.group || ''), 'es', { sensitivity: 'base', numeric: true });
-  if (groupOrder) return groupOrder;
+  if (groupOrder) return groupOrder * direction;
   return String(a.date).localeCompare(String(b.date), 'es', { numeric: true }) * direction;
 };
 
@@ -142,6 +142,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const backTo = backToFor(loc);
   const fromParam = new URLSearchParams(loc.search).get('from') || 'biblioteca';
   const routeParams = new URLSearchParams(loc.search);
+  const readerBackParam = routeParams.get('back') ? `&back=${encodeURIComponent(backTo)}` : '';
   const migrationSearchMode = routeParams.get('migrationSearch') === '1';
   const migrationSearchTargets = (routeParams.get('migrationTargets') || '').split(',').filter(Boolean);
   const migrationSearchQuery = routeParams.get('migrationQuery') || '';
@@ -770,7 +771,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     chapters = [...chapters].sort((a, b) => {
       const ga = a.group || '';
       const gb = b.group || '';
-      if (ga !== gb) return ga.localeCompare(gb, 'es', { sensitivity: 'base', numeric: true });
+      if (ga !== gb) return ga.localeCompare(gb, 'es', { sensitivity: 'base', numeric: true }) * (asc ? 1 : -1);
       return byNumber(a, b, asc ? 1 : -1);
     });
   } else {
@@ -982,7 +983,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             className="shadow-none"
             onClick={() => {
               saveDetailScroll();
-              window.location.hash = `#/leer?u=${encodeURIComponent(resume.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`;
+              window.location.hash = `#/leer?u=${encodeURIComponent(resume.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}${readerBackParam}`;
             }}
             style={{
               height: px(40, scale, 33),
@@ -1301,7 +1302,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               )}
               style={{ minHeight: `${Math.round(52 * scale)}px` }}
               onClick={saveDetailScroll}
-              href={`#/leer?u=${encodeURIComponent(c.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}`}
+              href={`#/leer?u=${encodeURIComponent(c.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}${readerBackParam}`}
             >
               <span className="flex-1 min-w-0">
                 <span

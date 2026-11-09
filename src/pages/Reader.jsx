@@ -121,7 +121,11 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const adultExtensionDisabled = !isExtensionAllowed(extensions.manifest(sourceId), showAdultExtensions);
   const fromParam = params.get('from') || '';
   const fromQS = fromParam ? `&from=${encodeURIComponent(fromParam)}` : '';
-  const backHash = `#/manga?u=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}`;
+  const detailBack = params.get('back') || '';
+  const detailBackQS = detailBack.startsWith('/manga?')
+    ? `&back=${encodeURIComponent(detailBack)}`
+    : '';
+  const backHash = `#/manga?u=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}${detailBackQS}`;
   const goBack = useCallback(() => {
     detailScroll.requestRestore();
     window.location.hash = backHash;
@@ -730,7 +734,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       </div>
     );
 
-  const go = (url) => `#/leer?u=${encodeURIComponent(url)}&m=${encodeURIComponent(mangaUrl || ch.mangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}`;
+  const go = (url) => `#/leer?u=${encodeURIComponent(url)}&m=${encodeURIComponent(mangaUrl || ch.mangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}${detailBackQS}`;
   const last = ch.pages.length - 1;
 
   const openPanelMenu = (e, url, label) => {

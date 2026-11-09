@@ -25,7 +25,6 @@ const sameUrl = (a, b) => {
 };
 
 const sameUrlKey = (u) => String(u || '').replace(/^https?:\/\/[^/]+/i, '').replace(/\/+$/, '') || '/';
-export const libraryKey = (url, sourceId = 'leercapitulo') => `${sourceId}|${sameUrlKey(url)}`;
 const libraryUrlKey = (url) => {
   try {
     const parsed = new URL(url);
@@ -39,13 +38,22 @@ const libraryUrlKey = (url) => {
     return sameUrlKey(url);
   }
 };
+export const libraryKey = (url, sourceId = 'leercapitulo') => {
+  const identity = libraryUrlKey(url);
+  return `${sourceId}|${identity.startsWith('mangadex.org/title/') ? identity : sameUrlKey(url)}`;
+};
 export const libraryIdentityKey = (url) => `url|${libraryUrlKey(url)}`;
 export const isLibraryManga = (manga, sourceId, keys) =>
   keys.has(libraryKey(manga.url, sourceId))
   || keys.has(libraryIdentityKey(manga.url));
 
 const SRC = (x) => x.sourceId || 'leercapitulo';
-const match = (a, url, sourceId = 'leercapitulo') => sameUrl(a.url, url) && SRC(a) === sourceId;
+const isUnresolvedMihonSource = (sourceId) => /^mihon-\d+$/i.test(String(sourceId || ''));
+const match = (a, url, sourceId = 'leercapitulo') => {
+  const sameIdentity = libraryIdentityKey(a.url) === libraryIdentityKey(url);
+  return (sameUrl(a.url, url) && SRC(a) === sourceId)
+    || (sameIdentity && (SRC(a) === sourceId || isUnresolvedMihonSource(SRC(a))));
+};
 
 export const lib = {
   favs() {

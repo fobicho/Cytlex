@@ -314,7 +314,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const savedMangaKeys = useMemo(
     () => new Set(lib.favs().flatMap((manga) => [
       libraryKey(manga.url, manga.sourceId || 'leercapitulo'),
-      libraryIdentityKey(manga.url)
+      ...(/^mihon-\d+$/i.test(manga.sourceId || '') ? [libraryIdentityKey(manga.url)] : [])
     ])),
     [loc.pathname, loc.search, active]
   );
