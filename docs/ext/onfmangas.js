@@ -161,7 +161,14 @@ export default function createSource({ fetchText, parse }) {
     const outer = parse(html);
     const pages = decodePageImages(html, outer, url);
     if (!pages.length) {
-      const blocked = /captcha|cloudflare|cf-chl|challenge-platform|verify (?:that )?you are human|checking your browser|just a moment|attention required|enable javascript and cookies|access denied|too many requests|demasiadas solicitudes|acceso temporalmente bloqueado/i.test(html);
+      const challengeMarkup = /cf-chl-|__cf_chl|challenge-platform|cdn-cgi\/challenge|cloudflare ray id/i.test(html);
+      const visibleText = html
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&(?:nbsp|amp|lt|gt|quot|#39);/gi, ' ');
+      const blockedMessage = /captcha|verify (?:that )?you are human|checking your browser|just a moment|attention required|enable javascript and cookies|access denied|too many requests|demasiadas solicitudes|acceso temporalmente bloqueado|verificaci[oó]n de seguridad/i.test(visibleText);
+      const blocked = challengeMarkup || blockedMessage;
       throw new Error(blocked
         ? 'ONF devolvió una verificación o bloqueo en vez de las páginas del capítulo. Inténtalo de nuevo más tarde.'
         : 'ONF respondió, pero Cytlex no encontró la lista de páginas del capítulo. Puede haber cambiado el formato del lector.');
