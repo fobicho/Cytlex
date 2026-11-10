@@ -72,6 +72,18 @@
     "desc": "Manga, manhwa y manhua en español."
   },
   {
+    "id": "plottwistnofansub",
+    "name": "Plot Twist No Fansub",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "contentWarning": "MIXED",
+    "main": "ext/plottwistnofansub.js",
+    "baseUrl": "https://plotnofansub.com",
+    "icon": "https://www.google.com/s2/favicons?domain=plotnofansub.com&sz=128",
+    "desc": "Manga y scanlations en español."
+  },
+  {
     "id": "inmanga",
     "name": "InManga",
     "lang": "es",

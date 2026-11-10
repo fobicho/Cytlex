@@ -7,13 +7,12 @@ import { tracking } from '../lib/tracking.js';
 import { extensions } from '../lib/extensions.js';
 import { lib } from '../lib/library.js';
 import { discardLibraryCover, getLibraryCover, markLibraryCoverLoaded, preloadLibraryCover, preloadSearchCover, requiresImageProxy, restoreLibraryCover } from '../lib/covers.js';
-import { rememberCover, sourceCatalogState } from '../lib/searchState.js';
+import { sourceCatalogState } from '../lib/searchState.js';
 import { SourceBadge } from './SourceBadge.jsx';
 import { browserImageUrl } from '../lib/browserHttp.js';
 
 const prefetched = new Set();
 const MAX_PREFETCHED = 80;
-const coverKey = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 function prefetch(url, sourceId) {
   const key = `${sourceId}|${url}`;
   if (!url || prefetched.has(key)) return;
@@ -63,13 +62,12 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
   const hoverTimer = useRef(null);
   const loadedCoverKey = useRef('');
   const failedCoverUrls = useRef(new Set());
-  const refreshedCoverMangas = useRef(new Set());
 
   useEffect(() => {
     if (unavailable) {
       if (unavailableCachedCover || !/^https?:\/\//i.test(m.cover || '')) return undefined;
       let alive = true;
-      restoreLibraryCover(m.cover).then((local) => local || preloadLibraryCover(m.cover)).then((local) => {
+      restoreLibraryCover(m.cover).then((local) => {
         if (alive && local) setCoverState({ key: preferredCover, src: local });
       });
       return () => { alive = false; };
@@ -204,21 +202,6 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
                 if (local) {
                   setCoverState({ key: preferredCover, src: local });
                   return;
-                }
-                const mangaKey = `${sourceId}|${m.url}`;
-                if (from === 'biblioteca' && m.url && m.title && !refreshedCoverMangas.current.has(mangaKey)) {
-                  refreshedCoverMangas.current.add(mangaKey);
-                  try {
-                    const result = await api.catalog({ q: m.title, page: 1 }, sourceId);
-                    const expectedTitle = coverKey(m.title);
-                    const refreshed = (result.items || []).find((item) => item.url === m.url && coverKey(item.title) === expectedTitle && item.cover && item.cover !== src);
-                    if (refreshed?.cover) {
-                      rememberCover(m.url, refreshed.cover, sourceId);
-                      lib.updateFav(m.url, { cover: refreshed.cover, coverLocal: '', coverCached: '' }, sourceId);
-                      setCoverState({ key: preferredCover, src: refreshed.cover });
-                      return;
-                    }
-                  } catch {}
                 }
                 if (!unavailable && from !== 'biblioteca' && m.url && sourceId) {
                   try {

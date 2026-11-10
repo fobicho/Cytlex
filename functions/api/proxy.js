@@ -4,8 +4,10 @@ const ALLOWED_HOSTS = new Set([
   'd33y4i2dmzjqjh.cloudfront.net',
   'fobicho.github.io',
   'images.mangalect.org',
+  'imagenes.plotnofansub.com',
   'inmanga.com',
   'intomanga.com',
+  'jumpg-assets.tokyo-cdn.com',
   'manga-oni.com',
   'mangalect.org',
   'mangadex.org',
@@ -13,7 +15,9 @@ const ALLOWED_HOSTS = new Set([
   'onfmangas.com',
   'panel.olympusxyz.com',
   'pack-yak.intomanga.com',
+  'plotnofansub.com',
   'uploads.mangadex.org',
+  'www.plotnofansub.com',
   'www.leercapitulo.co',
   'zonatmo.org'
 ]);
@@ -104,6 +108,9 @@ function forwardedHeaders(request, target) {
   }
   if (target.hostname === 'onfmangas.com') {
     headers.set('referer', onfReferer(request));
+  }
+  if (target.hostname === 'plotnofansub.com' || target.hostname.endsWith('.plotnofansub.com')) {
+    headers.set('referer', 'https://plotnofansub.com/');
   }
   if (target.hostname === 'd33y4i2dmzjqjh.cloudfront.net') {
     headers.set('referer', onfReferer(request));

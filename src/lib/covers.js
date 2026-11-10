@@ -257,11 +257,7 @@ export function getLibraryCover(url) {
 
 export async function preloadLibraryCover(url) {
   if (!url || typeof window === 'undefined') return '';
-  if (!window.cytlex?.fetchImage) {
-    try {
-      if (new URL(url).hostname.toLowerCase() === 'd33y4i2dmzjqjh.cloudfront.net') return '';
-    } catch {}
-  }
+  if (!window.cytlex?.fetchImage && !/^(data:|blob:)/i.test(url)) return '';
   const cached = libraryCoverCache.get(url);
   if (cached) {
     libraryCoverCache.delete(url);
