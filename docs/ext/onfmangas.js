@@ -135,6 +135,14 @@ export default function createSource({ fetchText, parse }) {
 
     let pageList = decodePageList(encodedPages);
     if (!pageList) {
+      for (const script of outer.querySelectorAll('script[type="application/json"]')) {
+        const payload = script.textContent || '';
+        if (!payload.includes('"src"')) continue;
+        pageList = decodePageList(payload);
+        if (pageList) break;
+      }
+    }
+    if (!pageList) {
       for (const payload of assignedPagePayloads(html)) {
         pageList = decodePageList(payload);
         if (pageList) break;
