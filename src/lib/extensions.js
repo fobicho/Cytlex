@@ -512,9 +512,17 @@ export const extensions = {
     if (cache.has(baseId)) return pickSource(cache.get(baseId), id, baseId);
     let pending = moduleLoads.get(baseId);
     if (!pending) {
-      pending = Promise.resolve().then(() => rec.manifest.type === 'module'
-        ? loadModule(rec.code, rec.manifest)
-        : buildSelectorSource(rec.manifest, ctx(rec.manifest)));
+      pending = Promise.resolve().then(async () => {
+        if (rec.manifest.type !== 'module') return buildSelectorSource(rec.manifest, ctx(rec.manifest));
+        let code = rec.code;
+        if (import.meta.env.DEV && baseId === 'onfmangas') {
+          try {
+            const response = await fetch('/docs/ext/onfmangas.js', { cache: 'no-store' });
+            if (response.ok) code = await response.text();
+          } catch {}
+        }
+        return loadModule(code, rec.manifest);
+      });
       moduleLoads.set(baseId, pending);
     }
     try {

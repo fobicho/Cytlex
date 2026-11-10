@@ -54,7 +54,7 @@ export default function createSource({ fetchText, parse }) {
     if (typeof page === 'string') return page;
     if (!page || typeof page !== 'object') return '';
     return page.url || page.src || page.image || page.srcUrl || page.pageUrl
-      || page.imageUrl || page.image_url || page.src_url || page.path || page.file || '';
+      || page.imageUrl || page.image_url || page.src_url || page.path || page.file || page.fallback || '';
   };
 
   function assignedPagePayloads(html) {
