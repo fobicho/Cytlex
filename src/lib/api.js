@@ -229,9 +229,12 @@ export const api = {
     chapterRequests.set(key, request);
     try {
       const value = await request;
-      chapterCache.delete(key);
-      chapterCache.set(key, { at: Date.now(), value });
-      pruneCache(chapterCache, CHAPTER_TTL_MS, CHAPTER_CACHE_MAX);
+      // No cachear resultados vacíos (bloqueos temporales del servidor dejan el índice venenoso).
+      if (value?.pages?.length) {
+        chapterCache.delete(key);
+        chapterCache.set(key, { at: Date.now(), value });
+        pruneCache(chapterCache, CHAPTER_TTL_MS, CHAPTER_CACHE_MAX);
+      }
       return value;
     } finally {
       if (chapterRequests.get(key) === request) chapterRequests.delete(key);

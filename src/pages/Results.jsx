@@ -174,7 +174,7 @@ export default function Results() {
         variant="ghost"
         size="sm"
         className="self-start hover:bg-transparent hover:text-foreground"
-        onClick={() => navigate('/explorar')}
+        onClick={(e) => { e.currentTarget.blur(); navigate('/explorar'); }}
         style={{
           marginTop: px(-8, scale, -6),
           marginLeft: px(-8, scale, -6),

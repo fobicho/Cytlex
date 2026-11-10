@@ -81,7 +81,7 @@ function onfReferer(request) {
 
 function forwardedHeaders(request, target) {
   const headers = new Headers();
-  for (const name of ['accept', 'content-type', 'x-requested-with']) {
+  for (const name of ['accept', 'content-type', 'x-requested-with', 'user-agent', 'accept-language']) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }

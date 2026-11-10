@@ -37,12 +37,16 @@ function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageR
   const [status, setStatus] = useState('loading');
   const [attempt, setAttempt] = useState(0);
   const [fallbackState, setFallbackState] = useState({ src, enabled: false });
+  const [srcOverride, setSrcOverride] = useState('');
   const usingFallback = fallbackState.src === src && fallbackState.enabled;
+  const ipcFallbackBusy = useRef(false);
   const autoRetried = useRef(false);
 
   useEffect(() => {
     autoRetried.current = false;
+    ipcFallbackBusy.current = false;
     setAttempt(0);
+    setSrcOverride('');
     setStatus('loading');
   }, [src]);
 
@@ -72,6 +76,7 @@ function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageR
           <span>No se pudo cargar {alt.toLowerCase()}.</span>
           <Button size="sm" variant="secondary" onClick={async () => {
             autoRetried.current = false;
+            ipcFallbackBusy.current = false;
             setStatus('loading');
             if (onRetry) {
               if (!(await onRetry())) setStatus('error');
@@ -85,7 +90,7 @@ function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageR
       )}
       <img
         key={attempt}
-        src={browserImageUrl(usingFallback ? fallbackSrc : src, imageReferer)}
+        src={browserImageUrl(srcOverride || (usingFallback ? fallbackSrc : src), imageReferer)}
         alt={alt}
         loading={loading}
         draggable={false}
@@ -99,6 +104,21 @@ function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageR
             setFallbackState({ src, enabled: true });
             setAttempt(0);
             setStatus('loading');
+            return;
+          }
+          if (!usingFallback && window.cytlex?.fetchImage && !ipcFallbackBusy.current) {
+            ipcFallbackBusy.current = true;
+            setStatus('loading');
+            autoRetried.current = false;
+            window.cytlex.fetchImage(src, imageReferer).then((img) => {
+              if (img?.base64) {
+                setSrcOverride(`data:${img.mime || 'image/webp'};base64,${img.base64}`);
+                setAttempt((n) => n + 1);
+                setStatus('loading');
+              } else {
+                setStatus('error');
+              }
+            }).catch(() => setStatus('error'));
             return;
           }
           setStatus('error');
@@ -134,6 +154,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const [chUrl, setChUrl] = useState('');
   const [imageSetRevision, setImageSetRevision] = useState(0);
   const [err, setErr] = useState('');
+  const [retryTick, setRetryTick] = useState(0);
   const [mode, setMode] = useState(() => {
     try {
       const map = JSON.parse(localStorage.getItem('cytlex:readerModeByManga') || '{}');
@@ -362,10 +383,15 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     setChUrl('');
     setImageSetRevision(0);
     pendingScrollRef.current = null;
-    api
-      .chapter(chapterUrl, sourceId)
-      .then((r) => {
+    (async () => {
+      try {
+        let r = await api.chapter(chapterUrl, sourceId);
+        if (!r?.pages?.length) r = await api.chapter(chapterUrl, sourceId, { fresh: true });
         if (!active) return;
+        if (!r?.pages?.length) {
+          setErr('El capítulo no devolvió páginas. La fuente puede estar bloqueando el acceso temporalmente.');
+          return;
+        }
         setCh(r);
         setChUrl(chapterUrl);
         const total = r.pages?.length || 1;
@@ -377,13 +403,13 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
           pendingScrollRef.current = sp;
           setToast(`Continuando desde la página ${sp + 1}`);
         }
-      })
-      .catch((e) => {
+      } catch (e) {
         if (active) setErr(String(e));
-      });
+      }
+    })();
     scrollToTop();
     return () => { active = false; };
-  }, [chapterUrl, sourceId, showAdultExtensions]);
+  }, [chapterUrl, sourceId, showAdultExtensions, retryTick]);
 
   const updateVerticalEnd = useCallback(() => {
     const mainEl = document.querySelector('main');
@@ -724,7 +750,12 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         tone="error"
         title="No se pudo cargar el capítulo"
         description={err}
-        action={<Button onClick={goBack}>Volver al detalle</Button>}
+        action={
+          <div className="flex items-center gap-2">
+            <Button onClick={() => { setErr(''); setRetryTick((t) => t + 1); }}>Reintentar</Button>
+            <Button variant="secondary" onClick={goBack}>Volver al detalle</Button>
+          </div>
+        }
       />
     );
   if (!ch || chUrl !== chapterUrl)

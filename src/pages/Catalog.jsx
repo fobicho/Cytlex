@@ -514,7 +514,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
               size="sm"
               variant="ghost"
               className="-ml-2 hover:bg-transparent hover:text-foreground"
-              onClick={migrationInline.onBack}
+              onClick={(e) => { e.currentTarget.blur(); migrationInline.onBack(); }}
               style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(8, scale, 6), paddingRight: px(8, scale, 6) }}
             >
               <ChevronLeft className="mr-1" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />

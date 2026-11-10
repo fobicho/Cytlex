@@ -161,7 +161,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
         aria-label={m.title}
         title={m.title}
         className={linkCls}
-        onClick={onSelect ? handleSelect : from === 'fuentes' ? saveSourceScroll : undefined}
+        onClick={(e) => { e.currentTarget.blur(); if (onSelect) { handleSelect(e); } else if (from === 'fuentes') { saveSourceScroll(e); } }}
         onMouseEnter={schedulePrefetch}
         onMouseLeave={cancelPrefetch}
         onFocus={schedulePrefetch}
@@ -272,7 +272,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
           style={titleStyle}
           href={detailHash}
           title={m.title}
-          onClick={onSelect ? handleSelect : from === 'fuentes' ? saveSourceScroll : undefined}
+          onClick={(e) => { e.currentTarget.blur(); if (onSelect) { handleSelect(e); } else if (from === 'fuentes') { saveSourceScroll(e); } }}
           {...linkA11y}
         >
           {m.title}

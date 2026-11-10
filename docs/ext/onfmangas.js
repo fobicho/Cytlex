@@ -7,6 +7,87 @@ export default function createSource({ fetchText, parse }) {
   };
 
   const text = (el, sel) => (el.querySelector(sel)?.textContent || '').replace(/\s+/g, ' ').trim();
+
+  function decodePageList(value) {
+    if (!value || typeof value !== 'string') return null;
+    const raw = value.trim();
+    const candidates = [raw];
+    const compact = raw.replace(/\s+/g, '');
+
+    if (/^(?:[0-9a-f]{2})+$/i.test(compact)) {
+      const bytes = Uint8Array.from(compact.match(/.{2}/g) || [], (byte) => parseInt(byte, 16));
+      candidates.push(new TextDecoder().decode(bytes));
+    }
+    try {
+      const base64 = compact.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(compact.length / 4) * 4, '=');
+      const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+      candidates.push(new TextDecoder().decode(bytes));
+    } catch {}
+
+    for (const candidate of candidates) {
+      try {
+        let parsed = JSON.parse(candidate);
+        if (typeof parsed === 'string') parsed = JSON.parse(parsed);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {}
+    }
+    return null;
+  }
+
+  const imageUrl = (page) => {
+    if (typeof page === 'string') return page;
+    if (!page || typeof page !== 'object') return '';
+    return page.url || page.src || page.image || page.srcUrl || page.pageUrl
+      || page.imageUrl || page.path || page.file || '';
+  };
+
+  const decodePageImages = (html, outer, chapterUrl) => {
+    const viewer = outer.querySelector('#viewerContainer, .viewer-container, .reader-container, .manga-pages, .chapter-reader');
+    const encodedPages = viewer?.getAttribute('data-reader-pages')
+      || viewer?.getAttribute('data-pages')
+      || viewer?.getAttribute('data-images')
+      || outer.querySelector('[data-reader-pages], [data-pages], [data-images]')?.getAttribute('data-reader-pages')
+      || outer.querySelector('[data-reader-pages], [data-pages], [data-images]')?.getAttribute('data-pages')
+      || outer.querySelector('[data-reader-pages], [data-pages], [data-images]')?.getAttribute('data-images');
+
+    let pageList = decodePageList(encodedPages);
+    if (!pageList) {
+      const hexPages = html.match(/\b(?:const|let|var)?\s*(?:window\.)?_hexP\s*=\s*["'`]([0-9a-fA-F\s_-]+)["'`]/);
+      if (hexPages) pageList = decodePageList(hexPages[1]);
+    }
+
+    const resolvePageUrl = (value) => {
+      if (!value || typeof value !== 'string') return '';
+      try {
+        const resolved = new URL(value.trim(), chapterUrl);
+        return ['http:', 'https:'].includes(resolved.protocol) ? resolved.href : '';
+      } catch { return ''; }
+    };
+
+    const fromPayload = Array.isArray(pageList)
+      ? pageList.map(imageUrl).map(resolvePageUrl).filter(Boolean)
+      : [];
+    if (fromPayload.length) return [...new Set(fromPayload)];
+
+    const imageNodes = outer.querySelectorAll(
+      '#viewerContainer img, .viewer-container img, .reader-container img, .manga-pages img, .chapter-reader img, img.manga-page, img[data-page-url]'
+    );
+    const fromImages = [...imageNodes]
+      .map((img) => img.getAttribute('data-page-url') || img.getAttribute('data-src')
+        || img.getAttribute('data-lazy-src') || img.getAttribute('data-original') || img.getAttribute('src'))
+      .map(resolvePageUrl)
+      .filter(Boolean);
+    if (fromImages.length) return [...new Set(fromImages)];
+
+    const noScript = html.match(/<noscript[^>]*>([\s\S]*?)<\/noscript>/i)?.[1] || '';
+    const fallbackImages = [...parse(noScript).querySelectorAll('img.manga-page')]
+      .map((img) => img.getAttribute('data-page-url') || img.getAttribute('data-src')
+        || img.getAttribute('data-lazy-src') || img.getAttribute('data-original') || img.getAttribute('src'))
+      .map(resolvePageUrl)
+      .filter(Boolean);
+    return [...new Set(fallbackImages)];
+  };
+
   function mapCards(doc) {
     return [...doc.querySelectorAll('.manga-card')]
       .map((el) => {
@@ -78,36 +159,13 @@ export default function createSource({ fetchText, parse }) {
     const url = abs(chapterUrl);
     const html = await fetchText(url);
     const outer = parse(html);
-    const resolvePageUrl = (pageUrl) => {
-      if (!pageUrl) return '';
-      try { return new URL(pageUrl, url).href; } catch { return ''; }
-    };
-    let pageList;
-    const encodedPages = outer.querySelector('#viewerContainer')?.getAttribute('data-reader-pages');
-    if (encodedPages) {
-      try {
-        const bytes = Uint8Array.from(atob(encodedPages), (char) => char.charCodeAt(0));
-        pageList = JSON.parse(new TextDecoder().decode(bytes));
-      } catch {}
+    const pages = decodePageImages(html, outer, url);
+    if (!pages.length) {
+      const blocked = /captcha|cloudflare|cf-chl|challenge-platform|verify (?:that )?you are human|checking your browser|just a moment|attention required|enable javascript and cookies|access denied|too many requests|demasiadas solicitudes|acceso temporalmente bloqueado/i.test(html);
+      throw new Error(blocked
+        ? 'ONF devolvió una verificación o bloqueo en vez de las páginas del capítulo. Inténtalo de nuevo más tarde.'
+        : 'ONF respondió, pero Cytlex no encontró la lista de páginas del capítulo. Puede haber cambiado el formato del lector.');
     }
-    if (!Array.isArray(pageList)) {
-      const hexPages = html.match(/(?:const|let|var)\s+_hexP\s*=\s*["']([0-9a-fA-F]+)["']/);
-      if (hexPages) {
-        try {
-          const bytes = Uint8Array.from(hexPages[1].match(/.{2}/g) || [], (byte) => parseInt(byte, 16));
-          pageList = JSON.parse(new TextDecoder().decode(bytes));
-        } catch {}
-      }
-    }
-    const pages = Array.isArray(pageList)
-      ? pageList.map((page) => {
-          if (typeof page === 'string') return page;
-          if (!page || typeof page !== 'object') return '';
-          return page.url || page.src || page.image || page.srcUrl || page.pageUrl || '';
-        }).map(resolvePageUrl).filter(Boolean)
-      : [...parse(html.match(/<noscript[^>]*>([\s\S]*?)<\/noscript>/i)?.[1] || html).querySelectorAll('img.manga-page')]
-          .map((el) => resolvePageUrl(el.getAttribute('src') || el.getAttribute('data-src')))
-          .filter(Boolean);
     return {
       label: text(outer, 'h1') || '',
       mangaUrl: '',

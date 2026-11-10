@@ -717,7 +717,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           variant="ghost"
           size="sm"
           className="self-start hover:bg-transparent hover:text-foreground"
-          onClick={() => navigate(backTo)}
+          onClick={(e) => { e.currentTarget.blur(); navigate(backTo); }}
           style={{
             marginTop: px(-8, scale, -6),
             marginLeft: px(-8, scale, -6),
@@ -981,7 +981,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         {resume ? (
           <Button
             className="shadow-none"
-            onClick={() => {
+            onClick={(e) => {
+              e.currentTarget.blur();
               saveDetailScroll();
               window.location.hash = `#/leer?u=${encodeURIComponent(resume.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}${readerBackParam}`;
             }}
@@ -1301,7 +1302,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 read && 'opacity-45 hover:opacity-70'
               )}
               style={{ minHeight: `${Math.round(52 * scale)}px` }}
-              onClick={saveDetailScroll}
+              onClick={(e) => { e.currentTarget.blur(); saveDetailScroll(e); }}
               href={`#/leer?u=${encodeURIComponent(c.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}${readerBackParam}`}
             >
               <span className="flex-1 min-w-0">

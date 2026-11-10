@@ -148,6 +148,7 @@ const REFERER_RULES = [
   { hosts: ['leercapitulo.co'], referer: 'https://www.leercapitulo.co/' },
   { hosts: ['mangalect.org'], referer: 'https://mangalect.org/' },
   { hosts: ['onfmangas.com'], referer: 'https://onfmangas.com/' },
+  { hosts: ['d33y4i2dmzjqjh.cloudfront.net'], referer: 'https://onfmangas.com/' },
   { hosts: ['imagesolymp.xyz', 'olympusxyz.com'], referer: 'https://olympusxyz.com/' },
   { hosts: ['zonatmo.org'], referer: 'https://zonatmo.org/' },
   { hosts: ['ntr-files.online'], referer: 'https://manga-oni.com/' },
@@ -196,22 +197,6 @@ function isPublicAddress(address) {
   return !normalized.startsWith('::ffff:');
 }
 
-async function resolvePublicAddress(hostname) {
-  const host = hostname.replace(/^\[|\]$/g, '');
-  if (isIP(host)) {
-    if (!isPublicAddress(host)) throw new Error('Las direcciones de red privada no están permitidas');
-    return { address: host, family: isIP(host) };
-  }
-  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) {
-    throw new Error('Los dominios locales no están permitidos');
-  }
-  const addresses = await lookup(host, { all: true, verbatim: true });
-  if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) {
-    throw new Error('El destino no resuelve exclusivamente a direcciones públicas');
-  }
-  return addresses[0];
-}
-
 function requestOnce(parsed, options, address) {
   return new Promise((resolve, reject) => {
     if (isHttpRequestCancelled(options.requestId)) {
@@ -220,6 +205,7 @@ function requestOnce(parsed, options, address) {
     }
     const transport = parsed.protocol === 'https:' ? https : http;
     let response;
+    let timer;
     let releaseAbort = () => {};
     const abort = () => {
       const error = httpRequestAborted();
@@ -236,15 +222,23 @@ function requestOnce(parsed, options, address) {
       }
     }, (res) => {
       response = res;
+      res.once('close', () => clearTimeout(timer));
       res.once('close', releaseAbort);
       resolve(res);
     });
     releaseAbort = registerHttpRequest(options.requestId, abort);
-    const timer = setTimeout(() => request.destroy(new Error('La petición excedió el tiempo límite')), options.timeout);
+    timer = setTimeout(() => {
+      const error = new Error('La petición excedió el tiempo límite');
+      error.code = 'ETIMEDOUT';
+      request.destroy(error);
+      response?.destroy(error);
+    }, options.timeout);
     request.on('error', reject);
     request.on('close', () => {
-      clearTimeout(timer);
-      if (!response) releaseAbort();
+      if (!response) {
+        clearTimeout(timer);
+        releaseAbort();
+      }
     });
     if (options.body != null) request.write(options.body);
     request.end();
@@ -279,12 +273,58 @@ function registerHttpRequest(requestId, abort) {
   };
 }
 
-async function requestPublic(url, options = {}, redirects = 0) {
+async function resolveAllPublicAddresses(hostname) {
+  const host = hostname.replace(/^\[|\]$/g, '');
+  if (isIP(host)) {
+    if (!isPublicAddress(host)) throw new Error('Las direcciones de red privada no están permitidas');
+    return [{ address: host, family: isIP(host) }];
+  }
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) {
+    throw new Error('Los dominios locales no están permitidos');
+  }
+  const addresses = await lookup(host, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) {
+    throw new Error('El destino no resuelve exclusivamente a direcciones públicas');
+  }
+  // IPv4 primero: si el proveedor entrega DNS IPv6 pero la conectividad IPv6 está
+  // degradada, elegir la primera dirección IPv6 produce ECONNRESET.
+  const v4 = addresses.filter((a) => a.family === 4);
+  const v6 = addresses.filter((a) => a.family === 6);
+  return [...v4, ...v6];
+}
+
+// Errores de conexión donde otra dirección podría funcionar (p. ej. IPv6 fallando).
+const FAILOVER_NET_ERRORS = new Set([
+  'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH',
+  'ENETDOWN', 'EPIPE', 'EACCES', 'EADDRNOTAVAIL'
+]);
+
+async function requestOnceWithFailover(parsed, options, addresses, maxBytes) {
+  let lastError;
+  for (const address of addresses) {
+    if (isHttpRequestCancelled(options.requestId)) throw httpRequestAborted();
+    try {
+      const response = await requestOnce(parsed, options, address);
+      if (maxBytes != null && !([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location)) {
+        return { response, body: await readResponse(response, maxBytes) };
+      }
+      return { response, body: null };
+    } catch (error) {
+      if (error?.code === 'HTTP_REQUEST_ABORTED') throw error;
+      lastError = error;
+      if (!FAILOVER_NET_ERRORS.has(error?.code)) throw error;
+    }
+  }
+  throw lastError;
+}
+
+async function requestPublic(url, options = {}, redirects = 0, maxBytes = null) {
   if (isHttpRequestCancelled(options.requestId)) throw httpRequestAborted();
   const parsed = validateUrl(url);
-  const address = await withTimeout(resolvePublicAddress(parsed.hostname), options.timeout);
+  const addresses = await withTimeout(resolveAllPublicAddresses(parsed.hostname), options.timeout);
   if (isHttpRequestCancelled(options.requestId)) throw httpRequestAborted();
-  const response = await requestOnce(parsed, options, address);
+  const result = await requestOnceWithFailover(parsed, options, addresses, maxBytes);
+  const response = result.response;
   const status = response.statusCode || 0;
   const location = response.headers.location;
   if ([301, 302, 303, 307, 308].includes(status) && location) {
@@ -310,9 +350,9 @@ async function requestPublic(url, options = {}, redirects = 0) {
       method: rewrite ? 'GET' : options.method,
       headers,
       body: rewrite ? null : options.body
-    }, redirects + 1);
+    }, redirects + 1, maxBytes);
   }
-  return response;
+  return maxBytes == null ? response : { response, body: result.body };
 }
 
 function readResponse(response, maxBytes) {
@@ -345,7 +385,11 @@ function readResponse(response, maxBytes) {
       settled = true;
       reject(error);
     });
-    response.on('aborted', () => fail(new Error('La respuesta se interrumpió')));
+    response.on('aborted', () => {
+      const error = new Error('La respuesta se interrumpió');
+      error.code = 'ECONNRESET';
+      fail(error);
+    });
     if (Number(response.headers['content-length']) > maxBytes) {
       fail(new Error('La respuesta excede el tamaño permitido'));
     }
@@ -647,7 +691,7 @@ ipcMain.on('http:release', (_event, requestId) => {
 ipcMain.handle('http:get', async (_e, url, requestId) => {
   const parsed = validateUrl(url);
   const mangaDexApi = parsed.hostname.toLowerCase() === 'api.mangadex.org';
-  const res = await requestPublic(parsed.toString(), {
+  const { response: res, body } = await requestPublic(parsed.toString(), {
     method: 'GET',
     headers: {
       'User-Agent': mangaDexApi
@@ -658,13 +702,13 @@ ipcMain.handle('http:get', async (_e, url, requestId) => {
     },
     timeout: HTTP_GET_TIMEOUT_MS,
     requestId
-  });
+  }, 0, HTTP_BODY_MAX_BYTES);
   if (res.statusCode < 200 || res.statusCode >= 300) {
     const retryAfter = res.headers['retry-after'];
     res.resume();
     throw new Error(`HTTP ${res.statusCode} al pedir ${parsed.toString()}${retryAfter ? ` (Retry-After: ${retryAfter})` : ''}`);
   }
-  return (await readResponse(res, HTTP_BODY_MAX_BYTES)).toString('utf8');
+  return body.toString('utf8');
 });
 
 ipcMain.handle('http:head', async (_e, url) => {
@@ -703,13 +747,22 @@ ipcMain.handle('http:post', async (_e, payload = {}, requestId) => {
   return payload.responseType === 'text' ? response : JSON.parse(response);
 });
 
-ipcMain.handle('image:fetch', async (_e, url) => {
+ipcMain.handle('image:fetch', async (_e, url, requestedReferer) => {
   if (!url) return null;
   try {
     const parsed = validateUrl(url);
     const urlStr = parsed.toString();
     const host = parsed.hostname.toLowerCase();
     const mangaDexImage = host === 'uploads.mangadex.org';
+    let imageReferer = refererFor(urlStr);
+    if (host === 'd33y4i2dmzjqjh.cloudfront.net' && typeof requestedReferer === 'string') {
+      try {
+        const candidate = validateUrl(requestedReferer);
+        if (candidate.origin === 'https://onfmangas.com' && candidate.pathname.startsWith('/lector/')) {
+          imageReferer = candidate.href;
+        }
+      } catch {}
+    }
     const headers = mangaDexImage
       ? {
           'User-Agent': 'Cytlex/0.1.0 (+https://github.com/fobicho/Cytlex)',
@@ -718,16 +771,15 @@ ipcMain.handle('image:fetch', async (_e, url) => {
         }
       : {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
-          Referer: refererFor(urlStr)
+          Referer: imageReferer
         };
-    const res = await requestPublic(urlStr, {
+    const { response: res, body } = await requestPublic(urlStr, {
       method: 'GET',
       headers,
       timeout: HTTP_GET_TIMEOUT_MS
-    });
+    }, 0, IMAGE_BODY_MAX_BYTES);
     if (res.statusCode < 200 || res.statusCode >= 300) return null;
-    const buf = await readResponse(res, IMAGE_BODY_MAX_BYTES);
-    return { mime: res.headers['content-type'] || 'application/octet-stream', base64: buf.toString('base64') };
+    return { mime: res.headers['content-type'] || 'application/octet-stream', base64: body.toString('base64') };
   } catch {
     return null;
   }

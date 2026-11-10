@@ -21,7 +21,7 @@ if (process.isMainFrame) contextBridge.exposeInMainWorld('cytlex', {
   authLogout: () => ipcRenderer.invoke('auth:logout'),
   authStatus: () => ipcRenderer.invoke('auth:status'),
   authGql: (payload) => ipcRenderer.invoke('auth:gql', payload),
-  fetchImage: (url) => ipcRenderer.invoke('image:fetch', url),
+  fetchImage: (url, referer) => ipcRenderer.invoke('image:fetch', url, referer),
   downloadImage: (payload) => ipcRenderer.invoke('image:download', payload),
   saveBackup: (payload) => ipcRenderer.invoke('backup:save', payload),
   openBackup: () => ipcRenderer.invoke('backup:open'),
