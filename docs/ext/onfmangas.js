@@ -24,12 +24,28 @@ export default function createSource({ fetchText, parse }) {
       candidates.push(new TextDecoder().decode(bytes));
     } catch {}
 
-    for (const candidate of candidates) {
+    const asPageList = (candidate) => {
       try {
-        let parsed = JSON.parse(candidate);
-        if (typeof parsed === 'string') parsed = JSON.parse(parsed);
+        let parsed = candidate;
+        for (let depth = 0; depth < 2 && typeof parsed === 'string'; depth += 1) parsed = JSON.parse(parsed);
         if (Array.isArray(parsed)) return parsed;
+        if (parsed && typeof parsed === 'object') {
+          for (const key of ['pages', 'images', 'readerPages', 'data']) {
+            const nested = parsed[key];
+            if (Array.isArray(nested)) return nested;
+            if (nested && (typeof nested === 'object' || typeof nested === 'string')) {
+              const list = asPageList(nested);
+              if (list) return list;
+            }
+          }
+        }
       } catch {}
+      return null;
+    };
+
+    for (const candidate of candidates) {
+      const list = asPageList(candidate);
+      if (list) return list;
     }
     return null;
   }
@@ -38,21 +54,22 @@ export default function createSource({ fetchText, parse }) {
     if (typeof page === 'string') return page;
     if (!page || typeof page !== 'object') return '';
     return page.url || page.src || page.image || page.srcUrl || page.pageUrl
-      || page.imageUrl || page.path || page.file || '';
+      || page.imageUrl || page.image_url || page.src_url || page.path || page.file || '';
   };
 
   const decodePageImages = (html, outer, chapterUrl) => {
-    const viewer = outer.querySelector('#viewerContainer, .viewer-container, .reader-container, .manga-pages, .chapter-reader');
+    const viewer = outer.querySelector('#viewerContainer, #reader, #manga-reader, .viewer-container, .reader-container, .manga-pages, .chapter-reader');
     const encodedPages = viewer?.getAttribute('data-reader-pages')
       || viewer?.getAttribute('data-pages')
       || viewer?.getAttribute('data-images')
-      || outer.querySelector('[data-reader-pages], [data-pages], [data-images]')?.getAttribute('data-reader-pages')
-      || outer.querySelector('[data-reader-pages], [data-pages], [data-images]')?.getAttribute('data-pages')
-      || outer.querySelector('[data-reader-pages], [data-pages], [data-images]')?.getAttribute('data-images');
+      || outer.querySelector('[data-reader-pages], [data-pages], [data-images], [data-pages-json]')?.getAttribute('data-reader-pages')
+      || outer.querySelector('[data-reader-pages], [data-pages], [data-images], [data-pages-json]')?.getAttribute('data-pages')
+      || outer.querySelector('[data-reader-pages], [data-pages], [data-images], [data-pages-json]')?.getAttribute('data-images')
+      || outer.querySelector('[data-pages-json]')?.getAttribute('data-pages-json');
 
     let pageList = decodePageList(encodedPages);
     if (!pageList) {
-      const hexPages = html.match(/\b(?:const|let|var)?\s*(?:window\.)?_hexP\s*=\s*["'`]([0-9a-fA-F\s_-]+)["'`]/);
+      const hexPages = html.match(/\b(?:const|let|var)?\s*(?:window\.)?_hexP\s*=\s*["'`]([0-9a-fA-F\s_-]+)["'`]/i);
       if (hexPages) pageList = decodePageList(hexPages[1]);
     }
 
@@ -70,19 +87,22 @@ export default function createSource({ fetchText, parse }) {
     if (fromPayload.length) return [...new Set(fromPayload)];
 
     const imageNodes = outer.querySelectorAll(
-      '#viewerContainer img, .viewer-container img, .reader-container img, .manga-pages img, .chapter-reader img, img.manga-page, img[data-page-url]'
+      '#viewerContainer img, #reader img, #manga-reader img, .viewer-container img, .reader-container img, .reader-page img, .page-container img, .page-item img, .manga-pages img, .chapter-reader img, img.manga-page, img[data-page-url]'
     );
+    const imageSource = (img) => img.getAttribute('data-page-url') || img.getAttribute('data-src')
+      || img.getAttribute('data-lazy-src')
+      || img.getAttribute('data-original') || img.getAttribute('data-original-src')
+      || img.getAttribute('data-srcset') || img.getAttribute('srcset') || img.getAttribute('src') || '';
     const fromImages = [...imageNodes]
-      .map((img) => img.getAttribute('data-page-url') || img.getAttribute('data-src')
-        || img.getAttribute('data-lazy-src') || img.getAttribute('data-original') || img.getAttribute('src'))
+      .map((img) => imageSource(img).split(',')[0].trim().split(/\s+/)[0])
       .map(resolvePageUrl)
       .filter(Boolean);
     if (fromImages.length) return [...new Set(fromImages)];
 
     const noScript = html.match(/<noscript[^>]*>([\s\S]*?)<\/noscript>/i)?.[1] || '';
     const fallbackImages = [...parse(noScript).querySelectorAll('img.manga-page')]
-      .map((img) => img.getAttribute('data-page-url') || img.getAttribute('data-src')
-        || img.getAttribute('data-lazy-src') || img.getAttribute('data-original') || img.getAttribute('src'))
+      .map(imageSource)
+      .map((value) => value.split(',')[0].trim().split(/\s+/)[0])
       .map(resolvePageUrl)
       .filter(Boolean);
     return [...new Set(fallbackImages)];
@@ -167,11 +187,16 @@ export default function createSource({ fetchText, parse }) {
         .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
         .replace(/<[^>]+>/g, ' ')
         .replace(/&(?:nbsp|amp|lt|gt|quot|#39);/gi, ' ');
-      const blockedMessage = /captcha|verify (?:that )?you are human|checking your browser|just a moment|attention required|enable javascript and cookies|access denied|too many requests|demasiadas solicitudes|acceso temporalmente bloqueado|verificaci[oó]n de seguridad/i.test(visibleText);
-      const blocked = challengeMarkup || blockedMessage;
+      const challengePhrase = visibleText.match(/(?:complete|solve|enter|verify|resuelve|completa|verifica)[^.!?]{0,48}captcha|captcha[^.!?]{0,48}(?:complete|solve|enter|verify|resuelve|completa|verifica)|verify (?:that )?you are human|checking your browser|just a moment|attention required|enable javascript and cookies|access denied|too many requests|demasiadas solicitudes|acceso temporalmente bloqueado|verificaci[oó]n de seguridad|security check/i);
+      const blocked = challengeMarkup || !!challengePhrase;
+      const responseTitle = (text(outer, 'title') || text(outer, 'h1')).slice(0, 100);
+      const responseInfo = [
+        challengeMarkup ? 'señales de desafío anti-bot' : challengePhrase?.[0],
+        responseTitle && `título: «${responseTitle}»`
+      ].filter(Boolean).join('; ');
       throw new Error(blocked
-        ? 'ONF devolvió una verificación o bloqueo en vez de las páginas del capítulo. Inténtalo de nuevo más tarde.'
-        : 'ONF respondió, pero Cytlex no encontró la lista de páginas del capítulo. Puede haber cambiado el formato del lector.');
+        ? `ONF devolvió una verificación o bloqueo en vez de las páginas del capítulo${responseInfo ? ` (${responseInfo})` : ''}. Inténtalo de nuevo más tarde.`
+        : `ONF respondió, pero Cytlex no encontró la lista de páginas del capítulo${responseInfo ? ` (${responseInfo})` : ''}. Puede haber cambiado el formato del lector.`);
     }
     return {
       label: text(outer, 'h1') || '',
