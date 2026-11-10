@@ -27,7 +27,7 @@
     "id": "onfmangas",
     "name": "ONF Mangas",
     "lang": "es",
-    "version": "1.0.14",
+    "version": "1.0.15",
     "type": "module",
     "contentWarning": "MIXED",
     "main": "ext/onfmangas.js",

@@ -57,20 +57,88 @@ export default function createSource({ fetchText, parse }) {
       || page.imageUrl || page.image_url || page.src_url || page.path || page.file || '';
   };
 
+  function assignedPagePayloads(html) {
+    const payloads = [];
+    const names = /(?:window\.)?(?:_hexP|[\w$]*(?:pages|images|pagelist|imagelist|pagedata|imagedata))\s*=/ig;
+    let match;
+    while ((match = names.exec(html))) {
+      let index = names.lastIndex;
+      while (/\s/.test(html[index] || '')) index += 1;
+      const first = html[index];
+      if (first === '"' || first === "'" || first === '`') {
+        const quote = first;
+        const start = ++index;
+        let escaped = false;
+        for (; index < html.length; index += 1) {
+          const char = html[index];
+          if (!escaped && char === quote) break;
+          if (!escaped && char === '\\') escaped = true;
+          else escaped = false;
+        }
+        if (index < html.length) payloads.push(html.slice(start, index));
+      } else if (/^atob\s*\(/i.test(html.slice(index))) {
+        const encoded = html.slice(index).match(/^atob\s*\(\s*(["'`])([\s\S]*?)\1\s*\)/i);
+        if (encoded) payloads.push(encoded[2]);
+      } else if (first === '[' || first === '{') {
+        const start = index;
+        const stack = [];
+        let quote = '';
+        let escaped = false;
+        for (; index < html.length; index += 1) {
+          const char = html[index];
+          if (quote) {
+            if (!escaped && char === quote) quote = '';
+            if (!escaped && char === '\\') escaped = true;
+            else escaped = false;
+            continue;
+          }
+          if (char === '"' || char === "'") { quote = char; continue; }
+          if (char === '[' || char === '{') stack.push(char);
+          else if (char === ']' || char === '}') {
+            stack.pop();
+            if (!stack.length) { payloads.push(html.slice(start, index + 1)); break; }
+          }
+        }
+      }
+      names.lastIndex = Math.max(names.lastIndex, index + 1);
+    }
+    return payloads;
+  }
+
+  const imageElementUrl = (image) => {
+    if (!image) return '';
+    for (const attr of ['data-src', 'data-lazy-src', 'data-original', 'data-original-src', 'data-srcset', 'srcset', 'src']) {
+      const raw = (image.getAttribute(attr) || '').trim();
+      const value = ['data-srcset', 'srcset'].includes(attr)
+        ? raw.split(',').map((candidate) => candidate.trim().split(/\s+/)[0]).filter(Boolean).at(-1) || ''
+        : raw;
+      if (!value || /^(?:data:|javascript:|about:|#)/i.test(value)
+        || /(?:placeholder|default|blank|spacer|pixel)\.(?:gif|png)(?:[?#]|$)/i.test(value)) continue;
+      return abs(value);
+    }
+    return '';
+  };
+
   const decodePageImages = (html, outer, chapterUrl) => {
     const viewer = outer.querySelector('#viewerContainer, #reader, #manga-reader, .viewer-container, .reader-container, .manga-pages, .chapter-reader');
+    const payloadNode = outer.querySelector('[data-reader-pages], [data-page-list], [data-pages], [data-images], [data-pages-json], [data-chapter-pages], [data-image-list]');
     const encodedPages = viewer?.getAttribute('data-reader-pages')
       || viewer?.getAttribute('data-pages')
       || viewer?.getAttribute('data-images')
-      || outer.querySelector('[data-reader-pages], [data-pages], [data-images], [data-pages-json]')?.getAttribute('data-reader-pages')
-      || outer.querySelector('[data-reader-pages], [data-pages], [data-images], [data-pages-json]')?.getAttribute('data-pages')
-      || outer.querySelector('[data-reader-pages], [data-pages], [data-images], [data-pages-json]')?.getAttribute('data-images')
-      || outer.querySelector('[data-pages-json]')?.getAttribute('data-pages-json');
+      || payloadNode?.getAttribute('data-reader-pages')
+      || payloadNode?.getAttribute('data-page-list')
+      || payloadNode?.getAttribute('data-pages')
+      || payloadNode?.getAttribute('data-images')
+      || payloadNode?.getAttribute('data-pages-json')
+      || payloadNode?.getAttribute('data-chapter-pages')
+      || payloadNode?.getAttribute('data-image-list');
 
     let pageList = decodePageList(encodedPages);
     if (!pageList) {
-      const hexPages = html.match(/\b(?:const|let|var)?\s*(?:window\.)?_hexP\s*=\s*["'`]([0-9a-fA-F\s_-]+)["'`]/i);
-      if (hexPages) pageList = decodePageList(hexPages[1]);
+      for (const payload of assignedPagePayloads(html)) {
+        pageList = decodePageList(payload);
+        if (pageList) break;
+      }
     }
 
     const resolvePageUrl = (value) => {
@@ -99,6 +167,17 @@ export default function createSource({ fetchText, parse }) {
       .filter(Boolean);
     if (fromImages.length) return [...new Set(fromImages)];
 
+    // ONF has changed the reader wrapper more than once; its page images still
+    // use the same CDN, so use those URLs if the wrapper selectors disappear.
+    const cdnImages = [...outer.querySelectorAll('img')]
+      .map(imageSource)
+      .map((value) => value.split(',')[0].trim().split(/\s+/)[0])
+      .map(resolvePageUrl)
+      .filter((value) => {
+        try { return new URL(value).hostname === 'd33y4i2dmzjqjh.cloudfront.net'; } catch { return false; }
+      });
+    if (cdnImages.length) return [...new Set(cdnImages)];
+
     const noScript = html.match(/<noscript[^>]*>([\s\S]*?)<\/noscript>/i)?.[1] || '';
     const fallbackImages = [...parse(noScript).querySelectorAll('img.manga-page')]
       .map(imageSource)
@@ -116,7 +195,7 @@ export default function createSource({ fetchText, parse }) {
         return {
           url: abs(a?.getAttribute('href')),
           title: text(el, '.manga-title') || (img?.getAttribute('alt') || '').trim(),
-          cover: abs(img?.getAttribute('src') || img?.getAttribute('data-src')),
+          cover: imageElementUrl(img),
           author: text(el, '.manga-author, .card-author, .author'),
           type: text(el, '.card-badge')
         };
@@ -166,7 +245,7 @@ export default function createSource({ fetchText, parse }) {
     const genres = [...doc.querySelectorAll('.genre-tag')].map((e) => e.textContent.trim()).filter(Boolean);
     return {
       title: text(doc, 'h1.manga-title'),
-      cover: abs(coverImg?.getAttribute('src')),
+      cover: imageElementUrl(coverImg),
       altTitles: '',
       genres,
       facts: { estado: '', status: '', tipo: '', autor: '', vistas: '' },

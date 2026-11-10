@@ -691,13 +691,18 @@ ipcMain.on('http:release', (_event, requestId) => {
 ipcMain.handle('http:get', async (_e, url, requestId) => {
   const parsed = validateUrl(url);
   const mangaDexApi = parsed.hostname.toLowerCase() === 'api.mangadex.org';
+  const plotTwist = parsed.hostname.toLowerCase() === 'plotnofansub.com'
+    || parsed.hostname.toLowerCase().endsWith('.plotnofansub.com');
   const { response: res, body } = await requestPublic(parsed.toString(), {
     method: 'GET',
     headers: {
       'User-Agent': mangaDexApi
         ? 'Cytlex/0.1.0 (+https://github.com/fobicho/Cytlex)'
-        : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
+        : plotTwist
+          ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+          : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
       ...(mangaDexApi ? { Accept: 'application/json' } : {}),
+      ...(plotTwist ? { Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'Accept-Language': 'es-419,es;q=0.9,en;q=0.8' } : {}),
       Referer: refererFor(parsed.toString())
     },
     timeout: HTTP_GET_TIMEOUT_MS,
