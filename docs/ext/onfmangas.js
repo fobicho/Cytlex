@@ -188,10 +188,13 @@ export default function createSource({ fetchText, parse }) {
         .replace(/<[^>]+>/g, ' ')
         .replace(/&(?:nbsp|amp|lt|gt|quot|#39);/gi, ' ');
       const challengePhrase = visibleText.match(/(?:complete|solve|enter|verify|resuelve|completa|verifica)[^.!?]{0,48}captcha|captcha[^.!?]{0,48}(?:complete|solve|enter|verify|resuelve|completa|verifica)|verify (?:that )?you are human|checking your browser|just a moment|attention required|enable javascript and cookies|access denied|too many requests|demasiadas solicitudes|acceso temporalmente bloqueado|verificaci[oó]n de seguridad|security check/i);
-      const blocked = challengeMarkup || !!challengePhrase;
-      const responseTitle = (text(outer, 'title') || text(outer, 'h1')).slice(0, 100);
+      const fullTitle = text(outer, 'title') || text(outer, 'h1');
+      const responseTitle = fullTitle.slice(0, 100);
+      const challengeTitle = /^(?:just a moment|attention required|security check|access denied|captcha|verify (?:that )?you are human)/i.test(fullTitle);
+      const looksLikeOnfChapter = /cap[ií]tulo\s+[\d.]+/i.test(fullTitle) && /onf\s*manga/i.test(fullTitle);
+      const blocked = !!challengePhrase || challengeTitle || (challengeMarkup && !looksLikeOnfChapter);
       const responseInfo = [
-        challengeMarkup ? 'señales de desafío anti-bot' : challengePhrase?.[0],
+        challengePhrase?.[0] || (challengeTitle ? 'título de verificación' : challengeMarkup && !looksLikeOnfChapter ? 'marcas de desafío anti-bot' : ''),
         responseTitle && `título: «${responseTitle}»`
       ].filter(Boolean).join('; ');
       throw new Error(blocked

@@ -12,9 +12,10 @@ export function browserImageUrl(url, referer = '') {
   if (electronBridge()?.fetchImage) return url;
   try {
     const { hostname } = new URL(url);
-    if (hostname === 'intomanga.com' || hostname.endsWith('.intomanga.com') || /^storage\d*\.zonatmo\.org$/i.test(hostname) || (hostname === 'd33y4i2dmzjqjh.cloudfront.net' && referer) || (hostname === 'onfmangas.com' && referer)) {
+    const onfCdn = hostname === 'd33y4i2dmzjqjh.cloudfront.net';
+    if (hostname === 'intomanga.com' || hostname.endsWith('.intomanga.com') || /^storage\d*\.zonatmo\.org$/i.test(hostname) || onfCdn || (hostname === 'onfmangas.com' && referer)) {
       const proxy = new URL(proxyUrl(url));
-      if (referer) proxy.searchParams.set('referer', referer);
+      if (referer || onfCdn) proxy.searchParams.set('referer', referer || 'https://onfmangas.com/');
       return proxy.href;
     }
   } catch {}
