@@ -529,21 +529,8 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                 onClick={() => {
                   if (active) {
                     const main = document.querySelector('main');
-                    if (t.id === 'fuentes') {
-                      if (main?.querySelector('[data-source-catalog-selected="true"]')) {
-                        window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
-                      } else {
-                        setTab('extensiones');
-                        const params = new URLSearchParams(loc.search);
-                        params.set('tab', 'extensiones');
-                        params.delete('source');
-                        params.delete('q');
-                        params.delete('quick');
-                        params.delete('migrationFrom');
-                        params.delete('migrationSource');
-                        params.delete('migrationTargets');
-                        navigate({ pathname: loc.pathname, search: `?${params}` }, { replace: true });
-                      }
+                    if (t.id === 'fuentes' && main?.querySelector('[data-source-catalog-selected="true"]')) {
+                      window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
                     }
                     if (t.id === 'mangas') {
                       setQ('');

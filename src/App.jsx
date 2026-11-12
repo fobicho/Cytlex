@@ -237,10 +237,6 @@ export default function App({ isVisible = true, tutorialMode = false }) {
     []
   );
 
-  const toggleFullscreen = () => {
-    appWindow.toggleFullscreen().then(setIsFullscreen);
-  };
-
   useEffect(() => {
     if (!quickSearchOpen) return undefined;
     const frame = requestAnimationFrame(() => quickSearchInput.current?.focus());
@@ -357,7 +353,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
                 />
                 <Route path="/seguimiento" element={<Tracking />} />
                 <Route path="/manga/*" element={null} />
-                <Route path="/leer/*" element={<Reader isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} />} />
+                <Route path="/leer/*" element={<Reader />} />
               </Routes>
             </PageBoundary>
           </main>

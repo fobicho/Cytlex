@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ArrowUpDown, Filter, Loader2, Search, X } from 'lucide-react';
+import { ArrowLeft, ArrowUpDown, ChevronDown, Filter, Loader2, Search, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import MangaCard from './MangaCard.jsx';
 import VirtualMangaGrid from './VirtualMangaGrid.jsx';
@@ -159,6 +159,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const [filterPanelPosition, setFilterPanelPosition] = useState(null);
   const filterRootRef = useRef(null);
   const filterPanelRef = useRef(null);
+  const filterBodyRef = useRef(null);
   const [query, setQuery] = useState(() => restore?.query || '');
   const [items, setItems] = useState(() => restore?.items || []);
   const [queuedItems, setQueuedItems] = useState(() => restore?.queuedItems || []);
@@ -182,6 +183,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const initialRestore = useRef(restore);
   const pendingScrollTop = useRef(restore?.scrollTop ?? null);
   const selected = useMemo(() => sources.find((source) => source.manifest.id === sourceId), [sources, sourceId]);
+  const isZonaTmo = sourceId === 'zonatmo';
+  const filterPanelWidth = px(isZonaTmo ? 480 : 360, scale, 300);
 
   useLayoutEffect(() => {
     if (!filtersOpen) {
@@ -193,33 +196,42 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       const panel = filterPanelRef.current;
       if (!trigger || !panel) return;
       const rect = trigger.getBoundingClientRect();
-      const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
-      const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
-      const width = Math.min(parseFloat(px(360, scale, 300)), viewportWidth - 32);
-      const left = Math.max(16, Math.min(rect.left, viewportWidth - width - 16));
-      const desiredHeight = Math.min(panel.scrollHeight, viewportHeight - 32);
-      const below = Math.max(0, viewportHeight - rect.bottom - 24);
-      const above = Math.max(0, rect.top - 24);
+      const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+      const viewportWidth = window.innerWidth / zoom;
+      const viewportHeight = window.innerHeight / zoom;
+      const triggerTop = rect.top / zoom;
+      const triggerBottom = rect.bottom / zoom;
+      const width = Math.min(parseFloat(filterPanelWidth), viewportWidth - 32);
+      const left = Math.max(16, Math.min(rect.left / zoom, viewportWidth - width - 16));
+      const body = filterBodyRef.current;
+      const overflow = body ? body.scrollHeight - body.clientHeight : 0;
+      const desiredHeight = Math.min(panel.offsetHeight + overflow, viewportHeight - 32);
+      const below = Math.max(0, viewportHeight - triggerBottom - 24);
+      const above = Math.max(0, triggerTop - 24);
       const openAbove = below < desiredHeight && above > below;
-      const maxHeight = Math.max(96, Math.min(desiredHeight, openAbove ? above : below));
+      const maxHeight = Math.max(96, openAbove ? above : below);
       const top = Math.max(16, Math.min(
-        openAbove ? rect.top - maxHeight - 8 : rect.bottom + 8,
-        viewportHeight - maxHeight - 16
+        openAbove ? triggerTop - Math.min(desiredHeight, maxHeight) - 8 : triggerBottom + 8,
+        viewportHeight - Math.min(desiredHeight, maxHeight) - 16
       ));
       const next = { left: Math.round(left), top: Math.round(top), width: Math.round(width), maxHeight: Math.round(maxHeight) };
       setFilterPanelPosition((current) => current && Object.keys(next).every((key) => current[key] === next[key]) ? current : next);
     };
     positionPanel();
+    const resize = new ResizeObserver(positionPanel);
+    if (filterBodyRef.current) resize.observe(filterBodyRef.current);
     window.addEventListener('resize', positionPanel);
     window.addEventListener('scroll', positionPanel, true);
     return () => {
+      resize.disconnect();
       window.removeEventListener('resize', positionPanel);
       window.removeEventListener('scroll', positionPanel, true);
     };
-  }, [filtersOpen, scale, sourceId]);
+  }, [filtersOpen, filterPanelWidth, sourceId]);
 
   useEffect(() => {
     if (!filtersOpen) return undefined;
+    filterPanelRef.current?.focus({ preventScroll: true });
     const onPointerDown = (event) => {
       if (!filterRootRef.current?.contains(event.target) && !filterPanelRef.current?.contains(event.target)) setFiltersOpen(false);
     };
@@ -397,6 +409,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     requestId.current += 1;
     setQuery('');
     setFilterValues({});
+    setFilterSearches({});
     setFiltersOpen(false);
     setItems([]);
     setQueuedItems([]);
@@ -476,6 +489,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const reset = () => {
     setQuery('');
     setFilterValues({});
+    setFilterSearches({});
     setFiltersOpen(false);
     loadCatalog(sourceId, { q: '', ...(sourceId === 'leercapitulo' ? { sort: loadedParams.sort || 'az' } : {}) });
   };
@@ -507,61 +521,86 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     ]));
   }, [displayFilters, sourceId]);
 
-  const renderFilter = (filter) => (
-    <div key={filter.id} className={`flex min-w-0 flex-col text-muted-foreground ${sourceId === 'zonatmo' && filter.id === 'author' ? 'sm:col-span-2' : ''}`} style={{ gap: px(5, scale, 4), fontSize: px(12, scale, 10) }}>
-      <span className="leading-tight">{filter.label}</span>
-      {filter.type === 'text' ? (
-        <Input
-          value={filterValues[filter.id] ?? filter.defaultValue ?? ''}
-          onChange={(event) => setFilterValues((current) => ({ ...current, [filter.id]: event.target.value }))}
-          placeholder={filter.placeholder || filter.label}
-          style={{ height: px(36, scale, 30), fontSize: px(13, scale, 11) }}
-        />
-      ) : filter.type === 'multiselect' ? (
-        <div className="min-w-0 rounded-lg border border-border bg-background p-2">
-          <Input
-            value={filterSearches[filter.id] || ''}
-            onChange={(event) => setFilterSearches((current) => ({ ...current, [filter.id]: event.target.value }))}
-            placeholder="Buscar género…"
-            aria-label={`Buscar en ${filter.label}`}
-            className="mb-2"
-            style={{ height: px(30, scale, 26), fontSize: px(12, scale, 10) }}
-          />
-          <div className="overflow-y-auto" style={{ maxHeight: px(150, scale, 120) }}>
-            {(filter.options || [])
-              .filter((option) => option.label.toLocaleLowerCase().includes((filterSearches[filter.id] || '').toLocaleLowerCase()))
-              .map((option) => {
-              const selectedValues = Array.isArray(filterValues[filter.id]) ? filterValues[filter.id] : [];
-              return (
-                <label key={option.value} className="flex min-h-11 cursor-pointer items-center gap-2 py-1 text-foreground sm:min-h-9">
-                  <input
-                    type="checkbox"
-                    checked={selectedValues.includes(option.value)}
-                    onChange={(event) => setFilterValues((current) => {
-                      const values = Array.isArray(current[filter.id]) ? current[filter.id] : [];
-                      return { ...current, [filter.id]: event.target.checked ? [...values, option.value] : values.filter((value) => value !== option.value) };
-                    })}
-                  />
-                  <span className="truncate">{option.label}</span>
-                </label>
-              );
-            })}
-          </div>
+  const renderFilter = (filter) => {
+    const selectedValues = Array.isArray(filterValues[filter.id]) ? filterValues[filter.id] : [];
+    const genreSearch = normalizeGenreLabel(filterSearches[filter.id]);
+    const genreOptions = filter.type === 'multiselect'
+      ? (filter.options || []).filter((option) => normalizeGenreLabel(option.label).includes(genreSearch))
+      : [];
+    const selectOptions = (filter.options || []).map((option) =>
+      typeof option === 'string' ? { value: option, label: option } : option);
+    return (
+      <div key={filter.id} className={`flex min-w-0 flex-col text-muted-foreground ${isZonaTmo && filter.id === 'author' ? 'col-span-2' : ''}`} style={{ gap: px(5, scale, 4), fontSize: px(12, scale, 10) }}>
+        <div className="flex items-center justify-between gap-1.5 font-medium leading-tight">
+          <span>{filter.label}</span>
+          {selectedValues.length > 0 && <span className="rounded-md bg-secondary px-1.5 py-0.5 text-foreground tabular-nums">{selectedValues.length}</span>}
         </div>
-      ) : (
-        <Dropdown
-          scale={scale}
-          value={filterValues[filter.id] ?? filter.defaultValue ?? ''}
-          onChange={(value) => setFilterValues((current) => ({ ...current, [filter.id]: value }))}
-          ariaLabel={filter.label}
-          placeholder={filter.placeholder || `Selecciona ${filter.label.toLocaleLowerCase()}`}
-          menuMaxHeight={sourceId === 'leercapitulo' && filter.id === 'genre' ? 288 : 256}
-          style={{ width: '100%' }}
-          options={(filter.options || []).map((option) => typeof option === 'string' ? { value: option, label: option } : option)}
-        />
-      )}
-    </div>
-  );
+        {filter.type === 'text' ? (
+          <Input
+            aria-label={filter.label}
+            value={filterValues[filter.id] ?? filter.defaultValue ?? ''}
+            onChange={(event) => setFilterValues((current) => ({ ...current, [filter.id]: event.target.value }))}
+            placeholder={filter.placeholder || filter.label}
+            style={{ height: px(36, scale, 30), fontSize: px(13, scale, 11) }}
+          />
+        ) : filter.type === 'multiselect' ? (
+          <div className="min-w-0 rounded-lg border border-border bg-background p-2">
+            <Input
+              value={filterSearches[filter.id] || ''}
+              onChange={(event) => setFilterSearches((current) => ({ ...current, [filter.id]: event.target.value }))}
+              placeholder="Buscar género…"
+              aria-label={`Buscar en ${filter.label}`}
+              className="mb-2"
+              style={{ height: px(30, scale, 26), fontSize: px(12, scale, 10) }}
+            />
+            <div className="h-36 overflow-y-auto overscroll-contain pr-1">
+              {genreOptions.length === 0 && <p className="px-1 py-2 text-xs">No se encontraron géneros.</p>}
+              {genreOptions.map((option) => (
+                  <label key={option.value} className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-foreground hover:bg-accent has-[:checked]:bg-secondary">
+                    <input
+                      type="checkbox"
+                      className="shrink-0 accent-primary"
+                      checked={selectedValues.includes(option.value)}
+                      onChange={(event) => setFilterValues((current) => {
+                        const values = Array.isArray(current[filter.id]) ? current[filter.id] : [];
+                        return { ...current, [filter.id]: event.target.checked ? [...values, option.value] : values.filter((value) => value !== option.value) };
+                      })}
+                    />
+                    <span className="min-w-0 break-words">{option.label}</span>
+                  </label>
+              ))}
+            </div>
+          </div>
+        ) : isZonaTmo ? (
+          <div className="relative">
+            <select
+              aria-label={filter.label}
+              className="h-9 w-full min-w-0 appearance-none truncate rounded-lg border border-border bg-secondary/60 pl-2.5 pr-7 text-sm text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              value={filterValues[filter.id] ?? filter.defaultValue ?? ''}
+              onChange={(event) => setFilterValues((current) => ({ ...current, [filter.id]: event.target.value }))}
+            >
+              {selectOptions.map((option) => {
+                const directionLabel = filter.id === 'orderDirection' && { asc: 'Ascendente', desc: 'Descendente' }[option.value];
+                return <option key={option.value} value={option.value} className="bg-card text-foreground">{directionLabel || option.label}</option>;
+              })}
+            </select>
+            <ChevronDown aria-hidden className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
+          </div>
+        ) : (
+          <Dropdown
+            scale={scale}
+            value={filterValues[filter.id] ?? filter.defaultValue ?? ''}
+            onChange={(value) => setFilterValues((current) => ({ ...current, [filter.id]: value }))}
+            ariaLabel={filter.label}
+            placeholder={filter.placeholder || `Selecciona ${filter.label.toLocaleLowerCase()}`}
+            menuMaxHeight={sourceId === 'leercapitulo' && filter.id === 'genre' ? 288 : 256}
+            style={{ width: '100%' }}
+            options={selectOptions}
+          />
+        )}
+      </div>
+    );
+  };
 
   if (!sources.length) {
     const hidden = allSources.length > 0 && !settings.get().showAdultExtensions;
@@ -707,41 +746,53 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                         key="source-filters"
                         role="dialog"
                         aria-label="Filtros de búsqueda"
+                        tabIndex={-1}
                         initial={{ opacity: 0, y: -4, scale: 0.98 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: -4, scale: 0.98 }}
                         transition={{ duration: reduceMotion ? 0 : 0.16, ease: [0.22, 1, 0.36, 1] }}
-                        className="fixed z-50 overflow-y-auto rounded-xl border border-border bg-card p-3 shadow-lg"
+                        className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-lg outline-none"
                         style={{
-                          width: filterPanelPosition?.width || px(360, scale, 300),
-                          maxWidth: 'calc(100vw - 32px)',
+                          width: filterPanelPosition?.width || filterPanelWidth,
+                          maxWidth: filterPanelPosition ? undefined : 'calc(100vw - 32px)',
                           maxHeight: filterPanelPosition?.maxHeight || 'calc(100dvh - 32px)',
                           left: filterPanelPosition?.left ?? 16,
                           top: filterPanelPosition?.top ?? 16,
                           transformOrigin: 'top left'
                         }}
                       >
-                        <div className="grid grid-cols-1 items-start" style={{ gap: px(14, scale, 10) }}>
+                        {isZonaTmo && (
+                          <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
+                            <h2 className="text-sm font-semibold">Filtros de ZonaTMO</h2>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8"
+                              aria-label="Cerrar filtros"
+                              onClick={() => {
+                                setFiltersOpen(false);
+                                filterRootRef.current?.querySelector('button')?.focus();
+                              }}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        )}
+                        <div ref={filterBodyRef} className="grid min-h-0 grid-cols-1 content-start gap-4 overflow-y-auto overscroll-contain p-3 sm:p-4">
                           {filterGroups.primary.length > 0 && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: px(12, scale, 9) }}>
+                            <div className={isZonaTmo ? 'grid grid-cols-2 gap-3' : 'grid grid-cols-1 gap-3 sm:grid-cols-2'}>
                               {filterGroups.primary.map(renderFilter)}
                             </div>
                           )}
                           {filterGroups.genres.length > 0 && (
-                            <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2" style={{ gap: px(12, scale, 9) }}>
+                            <div className={isZonaTmo ? 'grid min-w-0 grid-cols-2 items-start gap-3' : 'grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2'}>
                               {filterGroups.genres.map(renderFilter)}
                             </div>
                           )}
                           {filterGroups.sorting.length > 0 && (
-                            <div className="flex flex-wrap items-end justify-end" style={{ gap: px(10, scale, 7) }}>
-                              {filterGroups.sorting.map((filter) => <div key={filter.id} className="w-full sm:w-auto" style={{ width: '100%', maxWidth: px(180, scale, 150) }}>{renderFilter(filter)}</div>)}
-                              <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
-                                <Button type="button" className="min-h-11 sm:min-h-9" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
-                                <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-9" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
-                                  <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
-                                  Limpiar
-                                </Button>
-                              </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              {filterGroups.sorting.map(renderFilter)}
                             </div>
                           )}
                           {filterGroups.other.length > 0 && (
@@ -749,15 +800,14 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                               {filterGroups.other.map(renderFilter)}
                             </div>
                           )}
-                          {filterGroups.sorting.length === 0 && (
-                            <div className="flex flex-wrap items-center justify-end" style={{ gap: px(8, scale, 6) }}>
-                              <Button type="button" className="min-h-11 sm:min-h-9" onClick={search} disabled={loading} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>Aplicar filtros</Button>
-                              <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-9" onClick={reset} disabled={!hasActiveFilters || loading} title="Limpiar búsqueda y filtros" style={{ height: px(36, scale, 30) }}>
-                                <X className="mr-1" style={{ width: px(14, scale, 12), height: px(14, scale, 12) }} />
-                                Limpiar
-                              </Button>
-                            </div>
-                          )}
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-3 py-2 sm:px-4">
+                          <Button type="button" variant="ghost" className="min-h-11 sm:min-h-9" onClick={reset} disabled={!hasActiveFilters || loading}>
+                            Limpiar
+                          </Button>
+                          <Button type="button" className="min-h-11 sm:min-h-9" onClick={search} disabled={loading}>
+                            Aplicar filtros
+                          </Button>
                         </div>
                       </motion.div>
                     )}

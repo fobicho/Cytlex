@@ -1,6 +1,5 @@
 export default function createSource({ fetchText }) {
   const base = 'https://olympusxyz.com';
-  const panel = 'https://panel.olympusxyz.com';
   const LIMIT_PAGES = 200;
 
   const getJson = async (url, requestId) => JSON.parse(await fetchText(url, requestId));
@@ -49,27 +48,8 @@ export default function createSource({ fetchText }) {
 
   async function detail(mangaUrl) {
     const slug = String(mangaUrl).split('/').filter(Boolean).pop();
-    const panelUrl = (p) => `${panel}/api/series/${slug}/chapters?page=${p}&direction=desc&type=comic`;
-    const baseUrl = (p) => `${base}/api/series/${slug}/chapters?page=${p}&direction=desc&type=comic`;
-    const chaptersFetch = async (p) => {
-      const request = async (url) => {
-        let error;
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          try {
-            return await getJson(url);
-          } catch (e) {
-            error = e;
-            if (!attempt) await new Promise((resolve) => setTimeout(resolve, 350));
-          }
-        }
-        throw error;
-      };
-      try {
-        return await request(panelUrl(p));
-      } catch {
-        return await request(baseUrl(p));
-      }
-    };
+    const chaptersFetch = (page) =>
+      getJson(`${base}/api/series/${slug}/chapters?page=${page}&direction=desc&type=comic`);
 
     const [data, first] = await Promise.all([
       getJson(`${base}/api/series/${slug}?type=comic`),
