@@ -1,6 +1,7 @@
 import { extensions, isExtensionAllowed } from './extensions.js';
 import { settings } from './settings.js';
 import { mangaSourceUrl } from './library.js';
+import { readSourceCache, writeSourceCache } from './sourceCache.js';
 
 function bridge() {
   if (typeof window !== 'undefined' && window.cytlex) return window.cytlex;
@@ -38,7 +39,16 @@ const detailNotFound = new Map();
 const chapterCache = new Map();
 const chapterRequests = new Map();
 const catalogFiltersCache = new Map();
-const detailKey = (url, sourceId) => `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}|${mangaSourceUrl(url, sourceId)}`;
+const isMangaDex = (sourceId) => sourceId === 'mangadex' || sourceId === 'mangadex-en';
+const sourceCacheKey = (sourceId) => {
+  const version = extensions.manifest(sourceId)?.version || '0';
+  let languages;
+  if (isMangaDex(sourceId)) {
+    try { languages = JSON.parse(localStorage.getItem('cytlex:ext-config:v1'))?.[sourceId]?.languages; } catch {}
+  }
+  return JSON.stringify([sourceId, version, languages]);
+};
+const detailKey = (url, sourceId) => `${sourceCacheKey(sourceId)}|${mangaSourceUrl(url, sourceId)}`;
 const chapterKey = (url, sourceId) => `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}|${url}`;
 const titleKey = (value) => String(value || '').normalize('NFKC').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 
@@ -158,9 +168,28 @@ export const api = {
     return detailCache.get(detailKey(url, sourceId))?.value || null;
   },
 
+  async restoreDetail(url, sourceId) {
+    const entry = await readSourceCache('details', detailKey(url, sourceId));
+    return entry?.value || null;
+  },
+
   async catalog(args, sourceId) {
     const src = await resolveSource(sourceId);
-    return src.catalog(args);
+    if (!isMangaDex(sourceId)) return src.catalog(args);
+
+    const { q = '', page = 1, genre = '', year = '', status = '', type = '', sort = '' } = args || {};
+    const key = JSON.stringify([sourceCacheKey(sourceId), q, page, genre, year, status, type, sort]);
+    try {
+      const result = await src.catalog(args);
+      if (Array.isArray(result?.items)) void writeSourceCache('searches', key, result, 30);
+      return result;
+    } catch (error) {
+      if (/\b(?:ENOTFOUND|HTTP (?:429|50[234]))\b/.test(String(error?.message || error))) {
+        const entry = await readSourceCache('searches', key);
+        if (entry?.value.items.length && Date.now() - entry.at <= 7 * 24 * 60 * 60 * 1000) return entry.value;
+      }
+      throw error;
+    }
   },
 
   async catalogFilters(sourceId) {
@@ -168,12 +197,18 @@ export const api = {
     return catalogFiltersFor(sourceId, src);
   },
 
-  async detail(url, sourceId, { cacheResult = true } = {}) {
+  async detail(url, sourceId, { cacheResult = true, persistResult = cacheResult } = {}) {
     if (!sourceId || !extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
     assertSourceEnabled(sourceId);
     const key = detailKey(url, sourceId);
     const hit = freshEntry(key);
-    if (hit) return hit;
+    if (hit) {
+      if (persistResult && !detailCache.get(key).persisted) {
+        detailCache.get(key).persisted = true;
+        void writeSourceCache('details', key, hit, DETAIL_CACHE_MAX);
+      }
+      return hit;
+    }
     const failed = detailNotFound.get(key);
     if (failed && Date.now() - failed.at < DETAIL_NOT_FOUND_TTL_MS) throw failed.error;
     if (failed) detailNotFound.delete(key);
@@ -187,7 +222,14 @@ export const api = {
     }
     try {
       const result = await request;
-      if (cacheResult && result?.chapters?.length) storeDetail(key, result);
+      if (cacheResult && result?.chapters?.length) {
+        if (freshEntry(key) !== result) storeDetail(key, result);
+        const entry = detailCache.get(key);
+        if (persistResult && !entry.persisted) {
+          entry.persisted = true;
+          void writeSourceCache('details', key, result, DETAIL_CACHE_MAX);
+        }
+      }
       return result;
     } catch (error) {
       if (/\bHTTP 404\b/.test(String(error?.message || error))) {
@@ -244,7 +286,7 @@ export const api = {
   prefetchDetail(url, sourceId) {
     const key = detailKey(url, sourceId);
     if (freshEntry(key) || !sourceId) return;
-    this.detail(url, sourceId).catch(() => {});
+    this.detail(url, sourceId, { persistResult: false }).catch(() => {});
   },
 
   clearDetailCache() {

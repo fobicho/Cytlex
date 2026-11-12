@@ -202,12 +202,14 @@ async function fetchTarget(initialTarget, method, headers, body, signal) {
 
   for (let redirects = 0; redirects <= REDIRECT_LIMIT; redirects += 1) {
     let response;
-    const retries = target.hostname === 'd33y4i2dmzjqjh.cloudfront.net' ? 4 : UPSTREAM_RETRIES;
+    const mangaDexApi = target.hostname === 'api.mangadex.org';
+    const retries = mangaDexApi ? 1 : target.hostname === 'd33y4i2dmzjqjh.cloudfront.net' ? 4 : UPSTREAM_RETRIES;
     for (let attempt = 0; ; attempt += 1) {
       signal.throwIfAborted();
       const firstMangaRequest = attempt === 0 && currentMethod === 'GET'
         && target.hostname === 'www.leercapitulo.co' && target.pathname.startsWith('/manga/');
-      const attemptSignal = firstMangaRequest ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : signal;
+      const attemptTimeout = firstMangaRequest ? 5000 : mangaDexApi && attempt === 0 ? 6500 : 0;
+      const attemptSignal = attemptTimeout ? AbortSignal.any([signal, AbortSignal.timeout(attemptTimeout)]) : signal;
       try {
         response = await fetch(target, {
           method: currentMethod,
@@ -274,7 +276,7 @@ export async function onRequest(context) {
       'cache-control': 'no-store',
       'x-cytlex-proxy': '1'
     });
-    for (const name of ['content-type', 'last-modified', 'accept-ranges']) {
+    for (const name of ['content-type', 'last-modified', 'accept-ranges', 'retry-after']) {
       const value = upstream.headers.get(name);
       if (value) headers.set(name, value);
     }

@@ -394,7 +394,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     setFav(!!lib.fav(mangaUrl, sourceId));
     setAniLinked(!!tracking.get(mangaUrl, sourceId));
 
-    const cached = api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId);
+    let cached = api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId);
     setDetailState((current) => current.key === detailKey && current.data === cached
       ? current : { key: detailKey, data: cached });
     if (cached?.chapters?.length && reconcileMihonProgress(mangaUrl, sourceId, cached.chapters)) {
@@ -402,6 +402,15 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     }
 
     let alive = true;
+    let hasFreshDetail = false;
+    if (!cached?.chapters?.length) {
+      api.restoreDetail(mangaUrl, sourceId).then((saved) => {
+        if (!alive || hasFreshDetail || !saved?.chapters?.length) return;
+        cached = saved;
+        reconcileMihonProgress(mangaUrl, sourceId, saved.chapters);
+        setDetailState({ key: detailKey, data: saved });
+      });
+    }
     api
       .detail(mangaUrl, sourceId)
       .then((r) => {
@@ -411,6 +420,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           setErr('La fuente no devolvió capítulos.');
           return;
         }
+        hasFreshDetail = true;
         if (cached !== r) {
           if (cached) reconcileChapterProgress(cached.chapters, r.chapters, sourceId, sourceId, mangaUrl);
           reconcileMihonProgress(mangaUrl, sourceId, r.chapters);
@@ -636,6 +646,23 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     () => [...(d?.chapters || [])].sort(byNumber),
     [d?.chapters]
   );
+  const resume = useMemo(() => {
+    let firstUnread;
+    let inProgress;
+    for (const chapter of chaptersOldestFirst) {
+      const saved = progress.get(chapter.url, sourceId);
+      if (saved?.read) continue;
+      firstUnread ??= chapter;
+      if (Number.isInteger(saved?.page)
+        && (!inProgress || (saved.updatedAt || 0) > (inProgress.progress.updatedAt || 0))) {
+        inProgress = { chapter, progress: saved };
+      }
+    }
+    const chapter = inProgress?.chapter || firstUnread || chaptersOldestFirst.at(-1);
+    return chapter ? { chapter, progress: inProgress?.progress } : null;
+  }, [chaptersOldestFirst, sourceId, progressRevision]);
+  const currentChapter = resume?.chapter;
+  const currentProgress = resume?.progress;
   const chapters = useMemo(() => {
     if (selectedGroup === 'all' && chapterSort === 'chapter' && asc) return chaptersOldestFirst;
     const direction = asc ? 1 : -1;
@@ -650,22 +677,15 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   }, [asc, chapterSort, chaptersOldestFirst, d?.chapters, selectedGroup]);
 
   useEffect(() => {
-    if (migrationSearchMode || !active || !d?.chapters?.length) return undefined;
-    const status = norm(d.facts?.estado || d.facts?.status).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    const completed = /finaliz|complet|concluid|terminad|finished|ended/.test(status);
-    const target = completed
-      ? chaptersOldestFirst.at(-1)
-      : chaptersOldestFirst.find((chapter) => !progress.get(chapter.url, sourceId)?.read) || chaptersOldestFirst[0];
-    const saved = target && progress.get(target.url, sourceId);
-    if (!target || !saved || saved.read || !Number.isInteger(saved.page) || saved.total > 0) return undefined;
+    if (migrationSearchMode || !active || !currentChapter || !currentProgress || currentProgress.total > 0) return undefined;
 
     let alive = true;
     const timer = setTimeout(() => {
-      api.chapter(target.url, sourceId).then((chapter) => {
+      api.chapter(currentChapter.url, sourceId).then((chapter) => {
         if (!alive || !Array.isArray(chapter?.pages) || !chapter.pages.length) return;
-        const latest = progress.get(target.url, sourceId);
-        if (!latest || latest.read || latest.page !== saved.page || latest.total > 0) return;
-        progress.savePage(target.url, sourceId, latest.page, chapter.pages.length);
+        const latest = progress.get(currentChapter.url, sourceId);
+        if (!latest || latest.read || latest.page !== currentProgress.page || latest.total > 0) return;
+        progress.savePage(currentChapter.url, sourceId, latest.page, chapter.pages.length);
         setProgressTick((tick) => tick + 1);
       }).catch(() => {});
     }, 500);
@@ -674,7 +694,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       alive = false;
       clearTimeout(timer);
     };
-  }, [active, chaptersOldestFirst, d, mangaUrl, migrationSearchMode, sourceId]);
+  }, [active, currentChapter, currentProgress, migrationSearchMode, sourceId]);
 
   const chapterList = useMemo(() => (
       <div
@@ -906,7 +926,6 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             ) : (
               <>
                 <Skeleton style={{ height: px(17, scale, 13), width: px(160, scale, 125), marginTop: px(4, scale, 3) }} />
-                <Skeleton style={{ height: px(15, scale, 11), width: '100%', maxWidth: px(512, scale, 400), marginTop: px(4, scale, 3) }} />
                 <div className="flex flex-wrap items-center" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 9) }}>
                   <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(96, scale, 75) }} />
                   <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(80, scale, 63) }} />
@@ -942,22 +961,6 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     : -1;
   const chaptersBefore = markBeforeIndex > 0 ? ordered.slice(0, markBeforeIndex) : [];
   const chaptersToMark = chaptersBefore.filter((chapter) => !progress.get(chapter.url, sourceId)?.read);
-
-  const mangaStatus = norm(d.facts.estado || d.facts.status).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  const isCompleted = /finaliz|complet|concluid|terminad|finished|ended/.test(mangaStatus);
-  const pendiente = isCompleted
-    ? chaptersOldestFirst.at(-1) || null
-    : chaptersOldestFirst.find((c) => !progress.get(c.url, sourceId)?.read) || chaptersOldestFirst[0] || null;
-  const cap = pendiente ? progress.get(pendiente.url, sourceId) : null;
-  const enMarcha = !!(cap && !cap.read && Number.isInteger(cap.page));
-  const resume = pendiente ? { ...pendiente, cap } : null;
-  const currentChapter = chaptersOldestFirst.reduce((latest, chapter) => {
-    const chapterProgress = progress.get(chapter.url, sourceId);
-    if (!chapterProgress || chapterProgress.read || !Number.isInteger(chapterProgress.page)) return latest;
-    return !latest || (chapterProgress.updatedAt || 0) > (latest.progress.updatedAt || 0)
-      ? { chapter, progress: chapterProgress }
-      : latest;
-  }, null)?.chapter || resume;
 
   const goToCurrentChapter = () => {
     if (!currentChapter) return;
@@ -1030,10 +1033,6 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             <div className="mt-1">
               <SourceLine sourceId={sourceId} scale={scale} />
             </div>
-            <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(15 * scale)}px` }}>
-              {d.altTitles?.slice(0, 160)}
-            </div>
-
             <div
               className="flex flex-wrap items-center"
               style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 9) }}
@@ -1106,13 +1105,13 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           paddingTop: px(20, scale, 14)
         }}
       >
-        {resume ? (
+        {currentChapter ? (
           <Button
             className="shadow-none"
             onClick={(e) => {
               e.currentTarget.blur();
               saveDetailScroll(mangaUrl);
-              window.location.hash = `#/leer?u=${encodeURIComponent(resume.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}${readerBackParam}`;
+              window.location.hash = `#/leer?u=${encodeURIComponent(currentChapter.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}${readerBackParam}`;
             }}
             style={{
               height: px(40, scale, 33),
@@ -1123,15 +1122,15 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               fontSize: px(14, scale, 12)
             }}
           >
-            {enMarcha ? (
+            {currentProgress ? (
               <BookOpen className="mr-2 shrink-0" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
             ) : (
               <Play className="mr-2 shrink-0" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
             )}
-            {enMarcha ? 'Continuar' : 'Leer'} {resume.title}
-            {enMarcha && (
+            {currentProgress ? 'Continuar' : 'Leer'} {currentChapter.title}
+            {currentProgress && (
               <span className="opacity-70 ml-2">
-                · {cap.page + 1}/{cap.total || '?'}
+                · {currentProgress.page + 1}/{currentProgress.total || '?'}
               </span>
             )}
           </Button>

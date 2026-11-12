@@ -23,6 +23,7 @@ import { Input } from '../components/ui/input.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 import { clearPersistentLibraryCoverCache, invalidateLibraryCovers } from '../lib/covers.js';
+import { clearSourceCache } from '../lib/sourceCache.js';
 
 function clearLibraryUnreadCache() {
   localStorage.removeItem('cytlex:libraryUnread:v1');
@@ -251,7 +252,7 @@ export default function Settings({ tutorialPreview = false }) {
   const resetWebData = async () => {
     setWebDataResetBusy(true);
     try {
-      await clearPersistentLibraryCoverCache();
+      await Promise.all([clearPersistentLibraryCoverCache(), clearSourceCache()]);
       const keys = [];
       for (let index = 0; index < localStorage.length; index += 1) {
         const key = localStorage.key(index);

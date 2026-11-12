@@ -13,16 +13,23 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
   let lastRequestAt = 0;
   let genreOptionsRequest = null;
   const requestWaiters = [];
+  const mangaMetadata = new Map();
+
+  const rememberManga = (item) => {
+    if (!item?.id || !item.attributes?.title || !item.attributes.description) return;
+    mangaMetadata.delete(item.id);
+    mangaMetadata.set(item.id, { item, at: Date.now() });
+    if (mangaMetadata.size > 80) mangaMetadata.delete(mangaMetadata.keys().next().value);
+  };
 
   const acquireRequestSlot = async () => {
     if (activeRequests >= 2) await new Promise((resolve) => requestWaiters.push(resolve));
     else activeRequests += 1;
     const slot = requestQueue.then(async () => {
-      let wait;
-      do {
-        wait = Math.max(requestInterval - (Date.now() - lastRequestAt), blockedUntil - Date.now(), 0);
-        if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
-      } while (wait);
+      const wait = requestInterval - (Date.now() - lastRequestAt);
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      const retryAfter = Math.ceil((blockedUntil - Date.now()) / 1000);
+      if (retryAfter > 0) throw new Error(`HTTP 429 de MangaDex (Retry-After: ${retryAfter})`);
       lastRequestAt = Date.now();
     });
     requestQueue = slot.catch(() => {});
@@ -66,7 +73,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
             blockedUntil = Math.max(blockedUntil, Number.isFinite(retryAt) && retryAt > Date.now() ? retryAt : Date.now() + 5000);
             throw error;
           }
-          const retryable = !status || status >= 500;
+          const retryable = !status || (status >= 500 && ![502, 503, 504].includes(status));
           if (!retryable || attempt === 2) {
             throw error;
           }
@@ -134,6 +141,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
 
       return {
         items: (data.data || []).map((item) => {
+          rememberManga(item);
           const attributes = item.attributes || {};
           const authors = (item.relationships || [])
             .filter((rel) => rel.type === 'author' || rel.type === 'artist')
@@ -249,11 +257,18 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
         });
       };
 
-      const [data, chapters] = await Promise.all([
-        json(requestUrl(`/manga/${id}`, { 'includes[]': ['cover_art', 'author', 'artist'] })),
+      const cached = mangaMetadata.get(id);
+      const metadata = cached && Date.now() - cached.at < 10 * 60 * 1000
+        ? cached.item
+        : json(requestUrl(`/manga/${id}`, { 'includes[]': ['cover_art', 'author', 'artist'] }))
+          .then(({ data }) => {
+            rememberManga(data);
+            return data;
+          });
+      const [item, chapters] = await Promise.all([
+        metadata,
         fetchChapters(id)
       ]);
-      const item = data.data;
       const attributes = item?.attributes || {};
 
       const authors = (item?.relationships || [])
