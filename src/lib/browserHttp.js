@@ -147,17 +147,21 @@ export async function httpPost(payload, requestId) {
 
 function imageMimeFromBytes(bytes, contentType = '') {
   const ascii = (start, length) => String.fromCharCode(...bytes.subarray(start, start + length));
+  if (!bytes.length) return '';
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
   if (ascii(0, 8) === '\x89PNG\r\n\x1a\n') return 'image/png';
   if (ascii(0, 4) === 'GIF8') return 'image/gif';
   if (ascii(0, 4) === 'RIFF' && ascii(8, 4) === 'WEBP') return 'image/webp';
-  if (ascii(4, 4) === 'ftyp' && /^(?:avif|avis)$/.test(ascii(8, 4))) return 'image/avif';
+  if (ascii(4, 4) === 'ftyp' && /(?:avif|avis)/.test(ascii(8, Math.min(bytes.length - 8, 64)))) return 'image/avif';
   if (ascii(0, 2) === 'BM') return 'image/bmp';
   const prefix = new TextDecoder().decode(bytes.subarray(0, 512)).replace(/^\uFEFF/, '').trimStart();
   if (/^(?:<\?xml[^>]*>\s*)?<svg[\s>]/i.test(prefix)) return 'image/svg+xml';
-  // Do not trust the URL extension or the response header: ONF can return its
-  // anti-bot HTML page with status 200 for a signed image URL.
-  if (String(contentType).toLowerCase().startsWith('image/')) return '';
+  // ONF may return an image format with a brand or container not covered by
+  // the signatures above. Trust an image content type only after rejecting
+  // recognizable HTML/JSON challenge bodies.
+  if (/^(?:<!doctype\s+html|<html[\s>]|<head[\s>]|<body[\s>]|<script[\s>]|\{\s*["']|\[\s*\{)/i.test(prefix)) return '';
+  const declaredMime = String(contentType).split(';', 1)[0].trim().toLowerCase();
+  if (declaredMime.startsWith('image/')) return declaredMime === 'image/jpg' ? 'image/jpeg' : declaredMime;
   return '';
 }
 

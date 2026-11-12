@@ -615,7 +615,7 @@
   height: 111.111dvh;
 }
 
-.app-shell--web {
+.app-shell--web:not(:has(.browser-main--reader)) {
   min-width: 320px;
 }
 
@@ -665,8 +665,11 @@
 
 @media (max-width: 767px) {
   .browser-main {
-    padding-bottom: calc(var(--web-page-padding, 16px) + 60px + env(safe-area-inset-bottom));
     overscroll-behavior-y: contain;
+  }
+
+  .browser-main:not(.browser-main--reader) {
+    padding-bottom: calc(var(--web-page-padding, 16px) + 60px + env(safe-area-inset-bottom));
   }
 
   .app-shell--web {

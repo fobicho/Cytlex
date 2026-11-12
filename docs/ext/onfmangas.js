@@ -235,7 +235,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       for (const payload of payloads) {
         const pageList = decodePageList(payload);
         const urls = Array.isArray(pageList)
-          ? pageList.map(imageUrl).map(resolvePageUrl).filter(Boolean)
+          ? pageList.map((page) => imageUrl(page)).map(resolvePageUrl).filter(Boolean)
           : [];
         if (urls.length) return [...new Set(urls)];
       }
@@ -308,9 +308,10 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const list = decodePageList(response);
     if (!list) return [];
     const entries = Array.isArray(list) ? list : [list];
-    return [...new Set(entries.map(imageUrl).map((value) => {
+    return [...new Set(entries.map((page) => imageUrl(page)).map((value) => {
+      if (!value.trim()) return '';
       try {
-        const resolved = new URL(value, chapterUrl);
+        const resolved = new URL(value.trim(), chapterUrl);
         return ['http:', 'https:'].includes(resolved.protocol) ? resolved.href : '';
       } catch { return ''; }
     }).filter(Boolean))];

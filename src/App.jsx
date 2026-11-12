@@ -314,7 +314,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <main
             inert={tutorialMode}
-            className={`min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] [overflow-anchor:none]${isElectronApp ? '' : ` browser-main${isReader ? ' browser-main--reader' : ''}`}`}
+            className={`min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]${isReader ? '' : ' [scrollbar-gutter:stable]'}${isElectronApp ? '' : ` browser-main${isReader ? ' browser-main--reader' : ''}`}`}
             style={isReader ? undefined : isElectronApp
               ? { padding: `${Math.max(16, Math.round(24 * scale))}px` }
               : { '--web-page-padding': `${Math.max(14, Math.round(24 * scale))}px` }}

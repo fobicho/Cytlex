@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ArrowLeft, Maximize2, Minimize2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Download, Loader2 } from 'lucide-react';
+import { ArrowLeft, Maximize2, Minimize2, ChevronDown, Download, Loader2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
@@ -33,6 +33,20 @@ const chapterNumberFrom = (value) => {
   return match ? Number(match[0]) : NaN;
 };
 
+const pageImages = 'img[alt^="Página "]';
+
+function visiblePageBounds(stage) {
+  return [...stage.querySelectorAll(pageImages)]
+    .filter((img) => img.naturalWidth > 0)
+    .map((img) => {
+      const rect = img.getBoundingClientRect();
+      const scale = Math.min(rect.width / img.naturalWidth, rect.height / img.naturalHeight);
+      const insetX = (rect.width - img.naturalWidth * scale) / 2;
+      const insetY = (rect.height - img.naturalHeight * scale) / 2;
+      return { left: rect.left + insetX, right: rect.right - insetX, top: rect.top + insetY, bottom: rect.bottom - insetY };
+    });
+}
+
 const imageMimeFor = (mime, src, base64) => {
   const normalized = String(mime || '').split(';', 1)[0].trim().toLowerCase();
   if (normalized.startsWith('image/')) return normalized;
@@ -49,7 +63,7 @@ const imageMimeFor = (mime, src, base64) => {
   }
 };
 
-function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading = 'eager', imageReferer, imageCookie, imageClassName, imageStyle, wrapperClassName, wrapperStyle, onContextMenu, onLoaded, onFailed, onRetry, allowCacheUpdate = true }) {
+function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading = 'eager', imageReferer, imageCookie, imageClassName, wrapperClassName, wrapperStyle, onContextMenu, onLoaded, onRetry, allowCacheUpdate = true }) {
   const [status, setStatus] = useState('loading');
   const [attempt, setAttempt] = useState(0);
   const [fallbackState, setFallbackState] = useState({ src, enabled: false });
@@ -59,7 +73,10 @@ function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading 
   const usingFallback = fallbackState.src === src && fallbackState.enabled;
   const imageFallbackBusy = useRef(false);
   const autoRetried = useRef(false);
-  const cachedDisplaySrc = cachedSource.src === src ? cachedSource.value : displaySrc;
+  // Keep the in-flight network URL stable. A preload may finish while the
+  // browser is already loading this panel; swapping its src mid-request can
+  // cancel the visible load and restart it as a data URL.
+  const cachedDisplaySrc = cachedSource.src === src ? cachedSource.value : '';
 
   useEffect(() => {
     autoRetried.current = false;
@@ -72,7 +89,7 @@ function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading 
   }, [src]);
 
   useEffect(() => {
-    if (!allowCacheUpdate || !displaySrc || displaySrcFailed || usingFallback || srcOverride || status === 'loaded') return;
+    if (!allowCacheUpdate || !displaySrc || displaySrcFailed || usingFallback || srcOverride || status === 'loaded' || status === 'loading') return;
     if (cachedSource.src !== src || cachedSource.value !== displaySrc) {
       setCachedSource({ src, value: displaySrc });
       if (status === 'error') setStatus('loading');
@@ -87,7 +104,6 @@ function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading 
         setAttempt((current) => current + 1);
       } else {
         setStatus('error');
-        onFailed?.(src);
       }
     }, 15_000);
     return () => clearTimeout(timeout);
@@ -166,10 +182,8 @@ function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading 
             return;
           }
           setStatus('error');
-          onFailed?.(src);
         }}
         className={cn(imageClassName, 'transition-opacity duration-150', status === 'loaded' ? 'opacity-100' : 'opacity-0')}
-        style={imageStyle}
       />
     </div>
   );
@@ -233,9 +247,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const barTimer = useRef(null);
   const hideTimer = useRef(null);
   const hovering = useRef(false);
-  const [pgLoaded, setPgLoaded] = useState(false);
-  const [nat, setNat] = useState(null);
-  const [area, setArea] = useState({ w: 0, h: 0 });
   const [menu, setMenu] = useState(null);
   const [toast, setToast] = useState('');
   const [wheelZoom, setWheelZoom] = useState(0);
@@ -246,6 +257,8 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const panRef = useRef({ x: 0, y: 0 });
   const dragRef = useRef(null);
+  const didDragRef = useRef(false);
+  const pageClickTimer = useRef(null);
   const [dragging, setDragging] = useState(false);
   const [instantZoomReset, setInstantZoomReset] = useState(false);
   const zoomResetFrame = useRef(null);
@@ -258,7 +271,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const pendingScrollRef = useRef(null);
   const pageRef = useRef(page);
   pageRef.current = page;
-  const sizesRef = useRef(new Map());
   const preloadedPagesRef = useRef(new Map());
   const [, setPreloadRevision] = useState(0);
   const areaRef = useRef(null);
@@ -280,9 +292,9 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     const x = e.clientX - stageRect.left;
     const y = e.clientY - stageRect.top;
     const returningToOriginal = wheelZoomRef.current >= 50;
-    const panels = [...stage.querySelectorAll('img[alt^="Página "]')].map((panel) => panel.getBoundingClientRect());
+    const panels = visiblePageBounds(stage);
     const panelWidth = panels.length ? Math.max(...panels.map((rect) => rect.right)) - Math.min(...panels.map((rect) => rect.left)) : 0;
-    const targetScale = returningToOriginal || !panelWidth ? 1 : currentScale * stageRect.width / panelWidth;
+    const targetScale = returningToOriginal || !panelWidth ? 1 : Math.max(1.5, currentScale * stageRect.width / panelWidth);
     const targetZoom = returningToOriginal ? 0 : Math.max(0, (targetScale - 1) * 100);
     const originX = content.clientWidth / 2;
     const originY = content.clientHeight / 2;
@@ -388,10 +400,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     window.scrollTo(0, 0);
   }, []);
 
-  const remember = (src, img) => {
-    if (src && img.naturalWidth) sizesRef.current.set(src, { w: img.naturalWidth, h: img.naturalHeight });
-  };
-
   const scrollToTop = () => {
     const main = document.querySelector('main');
     if (main) main.scrollTop = 0;
@@ -425,12 +433,9 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     setIsRead(!!progress.get(chapterUrl, sourceId)?.read);
     setLastSeen(0);
     setVerticalAtEnd(false);
-    setPgLoaded(false);
-    setNat(null);
     setCh(null);
     setChUrl('');
     preloadedPagesRef.current.clear();
-    sizesRef.current.clear();
     setPreloadRevision((revision) => revision + 1);
     pendingScrollRef.current = null;
     (async () => {
@@ -617,22 +622,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   }, [pageSources, imageReferer, imageCookie, chUrl, chapterUrl]);
 
   useEffect(() => {
-    const src = ch?.pages?.[page] ?? '';
-    setPgLoaded(sizesRef.current.has(src));
-    setNat(sizesRef.current.get(src) ?? null);
-  }, [page, ch]);
-
-  useEffect(() => {
-    const el = areaRef.current;
-    if (!el) return undefined;
-    const update = () => setArea({ w: el.clientWidth, h: el.clientHeight });
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ch, mode]);
-
-  useEffect(() => {
     if (!ch || (ch.options && ch.options.length)) return;
     let alive = true;
     api.detail(ch.mangaUrl || mangaUrl, sourceId).then((d) => {
@@ -646,9 +635,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     if (useDouble) p = p - (p % 2);
     if (p < 0) p = 0;
     if (p > ch.pages.length - 1) p = ch.pages.length - 1;
-    const src = ch.pages[p] ?? '';
-    setPgLoaded(sizesRef.current.has(src));
-    setNat(sizesRef.current.get(src) ?? null);
     setPage(p);
     if (p !== page) {
       setInstantZoomReset(true);
@@ -736,32 +722,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   }, [mode, ch]);
 
   useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape') {
-        if (!chapterUrl) return;
-        if (menu || document.querySelector('[aria-haspopup="listbox"][aria-expanded="true"]')) return;
-        e.preventDefault();
-        goBack();
-        return;
-      }
-      if (!ch) return;
-      const rtl = mode === 'paginado-rtl';
-      const step = useDouble ? 2 : 1;
-      const last = ch.pages.length - 1;
-      if (e.key === 'ArrowRight') {
-        if (mode === 'paginado' || mode === 'paginado-rtl') goPage(rtl ? Math.max(page - step, 0) : Math.min(page + step, last));
-        else window.scrollBy({ top: 600 });
-      }
-      if (e.key === 'ArrowLeft') {
-        if (mode === 'paginado' || mode === 'paginado-rtl') goPage(rtl ? Math.min(page + step, last) : Math.max(page - step, 0));
-        else window.scrollBy({ top: -600 });
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [mode, ch, page, useDouble, chapterUrl, menu, goBack]);
-
-  useEffect(() => {
     if (!menu) return undefined;
     const close = () => setMenu(null);
     const onKey = (e) => { if (e.key === 'Escape') setMenu(null); };
@@ -781,45 +741,11 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     return () => clearTimeout(id);
   }, [toast]);
 
-  if (adultExtensionDisabled)
-    return (
-      <EmptyState
-        face="（・_・）"
-        tone="prompt"
-        title="Extensión desactivada"
-        description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para volver a usarla."
-        action={<Button onClick={() => { window.location.hash = '#/ajustes'; }}>Ir a Ajustes</Button>}
-      />
-    );
-  if (!chapterUrl)
-    return <EmptyState face="¯\\_(ツ)_/¯" title="Sin capítulo seleccionado." />;
-  if (err)
-    return (
-      <EmptyState
-        face="（╯°□°）╯︵ ┻━┻"
-        tone="error"
-        title="No se pudo cargar el capítulo"
-        description={err}
-        action={
-          <div className="flex items-center gap-2">
-            <Button onClick={() => { setErr(''); setRetryTick((t) => t + 1); }}>Reintentar</Button>
-            <Button variant="secondary" onClick={goBack}>Volver al detalle</Button>
-          </div>
-        }
-      />
-    );
-  if (!ch || chUrl !== chapterUrl)
-    return (
-      <div className="h-full grid place-items-center">
-        <Loader2 className="w-7 h-7 animate-spin text-muted-foreground" />
-      </div>
-    );
-
   const go = (url) => `#/leer?u=${encodeURIComponent(url)}&m=${encodeURIComponent(mangaUrl || ch.mangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}${detailBackQS}`;
-  const last = ch.pages.length - 1;
 
   const openPanelMenu = (e, url, label) => {
     e.preventDefault();
+    clearTimeout(pageClickTimer.current);
     if (!appWindow.canDownload()) return;
     setMenu({ x: e.clientX, y: e.clientY, url, label });
   };
@@ -833,12 +759,9 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     else if (!result?.canceled) setToast(result?.error || 'No se pudo descargar');
   };
 
-  const navBtn =
-    'absolute top-1/2 -translate-y-1/2 z-20 grid place-items-center w-11 h-11 rounded-lg border border-border bg-card/90 backdrop-blur-xl shadow-2xl text-foreground transition-colors hover:bg-accent';
+  const allPages = [...Array(ch?.pages?.length || 0).keys()];
 
-  const allPages = [...Array(ch.pages.length).keys()];
-
-  const chapterOptions = ch?.options?.length ? ch.options : [{ title: ch.label, url: chapterUrl }];
+  const chapterOptions = ch?.options?.length ? ch.options : [{ title: ch?.label, url: chapterUrl }];
   const oldestFirst = chapterOrder.get(mangaUrl);
   const orderedChapterOptions = chapterOptions
     .map((option, index) => ({ option, index, number: Number.parseFloat(String(option.title || '').match(/[\d.]+/)?.[0]) }))
@@ -871,20 +794,85 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       ? ch?.next?.url ? ch.next : orderedChapterOptions[newerChapterIndex]
       : null
     : ch?.next || null;
-  const atStart = paginated ? page <= 0 : lastSeen <= 0;
-  const atEnd = paginated
-    ? page >= ch.pages.length - 1
-    : (lastSeen >= (ch?.pages?.length || 1) - 1);
-  const zoomPct = mode === 'vertical' ? scalePct + (scalePct * wheelZoom) / 100 : scalePct;
-  let pageStyle = { width: `${zoomPct}%`, maxHeight: `calc(100vh - ${px(60, scale, 50)})` };
-  if ((mode === 'paginado' || mode === 'paginado-rtl') && nat && area.w > 0 && nat.w > nat.h) {
-    const aspect = nat.w / nat.h;
-    const zoomW = (zoomPct / 100) * area.w;
-    pageStyle = { width: `${Math.max(zoomW, area.h * aspect)}px`, maxWidth: '100%', maxHeight: '100%' };
+  const navigateReading = (direction) => {
+    const forward = rtl ? direction < 0 : direction > 0;
+    const chapter = forward ? nextChapter : previousChapter;
+    if (paginated) {
+      const nextPage = page + (forward ? 1 : -1) * (useDouble ? 2 : 1);
+      if (nextPage >= 0 && nextPage < ch.pages.length) {
+        goPage(nextPage);
+        return;
+      }
+    } else {
+      const scroller = document.querySelector('main') || document.scrollingElement;
+      if (scroller && (forward ? !verticalAtEnd : scroller.scrollTop > 1)) {
+        scroller.scrollBy({ top: direction * 600 });
+        return;
+      }
+    }
+    if (chapter?.url) window.location.hash = go(chapter.url);
+  };
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.defaultPrevented || menu || document.querySelector('[aria-haspopup="listbox"][aria-expanded="true"]')) return;
+      if (e.key === 'Escape' && chapterUrl) {
+        e.preventDefault();
+        goBack();
+      }
+      if (!ch || chUrl !== chapterUrl || err || adultExtensionDisabled) return;
+      if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]')) return;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        clearTimeout(pageClickTimer.current);
+        navigateReading(e.key === 'ArrowRight' ? 1 : -1);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  useEffect(() => () => clearTimeout(pageClickTimer.current), [chapterUrl, page, mode, useDouble]);
+
+  if (adultExtensionDisabled) {
+    return (
+      <EmptyState
+        face="（・_・）"
+        tone="prompt"
+        title="Extensión desactivada"
+        description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para volver a usarla."
+        action={<Button onClick={() => { window.location.hash = '#/ajustes'; }}>Ir a Ajustes</Button>}
+      />
+    );
   }
+  if (!chapterUrl)
+    return <EmptyState face="¯\\_(ツ)_/¯" title="Sin capítulo seleccionado." />;
+  if (err)
+    return (
+      <EmptyState
+        face="（╯°□°）╯︵ ┻━┻"
+        tone="error"
+        title="No se pudo cargar el capítulo"
+        description={err}
+        action={
+          <div className="flex items-center gap-2">
+            <Button onClick={() => { setErr(''); setRetryTick((t) => t + 1); }}>Reintentar</Button>
+            <Button variant="secondary" onClick={goBack}>Volver al detalle</Button>
+          </div>
+        }
+      />
+    );
+  if (!ch || chUrl !== chapterUrl)
+    return (
+      <div className="h-full grid place-items-center">
+        <Loader2 className="w-7 h-7 animate-spin text-muted-foreground" />
+      </div>
+    );
+
+  const zoomPct = scalePct + (scalePct * wheelZoom) / 100;
 
   return (
-    <div className="relative h-full min-h-0 p-3">
+    <div className={cn('relative h-full min-h-0', !paginated && 'p-3')}>
       {barsOpen ? (
             <div
               onMouseEnter={showBar}
@@ -951,7 +939,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                  options={allPages
                    .filter((i) => !useDouble || i % 2 === 0)
                    .map((i) => {
-                     const end = Math.min(i + 1, ch.pages.length - 1);
                      const label = useDouble && i + 1 < ch.pages.length
                        ? `Páginas ${i + 1}-${i + 2}`
                        : `Página ${i + 1}`;
@@ -983,7 +970,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
               className="fixed z-20 flex items-center text-muted-foreground"
               style={{
                 left: `${arrowLeft}px`,
-                width: px(500, scale, 360),
+                width: px(32, scale, 27),
                 height: `${arrowH}px`,
                 top: `${arrowTop}px`
               }}
@@ -1010,8 +997,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
               imageCookie={ch.imageCookie}
               loading="lazy"
               onContextMenu={(e) => openPanelMenu(e, src, `Página ${i + 1}`)}
-              onLoaded={(e) => {
-                remember(src, e.currentTarget);
+              onLoaded={() => {
                 if (i === ch.pages.length - 1) requestAnimationFrame(updateVerticalEnd);
               }}
               wrapperClassName="mb-2.5 w-full"
@@ -1023,16 +1009,27 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       ) : (
         <div
           ref={areaRef}
-          className="relative h-full min-h-0 w-full overflow-hidden grid grid-rows-[minmax(0,1fr)] place-items-center"
+          className="relative h-full min-h-0 w-full touch-manipulation overflow-hidden"
+          onClick={(e) => {
+            if (didDragRef.current || menu) return;
+            if (e.target instanceof Element && e.target.closest('button, a, [role="alert"]')) return;
+            const { left, width } = e.currentTarget.getBoundingClientRect();
+            const direction = e.clientX < left + width / 2 ? -1 : 1;
+            clearTimeout(pageClickTimer.current);
+            if (e.nativeEvent.pointerType === 'touch') navigateReading(direction);
+            else if (e.detail === 1) pageClickTimer.current = setTimeout(() => navigateReading(direction), 250);
+          }}
           onDoubleClick={(e) => {
+            clearTimeout(pageClickTimer.current);
             if (performance.now() < ignoreNativeDoubleClickUntilRef.current) return;
             if (wheelZoomRef.current >= 50) return;
             const panel = document.elementFromPoint(e.clientX, e.clientY);
-            if (!(panel instanceof Element) || !panel.closest('img[alt^="Página "]')) return;
+            if (!(panel instanceof Element) || !panel.closest(pageImages)) return;
             toggleZoomAtPointer(e);
           }}
           onPointerDown={(e) => {
-            const isPanel = e.target instanceof Element && e.target.closest('img[alt^="Página "]');
+            didDragRef.current = false;
+            const isPanel = e.target instanceof Element && e.target.closest(pageImages);
             if (isPanel && wheelZoomRef.current >= 50 && e.pointerType === 'mouse' && e.button === 0) {
               const now = performance.now();
               const previous = lastPanelPointerDownRef.current;
@@ -1040,6 +1037,8 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                 && Math.hypot(e.clientX - previous.x, e.clientY - previous.y) <= 8;
               lastPanelPointerDownRef.current = isDoubleClick ? null : { time: now, x: e.clientX, y: e.clientY };
               if (isDoubleClick) {
+                clearTimeout(pageClickTimer.current);
+                didDragRef.current = true;
                 ignoreNativeDoubleClickUntilRef.current = now + 600;
                 toggleZoomAtPointer(e);
                 return;
@@ -1072,7 +1071,9 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
             const drag = dragRef.current;
             const stage = areaRef.current;
             if (!drag || drag.pointerId !== e.pointerId || !stage) return;
-            const bounds = [...stage.querySelectorAll('img[alt^="Página "]')].map((img) => img.getBoundingClientRect());
+            if (!didDragRef.current && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 5) return;
+            didDragRef.current = true;
+            const bounds = visiblePageBounds(stage);
             if (!bounds.length) return;
             const viewport = stage.getBoundingClientRect();
             const current = panRef.current;
@@ -1106,7 +1107,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         >
           <div
             ref={zoomContentRef}
-            className="relative flex h-full w-full items-center justify-center gap-2"
+            className="relative flex h-full w-full items-center justify-center"
             style={{
               transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${1 + wheelZoom / 100})`,
               transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%`,
@@ -1115,7 +1116,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
             }}
           >
            {useDouble ? (
-             <div className="flex min-h-0 items-center justify-center gap-2 h-full w-full overflow-hidden">
+             <div className="flex h-full min-h-0 w-full items-center justify-center overflow-hidden">
                {(() => {
                  const hasSecond = page + 1 < ch.pages.length;
                  const indices = hasSecond ? (rtl ? [page + 1, page] : [page, page + 1]) : [page];
@@ -1133,17 +1134,8 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                        imageReferer={ch.imageReferer}
                        imageCookie={ch.imageCookie}
                        onContextMenu={(e) => openPanelMenu(e, src, `Página ${idx + 1}`)}
-                       onLoaded={(e) => {
-                         remember(src, e.currentTarget);
-                         if (idx === page) {
-                           if (e.currentTarget.naturalWidth) setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight });
-                           setPgLoaded(true);
-                         }
-                       }}
-                       onFailed={() => { if (idx === page) setPgLoaded(true); }}
-                       wrapperClassName={cn('grid-rows-[minmax(0,1fr)] h-full min-h-0 min-w-0 flex-1', idx === indices[indices.length - 1] && 'translate-x-[6px]')}
-                       imageClassName={cn('block object-contain max-w-full', mode !== 'vertical' && wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
-                       imageStyle={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto' }}
+                       wrapperClassName="grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] h-full min-h-0 min-w-0 flex-1"
+                       imageClassName={cn('block h-full w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                      />
                    );
                  });
@@ -1160,66 +1152,13 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                 imageReferer={ch.imageReferer}
                 imageCookie={ch.imageCookie}
                 onContextMenu={(e) => openPanelMenu(e, ch.pages[page], `Página ${page + 1}`)}
-                onLoaded={(e) => {
-                  remember(ch.pages[page], e.currentTarget);
-                  if (e.currentTarget.naturalWidth) {
-                    setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight });
-                  }
-                  setPgLoaded(true);
-                }}
-                onFailed={() => setPgLoaded(true)}
-                wrapperClassName="grid-rows-[minmax(0,1fr)] h-full min-h-0 w-full"
-                imageClassName={cn('block max-w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
-                imageStyle={{ ...pageStyle, maxHeight: '100%', height: 'auto' }}
+                wrapperClassName="grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] h-full min-h-0 w-full"
+                imageClassName={cn('block h-full w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                />
            )}
           </div>
-           { (rtl ? (page + (useDouble ? 2 : 1) <= ch.pages.length - 1) : page > 0) && (
-            <button
-              type="button"
-              className={`${navBtn} left-0`}
-              aria-label="Página anterior"
-              onClick={(e) => { e.stopPropagation(); goPage(rtl ? (useDouble ? Math.min(page + 2, ch.pages.length - 1) : page + 1) : (useDouble ? Math.max(page - 2, 0) : page - 1)); }}
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-          )}
-           { (rtl ? page > 0 : (page + (useDouble ? 2 : 1) <= ch.pages.length - 1)) && (
-            <button
-              type="button"
-              className={`${navBtn} right-0`}
-              aria-label="Página siguiente"
-              onClick={(e) => { e.stopPropagation(); goPage(rtl ? (useDouble ? Math.max(page - 2, 0) : page - 1) : (useDouble ? Math.min(page + 2, ch.pages.length - 1) : page + 1)); }}
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          )}
         </div>
       )}
-
-       {previousChapter && atStart && (
-         <button
-           type="button"
-            className={`${navBtn} ${rtl ? 'right-3' : 'left-3'}`}
-           title={`Capítulo anterior: ${previousChapter.title}`}
-           aria-label="Capítulo anterior"
-           onClick={() => { window.location.hash = go(previousChapter.url); }}
-         >
-           {rtl ? <ChevronsRight className="w-5 h-5" /> : <ChevronsLeft className="w-5 h-5" />}
-         </button>
-       )}
-
-       {nextChapter && atEnd && (
-         <button
-           type="button"
-            className={`${navBtn} ${rtl ? 'left-3' : 'right-3'}`}
-           title={`Siguiente capítulo: ${nextChapter.title}`}
-           aria-label="Siguiente capítulo"
-           onClick={() => { window.location.hash = go(nextChapter.url); }}
-         >
-           {rtl ? <ChevronsLeft className="w-5 h-5" /> : <ChevronsRight className="w-5 h-5" />}
-         </button>
-       )}
 
        {menu && (
          <div

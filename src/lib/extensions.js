@@ -391,14 +391,18 @@ export const extensions = {
     await Promise.all(records.map(async (r) => {
       if (!pendientes.has(r.manifest.id)) return;
       const fresh = repo.find((m) => m.id === r.manifest.id);
-      if (!fresh || fresh.type !== 'module' || !fresh.main) return;
+      if (!fresh) return;
       const local = r.installedVersion || r.manifest.version || '0';
       if (!fresh.version || !isNewer(fresh.version, local)) return;
       try {
-        const mainUrl = /^https?:/i.test(fresh.main)
-          ? fresh.main
-          : new URL(fresh.main, indexUrl).href;
-        const code = await ctx().fetchText(freshIndexUrl(mainUrl));
+        let code = null;
+        if (fresh.type === 'module') {
+          if (!fresh.main) throw new Error('La extensión no define "main"');
+          const mainUrl = new URL(fresh.main, indexUrl).href;
+          code = await ctx().fetchText(freshIndexUrl(mainUrl));
+        } else if (fresh.type !== 'selector' || !fresh.baseUrl || !fresh.selectors) {
+          throw new Error('La extensión no define una configuración válida');
+        }
         r.code = code;
         r.manifest = { ...r.manifest, ...fresh };
         delete r.manifest.adultContent;
@@ -514,14 +518,7 @@ export const extensions = {
     if (!pending) {
       pending = Promise.resolve().then(async () => {
         if (rec.manifest.type !== 'module') return buildSelectorSource(rec.manifest, ctx(rec.manifest));
-        let code = rec.code;
-        if (import.meta.env.DEV && baseId === 'onfmangas') {
-          try {
-            const response = await fetch('/docs/ext/onfmangas.js', { cache: 'no-store' });
-            if (response.ok) code = await response.text();
-          } catch {}
-        }
-        return loadModule(code, rec.manifest);
+        return loadModule(rec.code, rec.manifest);
       });
       moduleLoads.set(baseId, pending);
     }
