@@ -31,8 +31,8 @@ export default function createSource({ fetchText, parse }) {
         for (let depth = 0; depth < 2 && typeof parsed === 'string'; depth += 1) parsed = JSON.parse(parsed);
         if (Array.isArray(parsed)) return parsed;
         if (parsed && typeof parsed === 'object') {
-          for (const key of ['pages', 'images', 'readerPages', 'data']) {
-            const nested = parsed[key];
+          for (const [key, nested] of Object.entries(parsed)) {
+            if (!/(?:pages?|images?|reader|chapter|data|result|items)/i.test(key)) continue;
             if (Array.isArray(nested)) return nested;
             if (nested && (typeof nested === 'object' || typeof nested === 'string')) {
               const list = asPageList(nested);
@@ -51,11 +51,28 @@ export default function createSource({ fetchText, parse }) {
     return null;
   }
 
-  const imageUrl = (page) => {
+  const imageUrl = (page, depth = 0) => {
     if (typeof page === 'string') return page;
-    if (!page || typeof page !== 'object') return '';
-    return page.url || page.src || page.image || page.srcUrl || page.pageUrl
-      || page.imageUrl || page.image_url || page.src_url || page.path || page.file || page.fallback || '';
+    if (!page || typeof page !== 'object' || depth > 4) return '';
+    if (Array.isArray(page)) return page.map((item) => imageUrl(item, depth + 1)).find(Boolean) || '';
+
+    const preferredKeys = [
+      'url', 'src', 'image', 'img', 'source', 'original', 'fallback',
+      'srcUrl', 'pageUrl', 'imageUrl', 'image_url', 'src_url', 'img_url',
+      'fileUrl', 'file_url', 'originalUrl', 'original_url', 'webp', 'path', 'file'
+    ];
+    for (const key of preferredKeys) {
+      const value = page[key];
+      const found = typeof value === 'string' ? value : imageUrl(value, depth + 1);
+      if (found) return found;
+    }
+
+    for (const [key, value] of Object.entries(page)) {
+      if (!/(?:url|src|image|img|file|page|original|fallback|webp|path)/i.test(key)) continue;
+      const found = typeof value === 'string' ? value : imageUrl(value, depth + 1);
+      if (found) return found;
+    }
+    return '';
   };
 
   function isCookieChallenge(html) {
