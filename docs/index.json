@@ -39,7 +39,7 @@
     "id": "olympusscanlation",
     "name": "Olympus Scanlation",
     "lang": "es",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "type": "module",
     "contentWarning": "SAFE",
     "main": "ext/olympusscanlation.js",

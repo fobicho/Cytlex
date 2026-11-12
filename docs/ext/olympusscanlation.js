@@ -5,6 +5,8 @@ export default function createSource({ fetchText }) {
   const getJson = async (url, requestId) => JSON.parse(await fetchText(url, requestId));
   const isComic = (s) => (s.type || 'comic').toLowerCase() === 'comic';
   let seriesListRequest;
+  let latestChapters;
+  const chapterListRequests = new Map();
 
   const best = (u) => (u || '').replace(/-[a-z]{1,3}\.(jpe?g|png|webp|avif)$/i, '-xl.$1');
 
@@ -46,17 +48,10 @@ export default function createSource({ fetchText }) {
     return { items, totalPages, totalText: '' };
   }
 
-  async function detail(mangaUrl) {
-    const slug = String(mangaUrl).split('/').filter(Boolean).pop();
+  async function fetchChapterList(slug) {
     const chaptersFetch = (page) =>
       getJson(`${base}/api/series/${slug}/chapters?page=${page}&direction=desc&type=comic`);
-
-    const [data, first] = await Promise.all([
-      getJson(`${base}/api/series/${slug}?type=comic`),
-      chaptersFetch(1)
-    ]);
-    const s = data?.data || {};
-
+    const first = await chaptersFetch(1);
     const lastPage = Math.min(first?.meta?.last_page || 1, LIMIT_PAGES);
     const rest = [];
     for (let start = 2; start <= lastPage; start += 6) {
@@ -64,14 +59,31 @@ export default function createSource({ fetchText }) {
       const batch = await Promise.all(Array.from({ length: count }, (_, i) => chaptersFetch(start + i)));
       rest.push(...batch);
     }
+    return [first, ...rest].flatMap((res) => res?.data || []);
+  }
 
-    const chapters = [first, ...rest]
-      .flatMap((res) => res?.data || [])
-      .map((c) => ({
-        url: `${base}/capitulo/${slug}/${c.id}`,
-        title: c.name ? `Capítulo ${c.name}` : `Capítulo ${c.id}`,
-        date: c.published_at || ''
-      }));
+  function listChapters(slug) {
+    if (!chapterListRequests.has(slug)) {
+      chapterListRequests.set(slug, fetchChapterList(slug).then((entries) => {
+        latestChapters = { slug, entries };
+        return entries;
+      }).finally(() => chapterListRequests.delete(slug)));
+    }
+    return chapterListRequests.get(slug);
+  }
+
+  async function detail(mangaUrl) {
+    const slug = String(mangaUrl).split('/').filter(Boolean).pop();
+    const [data, entries] = await Promise.all([
+      getJson(`${base}/api/series/${slug}?type=comic`),
+      listChapters(slug)
+    ]);
+    const s = data?.data || {};
+    const chapters = entries.map((c) => ({
+      url: `${base}/capitulo/${slug}/${c.id}`,
+      title: c.name ? `Capítulo ${c.name}` : `Capítulo ${c.id}`,
+      date: c.published_at || ''
+    }));
 
     const status = s.status?.name || '';
     return {
@@ -86,10 +98,15 @@ export default function createSource({ fetchText }) {
   }
 
   async function chapter(chapterUrl) {
-    const parts = String(chapterUrl).split('/').filter(Boolean);
-    const id = parts.pop();
-    const slug = parts.pop();
-    const data = await getJson(`${base}/api/capitulo/comic-${slug}/${id}`);
+    const [, slug, id] = new URL(chapterUrl).pathname.split('/').filter(Boolean);
+    const matchesId = (entry) => String(entry.id) === id;
+    const cached = latestChapters?.slug === slug && latestChapters.entries.find(matchesId);
+    const entry = cached || (await listChapters(slug)).find(matchesId);
+    const number = String(entry?.name ?? '').trim();
+    if (!/^-?\d+(?:\.\d+)?$/.test(number)) {
+      throw new Error('Olympus no encontró el número de este capítulo en la serie.');
+    }
+    const data = await getJson(`${base}/api/capitulo/${slug}/${number}`);
     const ch = data?.chapter || {};
     return {
       label: ch.name ? `Capítulo ${ch.name}` : '',
