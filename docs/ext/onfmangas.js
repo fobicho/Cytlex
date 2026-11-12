@@ -411,20 +411,25 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     }
     const outer = parse(html);
     let pages = decodePageImages(html, outer, url);
-    if (!pages.length && typeof fetchPostText === 'function') {
+    if (typeof fetchPostText === 'function') {
       const access = findReaderAccess(html, outer);
       if (access) {
-        const response = await fetchPostText({
-          url: `${base}/reader_pages.php`,
-          body: { access },
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Requested-With': 'XMLHttpRequest'
-          },
-          onfCookie,
-          onfReferer: url
-        });
-        pages = decodeReaderPageResponse(response, url);
+        try {
+          const response = await fetchPostText({
+            url: `${base}/reader_pages.php`,
+            body: { access },
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+            },
+            onfCookie,
+            onfReferer: url
+          });
+          const completePages = decodeReaderPageResponse(response, url);
+          if (completePages.length >= pages.length) pages = completePages;
+        } catch {
+          // Keep any image URLs embedded in the chapter if the page-list endpoint is temporarily unavailable.
+        }
       }
     }
     if (!pages.length) {

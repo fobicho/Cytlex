@@ -213,6 +213,8 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const [verticalAtEnd, setVerticalAtEnd] = useState(false);
   const [lastSeen, setLastSeen] = useState(0);
   const pendingScrollRef = useRef(null);
+  const pageRef = useRef(page);
+  pageRef.current = page;
   const sizesRef = useRef(new Map());
   const areaRef = useRef(null);
 
@@ -351,9 +353,10 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     window.scrollTo(0, 0);
   };
 
-  const retryMangaDexImages = useCallback(async () => {
+  const retryChapterImages = useCallback(async () => {
     try {
       const refreshed = await api.chapter(chapterUrl, sourceId, { fresh: true });
+      if (!refreshed?.pages?.length) return false;
       setCh(refreshed);
       setImageSetRevision((revision) => revision + 1);
       return true;
@@ -510,17 +513,14 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     return () => { cancelled = true; };
   }, [ch, mode]);
 
+  const pageSources = ch?.pages;
+  const imageReferer = ch?.imageReferer;
   useEffect(() => {
-    if (!ch || mode === 'vertical' || chUrl !== chapterUrl) return;
-    const direction = rtl ? -1 : 1;
-    const start = page + (rtl ? -1 : useDouble ? 2 : 1);
-    const queue = [];
-    for (let index = start; index >= 0 && index < ch.pages.length; index += direction) {
-      const src = ch.pages[index];
-      if (src && !sizesRef.current.has(src)) queue.push(src);
-      if (queue.length === 2) break;
-    }
-
+    if (!pageSources?.length || chUrl !== chapterUrl) return;
+    const start = Math.min(Math.max(pageRef.current, 0), pageSources.length - 1);
+    const orderedPages = [...pageSources.slice(start + 1), ...pageSources.slice(0, start + 1)];
+    const queue = orderedPages.filter((src) => src && !sizesRef.current.has(src));
+    if (!queue.length) return;
     let cancelled = false;
     let cursor = 0;
     const active = new Map();
@@ -549,7 +549,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         img.onload = () => finish(true);
         img.onerror = () => finish(false);
         active.set(img, timeout);
-        img.src = browserImageUrl(src, ch.imageReferer);
+        img.src = browserImageUrl(src, imageReferer);
       }
     };
     pump();
@@ -564,7 +564,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
       });
       active.clear();
     };
-  }, [ch, chUrl, chapterUrl, mode, rtl, useDouble]);
+  }, [pageSources, imageReferer, chUrl, chapterUrl, imageSetRevision]);
 
   useEffect(() => {
     const src = ch?.pages?.[page] ?? '';
@@ -953,7 +953,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
               id={`pg-${i}`}
               src={src}
               fallbackSrc={ch.pageFallbacks?.[i]}
-              onRetry={sourceId.startsWith('mangadex') ? retryMangaDexImages : undefined}
+              onRetry={sourceId.startsWith('mangadex') || sourceId === 'onfmangas' ? retryChapterImages : undefined}
               alt={`Página ${i + 1}`}
               imageReferer={ch.imageReferer}
               loading="lazy"
@@ -1075,7 +1075,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                        key={`${idx}-${imageSetRevision}`}
                        src={src}
                        fallbackSrc={ch.pageFallbacks?.[idx]}
-                       onRetry={sourceId.startsWith('mangadex') ? retryMangaDexImages : undefined}
+                       onRetry={sourceId.startsWith('mangadex') || sourceId === 'onfmangas' ? retryChapterImages : undefined}
                        alt={`Página ${idx + 1}`}
                        imageReferer={ch.imageReferer}
                        onContextMenu={(e) => openPanelMenu(e, src, `Página ${idx + 1}`)}
@@ -1100,7 +1100,7 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                 key={`${page}-${imageSetRevision}`}
                 src={ch.pages[page]}
                 fallbackSrc={ch.pageFallbacks?.[page]}
-                onRetry={sourceId.startsWith('mangadex') ? retryMangaDexImages : undefined}
+                onRetry={sourceId.startsWith('mangadex') || sourceId === 'onfmangas' ? retryChapterImages : undefined}
                 alt={`Página ${page + 1}`}
                 imageReferer={ch.imageReferer}
                 onContextMenu={(e) => openPanelMenu(e, ch.pages[page], `Página ${page + 1}`)}

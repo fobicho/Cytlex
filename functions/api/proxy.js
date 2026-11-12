@@ -172,6 +172,10 @@ function forwardedHeaders(request, target) {
       headers.set('accept', 'application/json, text/plain, */*');
       headers.set('sec-fetch-dest', 'empty');
       headers.set('sec-fetch-mode', 'cors');
+    } else if (target.pathname.startsWith('/reader_image.php/')) {
+      headers.set('accept', 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8');
+      headers.set('sec-fetch-dest', 'image');
+      headers.set('sec-fetch-mode', 'no-cors');
     } else {
       headers.set('accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8');
       headers.set('sec-fetch-dest', 'document');

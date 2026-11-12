@@ -837,8 +837,9 @@ ipcMain.handle('image:fetch', async (_e, url, requestedReferer) => {
     const urlStr = parsed.toString();
     const host = parsed.hostname.toLowerCase();
     const mangaDexImage = host === 'uploads.mangadex.org';
+    const onfImage = parsed.origin === 'https://onfmangas.com' && parsed.pathname.startsWith('/reader_image.php/');
     let imageReferer = refererFor(urlStr);
-    if (host === 'd33y4i2dmzjqjh.cloudfront.net' && typeof requestedReferer === 'string') {
+    if ((host === 'd33y4i2dmzjqjh.cloudfront.net' || onfImage) && typeof requestedReferer === 'string') {
       try {
         const candidate = validateUrl(requestedReferer);
         if (candidate.origin === 'https://onfmangas.com' && candidate.pathname.startsWith('/lector/')) {
@@ -856,6 +857,11 @@ ipcMain.handle('image:fetch', async (_e, url, requestedReferer) => {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
           Referer: imageReferer
         };
+    if (onfImage) {
+      headers.Accept = 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8';
+      const cookie = mergeOnfCookies(onfCookieJar.get(parsed.origin));
+      if (cookie) headers.Cookie = cookie;
+    }
     const { response: res, body } = await requestPublic(urlStr, {
       method: 'GET',
       headers,

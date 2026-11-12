@@ -145,13 +145,13 @@ export async function httpPost(payload, requestId) {
   return payload.responseType === 'text' ? text : JSON.parse(text);
 }
 
-export async function fetchImage(url, signal) {
+export async function fetchImage(url, signal, referer = '') {
   const bridge = electronBridge();
   if (bridge?.fetchImage) {
-    const image = await bridge.fetchImage(url);
+    const image = await bridge.fetchImage(url, referer);
     return signal?.aborted ? null : image;
   }
-  const response = await browserRequest(url, { signal });
+  const response = await browserRequest(url, { signal, onfReferer: referer });
   const blob = await response.blob();
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let binary = '';
