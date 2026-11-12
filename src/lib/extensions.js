@@ -2,15 +2,16 @@ import { buildSelectorSource } from './selectorSource.js';
 import { chapterIndex } from './chapterIndex.js';
 import { settings } from './settings.js';
 import { httpGet, httpHead, httpPost } from './browserHttp.js';
+import { isUnresolvedMihonSource } from './library.js';
 import defaultExtensionIndex from '../../docs/index.json';
 
 const KEY = 'cytlex:extensions:v1';
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
 const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
-const isPlaceholderExtension = (record) => /^mihon-\d+$/i.test(String(record?.manifest?.id || ''));
 export const isRetiredExtension = (id) => id === 'plottwistnofansub';
+export const isUnavailableMangaSource = (id) => isRetiredExtension(id) || isUnresolvedMihonSource(id);
 const keepInstalledExtension = (record) => record?.manifest?.type !== 'builtin'
-  && !isPlaceholderExtension(record) && !isRetiredExtension(record?.manifest?.id);
+  && !isUnavailableMangaSource(record?.manifest?.id);
 let recordsCache = null;
 
 function freshIndexUrl(indexUrl) {

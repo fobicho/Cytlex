@@ -4,7 +4,7 @@ import { Search, Loader2, ChevronRight, ChevronLeft, CircleHelp } from 'lucide-r
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { isLibraryManga, lib, libraryIdentityKey, libraryKey } from '../lib/library.js';
-import { extensions, isExtensionAllowed, isRetiredExtension } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed, isUnavailableMangaSource } from '../lib/extensions.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { settings } from '../lib/settings.js';
 import { lastSearch, scrollMemory, rememberCover, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
@@ -385,7 +385,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
         const params = { q: searchQuery, genre: '', page: 1 };
         const r = await api.catalog(params, s.manifest.id);
         const items = (r.items || []).filter((m) =>
-          (!migrationMode || migrationInline?.onConfirm || normalizeMangaTitle(m.title) === normalizeMangaTitle(migrationQuery)) &&
+          (!migrationMode || isUnavailableMangaSource(migrationFromSource) || normalizeMangaTitle(m.title) === normalizeMangaTitle(migrationQuery)) &&
           (s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim())
         ).slice(0, MAX_SEARCH_RESULTS);
         const visibleCovers = await Promise.all(items.slice(0, 10).map(async (m) => [
@@ -433,14 +433,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     setMigrationError('');
     try {
       const targetSourceId = migrationSelection.sourceId;
-      if (migrationInline?.onConfirm) {
-        const targetDetail = await api.detail(migrationSelection.manga.url, targetSourceId);
-        if (!targetDetail) throw new Error('No se pudo cargar el manga de destino.');
-        migrationInline.onConfirm(migrationSelection.manga, targetSourceId, targetDetail);
-        setMigrationSelection(null);
-        return;
-      }
-      const originalDetail = isRetiredExtension(migrationFromSource)
+      const originalDetail = isUnavailableMangaSource(migrationFromSource)
         ? { chapters: (chapterIndex.peek(migrationFromUrl, migrationFromSource) || []).map((url) => ({ url })) }
         : api.detail(migrationFromUrl, migrationFromSource);
       const [fromDetail, targetDetail] = await Promise.all([

@@ -1,9 +1,11 @@
-import { lib } from './library.js';
+import { lib, libraryIdentityKey } from './library.js';
 import { progress } from './progress.js';
 import { chapterIndex } from './chapterIndex.js';
 import { chapterOrder } from './searchState.js';
 import { tracking } from './tracking.js';
 import { extensions } from './extensions.js';
+import { mergeChapterProgress } from './mihonBackup.js';
+import { reconcileMihonProgress } from './mihonProgress.js';
 
 const norm = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -71,7 +73,10 @@ export function migrateSavedManga({ fromUrl, fromSourceId, fromDetail, targetUrl
 
   const targetChapters = targetDetail.chapters || [];
   const manifest = extensions.manifest(targetSourceId);
-  const existingTarget = lib.fav(targetUrl, targetSourceId);
+  const existingTarget = lib.favs().find((manga) => (
+    (manga.sourceId || 'leercapitulo') === targetSourceId
+    && libraryIdentityKey(manga.url) === libraryIdentityKey(targetUrl)
+  ));
   const categories = [...new Set([...(saved.cats || []), ...(existingTarget?.cats || [])])];
   const nextManga = {
     url: targetUrl,
@@ -89,7 +94,12 @@ export function migrateSavedManga({ fromUrl, fromSourceId, fromDetail, targetUrl
   chapterIndex.drop(fromUrl, fromSourceId);
   chapterIndex.set(targetUrl, targetSourceId, targetChapters.map((chapter) => chapter.url).filter(Boolean));
   if (existingTarget) {
-    lib.updateFavCats(targetUrl, categories, targetSourceId);
+    const mihonProgress = mergeChapterProgress(existingTarget.mihonProgress, saved.mihonProgress);
+    lib.updateFavs([{
+      url: existingTarget.url,
+      sourceId: targetSourceId,
+      patch: { cats: categories, mihonProgress: mihonProgress.length ? mihonProgress : undefined }
+    }]);
     lib.toggleFav({ url: fromUrl, sourceId: fromSourceId });
   } else {
     lib.updateFav(fromUrl, {
@@ -101,6 +111,7 @@ export function migrateSavedManga({ fromUrl, fromSourceId, fromDetail, targetUrl
       coverCached: ''
     }, fromSourceId);
   }
+  reconcileMihonProgress(existingTarget?.url || targetUrl, targetSourceId, targetChapters);
   tracking.move(fromUrl, targetUrl, fromSourceId, targetSourceId);
   chapterOrder.move(fromUrl, targetUrl);
 }

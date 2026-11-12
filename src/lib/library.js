@@ -48,7 +48,7 @@ export const isLibraryManga = (manga, sourceId, keys) =>
   || keys.has(libraryIdentityKey(manga.url));
 
 const SRC = (x) => x.sourceId || 'leercapitulo';
-const isUnresolvedMihonSource = (sourceId) => /^mihon-\d+$/i.test(String(sourceId || ''));
+export const isUnresolvedMihonSource = (sourceId) => /^mihon-\d+$/i.test(String(sourceId || ''));
 const match = (a, url, sourceId = 'leercapitulo') => {
   const sameIdentity = libraryIdentityKey(a.url) === libraryIdentityKey(url);
   return (sameUrl(a.url, url) && SRC(a) === sourceId)

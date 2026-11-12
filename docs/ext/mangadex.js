@@ -52,7 +52,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
           break;
         } catch (error) {
           const message = String(error?.message || error);
-          if (/Petición cancelada|HTTP_REQUEST_ABORTED/i.test(message)) throw error;
+          if (/Petición cancelada|HTTP_REQUEST_ABORTED|\bENOTFOUND\b/i.test(message)) throw error;
           if (/^\s*</.test(response)) {
             throw new Error(`MangaDex respondió con HTML en lugar de JSON al consultar ${new URL(url).pathname}. La API puede estar temporalmente inaccesible.`);
           }

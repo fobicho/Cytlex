@@ -6,7 +6,7 @@ import { api } from '../lib/api.js';
 import { lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { reconcileMihonProgress } from '../lib/mihonProgress.js';
-import { extensions, isExtensionAllowed, isRetiredExtension } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed, isUnavailableMangaSource } from '../lib/extensions.js';
 import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
@@ -658,14 +658,14 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
 
   if (!mangaUrl)
     return <EmptyState face="¯\\_(ツ)_/¯" title="Sin manga seleccionado." />;
-  if (isRetiredExtension(sourceId)) {
+  if (isUnavailableMangaSource(sourceId)) {
     const saved = lib.fav(mangaUrl, sourceId);
     const targets = migrationTargets.filter((manifest) => isExtensionAllowed(manifest, showAdultExtensions));
     const canMigrate = Boolean(saved?.title && targets.length);
     return (
       <EmptyState
-        title={saved?.title || 'Fuente retirada'}
-        description={canMigrate ? 'La fuente fue retirada. Puedes buscar este manga en otra extensión.' : 'La fuente fue retirada.'}
+        title={saved?.title || 'Extensión no disponible'}
+        description={canMigrate ? 'La extensión no se encuentra disponible. Puedes buscar este manga en otra extensión.' : 'La extensión no se encuentra disponible.'}
         action={
           <div className="flex flex-wrap justify-center gap-2">
             {canMigrate && (

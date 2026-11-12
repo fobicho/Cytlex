@@ -193,18 +193,6 @@ export const api = {
     return src.detail(url);
   },
 
-  async refreshManga(url, sourceId, { title = '', author = '' } = {}) {
-    const src = await resolveSource(sourceId);
-    try {
-      return { url, detail: await src.detail(url) };
-    } catch (error) {
-      if (!/\bHTTP 404\b/.test(String(error?.message || error)) || !title) throw error;
-      const replacement = await findManga(src, url, title, author);
-      if (!replacement) throw error;
-      return replacement;
-    }
-  },
-
   async findManga({ url, title, author = '' }, sourceId) {
     const src = await resolveSource(sourceId);
     return findManga(src, url, title, author);

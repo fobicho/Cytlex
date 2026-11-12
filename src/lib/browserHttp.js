@@ -107,6 +107,10 @@ async function browserRequest(url, options = {}) {
     }
   }
   if (!response.ok) {
+    if (response.status === 502 && response.headers.get('x-cytlex-proxy') === '1'
+      && response.headers.get('x-cytlex-upstream-error') === 'dns-not-found') {
+      throw new Error(`DNS ENOTFOUND: Cytlex no pudo resolver ${target.hostname}. Comprueba tu conexión y vuelve a intentar.`);
+    }
     const retryAfter = response.headers.get('retry-after');
     throw new Error(`HTTP ${response.status} al pedir ${url}${retryAfter ? ` (Retry-After: ${retryAfter})` : ''}`);
   }

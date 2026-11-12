@@ -71,9 +71,10 @@ function validateTarget(value) {
   return target;
 }
 
-function errorResponse(message, status, deniedTarget = false) {
+function errorResponse(message, status, deniedTarget = false, upstreamError = '') {
   const headers = { 'cache-control': 'no-store', 'x-cytlex-proxy': '1' };
   if (deniedTarget) headers['x-cytlex-proxy-denied'] = '1';
+  if (upstreamError) headers['x-cytlex-upstream-error'] = upstreamError;
   return Response.json({ error: message }, {
     status,
     headers
@@ -188,6 +189,10 @@ function forwardedHeaders(request, target) {
   return headers;
 }
 
+function isDnsNotFound(error) {
+  return (error?.cause?.code || error?.code) === 'ENOTFOUND';
+}
+
 async function fetchTarget(initialTarget, method, headers, body) {
   let target = initialTarget;
   let currentMethod = method;
@@ -207,7 +212,7 @@ async function fetchTarget(initialTarget, method, headers, body) {
           redirect: 'manual'
         });
       } catch (error) {
-        if (!retryableMethod || attempt >= retries) throw error;
+        if (isDnsNotFound(error) || !retryableMethod || attempt >= retries) throw error;
         await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
         continue;
       }
@@ -274,7 +279,7 @@ export async function onRequest(context) {
       status: upstream.status,
       headers
     });
-  } catch {
-    return errorResponse('The source could not be reached', 502);
+  } catch (error) {
+    return errorResponse('The source could not be reached', 502, false, isDnsNotFound(error) ? 'dns-not-found' : '');
   }
 }

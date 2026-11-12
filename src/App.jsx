@@ -5,7 +5,6 @@ import BrowserMobileNav from './components/BrowserMobileNav.jsx';
 import TitleBar from './components/TitleBar.jsx';
 import Library from './pages/Library.jsx';
 import Catalog from './pages/Catalog.jsx';
-import MihonMigration from './pages/MihonMigration.jsx';
 import Results from './pages/Results.jsx';
 import Detail from './pages/Detail.jsx';
 import Reader from './pages/Reader.jsx';
@@ -116,7 +115,6 @@ export default function App({ isVisible = true, tutorialMode = false }) {
     if (isExplorePage) setRetainedExploreLocation(location);
   }, [isExplorePage, location.pathname, location.search]);
   const catalogLocation = isExplorePage ? location : retainedExploreLocation;
-  const mihonMigrationId = new URLSearchParams(catalogLocation?.search).get('mihonMigration');
   const isLibraryPage = location.pathname === '/biblioteca';
   const isLibraryDetail = isMangaPage && new URLSearchParams(location.search).get('from') === 'biblioteca';
 
@@ -320,11 +318,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
             <PageBoundary>
               {catalogLocation && (
                 <div className={isExplorePage ? '' : 'hidden'} aria-hidden={!isExplorePage} inert={!isExplorePage}>
-                  {mihonMigrationId ? (
-                    <MihonMigration key={mihonMigrationId} id={mihonMigrationId} location={catalogLocation} active={isExplorePage} />
-                  ) : (
-                    <Catalog key={`cat-${resetTick}`} locationOverride={catalogLocation} tutorialPreview={tutorialMode} active={isExplorePage} />
-                  )}
+                  <Catalog key={`cat-${resetTick}`} locationOverride={catalogLocation} tutorialPreview={tutorialMode} active={isExplorePage} />
                 </div>
               )}
               {DETAIL_ORIGINS.map((origin) => {
