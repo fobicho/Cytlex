@@ -354,7 +354,7 @@ export const extensions = {
             const mainUrl = /^https?:/i.test(remote.main)
               ? remote.main
               : new URL(remote.main, indexUrl).href;
-            const remoteCode = await ctx().fetchText(mainUrl);
+            const remoteCode = await ctx().fetchText(freshIndexUrl(mainUrl));
             if (remoteCode === r.code) {
               r.installedVersion = remote.version;
               local = remote.version;
@@ -398,7 +398,7 @@ export const extensions = {
         const mainUrl = /^https?:/i.test(fresh.main)
           ? fresh.main
           : new URL(fresh.main, indexUrl).href;
-        const code = await ctx().fetchText(mainUrl);
+        const code = await ctx().fetchText(freshIndexUrl(mainUrl));
         r.code = code;
         r.manifest = { ...r.manifest, ...fresh };
         delete r.manifest.adultContent;
@@ -461,7 +461,7 @@ export const extensions = {
       const mainUrl = /^https?:/i.test(manifest.main)
         ? manifest.main
         : new URL(manifest.main, indexUrl).href;
-      code = await ctx().fetchText(mainUrl);
+      code = await ctx().fetchText(freshIndexUrl(mainUrl));
     }
     const list = read().filter((r) => r.manifest.id !== manifest.id);
     list.push({ manifest, code, installedVersion: manifest.version || '0', installedAt: Date.now() });
