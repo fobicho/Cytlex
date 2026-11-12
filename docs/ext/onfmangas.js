@@ -461,6 +461,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       label: text(outer, 'h1') || '',
       mangaUrl: '',
       imageReferer: url,
+      imageCookie: onfCookie,
       pages: [...new Set(pages)],
       options: [],
       prev: null,

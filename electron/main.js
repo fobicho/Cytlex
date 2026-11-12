@@ -830,7 +830,7 @@ ipcMain.handle('http:post', async (_e, payload = {}, requestId) => {
   return payload.responseType === 'text' ? response : JSON.parse(response);
 });
 
-ipcMain.handle('image:fetch', async (_e, url, requestedReferer) => {
+ipcMain.handle('image:fetch', async (_e, url, requestedReferer, requestedCookie) => {
   if (!url) return null;
   try {
     const parsed = validateUrl(url);
@@ -859,7 +859,7 @@ ipcMain.handle('image:fetch', async (_e, url, requestedReferer) => {
         };
     if (onfImage) {
       headers.Accept = 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8';
-      const cookie = mergeOnfCookies(onfCookieJar.get(parsed.origin));
+      const cookie = mergeOnfCookies(onfCookieJar.get(parsed.origin), requestedCookie);
       if (cookie) headers.Cookie = cookie;
     }
     const { response: res, body } = await requestPublic(urlStr, {

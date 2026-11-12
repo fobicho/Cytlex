@@ -145,18 +145,50 @@ export async function httpPost(payload, requestId) {
   return payload.responseType === 'text' ? text : JSON.parse(text);
 }
 
-export async function fetchImage(url, signal, referer = '') {
-  const bridge = electronBridge();
-  if (bridge?.fetchImage) {
-    const image = await bridge.fetchImage(url, referer);
-    return signal?.aborted ? null : image;
-  }
-  const response = await browserRequest(url, { signal, onfReferer: referer });
-  const blob = await response.blob();
-  const bytes = new Uint8Array(await blob.arrayBuffer());
+function imageMimeFromBytes(bytes, contentType = '') {
+  const ascii = (start, length) => String.fromCharCode(...bytes.subarray(start, start + length));
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+  if (ascii(0, 8) === '\x89PNG\r\n\x1a\n') return 'image/png';
+  if (ascii(0, 4) === 'GIF8') return 'image/gif';
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 4) === 'WEBP') return 'image/webp';
+  if (ascii(4, 4) === 'ftyp' && /^(?:avif|avis)$/.test(ascii(8, 4))) return 'image/avif';
+  if (ascii(0, 2) === 'BM') return 'image/bmp';
+  const prefix = new TextDecoder().decode(bytes.subarray(0, 512)).replace(/^\uFEFF/, '').trimStart();
+  if (/^(?:<\?xml[^>]*>\s*)?<svg[\s>]/i.test(prefix)) return 'image/svg+xml';
+  // Do not trust the URL extension or the response header: ONF can return its
+  // anti-bot HTML page with status 200 for a signed image URL.
+  if (String(contentType).toLowerCase().startsWith('image/')) return '';
+  return '';
+}
+
+function validImageResult(bytes, contentType = '') {
+  const mime = imageMimeFromBytes(bytes, contentType);
+  if (!mime) return null;
   let binary = '';
   for (let offset = 0; offset < bytes.length; offset += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
   }
-  return { mime: blob.type || 'application/octet-stream', base64: btoa(binary) };
+  return { mime, base64: btoa(binary) };
+}
+
+function imageFromBase64(image) {
+  if (!image?.base64) return null;
+  try {
+    const binary = atob(image.base64);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return validImageResult(bytes, image.mime);
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchImage(url, signal, referer = '', onfCookie = '') {
+  const bridge = electronBridge();
+  if (bridge?.fetchImage) {
+    const image = await bridge.fetchImage(url, referer, onfCookie);
+    return signal?.aborted ? null : imageFromBase64(image);
+  }
+  const response = await browserRequest(url, { signal, onfReferer: referer, onfCookie });
+  const blob = await response.blob();
+  return validImageResult(new Uint8Array(await blob.arrayBuffer()), blob.type || response.headers.get('content-type') || '');
 }

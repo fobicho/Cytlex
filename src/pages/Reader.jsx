@@ -10,7 +10,7 @@ import { tracking } from '../lib/tracking.js';
 import { chapterOrder, detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
-import { browserImageUrl } from '../lib/browserHttp.js';
+import { browserImageUrl, fetchImage } from '../lib/browserHttp.js';
 import { Button } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
@@ -33,22 +33,51 @@ const chapterNumberFrom = (value) => {
   return match ? Number(match[0]) : NaN;
 };
 
-function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageReferer, imageClassName, imageStyle, wrapperClassName, wrapperStyle, onContextMenu, onLoaded, onFailed, onRetry }) {
+const imageMimeFor = (mime, src, base64) => {
+  const normalized = String(mime || '').split(';', 1)[0].trim().toLowerCase();
+  if (normalized.startsWith('image/')) return normalized;
+  if (base64.startsWith('/9j/')) return 'image/jpeg';
+  if (base64.startsWith('iVBORw0KGgo')) return 'image/png';
+  if (base64.startsWith('R0lGOD')) return 'image/gif';
+  if (base64.startsWith('UklGR')) return 'image/webp';
+  if (base64.startsWith('AAAAIGZ0eXBhdmlm')) return 'image/avif';
+  try {
+    const extension = new URL(src, window.location.href).pathname.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+    return ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', svg: 'image/svg+xml' })[extension] || 'image/webp';
+  } catch {
+    return 'image/webp';
+  }
+};
+
+function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading = 'eager', imageReferer, imageCookie, imageClassName, imageStyle, wrapperClassName, wrapperStyle, onContextMenu, onLoaded, onFailed, onRetry, allowCacheUpdate = true }) {
   const [status, setStatus] = useState('loading');
   const [attempt, setAttempt] = useState(0);
   const [fallbackState, setFallbackState] = useState({ src, enabled: false });
   const [srcOverride, setSrcOverride] = useState('');
+  const [displaySrcFailed, setDisplaySrcFailed] = useState(false);
+  const [cachedSource, setCachedSource] = useState({ src, value: displaySrc });
   const usingFallback = fallbackState.src === src && fallbackState.enabled;
-  const ipcFallbackBusy = useRef(false);
+  const imageFallbackBusy = useRef(false);
   const autoRetried = useRef(false);
+  const cachedDisplaySrc = cachedSource.src === src ? cachedSource.value : displaySrc;
 
   useEffect(() => {
     autoRetried.current = false;
-    ipcFallbackBusy.current = false;
+    imageFallbackBusy.current = false;
     setAttempt(0);
     setSrcOverride('');
+    setDisplaySrcFailed(false);
     setStatus('loading');
+    setCachedSource({ src, value: displaySrc });
   }, [src]);
+
+  useEffect(() => {
+    if (!allowCacheUpdate || !displaySrc || displaySrcFailed || usingFallback || srcOverride || status === 'loaded') return;
+    if (cachedSource.src !== src || cachedSource.value !== displaySrc) {
+      setCachedSource({ src, value: displaySrc });
+      if (status === 'error') setStatus('loading');
+    }
+  }, [allowCacheUpdate, cachedSource, displaySrc, displaySrcFailed, src, srcOverride, status, usingFallback]);
 
   useEffect(() => {
     if (status !== 'loading' || loading !== 'eager') return undefined;
@@ -76,10 +105,17 @@ function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageR
           <span>No se pudo cargar {alt.toLowerCase()}.</span>
           <Button size="sm" variant="secondary" onClick={async () => {
             autoRetried.current = false;
-            ipcFallbackBusy.current = false;
+            imageFallbackBusy.current = false;
             setStatus('loading');
             if (onRetry) {
-              if (!(await onRetry())) setStatus('error');
+              if (await onRetry()) {
+                setSrcOverride('');
+                setDisplaySrcFailed(false);
+                setFallbackState({ src, enabled: false });
+                setAttempt((n) => n + 1);
+              } else {
+                setStatus('error');
+              }
             } else {
               setAttempt((n) => n + 1);
             }
@@ -90,7 +126,7 @@ function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageR
       )}
       <img
         key={attempt}
-        src={browserImageUrl(srcOverride || (usingFallback ? fallbackSrc : src), imageReferer)}
+        src={srcOverride || (!usingFallback && !displaySrcFailed ? cachedDisplaySrc : '') || browserImageUrl(usingFallback ? fallbackSrc : src, imageReferer)}
         alt={alt}
         loading={loading}
         draggable={false}
@@ -99,6 +135,14 @@ function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageR
         onContextMenu={onContextMenu}
         onLoad={(e) => { setStatus('loaded'); onLoaded?.(e); }}
         onError={() => {
+          if (!usingFallback && !srcOverride && cachedDisplaySrc && !displaySrcFailed) {
+            setSrcOverride(cachedDisplaySrc);
+            setDisplaySrcFailed(true);
+            autoRetried.current = false;
+            setAttempt((n) => n + 1);
+            setStatus('loading');
+            return;
+          }
           if (!usingFallback && fallbackSrc && fallbackSrc !== src) {
             autoRetried.current = false;
             setFallbackState({ src, enabled: true });
@@ -106,11 +150,11 @@ function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageR
             setStatus('loading');
             return;
           }
-          if (!usingFallback && window.cytlex?.fetchImage && !ipcFallbackBusy.current) {
-            ipcFallbackBusy.current = true;
+          if (!usingFallback && !imageFallbackBusy.current) {
+            imageFallbackBusy.current = true;
             setStatus('loading');
             autoRetried.current = false;
-            window.cytlex.fetchImage(src, imageReferer).then((img) => {
+            fetchImage(src, undefined, imageReferer, imageCookie).then((img) => {
               if (img?.base64) {
                 setSrcOverride(`data:${img.mime || 'image/webp'};base64,${img.base64}`);
                 setAttempt((n) => n + 1);
@@ -118,7 +162,7 @@ function ReaderPanel({ id, src, fallbackSrc = '', alt, loading = 'eager', imageR
               } else {
                 setStatus('error');
               }
-            }).catch(() => setStatus('error'));
+            }).catch(() => setStatus('error')).finally(() => { imageFallbackBusy.current = false; });
             return;
           }
           setStatus('error');
@@ -152,7 +196,6 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   }, [backHash]);
   const [ch, setCh] = useState(null);
   const [chUrl, setChUrl] = useState('');
-  const [imageSetRevision, setImageSetRevision] = useState(0);
   const [err, setErr] = useState('');
   const [retryTick, setRetryTick] = useState(0);
   const [mode, setMode] = useState(() => {
@@ -216,6 +259,8 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
   const pageRef = useRef(page);
   pageRef.current = page;
   const sizesRef = useRef(new Map());
+  const preloadedPagesRef = useRef(new Map());
+  const [, setPreloadRevision] = useState(0);
   const areaRef = useRef(null);
 
   const scalePct = Math.min(Math.max(settings.get().readerZoom, 20), 200) / 2;
@@ -357,8 +402,8 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     try {
       const refreshed = await api.chapter(chapterUrl, sourceId, { fresh: true });
       if (!refreshed?.pages?.length) return false;
+      preloadedPagesRef.current.clear();
       setCh(refreshed);
-      setImageSetRevision((revision) => revision + 1);
       return true;
     } catch {
       return false;
@@ -384,7 +429,9 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
     setNat(null);
     setCh(null);
     setChUrl('');
-    setImageSetRevision(0);
+    preloadedPagesRef.current.clear();
+    sizesRef.current.clear();
+    setPreloadRevision((revision) => revision + 1);
     pendingScrollRef.current = null;
     (async () => {
       try {
@@ -515,56 +562,59 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
 
   const pageSources = ch?.pages;
   const imageReferer = ch?.imageReferer;
+  const imageCookie = ch?.imageCookie || '';
   useEffect(() => {
     if (!pageSources?.length || chUrl !== chapterUrl) return;
     const start = Math.min(Math.max(pageRef.current, 0), pageSources.length - 1);
-    const orderedPages = [...pageSources.slice(start + 1), ...pageSources.slice(0, start + 1)];
-    const queue = orderedPages.filter((src) => src && !sizesRef.current.has(src));
+    const orderedPages = [...pageSources.slice(start), ...pageSources.slice(0, start)];
+    // Fetch the visible panel through the authenticated image path too. Some
+    // sources return an HTML challenge to <img> requests even when the reader
+    // API supplied a valid page URL.
+    const queue = orderedPages.filter((src) => src && !preloadedPagesRef.current.has(src));
     if (!queue.length) return;
     let cancelled = false;
     let cursor = 0;
-    const active = new Map();
+    const controllers = new Set();
+    const load = async (src) => {
+      let image = null;
+      for (let attempt = 0; attempt < 2 && !cancelled; attempt += 1) {
+        const controller = new AbortController();
+        controllers.add(controller);
+        try {
+          image = await fetchImage(src, controller.signal, imageReferer, imageCookie);
+          if (image?.base64 && !cancelled) break;
+          image = null;
+        } catch {
+          image = null;
+        } finally {
+          controllers.delete(controller);
+        }
+        if (!cancelled && attempt === 0) await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      if (cancelled || !image?.base64) return;
+      preloadedPagesRef.current.set(src, `data:${imageMimeFor(image.mime, src, image.base64)};base64,${image.base64}`);
+      setPreloadRevision((revision) => revision + 1);
+    };
+
+    let active = 0;
     const pump = () => {
-      while (!cancelled && active.size < 4 && cursor < queue.length) {
+      while (!cancelled && active < 3 && cursor < queue.length) {
         const src = queue[cursor++];
-        const img = new Image();
-        img.referrerPolicy = 'no-referrer';
-        img.fetchPriority = 'low';
-        let settled = false;
-        let timeout;
-        const finish = (loaded) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timeout);
-          active.delete(img);
-          if (loaded) remember(src, img);
+        active += 1;
+        load(src).finally(() => {
+          active -= 1;
           pump();
-        };
-        timeout = setTimeout(() => {
-          img.onload = null;
-          img.onerror = null;
-          img.removeAttribute('src');
-          finish(false);
-        }, 15_000);
-        img.onload = () => finish(true);
-        img.onerror = () => finish(false);
-        active.set(img, timeout);
-        img.src = browserImageUrl(src, imageReferer);
+        });
       }
     };
     pump();
 
     return () => {
       cancelled = true;
-      active.forEach((timeout, img) => {
-        clearTimeout(timeout);
-        img.onload = null;
-        img.onerror = null;
-        img.removeAttribute('src');
-      });
-      active.clear();
+      controllers.forEach((controller) => controller.abort());
+      controllers.clear();
     };
-  }, [pageSources, imageReferer, chUrl, chapterUrl, imageSetRevision]);
+  }, [pageSources, imageReferer, imageCookie, chUrl, chapterUrl]);
 
   useEffect(() => {
     const src = ch?.pages?.[page] ?? '';
@@ -949,13 +999,15 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
         <div className="mx-auto" onDoubleClick={toggleVerticalZoomAtPointer} style={{ width: `${zoomPct}%` }}>
           {ch.pages.map((src, i) => (
             <ReaderPanel
-              key={`${i}-${imageSetRevision}`}
+              key={i}
               id={`pg-${i}`}
               src={src}
+              displaySrc={preloadedPagesRef.current.get(src) || ''}
               fallbackSrc={ch.pageFallbacks?.[i]}
               onRetry={sourceId.startsWith('mangadex') || sourceId === 'onfmangas' ? retryChapterImages : undefined}
               alt={`Página ${i + 1}`}
               imageReferer={ch.imageReferer}
+              imageCookie={ch.imageCookie}
               loading="lazy"
               onContextMenu={(e) => openPanelMenu(e, src, `Página ${i + 1}`)}
               onLoaded={(e) => {
@@ -1072,12 +1124,14 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
                    if (!src) return null;
                    return (
                      <ReaderPanel
-                       key={`${idx}-${imageSetRevision}`}
+                       key={idx}
                        src={src}
+                       displaySrc={preloadedPagesRef.current.get(src) || ''}
                        fallbackSrc={ch.pageFallbacks?.[idx]}
                        onRetry={sourceId.startsWith('mangadex') || sourceId === 'onfmangas' ? retryChapterImages : undefined}
                        alt={`Página ${idx + 1}`}
                        imageReferer={ch.imageReferer}
+                       imageCookie={ch.imageCookie}
                        onContextMenu={(e) => openPanelMenu(e, src, `Página ${idx + 1}`)}
                        onLoaded={(e) => {
                          remember(src, e.currentTarget);
@@ -1097,12 +1151,14 @@ export default function Reader({ isFullscreen, onToggleFullscreen }) {
              </div>
            ) : (
               <ReaderPanel
-                key={`${page}-${imageSetRevision}`}
+                key={page}
                 src={ch.pages[page]}
+                displaySrc={preloadedPagesRef.current.get(ch.pages[page]) || ''}
                 fallbackSrc={ch.pageFallbacks?.[page]}
                 onRetry={sourceId.startsWith('mangadex') || sourceId === 'onfmangas' ? retryChapterImages : undefined}
                 alt={`Página ${page + 1}`}
                 imageReferer={ch.imageReferer}
+                imageCookie={ch.imageCookie}
                 onContextMenu={(e) => openPanelMenu(e, ch.pages[page], `Página ${page + 1}`)}
                 onLoaded={(e) => {
                   remember(ch.pages[page], e.currentTarget);
