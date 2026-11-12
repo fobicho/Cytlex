@@ -39,7 +39,12 @@ export const chapterIndex = {
     if (!url || !Array.isArray(urls)) return;
     const resolvedSourceId = sourceId || 'leercapitulo';
     const data = read();
-    data[cap(url, resolvedSourceId)] = { urls, at: Date.now() };
+    const key = cap(url, resolvedSourceId);
+    const current = data[key];
+    const now = Date.now();
+    if (current && now - current.at <= TTL_MS && current.urls?.length === urls.length
+      && urls.every((chapterUrl, index) => chapterUrl === current.urls[index])) return;
+    data[key] = { urls, at: now };
     write(data, { type: 'set', mangaUrl: url, sourceId: resolvedSourceId });
   },
 

@@ -1,5 +1,7 @@
 const FAV = 'cytlex:favs';
 const CATS = 'cytlex:cats:v1';
+let favoritesRaw;
+let favoritesSnapshot;
 
 const read = (k, fb) => {
   try { return JSON.parse(localStorage.getItem(k)) ?? fb; } catch { return fb; }
@@ -53,14 +55,19 @@ export function isMangaCover(cover, mangaUrl) {
   if (!identity.startsWith('mangadex.org/title/')) return true;
   try {
     const image = new URL(cover);
-    const coverId = image.hostname === 'uploads.mangadex.org'
-      ? image.pathname.match(/^\/covers\/([\da-f-]{36})\//i)?.[1]
-      : '';
-    return !coverId || coverId.toLowerCase() === identity.split('/').at(-1);
+    const host = image.hostname.replace(/^www\./, '');
+    const coverId = image.pathname.match(/^\/covers\/([\da-f-]{36})\/[^/]+$/i)?.[1];
+    return (image.protocol === 'https:' || image.protocol === 'http:')
+      && (host === 'uploads.mangadex.org' || host === 'mangadex.org')
+      && coverId?.toLowerCase() === identity.split('/').at(-1);
   } catch {
-    return true;
+    return false;
   }
 }
+export const storedCoverThumbnail = (manga) =>
+  manga && !libraryUrlKey(manga.url).startsWith('mangadex.org/title/')
+    ? manga.coverCached || manga.coverLocal || ''
+    : '';
 export const isLibraryManga = (manga, sourceId, keys) =>
   keys.has(libraryKey(manga.url, sourceId))
   || keys.has(libraryIdentityKey(manga.url));
@@ -68,25 +75,30 @@ export const isLibraryManga = (manga, sourceId, keys) =>
 const SRC = (x) => x.sourceId || 'leercapitulo';
 export const isUnresolvedMihonSource = (sourceId) => /^mihon-\d+$/i.test(String(sourceId || ''));
 const match = (a, url, sourceId = 'leercapitulo') => {
-  const sameIdentity = libraryIdentityKey(a.url) === libraryIdentityKey(url);
-  return (sameUrl(a.url, url) && SRC(a) === sourceId)
-    || (sameIdentity && (SRC(a) === sourceId || isUnresolvedMihonSource(SRC(a))));
+  const savedSource = SRC(a);
+  return (savedSource === sourceId && sameUrl(a.url, url))
+    || ((savedSource === sourceId || isUnresolvedMihonSource(savedSource))
+      && libraryUrlKey(a.url) === libraryUrlKey(url));
 };
 
 export const lib = {
   favs() {
-    const stored = read(FAV, []);
-    const cats = loadCats();
-    let changed = false;
-    const list = stored.map((f) => {
-      if (f.cats === undefined) {
-        changed = true;
-        return { ...f, cats: cats[0] ? [cats[0].id] : [] };
+    let raw = null;
+    try { raw = localStorage.getItem(FAV); } catch {}
+    if (raw !== favoritesRaw || !favoritesSnapshot) {
+      let list = [];
+      try { list = JSON.parse(raw) || []; } catch {}
+      if (!Array.isArray(list)) list = [];
+      if (list.some((f) => f.cats === undefined)) {
+        const [first] = loadCats();
+        list = list.map((f) => f.cats === undefined ? { ...f, cats: first ? [first.id] : [] } : f);
+        raw = JSON.stringify(list);
+        localStorage.setItem(FAV, raw);
       }
-      return f;
-    });
-    if (changed) write(FAV, list);
-    return list;
+      favoritesRaw = raw;
+      favoritesSnapshot = list;
+    }
+    return favoritesSnapshot.slice();
   },
   fav(url, sourceId = 'leercapitulo') {
     return lib.favs().find((f) => match(f, url, sourceId)) || null;

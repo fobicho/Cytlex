@@ -1,3 +1,5 @@
+import { isMangaCover, mangaSourceUrl } from './library.js';
+
 export const lastSearch = { q: '', genre: '', results: null };
 export const MAX_SEARCH_RESULTS = 30;
 export const SOURCE_CATALOG_HOME_EVENT = 'cytlex:source-catalog-home';
@@ -5,10 +7,10 @@ export const SOURCE_CATALOG_HOME_EVENT = 'cytlex:source-catalog-home';
 const seenCovers = new Map();
 const MAX_SEEN_COVERS = 120;
 
-const coverCacheKey = (url, sourceId = '') => `${sourceId || ''}|${url || ''}`;
+const coverCacheKey = (url, sourceId = '') => `${sourceId || ''}|${mangaSourceUrl(url, sourceId) || ''}`;
 
 export function rememberCover(url, cover, sourceId = '') {
-  if (!url || !cover) return;
+  if (!url || !cover || !isMangaCover(cover, url)) return;
   const key = coverCacheKey(url, sourceId);
   seenCovers.delete(key);
   seenCovers.set(key, cover);

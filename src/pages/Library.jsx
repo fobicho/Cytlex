@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { RefreshCw, ArrowUpDown } from 'lucide-react';
-import { isMangaCover, isUnresolvedMihonSource, lib } from '../lib/library.js';
+import { isMangaCover, isUnresolvedMihonSource, lib, storedCoverThumbnail } from '../lib/library.js';
 import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
 import VirtualMangaGrid from '../components/VirtualMangaGrid.jsx';
@@ -87,13 +87,14 @@ const invalidateUnreadCountsForUrl = (mangaUrl) => {
 const compareLibraryTitles = (a, b) => libraryTitleCollator.compare(String(a.title || ''), String(b.title || ''));
 const sameLibraryFavorites = (left, right) => left.length === right.length && left.every((manga, index) => {
   const next = right[index];
+  if (manga === next) return true;
   return manga.url === next.url
     && manga.sourceId === next.sourceId
     && manga.title === next.title
     && manga.author === next.author
     && manga.cover === next.cover
-    && (manga.coverLocal || '').length === (next.coverLocal || '').length
-    && (manga.coverCached || '').length === (next.coverCached || '').length
+    && manga.coverLocal === next.coverLocal
+    && manga.coverCached === next.coverCached
     && manga.sourceName === next.sourceName
     && manga.sourceIcon === next.sourceIcon
     && manga.chapterTotal === next.chapterTotal
@@ -218,7 +219,10 @@ const Library = memo(function Library({ active = true }) {
     const reloadLibrary = () => {
       const latest = lib.favs();
       setFavs((current) => sameLibraryFavorites(current, latest) ? current : latest);
-      setCats(lib.cats());
+      const latestCats = lib.cats();
+      setCats((current) => current.length === latestCats.length
+        && current.every(({ id, name }, index) => id === latestCats[index].id && name === latestCats[index].name)
+        ? current : latestCats);
     };
     if (active) reloadLibrary();
     const onImport = () => {
@@ -615,7 +619,7 @@ const Library = memo(function Library({ active = true }) {
                           style={{ width: px(68 * coverSize / 160, scale, 56), height: px(102 * coverSize / 160, scale, 82) }}
                         >
                           {cover && (
-                            <CachedLibraryCover cover={cover} title={m.title} className="w-full h-full object-cover bg-black" cachedOnly={unavailable} cachedCover={validCover ? m.coverCached || m.coverLocal || '' : ''} />
+                            <CachedLibraryCover cover={cover} title={m.title} className="w-full h-full object-cover bg-black" cachedOnly={unavailable} cachedCover={validCover ? storedCoverThumbnail(m) : ''} />
                           )}
                           {unavailable && (
                             <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 px-0.5 text-center font-semibold leading-tight text-white" style={{ fontSize: px(8, scale, 7) }}>

@@ -1,13 +1,13 @@
 import { MigrationSources } from '../components/MigrationSources.jsx';
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Link2, ArrowRightLeft, Crosshair } from 'lucide-react';
 import { api } from '../lib/api.js';
-import { isMangaCover, lib } from '../lib/library.js';
+import { isMangaCover, lib, mangaSourceUrl, storedCoverThumbnail } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { reconcileMihonProgress } from '../lib/mihonProgress.js';
 import { extensions, isExtensionAllowed, isUnavailableMangaSource } from '../lib/extensions.js';
-import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy, restoreLibraryCover } from '../lib/covers.js';
+import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { reconcileChapterProgress } from '../lib/mangaMigration.js';
@@ -28,6 +28,7 @@ import Catalog from './Catalog.jsx';
 const SYNOPSIS_CONTROL_SIZE = 24;
 const SYNOPSIS_CONTROL_GAP = 4;
 const COVER_BASE = 184;
+const FIRST_CHAPTERS = 48;
 const chapterDateFormat = new Intl.DateTimeFormat('es');
 const compareChapterGroups = new Intl.Collator('es', { sensitivity: 'base', numeric: true }).compare;
 const compareChapterDates = new Intl.Collator('es', { numeric: true }).compare;
@@ -189,6 +190,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     ? Math.ceil(d.chapters.length / 2)
     : (d?.chapters?.length || 0);
   const visibleChapterCount = chapterWindow.key === chapterWindowKey ? chapterWindow.count : initialChapterCount;
+  const [chapterListReadyKey, setChapterListReadyKey] = useState('');
+  const renderedChapterCount = chapterListReadyKey === detailKey
+    ? visibleChapterCount : Math.min(visibleChapterCount, FIRST_CHAPTERS);
   const [dup, setDup] = useState(null);
   const [migration, setMigration] = useState(null);
   const [catPick, setCatPick] = useState(null);
@@ -200,6 +204,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const [animate, setAnimate] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [progressTick, setProgressTick] = useState(0);
+  const progressRevision = progress.revision();
   const [coverTick, setCoverTick] = useState(0);
   const [markBefore, setMarkBefore] = useState(null);
   const [pendingChapterJump, setPendingChapterJump] = useState('');
@@ -222,7 +227,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const synopsis = d?.sinopsis?.trim() || savedManga?.description?.trim() || '';
   const knownCover = useMemo(() => {
     const valid = isMangaCover(savedManga?.cover, mangaUrl);
-    const local = valid ? savedManga?.coverCached || savedManga?.coverLocal : '';
+    const local = valid ? storedCoverThumbnail(savedManga) : '';
     const t = tracking.get(mangaUrl, sourceId);
     const tLocal = t?.coverLocal;
     const tCover = t?.cover;
@@ -230,7 +235,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     if (anilistCover && tCover) return getLibraryCover(tCover) || tCover;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
     const recalled = recallCover(mangaUrl, sourceId);
-    const remoteCover = (valid && savedManga?.cover) || recalled;
+    const remoteCover = (valid && savedManga?.cover) || (isMangaCover(recalled, mangaUrl) ? recalled : '');
     return getLibraryCover(remoteCover) || getSearchCover(remoteCover) || remoteCover || '';
   }, [mangaUrl, sourceId, anilistCover, savedManga]);
 
@@ -267,14 +272,12 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const proxyCover = browserImageUrl(finalCover) !== finalCover
     || (requiresImageProxy(finalCover) && !!window.cytlex?.fetchImage);
   useEffect(() => {
-    if (!sourceAvailable || !proxyCover || !finalCover) return undefined;
+    if (!active || !sourceAvailable || !proxyCover || !finalCover) return undefined;
     let alive = true;
     const loadCover = async () => {
       const candidates = [...new Set([finalCover, knownCover].filter(Boolean))];
       for (const candidate of candidates) {
-        const cached = getLibraryCover(candidate) || getSearchCover(candidate) || await restoreLibraryCover(candidate);
-        if (!alive) return;
-        const local = cached || await preloadLibraryCover(candidate, { web: true });
+        const local = getLibraryCover(candidate) || getSearchCover(candidate) || await preloadLibraryCover(candidate, { web: true });
         if (!alive) return;
         if (local) {
           setDisplayedCover({ key: coverKey, src: local });
@@ -286,7 +289,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     };
     loadCover();
     return () => { alive = false; };
-  }, [coverKey, finalCover, knownCover, proxyCover, sourceAvailable]);
+  }, [active, coverKey, finalCover, knownCover, proxyCover, sourceAvailable]);
   const coverImg = (alt) => (
     <>
       {visibleCover && visibleCover !== finalCover && (
@@ -366,7 +369,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   }, [active, activeRef, mangaUrl, migrationSearchMode]);
 
   useLayoutEffect(() => {
-    if (!active || !d || !pendingScrollRestore.current) return undefined;
+    if (!active || !d || renderedChapterCount < visibleChapterCount || !pendingScrollRestore.current) return undefined;
     const main = document.querySelector('main');
     if (!main) return undefined;
     const frame = requestAnimationFrame(() => {
@@ -374,7 +377,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       pendingScrollRestore.current = 0;
     });
     return () => cancelAnimationFrame(frame);
-  }, [active, d, mangaUrl]);
+  }, [active, d, mangaUrl, renderedChapterCount, visibleChapterCount]);
   useEffect(
     () => tracking.subscribe(() => setAniLinked(!!tracking.get(mangaUrl, sourceId))),
     [mangaUrl, sourceId]
@@ -392,8 +395,11 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     setAniLinked(!!tracking.get(mangaUrl, sourceId));
 
     const cached = api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId);
-    setDetailState({ key: `${sourceId}|${mangaUrl}`, data: cached || null });
-    if (cached?.chapters?.length) reconcileMihonProgress(mangaUrl, sourceId, cached.chapters);
+    setDetailState((current) => current.key === detailKey && current.data === cached
+      ? current : { key: detailKey, data: cached });
+    if (cached?.chapters?.length && reconcileMihonProgress(mangaUrl, sourceId, cached.chapters)) {
+      setProgressTick((tick) => tick + 1);
+    }
 
     let alive = true;
     api
@@ -405,9 +411,11 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           setErr('La fuente no devolvió capítulos.');
           return;
         }
-        if (cached && cached !== r) reconcileChapterProgress(cached.chapters, r.chapters, sourceId, sourceId, mangaUrl);
-        setDetailState({ key: `${sourceId}|${mangaUrl}`, data: r });
-        reconcileMihonProgress(mangaUrl, sourceId, r?.chapters);
+        if (cached !== r) {
+          if (cached) reconcileChapterProgress(cached.chapters, r.chapters, sourceId, sourceId, mangaUrl);
+          reconcileMihonProgress(mangaUrl, sourceId, r.chapters);
+          setDetailState({ key: detailKey, data: r });
+        }
         const favorite = lib.fav(mangaUrl, sourceId);
         if (r?.cover && favorite && isMangaCover(r.cover, mangaUrl) && r.cover !== favorite.cover) {
           lib.updateFav(mangaUrl, { cover: r.cover }, sourceId);
@@ -417,7 +425,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       .catch(async (e) => {
         if (!alive) return;
         const message = String(e?.message || e);
-        if (/\bHTTP 404\b/.test(message)) {
+        if (/\bHTTP 404\b/.test(message) && !mangaSourceUrl(mangaUrl, sourceId).startsWith('https://mangadex.org/title/')) {
           const favorite = lib.fav(mangaUrl, sourceId);
           const title = favorite?.title || d?.title || decodeURIComponent(mangaUrl.split('/').filter(Boolean).at(-1) || '').replace(/-/g, ' ');
           if (title) {
@@ -581,6 +589,17 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
 
   useEffect(() => () => clearTimeout(chapterHighlightTimer.current), []);
   useEffect(() => {
+    if (!active || renderedChapterCount >= visibleChapterCount) return undefined;
+    let fillFrame;
+    const firstFrame = requestAnimationFrame(() => {
+      fillFrame = requestAnimationFrame(() => startTransition(() => setChapterListReadyKey(detailKey)));
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(fillFrame);
+    };
+  }, [active, detailKey, renderedChapterCount, visibleChapterCount]);
+  useEffect(() => {
     if (!pendingChapterJump) return;
     const context = chapterJumpContext.current;
     if (!context || context.detailKey !== detailKey) return;
@@ -601,7 +620,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     setHighlightedChapter(pendingChapterJump);
     clearTimeout(chapterHighlightTimer.current);
     chapterHighlightTimer.current = setTimeout(() => setHighlightedChapter(''), 1800);
-  }, [pendingChapterJump, detailKey, chapterWindow, groupFilter, d]);
+  }, [pendingChapterJump, detailKey, chapterWindow, groupFilter, d, renderedChapterCount]);
 
   useEffect(() => {
     if (!d?.chapters?.length) return;
@@ -662,7 +681,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         className={chaptersPerRow > 1 ? 'grid gap-2' : 'flex flex-col gap-2'}
         style={chaptersPerRow > 1 ? { gridTemplateColumns: `repeat(${chaptersPerRow}, minmax(0, 1fr))` } : undefined}
       >
-        {chapters.slice(0, visibleChapterCount).map((c, i) => {
+        {chapters.slice(0, renderedChapterCount).map((c, i) => {
           const cap = progress.get(c.url, sourceId);
           const read = !!cap?.read;
           const inCourse = !read && cap && Number.isInteger(cap?.page) && cap.page > 0;
@@ -755,7 +774,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           );
         })}
       </div>
-  ), [active, chapters, visibleChapterCount, chaptersPerRow, highlightedChapter, scale, sourceId, mangaUrl, fromParam, readerBackParam, progressTick]);
+  ), [chapters, renderedChapterCount, chaptersPerRow, highlightedChapter, scale, sourceId, mangaUrl, fromParam, readerBackParam, progressTick, progressRevision]);
 
   if (migrationSearchMode)
     return (
@@ -825,7 +844,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         }
       />
     );
-  if (err && !savedManga)
+  if (err && !savedManga && !d)
     return (
       <EmptyState
         face="（╯°□°）╯︵ ┻━┻"
@@ -1400,7 +1419,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
 
       {chapterList}
 
-      {visibleChapterCount < chapters.length && (
+      {renderedChapterCount === visibleChapterCount && visibleChapterCount < chapters.length && (
         <div className="flex justify-center" style={{ paddingTop: px(16, scale, 12) }}>
           <Button
             size="sm"

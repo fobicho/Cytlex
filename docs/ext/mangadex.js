@@ -197,12 +197,6 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
       const id = new URL(url, site).pathname.split('/').filter(Boolean).at(-1);
       if (!id) throw new Error('No se pudo identificar el manga de MangaDex.');
 
-      const data = await json(requestUrl(`/manga/${id}`, {
-        'includes[]': ['cover_art', 'author', 'artist']
-      }));
-      const item = data.data;
-      const attributes = item?.attributes || {};
-
       const fetchChapters = async (mangaId) => {
         const entries = [];
         let offset = 0;
@@ -234,7 +228,8 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
           offset += pageData.length;
         }
 
-        const locale = (a, b) => String(a).localeCompare(String(b), 'es', { numeric: true });
+        const collator = new Intl.Collator('es', { numeric: true });
+        const locale = (a, b) => collator.compare(String(a), String(b));
         entries.sort((a, b) => (Number.isNaN(a.number) ? 1 : Number.isNaN(b.number) ? -1 : a.number - b.number)
           || locale(a.a.chapter, b.a.chapter)
           || locale(a.publishAt, b.publishAt)
@@ -254,7 +249,12 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
         });
       };
 
-      const chapters = await fetchChapters(id);
+      const [data, chapters] = await Promise.all([
+        json(requestUrl(`/manga/${id}`, { 'includes[]': ['cover_art', 'author', 'artist'] })),
+        fetchChapters(id)
+      ]);
+      const item = data.data;
+      const attributes = item?.attributes || {};
 
       const authors = (item?.relationships || [])
         .filter((rel) => rel.type === 'author' || rel.type === 'artist')
@@ -271,7 +271,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
 
       return {
         title: localized(attributes.title),
-        cover: coverUrl(item, '512.jpg'),
+        cover: coverUrl(item),
         altTitles: (attributes.altTitles || []).map(localized).filter(Boolean).join(' · '),
         genres,
         facts: {

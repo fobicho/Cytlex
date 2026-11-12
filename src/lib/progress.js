@@ -1,6 +1,7 @@
 const KEY = 'cytlex:progress:v1';
 
 let cache = null;
+let revision = 0;
 
 const read = () => {
   if (cache) return cache;
@@ -10,6 +11,7 @@ const read = () => {
 
 const write = (data) => {
   cache = data;
+  revision += 1;
   try { localStorage.setItem(KEY, JSON.stringify(data)); } catch {}
 };
 
@@ -26,6 +28,8 @@ function put(url, sourceId, patch) {
 }
 
 export const progress = {
+  revision: () => revision,
+
   subscribe(l) {
     listeners.add(l);
     return () => listeners.delete(l);

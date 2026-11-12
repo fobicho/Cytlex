@@ -5,7 +5,7 @@ import { api } from '../lib/api.js';
 import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
 import { extensions } from '../lib/extensions.js';
-import { lib } from '../lib/library.js';
+import { isMangaCover, lib, mangaSourceUrl, storedCoverThumbnail } from '../lib/library.js';
 import { discardLibraryCover, getLibraryCover, preloadLibraryCover, preloadSearchCover, requiresImageProxy, restoreLibraryCover } from '../lib/covers.js';
 import { sourceCatalogState } from '../lib/searchState.js';
 import { SourceBadge } from './SourceBadge.jsx';
@@ -39,18 +39,18 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
   const linkCls = cn(linkDisabled && 'pointer-events-none');
   const linkA11y = linkDisabled ? { 'aria-disabled': true, tabIndex: -1 } : {};
 
-  const localCover = m.coverLocal?.startsWith('data:') ? m.coverLocal : '';
-  const cachedCover = m.coverCached || '';
-  const indexedCover = getLibraryCover(m.cover);
-  const unavailableCachedCover = [cachedCover, localCover, indexedCover].find((cover) => /^(data:|blob:)/i.test(cover || '')) || '';
+  const remoteCover = isMangaCover(m.cover, m.url) ? m.cover : '';
+  const cachedCover = storedCoverThumbnail(m);
+  const indexedCover = getLibraryCover(remoteCover);
+  const unavailableCachedCover = [cachedCover, indexedCover].find((cover) => /^(data:|blob:)/i.test(cover || '')) || '';
   const [anilistCoverOn, setAnilistCoverOn] = useState(() => !!settings.get().anilistCover);
   useEffect(() => settings.subscribe((s) => setAnilistCoverOn(!!s.anilistCover)), []);
   const t = unavailable ? null : tracking.get(m.url, sourceId);
   const aniLocal = anilistCoverOn ? (t?.coverLocal || '') : '';
   const aniCover = anilistCoverOn ? (t?.cover || '') : '';
-  const preferredCover = unavailable ? unavailableCachedCover || m.cover : aniLocal || aniCover || cachedCover || localCover || m.cover;
+  const preferredCover = unavailable ? unavailableCachedCover || remoteCover : aniLocal || aniCover || cachedCover || remoteCover;
   const libraryCover = from === 'biblioteca' || useLibraryCoverCache;
-  const libraryImage = useLibraryCover(unavailable ? m.cover : preferredCover, {
+  const libraryImage = useLibraryCover(unavailable ? remoteCover : preferredCover, {
     enabled: libraryCover,
     cachedOnly: unavailable,
     cachedCover: unavailable ? unavailableCachedCover : ''
@@ -74,9 +74,9 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
   useEffect(() => {
     if (libraryCover) return undefined;
     if (unavailable) {
-      if (unavailableCachedCover || !/^https?:\/\//i.test(m.cover || '')) return undefined;
+      if (unavailableCachedCover || !/^https?:\/\//i.test(remoteCover || '')) return undefined;
       let alive = true;
-      restoreLibraryCover(m.cover).then((local) => {
+      restoreLibraryCover(remoteCover).then((local) => {
         if (alive && local) setCoverState({ key: preferredCover, src: local });
       });
       return () => { alive = false; };
@@ -102,7 +102,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
       return () => { alive = false; observer.disconnect(); };
     }
     return undefined;
-  }, [libraryCover, m.cover, preferredCover, proxyCover, unavailable, unavailableCachedCover]);
+  }, [libraryCover, remoteCover, preferredCover, proxyCover, unavailable, unavailableCachedCover]);
 
   const schedulePrefetch = () => {
     if (unavailable || from === 'biblioteca') return;
@@ -187,9 +187,12 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
                 }
                 if (!unavailable && from !== 'biblioteca' && m.url && sourceId) {
                   try {
-                    const detail = await api.detail(m.url, sourceId);
+                    const canonicalUrl = mangaSourceUrl(m.url, sourceId);
+                    const detail = canonicalUrl.startsWith('https://mangadex.org/title/')
+                      ? api.peekStaleDetail(m.url, sourceId)
+                      : await api.detail(m.url, sourceId);
                     const refreshedCover = detail?.cover;
-                    if (refreshedCover && refreshedCover !== src && !failedCoverUrls.current.has(refreshedCover)) {
+                    if (refreshedCover && isMangaCover(refreshedCover, m.url) && refreshedCover !== src && !failedCoverUrls.current.has(refreshedCover)) {
                       lib.updateFav(m.url, { cover: refreshedCover, coverLocal: '', coverCached: '' }, sourceId);
                       setCoverState({ key: preferredCover, src: refreshedCover });
                       return;
