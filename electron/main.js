@@ -810,6 +810,7 @@ ipcMain.handle('http:post', async (_e, payload = {}, requestId) => {
   if (onf) {
     const cookie = mergeOnfCookies(onfCookieJar.get(parsed.origin), payload.onfCookie);
     if (cookie) postHeaders.Cookie = cookie;
+    postHeaders.Origin = parsed.origin;
     if (typeof payload.onfReferer === 'string') {
       try {
         const referer = validateUrl(payload.onfReferer);

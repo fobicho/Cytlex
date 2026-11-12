@@ -168,6 +168,7 @@ function forwardedHeaders(request, target) {
     headers.set('sec-fetch-site', 'same-origin');
     headers.set('referer', onfReferer(request));
     if (request.method.toUpperCase() === 'POST') {
+      headers.set('origin', target.origin);
       headers.set('accept', 'application/json, text/plain, */*');
       headers.set('sec-fetch-dest', 'empty');
       headers.set('sec-fetch-mode', 'cors');

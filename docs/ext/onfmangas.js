@@ -416,9 +416,9 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       if (access) {
         const response = await fetchPostText({
           url: `${base}/reader_pages.php`,
-          body: { access },
+          body: new URLSearchParams({ access }).toString(),
           headers: {
-            'Content-Type': 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
             'X-Requested-With': 'XMLHttpRequest'
           },
           onfCookie,
