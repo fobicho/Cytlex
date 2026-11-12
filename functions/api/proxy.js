@@ -108,6 +108,12 @@ function forwardedHeaders(request, target) {
     } catch {}
   }
 
+  const onfCookie = request.headers.get('x-cytlex-onf-cookie');
+  if (target.hostname === 'onfmangas.com' && onfCookie && onfCookie.length <= 2048
+    && /^[A-Za-z0-9!#$%&'*+.^_`|~-]+=[A-Za-z0-9!#$%&'()*+,.\/:=?@_`|~-]{1,2048}$/.test(onfCookie)) {
+    headers.set('cookie', onfCookie);
+  }
+
   if (isMangaDexApi) {
     headers.set('accept', 'application/json');
     headers.set('user-agent', 'Cytlex/0.1.0 (+https://github.com/fobicho/Cytlex)');
@@ -158,6 +164,7 @@ async function fetchTarget(initialTarget, method, headers, body) {
   let target = initialTarget;
   let currentMethod = method;
   let currentBody = body;
+  let currentHeaders = headers;
   const retryableMethod = currentMethod === 'GET' || currentMethod === 'HEAD';
 
   for (let redirects = 0; redirects <= REDIRECT_LIMIT; redirects += 1) {
@@ -167,7 +174,7 @@ async function fetchTarget(initialTarget, method, headers, body) {
       try {
         response = await fetch(target, {
           method: currentMethod,
-          headers,
+          headers: currentHeaders,
           body: currentMethod === 'GET' || currentMethod === 'HEAD' ? undefined : currentBody,
           redirect: 'manual'
         });
@@ -188,6 +195,11 @@ async function fetchTarget(initialTarget, method, headers, body) {
 
     const nextTarget = validateTarget(new URL(location, target).href);
     if (!nextTarget) return new Response('Redirect target is not allowed', { status: 403 });
+
+    if (nextTarget.origin !== target.origin && currentHeaders.has('cookie')) {
+      currentHeaders = new Headers(currentHeaders);
+      currentHeaders.delete('cookie');
+    }
 
     if (response.status === 303 || ((response.status === 301 || response.status === 302) && currentMethod === 'POST')) {
       currentMethod = 'GET';

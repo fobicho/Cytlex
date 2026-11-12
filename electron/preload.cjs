@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 if (process.isMainFrame) contextBridge.exposeInMainWorld('cytlex', {
-  httpGet: (url, requestId) => ipcRenderer.invoke('http:get', url, requestId),
+  httpGet: (url, requestId, options) => ipcRenderer.invoke('http:get', url, requestId, options),
   httpHead: (url) => ipcRenderer.invoke('http:head', url),
   notify: (payload) => ipcRenderer.invoke('notify:show', payload),
   notifySupported: () => ipcRenderer.invoke('notify:supported'),

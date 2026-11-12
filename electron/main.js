@@ -688,23 +688,36 @@ ipcMain.on('http:release', (_event, requestId) => {
   activeHttpRequests.delete(requestId);
 });
 
-ipcMain.handle('http:get', async (_e, url, requestId) => {
+ipcMain.handle('http:get', async (_e, url, requestId, options = {}) => {
   const parsed = validateUrl(url);
+  const onf = parsed.origin === 'https://onfmangas.com';
   const mangaDexApi = parsed.hostname.toLowerCase() === 'api.mangadex.org';
   const plotTwist = parsed.hostname.toLowerCase() === 'plotnofansub.com'
     || parsed.hostname.toLowerCase().endsWith('.plotnofansub.com');
+  const headers = {
+    'User-Agent': mangaDexApi
+      ? 'Cytlex/0.1.0 (+https://github.com/fobicho/Cytlex)'
+      : plotTwist
+        ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+        : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
+    ...(mangaDexApi ? { Accept: 'application/json' } : {}),
+    ...(plotTwist ? { Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'Accept-Language': 'es-419,es;q=0.9,en;q=0.8' } : {}),
+    Referer: refererFor(parsed.toString())
+  };
+  if (onf && typeof options?.onfReferer === 'string') {
+    try {
+      const referer = validateUrl(options.onfReferer);
+      if (referer.origin === parsed.origin && referer.pathname.startsWith('/lector/')) headers.Referer = referer.href;
+    } catch {}
+  }
+  if (onf && typeof options?.onfCookie === 'string'
+    && options.onfCookie.length <= 2048
+    && /^[A-Za-z0-9!#$%&'*+.^_`|~-]+=[A-Za-z0-9!#$%&'()*+,.\/:=?@_`|~-]{1,2048}$/.test(options.onfCookie)) {
+    headers.Cookie = options.onfCookie;
+  }
   const { response: res, body } = await requestPublic(parsed.toString(), {
     method: 'GET',
-    headers: {
-      'User-Agent': mangaDexApi
-        ? 'Cytlex/0.1.0 (+https://github.com/fobicho/Cytlex)'
-        : plotTwist
-          ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-          : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
-      ...(mangaDexApi ? { Accept: 'application/json' } : {}),
-      ...(plotTwist ? { Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'Accept-Language': 'es-419,es;q=0.9,en;q=0.8' } : {}),
-      Referer: refererFor(parsed.toString())
-    },
+    headers,
     timeout: HTTP_GET_TIMEOUT_MS,
     requestId
   }, 0, HTTP_BODY_MAX_BYTES);

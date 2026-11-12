@@ -1,5 +1,6 @@
 export default function createSource({ fetchText, parse }) {
   const base = 'https://onfmangas.com';
+  let onfCookie = '';
 
   const abs = (u) => {
     if (!u) return '';
@@ -56,6 +57,41 @@ export default function createSource({ fetchText, parse }) {
     return page.url || page.src || page.image || page.srcUrl || page.pageUrl
       || page.imageUrl || page.image_url || page.src_url || page.path || page.file || page.fallback || '';
   };
+
+  function isCookieChallenge(html) {
+    return html.slice(0, 8192).includes('Verificando');
+  }
+
+  function solveCookieChallenge(html) {
+    const script = parse(html).querySelector('script')?.textContent?.trim();
+    if (!script) return Promise.resolve('');
+
+    const frame = document.createElement('iframe');
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.style.cssText = 'display:none';
+    const id = `onf-${Date.now()}-${Math.random()}`;
+    const scriptLiteral = JSON.stringify(script).replace(/</g, '\\u003c');
+
+    return new Promise((resolve) => {
+      const finish = (value) => {
+        clearTimeout(timeout);
+        window.removeEventListener('message', onMessage);
+        frame.remove();
+        resolve(value);
+      };
+      const onMessage = (event) => {
+        if (event.source !== frame.contentWindow || event.data?.id !== id) return;
+        finish(typeof event.data.cookie === 'string' ? event.data.cookie : '');
+      };
+      const timeout = setTimeout(() => finish(''), 3000);
+      window.addEventListener('message', onMessage);
+      frame.srcdoc = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; connect-src 'none'; img-src 'none'; style-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"><script>(()=>{try{const source=${scriptLiteral};const run=new Function('window','document','location','setTimeout',source+'\\n;return document.cookie;');const cookie=run({location:{}},{cookie:null},{},fn=>fn());parent.postMessage({id:${JSON.stringify(id)},cookie},'*')}catch(error){parent.postMessage({id:${JSON.stringify(id)},error:String(error)},'*')}})();</script>`;
+      (document.body || document.documentElement).append(frame);
+    }).then((raw) => {
+      const cookie = String(raw || '').split(';', 1)[0].trim();
+      return /^[A-Za-z0-9!#$%&'*+.^_`|~-]+=[A-Za-z0-9!#$%&'()*+,.\/:=?@_`|~-]{1,2048}$/.test(cookie) ? cookie : '';
+    });
+  }
 
   function assignedPagePayloads(html) {
     const payloads = [];
@@ -264,17 +300,23 @@ export default function createSource({ fetchText, parse }) {
 
   async function chapter(chapterUrl) {
     const url = abs(chapterUrl);
-    const html = await fetchText(url);
+    const requestOptions = { onfCookie, onfReferer: url };
+    let html = await fetchText(url, undefined, requestOptions);
+    if (isCookieChallenge(html)) {
+      onfCookie = await solveCookieChallenge(html);
+      if (!onfCookie) throw new Error('ONF solicitó una verificación anti-bot, pero Cytlex no pudo obtener la cookie de acceso. Inténtalo de nuevo más tarde.');
+      html = await fetchText(url, undefined, { onfCookie, onfReferer: url });
+    }
     const outer = parse(html);
     const pages = decodePageImages(html, outer, url);
     if (!pages.length) {
-      const challengeMarkup = /cf-chl-|__cf_chl|challenge-platform|cdn-cgi\/challenge|cloudflare ray id/i.test(html);
+      const challengeMarkup = /cf-chl-|__cf_chl|challenge-platform|cdn-cgi\/challenge|cloudflare ray id|verificando/i.test(html);
       const visibleText = html
         .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
         .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
         .replace(/<[^>]+>/g, ' ')
         .replace(/&(?:nbsp|amp|lt|gt|quot|#39);/gi, ' ');
-      const challengePhrase = visibleText.match(/(?:complete|solve|enter|verify|resuelve|completa|verifica)[^.!?]{0,48}captcha|captcha[^.!?]{0,48}(?:complete|solve|enter|verify|resuelve|completa|verifica)|verify (?:that )?you are human|checking your browser|just a moment|attention required|enable javascript and cookies|access denied|too many requests|demasiadas solicitudes|acceso temporalmente bloqueado|verificaci[oó]n de seguridad|security check/i);
+      const challengePhrase = visibleText.match(/(?:complete|solve|enter|verify|resuelve|completa|verifica)[^.!?]{0,48}captcha|captcha[^.!?]{0,48}(?:complete|solve|enter|verify|resuelve|completa|verifica)|verify (?:that )?you are human|checking your browser|just a moment|attention required|enable javascript and cookies|access denied|too many requests|demasiadas solicitudes|acceso temporalmente bloqueado|verificaci[oó]n de seguridad|security check|verificando/i);
       const fullTitle = text(outer, 'title') || text(outer, 'h1');
       const responseTitle = fullTitle.slice(0, 100);
       const challengeTitle = /^(?:just a moment|attention required|security check|access denied|captcha|verify (?:that )?you are human)/i.test(fullTitle);

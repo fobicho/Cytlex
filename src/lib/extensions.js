@@ -76,7 +76,7 @@ function ctx(manifest = {}) {
     id: manifest.id,
     config: manifest.config,
     languageSelections,
-    fetchText: (url, requestId) => httpGet(url, requestId),
+    fetchText: (url, requestId, options) => httpGet(url, requestId, options),
     parse: (html) => new DOMParser().parseFromString(html, 'text/html'),
     head: (url) => httpHead(url)
   };
@@ -122,7 +122,7 @@ addEventListener('message', async (event) => {
         id: message.context.id,
         config: message.context.config,
         languageSelections: message.context.languageSelections,
-        fetchText: (url, requestId) => callHost('fetchText', [url, requestId]),
+        fetchText: (url, requestId, options) => callHost('fetchText', [url, requestId, options]),
         fetchPostText: (payload, requestId) => callHost('fetchPostText', [payload, requestId]),
         head: (url) => callHost('head', [url]),
         parse: (html) => new DOMParser().parseFromString(html, 'text/html')
@@ -208,7 +208,7 @@ async function loadModule(code, manifest) {
     }
     if (message.kind === 'host-call') {
       const action = message.method === 'fetchText'
-        ? (url, requestId) => httpGet(url, requestId)
+        ? (url, requestId, options) => httpGet(url, requestId, options)
         : message.method === 'fetchPostText'
           ? (payload, requestId) => httpPost({ ...payload, responseType: 'text' }, requestId)
         : message.method === 'head'

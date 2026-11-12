@@ -1,10 +1,11 @@
 const electronBridge = () => (typeof window !== 'undefined' ? window.cytlex : null);
 
-function proxyUrl(targetUrl) {
+function proxyUrl(targetUrl, referer = '') {
   const configuredProxy = import.meta.env.VITE_CYTLEX_PROXY_URL;
   const endpoint = configuredProxy || '/api/proxy';
   const proxy = new URL(endpoint, window.location.href);
   proxy.searchParams.set('url', targetUrl);
+  if (referer) proxy.searchParams.set('referer', referer);
   return proxy.href;
 }
 
@@ -50,14 +51,22 @@ function proxyRequestOptions(url, options) {
 }
 
 async function browserRequest(url, options = {}) {
+  const target = new URL(url);
+  const { onfCookie = '', onfReferer = '', ...fetchOptions } = options;
+  const requestHeaders = new Headers(fetchOptions.headers || {});
+  const isOnf = target.origin === 'https://onfmangas.com';
+  if (isOnf && /^[A-Za-z0-9!#$%&'*+.^_`|~-]+=[A-Za-z0-9!#$%&'()*+,.\/:=?@_`|~-]{1,2048}$/.test(onfCookie)) {
+    requestHeaders.set('x-cytlex-onf-cookie', onfCookie);
+  }
   let response;
-  const requestOptions = { credentials: 'omit', redirect: 'follow', ...options };
+  const requestOptions = { credentials: 'omit', redirect: 'follow', ...fetchOptions, headers: requestHeaders };
+  const directOptions = { ...fetchOptions, headers: new Headers(fetchOptions.headers || {}) };
 
   try {
-    const proxied = await fetch(proxyUrl(url), proxyRequestOptions(url, requestOptions));
+    const proxied = await fetch(proxyUrl(url, isOnf ? onfReferer : ''), proxyRequestOptions(url, requestOptions));
     const proxyIsLive = proxied.headers.get('x-cytlex-proxy') === '1';
     const proxyDeniedTarget = proxied.headers.get('x-cytlex-proxy-denied') === '1';
-    response = proxyIsLive && !proxyDeniedTarget ? proxied : await fetch(url, requestOptions);
+    response = proxyIsLive && !proxyDeniedTarget ? proxied : await fetch(url, directOptions);
   } catch (error) {
     if (requestOptions.signal?.aborted) throw error;
     throw new Error('El navegador bloqueó la conexión a esta fuente. Para fuentes sin acceso CORS, publica Cytlex con su proxy web habilitado.');
@@ -69,10 +78,10 @@ async function browserRequest(url, options = {}) {
   return response;
 }
 
-export async function httpGet(url, requestId) {
+export async function httpGet(url, requestId, options = {}) {
   const bridge = electronBridge();
-  if (bridge?.httpGet) return bridge.httpGet(url, requestId);
-  return (await browserRequest(url)).text();
+  if (bridge?.httpGet) return bridge.httpGet(url, requestId, options);
+  return (await browserRequest(url, options)).text();
 }
 
 export async function httpHead(url) {
