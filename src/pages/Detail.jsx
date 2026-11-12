@@ -3,11 +3,11 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Link2, ArrowRightLeft, Crosshair } from 'lucide-react';
 import { api } from '../lib/api.js';
-import { lib } from '../lib/library.js';
+import { isMangaCover, lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { reconcileMihonProgress } from '../lib/mihonProgress.js';
 import { extensions, isExtensionAllowed, isUnavailableMangaSource } from '../lib/extensions.js';
-import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
+import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy, restoreLibraryCover } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { reconcileChapterProgress } from '../lib/mangaMigration.js';
@@ -25,9 +25,17 @@ import { tracking } from '../lib/tracking.js';
 import { browserImageUrl } from '../lib/browserHttp.js';
 import Catalog from './Catalog.jsx';
 
-const EXPAND_CTRL_H = 16;
+const SYNOPSIS_CONTROL_SIZE = 24;
+const SYNOPSIS_CONTROL_GAP = 4;
 const COVER_BASE = 184;
 const chapterDateFormat = new Intl.DateTimeFormat('es');
+const compareChapterGroups = new Intl.Collator('es', { sensitivity: 'base', numeric: true }).compare;
+const compareChapterDates = new Intl.Collator('es', { numeric: true }).compare;
+
+function saveDetailScroll(mangaUrl) {
+  const main = document.querySelector('main');
+  if (main) detailScroll.set(mangaUrl, main.scrollTop);
+}
 
 function formatChapterDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}T/.test(value)) return value;
@@ -45,9 +53,9 @@ const byNumber = (a, b, direction = 1) => {
   const nb = chapterNum(b);
   if (Number.isNaN(na) !== Number.isNaN(nb)) return (Number.isNaN(na) ? 1 : -1) * direction;
   if (!Number.isNaN(na) && na !== nb) return (na - nb) * direction;
-  const groupOrder = String(a.group || '').localeCompare(String(b.group || ''), 'es', { sensitivity: 'base', numeric: true });
+  const groupOrder = compareChapterGroups(a.group || '', b.group || '');
   if (groupOrder) return groupOrder * direction;
-  return String(a.date).localeCompare(String(b.date), 'es', { numeric: true }) * direction;
+  return compareChapterDates(a.date, b.date) * direction;
 };
 
 function SourceLine({ sourceId, scale }) {
@@ -157,6 +165,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   }));
   const d = detailState.key === detailKey ? detailState.data : api.peekStaleDetail(mangaUrl, sourceId);
   const [err, setErr] = useState('');
+  const [detailRetry, setDetailRetry] = useState(0);
   const [fav, setFav] = useState(false);
   const [asc, setAsc] = useState(() => chapterOrder.get(mangaUrl));
   const [groupFilter, setGroupFilter] = useState(() => {
@@ -186,12 +195,11 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const catMenuRef = useRef(null);
   const coverRef = useRef(null);
   const synRef = useRef(null);
-  const [availH, setAvailH] = useState(0);
-  const [fullH, setFullH] = useState(0);
+  const metadataRef = useRef(null);
+  const [synopsisSize, setSynopsisSize] = useState(null);
   const [animate, setAnimate] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [overflow, setOverflow] = useState(false);
-  const [, setProgressTick] = useState(0);
+  const [progressTick, setProgressTick] = useState(0);
   const [coverTick, setCoverTick] = useState(0);
   const [markBefore, setMarkBefore] = useState(null);
   const [pendingChapterJump, setPendingChapterJump] = useState('');
@@ -210,9 +218,11 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     .filter((manifest, index, sources) => sources.findIndex((source) => source.id === manifest.id) === index);
   const migrationTargets = installedExtensions.filter((manifest) => manifest.id !== sourceId);
 
+  const savedManga = useMemo(() => lib.fav(mangaUrl, sourceId), [mangaUrl, sourceId, coverTick, fav]);
+  const synopsis = d?.sinopsis?.trim() || savedManga?.description?.trim() || '';
   const knownCover = useMemo(() => {
-    const fav = lib.fav(mangaUrl, sourceId);
-    const local = fav?.coverLocal;
+    const valid = isMangaCover(savedManga?.cover, mangaUrl);
+    const local = valid ? savedManga?.coverCached || savedManga?.coverLocal : '';
     const t = tracking.get(mangaUrl, sourceId);
     const tLocal = t?.coverLocal;
     const tCover = t?.cover;
@@ -220,9 +230,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     if (anilistCover && tCover) return getLibraryCover(tCover) || tCover;
     if (typeof local === 'string' && local.startsWith('data:')) return local;
     const recalled = recallCover(mangaUrl, sourceId);
-    const remoteCover = fav?.cover || tCover || recalled;
+    const remoteCover = (valid && savedManga?.cover) || recalled;
     return getLibraryCover(remoteCover) || getSearchCover(remoteCover) || remoteCover || '';
-  }, [mangaUrl, sourceId, anilistCover, coverTick]);
+  }, [mangaUrl, sourceId, anilistCover, savedManga]);
 
   const coverSrc = useMemo(() => {
     const t = tracking.get(mangaUrl, sourceId);
@@ -230,9 +240,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     const tCover = t?.cover;
     if (anilistCover && tCover) return tCover;
     if (anilistCover && tLocal) return tLocal;
-    if (d?.cover) return d.cover;
-    const local = lib.fav(mangaUrl, sourceId)?.coverLocal;
-    if (typeof local === 'string' && local.startsWith('data:')) return local;
+    if (d?.cover && isMangaCover(d.cover, mangaUrl)) return d.cover;
     if (knownCover) return knownCover;
     return '';
   }, [d?.cover, knownCover, mangaUrl, sourceId, anilistCover, coverTick]);
@@ -256,15 +264,17 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     setFailedCover('');
   }, [coverSrc]);
   const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
-  const proxyCover = requiresImageProxy(finalCover) && !!window.cytlex?.fetchImage;
+  const proxyCover = browserImageUrl(finalCover) !== finalCover
+    || (requiresImageProxy(finalCover) && !!window.cytlex?.fetchImage);
   useEffect(() => {
     if (!sourceAvailable || !proxyCover || !finalCover) return undefined;
     let alive = true;
     const loadCover = async () => {
       const candidates = [...new Set([finalCover, knownCover].filter(Boolean))];
       for (const candidate of candidates) {
-        const cached = getLibraryCover(candidate) || getSearchCover(candidate);
-        const local = cached || await preloadLibraryCover(candidate);
+        const cached = getLibraryCover(candidate) || getSearchCover(candidate) || await restoreLibraryCover(candidate);
+        if (!alive) return;
+        const local = cached || await preloadLibraryCover(candidate, { web: true });
         if (!alive) return;
         if (local) {
           setDisplayedCover({ key: coverKey, src: local });
@@ -334,47 +344,37 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     setChaptersPerRow([1, 2, 3].includes(v) ? v : 1);
   }), []);
 
-  useEffect(() => {
+  const pendingScrollRestore = useRef(0);
+  useLayoutEffect(() => {
     const main = document.querySelector('main');
     if (migrationSearchMode || !main || !active || !activeRef.current) return undefined;
 
-    const requestedRestore = detailScroll.takeRestore(mangaUrl);
-    const saved = requestedRestore;
-    let restoring = saved > 0;
-    const apply = () => {
-      if (!activeRef.current) return;
-      const max = main.scrollHeight - main.clientHeight;
-      main.scrollTop = restoring ? Math.min(saved, Math.max(0, max)) : 0;
+    pendingScrollRestore.current = detailScroll.takeRestore(mangaUrl);
+    main.scrollTop = pendingScrollRestore.current;
+    const save = () => {
+      if (activeRef.current && !pendingScrollRestore.current) detailScroll.set(mangaUrl, main.scrollTop);
     };
-    apply();
-    const raf1 = requestAnimationFrame(() => requestAnimationFrame(apply));
-    const cover = coverRef.current;
-    cover?.addEventListener('load', apply);
-
-    let ticks = 0;
-    let lastH = -1;
-    let settleTimer = null;
-    const settle = () => {
-      if (!activeRef.current) { restoring = false; return; }
-      if (ticks > 8) { restoring = false; return; }
-      ticks += 1;
-      const h = main.scrollHeight;
-      if (h === lastH) { restoring = false; return; }
-      lastH = h;
-      apply();
-      settleTimer = setTimeout(settle, 120);
-    };
-    settleTimer = setTimeout(settle, 120);
-
-    const save = () => { if (activeRef.current && !restoring) detailScroll.set(mangaUrl, main.scrollTop); };
+    const cancelRestore = () => { pendingScrollRestore.current = 0; };
     main.addEventListener('scroll', save, { passive: true });
+    main.addEventListener('wheel', cancelRestore, { passive: true });
+    main.addEventListener('pointerdown', cancelRestore, { passive: true });
     return () => {
-      cancelAnimationFrame(raf1);
-      clearTimeout(settleTimer);
-      cover?.removeEventListener('load', apply);
       main.removeEventListener('scroll', save);
+      main.removeEventListener('wheel', cancelRestore);
+      main.removeEventListener('pointerdown', cancelRestore);
     };
-  }, [active, mangaUrl, d?.chapters?.length, migrationSearchMode]);
+  }, [active, activeRef, mangaUrl, migrationSearchMode]);
+
+  useLayoutEffect(() => {
+    if (!active || !d || !pendingScrollRestore.current) return undefined;
+    const main = document.querySelector('main');
+    if (!main) return undefined;
+    const frame = requestAnimationFrame(() => {
+      if (pendingScrollRestore.current) main.scrollTop = pendingScrollRestore.current;
+      pendingScrollRestore.current = 0;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [active, d, mangaUrl]);
   useEffect(
     () => tracking.subscribe(() => setAniLinked(!!tracking.get(mangaUrl, sourceId))),
     [mangaUrl, sourceId]
@@ -400,16 +400,17 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       .detail(mangaUrl, sourceId)
       .then((r) => {
         if (!alive) return;
-        if (cached && cached !== r) reconcileChapterProgress(cached.chapters, r?.chapters, sourceId, sourceId, mangaUrl);
+        if (!r?.chapters?.length) {
+          if (!cached?.chapters?.length) setDetailState({ key: detailKey, data: r });
+          setErr('La fuente no devolvió capítulos.');
+          return;
+        }
+        if (cached && cached !== r) reconcileChapterProgress(cached.chapters, r.chapters, sourceId, sourceId, mangaUrl);
         setDetailState({ key: `${sourceId}|${mangaUrl}`, data: r });
         reconcileMihonProgress(mangaUrl, sourceId, r?.chapters);
         const favorite = lib.fav(mangaUrl, sourceId);
-        if (r?.cover && favorite && (
-          r.cover !== favorite.cover
-          || favorite.coverLocal
-          || favorite.coverCached
-        )) {
-          lib.updateFav(mangaUrl, { cover: r.cover, coverLocal: '', coverCached: '' }, sourceId);
+        if (r?.cover && favorite && isMangaCover(r.cover, mangaUrl) && r.cover !== favorite.cover) {
+          lib.updateFav(mangaUrl, { cover: r.cover }, sourceId);
           setCoverTick((tick) => tick + 1);
         }
       })
@@ -424,9 +425,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               const recovered = await api.findManga({ url: mangaUrl, title, author: favorite?.author || d?.facts?.autor || '' }, sourceId);
               if (alive && activeRef.current && recovered) {
                 const updates = { url: recovered.url };
-                if (recovered.detail?.cover && !favorite?.cover && !favorite?.coverLocal) {
-                  updates.cover = recovered.detail.cover;
-                }
+                if (favorite) Object.assign(updates, {
+                  cover: recovered.detail?.cover || '', coverLocal: '', coverCached: ''
+                });
                 lib.updateFav(mangaUrl, updates, sourceId);
                 tracking.move(mangaUrl, recovered.url, sourceId);
                 chapterOrder.move(mangaUrl, recovered.url);
@@ -438,11 +439,11 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             } catch {}
           }
         }
-        if (alive && !cached) setErr(message);
+        if (alive) setErr(message);
       });
 
     return () => { alive = false; };
-  }, [mangaUrl, sourceId, migrationSearchMode]);
+  }, [mangaUrl, sourceId, migrationSearchMode, detailRetry]);
 
   useLayoutEffect(() => {
     if (!active) return undefined;
@@ -451,41 +452,32 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     if (!cover || !syn) return undefined;
 
     const update = () => {
-      const c = cover.getBoundingClientRect();
-      const s = syn.getBoundingClientRect();
-      if (c.height === 0 || s.width === 0) return;
-      const avail = Math.max(0, c.bottom - s.top - EXPAND_CTRL_H);
-      setFullH(syn.scrollHeight);
-      setAvailH(avail);
-      setOverflow(syn.scrollHeight > avail + 4);
+      const coverBounds = cover.getBoundingClientRect();
+      const synopsisBounds = syn.getBoundingClientRect();
+      if (!coverBounds.height || !synopsisBounds.width) return;
+      const synopsisStyle = getComputedStyle(syn);
+      const zoom = synopsisBounds.width / parseFloat(synopsisStyle.width);
+      const controlOffset = SYNOPSIS_CONTROL_GAP + SYNOPSIS_CONTROL_SIZE / 2;
+      const fullH = parseFloat(synopsisStyle.height);
+      const availH = coverBounds.right <= synopsisBounds.left
+        ? Math.max(0, (coverBounds.bottom - synopsisBounds.top) / zoom - controlOffset)
+        : parseFloat(synopsisStyle.lineHeight) * 6;
+      setSynopsisSize((previous) => previous?.availH === availH && previous.fullH === fullH
+        ? previous
+        : { availH, fullH });
     };
 
     update();
-    const raf = requestAnimationFrame(update);
-    const resizeObserver = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(update)
-      : null;
-    resizeObserver?.observe(cover);
-    resizeObserver?.observe(syn);
-    let raf2 = 0;
-    if (document.fonts?.ready) {
-      document.fonts.ready.then(() => {
-        raf2 = requestAnimationFrame(update);
-      });
-    }
+    const resizeObserver = new ResizeObserver(update);
+    resizeObserver.observe(cover);
+    resizeObserver.observe(syn);
+    if (metadataRef.current) resizeObserver.observe(metadataRef.current);
     window.addEventListener('resize', update);
     return () => {
-      cancelAnimationFrame(raf);
-      cancelAnimationFrame(raf2);
-      resizeObserver?.disconnect();
+      resizeObserver.disconnect();
       window.removeEventListener('resize', update);
     };
-  }, [active, d, scale]);
-
-  useEffect(() => {
-    if (!synRef.current) return;
-    setFullH(synRef.current.scrollHeight);
-  }, [d, expanded]);
+  }, [active, d, scale, synopsis]);
 
   const addToLibrary = (manga, catIds) => {
     if (!Array.isArray(catIds) || catIds.length === 0) return;
@@ -616,28 +608,154 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     chapterIndex.set(mangaUrl, sourceId, d.chapters.map((c) => c.url));
   }, [mangaUrl, sourceId, d]);
 
+  const chapterGroups = useMemo(
+    () => [...new Set(d?.chapters?.map((chapter) => chapter.group).filter(Boolean))],
+    [d?.chapters]
+  );
+  const selectedGroup = chapterGroups.includes(groupFilter) ? groupFilter : 'all';
+  const chaptersOldestFirst = useMemo(
+    () => [...(d?.chapters || [])].sort(byNumber),
+    [d?.chapters]
+  );
+  const chapters = useMemo(() => {
+    if (selectedGroup === 'all' && chapterSort === 'chapter' && asc) return chaptersOldestFirst;
+    const direction = asc ? 1 : -1;
+    const visible = (d?.chapters || []).filter((chapter) => selectedGroup === 'all' || chapter.group === selectedGroup);
+    return visible.sort((a, b) => {
+      if (chapterSort === 'scanlation') {
+        const groupOrder = compareChapterGroups(a.group || '', b.group || '');
+        if (groupOrder) return groupOrder * direction;
+      }
+      return byNumber(a, b, direction);
+    });
+  }, [asc, chapterSort, chaptersOldestFirst, d?.chapters, selectedGroup]);
+
   useEffect(() => {
     if (migrationSearchMode || !active || !d?.chapters?.length) return undefined;
     const status = norm(d.facts?.estado || d.facts?.status).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const completed = /finaliz|complet|concluid|terminad|finished|ended/.test(status);
-    const chapters = [...d.chapters].sort(byNumber);
     const target = completed
-      ? chapters.at(-1)
-      : chapters.find((chapter) => !progress.get(chapter.url, sourceId)?.read) || chapters[0];
+      ? chaptersOldestFirst.at(-1)
+      : chaptersOldestFirst.find((chapter) => !progress.get(chapter.url, sourceId)?.read) || chaptersOldestFirst[0];
     const saved = target && progress.get(target.url, sourceId);
     if (!target || !saved || saved.read || !Number.isInteger(saved.page) || saved.total > 0) return undefined;
 
     let alive = true;
-    api.chapter(target.url, sourceId).then((chapter) => {
-      if (!alive || !Array.isArray(chapter?.pages) || !chapter.pages.length) return;
-      const latest = progress.get(target.url, sourceId);
-      if (!latest || latest.read || latest.page !== saved.page || latest.total > 0) return;
-      progress.savePage(target.url, sourceId, latest.page, chapter.pages.length);
-      setProgressTick((tick) => tick + 1);
-    }).catch(() => {});
+    const timer = setTimeout(() => {
+      api.chapter(target.url, sourceId).then((chapter) => {
+        if (!alive || !Array.isArray(chapter?.pages) || !chapter.pages.length) return;
+        const latest = progress.get(target.url, sourceId);
+        if (!latest || latest.read || latest.page !== saved.page || latest.total > 0) return;
+        progress.savePage(target.url, sourceId, latest.page, chapter.pages.length);
+        setProgressTick((tick) => tick + 1);
+      }).catch(() => {});
+    }, 500);
 
-    return () => { alive = false; };
-  }, [active, d, mangaUrl, migrationSearchMode, sourceId]);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [active, chaptersOldestFirst, d, mangaUrl, migrationSearchMode, sourceId]);
+
+  const chapterList = useMemo(() => (
+      <div
+        className={chaptersPerRow > 1 ? 'grid gap-2' : 'flex flex-col gap-2'}
+        style={chaptersPerRow > 1 ? { gridTemplateColumns: `repeat(${chaptersPerRow}, minmax(0, 1fr))` } : undefined}
+      >
+        {chapters.slice(0, visibleChapterCount).map((c, i) => {
+          const cap = progress.get(c.url, sourceId);
+          const read = !!cap?.read;
+          const inCourse = !read && cap && Number.isInteger(cap?.page) && cap.page > 0;
+          return (
+            <a
+              key={i}
+              ref={(element) => {
+                if (element) chapterRefs.current.set(c.url, element);
+                else chapterRefs.current.delete(c.url);
+              }}
+              className={cn(
+                'group relative flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-2.5 hover:bg-accent/50 transition-colors',
+                highlightedChapter === c.url && 'cx-chapter-pulse',
+                read && 'opacity-45 hover:opacity-70'
+              )}
+              style={{ contentVisibility: 'auto', containIntrinsicBlockSize: `auto ${Math.round(42 * scale)}px`, minHeight: `${Math.round(52 * scale)}px` }}
+              onClick={(e) => { e.currentTarget.blur(); saveDetailScroll(mangaUrl); }}
+              href={`#/leer?u=${encodeURIComponent(c.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}${readerBackParam}`}
+            >
+              <span className="flex-1 min-w-0">
+                <span
+                  className="block font-semibold truncate"
+                  style={{ fontSize: `${Math.round(15 * scale)}px` }}
+                >
+                  {c.title}
+                </span>
+                <span
+                  className={cn('block text-muted-foreground', chaptersPerRow === 3 && 'truncate')}
+                  style={{
+                    fontSize: `${Math.round(13 * scale)}px`,
+                    lineHeight: `${Math.round(20 * scale)}px`,
+                    minHeight: `${Math.round(20 * scale)}px`
+                  }}
+                >
+                  {formatChapterDate(c.date)}
+                  {c.group ? ` · ${c.group}` : ''}
+                  {inCourse && Number.isInteger(cap.total) && cap.total > 0
+                    ? ` · pág. ${cap.page + 1}/${cap.total}`
+                    : ''}
+                </span>
+              </span>
+              <span className="shrink-0 flex items-center gap-2">
+                {read ? (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    title="Marcar como no leído"
+                    aria-label={`Marcar ${c.title} como no leído`}
+                    className="order-2 shrink-0 flex items-center gap-1 text-primary rounded-md hover:bg-accent"
+                    style={{ fontSize: `${Math.round(13 * scale)}px` }}
+                    onClick={(e) => { e.preventDefault(); progress.markUnread(c.url, sourceId, mangaUrl); setProgressTick((t) => t + 1); }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markUnread(c.url, sourceId, mangaUrl); setProgressTick((t) => t + 1); }
+                    }}
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    Leído
+                  </span>
+                ) : (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    title="Marcar como leído"
+                    aria-label={`Marcar ${c.title} como leído`}
+                    className="order-2 shrink-0 flex items-center gap-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded-md hover:bg-accent hover:text-foreground transition-opacity"
+                    style={{ fontSize: `${Math.round(13 * scale)}px` }}
+                    onClick={(e) => { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0, mangaUrl); setProgressTick((t) => t + 1); }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0, mangaUrl); setProgressTick((t) => t + 1); }
+                    }}
+                  >
+                    <Check className="w-4 h-4" />
+                    Leído
+                  </span>
+                )}
+                <span className="relative order-1">
+                  <button
+                    type="button"
+                    title="Marcar todos los anteriores como leídos"
+                    aria-label={`Marcar anteriores a ${c.title} como leídos`}
+                    className="shrink-0 flex items-center rounded-md text-muted-foreground/70 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-accent hover:text-foreground transition-opacity"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMarkBefore({ chapter: c }); }}
+                  >
+                    <CheckCheck className="w-4 h-4" />
+                    <ChevronDown className="w-3.5 h-3.5 ml-1.5" />
+                  </button>
+                </span>
+              </span>
+            </a>
+          );
+        })}
+      </div>
+  ), [active, chapters, visibleChapterCount, chaptersPerRow, highlightedChapter, scale, sourceId, mangaUrl, fromParam, readerBackParam, progressTick]);
 
   if (migrationSearchMode)
     return (
@@ -707,14 +825,14 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         }
       />
     );
-  if (err)
+  if (err && !savedManga)
     return (
       <EmptyState
         face="（╯°□°）╯︵ ┻━┻"
         tone="error"
         title="No se pudo cargar"
         description={err}
-        action={<Button variant="secondary" onClick={() => window.location.reload()}>Reintentar</Button>}
+        action={<Button variant="secondary" onClick={() => setDetailRetry((attempt) => attempt + 1)}>Reintentar</Button>}
       />
     );
   if (!d)
@@ -747,44 +865,48 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               {!visibleCover && failedCover !== finalCover && <Skeleton className="absolute inset-0 rounded-xl" />}
               {coverImg('')}
             </div>
+          ) : err ? (
+            <div className="aspect-[2/3] rounded-xl shrink-0 bg-muted/50" style={{ width: `${coverSize}px` }} />
           ) : (
             <Skeleton className="aspect-[2/3] rounded-xl shrink-0" style={{ width: `${coverSize}px` }} />
           )}
           <div className="flex-1 min-w-0">
-            <Skeleton style={{ height: px(32, scale, 25), width: '66%', maxWidth: px(448, scale, 350) }} />
-            <Skeleton style={{ height: px(17, scale, 13), width: px(160, scale, 125), marginTop: px(4, scale, 3) }} />
-            <Skeleton style={{ height: px(15, scale, 11), width: '100%', maxWidth: px(512, scale, 400), marginTop: px(4, scale, 3) }} />
-            <div className="flex flex-wrap items-center" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 9) }}>
-              <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(96, scale, 75) }} />
-              <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(80, scale, 63) }} />
-              <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(112, scale, 88) }} />
-              <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(96, scale, 75) }} />
-            </div>
-            <div className="flex flex-col" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 9) }}>
-              <Skeleton style={{ height: px(14, scale, 11) }} />
-              <Skeleton style={{ height: px(14, scale, 11) }} />
-              <Skeleton style={{ height: px(14, scale, 11), width: '80%' }} />
-            </div>
+            {savedManga?.title ? (
+              <h1 className="font-extrabold tracking-tight text-foreground break-words" style={{ fontSize: `${Math.round(32 * scale)}px`, lineHeight: 1.1 }}>
+                {savedManga.title}
+              </h1>
+            ) : (
+              <Skeleton style={{ height: px(32, scale, 25), width: '66%', maxWidth: px(448, scale, 350) }} />
+            )}
+            {err ? (
+              <div className="mt-5 text-sm text-muted-foreground" role="status">
+                <p className="font-medium text-foreground">No se pudieron cargar los capítulos.</p>
+                <p className="mt-1 break-words">{err}</p>
+                <Button className="mt-3" variant="secondary" onClick={() => setDetailRetry((attempt) => attempt + 1)}>Reintentar</Button>
+              </div>
+            ) : (
+              <>
+                <Skeleton style={{ height: px(17, scale, 13), width: px(160, scale, 125), marginTop: px(4, scale, 3) }} />
+                <Skeleton style={{ height: px(15, scale, 11), width: '100%', maxWidth: px(512, scale, 400), marginTop: px(4, scale, 3) }} />
+                <div className="flex flex-wrap items-center" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 9) }}>
+                  <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(96, scale, 75) }} />
+                  <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(80, scale, 63) }} />
+                  <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(112, scale, 88) }} />
+                  <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(96, scale, 75) }} />
+                </div>
+                <div className="flex flex-col" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 9) }}>
+                  <Skeleton style={{ height: px(14, scale, 11) }} />
+                  <Skeleton style={{ height: px(14, scale, 11) }} />
+                  <Skeleton style={{ height: px(14, scale, 11), width: '80%' }} />
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
     );
 
-  const chapterGroups = [...new Set((d.chapters || []).map((c) => c.group).filter(Boolean))];
-
-  let chapters = d.chapters;
-  if (groupFilter !== 'all') chapters = chapters.filter((c) => c.group === groupFilter);
-  if (chapterSort === 'scanlation') {
-    chapters = [...chapters].sort((a, b) => {
-      const ga = a.group || '';
-      const gb = b.group || '';
-      if (ga !== gb) return ga.localeCompare(gb, 'es', { sensitivity: 'base', numeric: true }) * (asc ? 1 : -1);
-      return byNumber(a, b, asc ? 1 : -1);
-    });
-  } else {
-    chapters = [...chapters].sort((a, b) => byNumber(a, b, asc ? 1 : -1));
-  }
-  chapterJumpContext.current = { detailKey, chapters, visibleChapterCount, chapterWindowKey, groupFilter };
+  chapterJumpContext.current = { detailKey, chapters, visibleChapterCount, chapterWindowKey, groupFilter: selectedGroup };
 
   const changeGroupFilter = (v) => {
     setGroupFilter(v);
@@ -795,16 +917,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     } catch {}
   };
 
-  const chaptersOldestFirst = [...d.chapters].sort((a, b) => byNumber(a, b, 1));
   const ordered = chaptersOldestFirst;
-  const saveDetailScroll = () => {
-    const main = document.querySelector('main');
-    if (main) detailScroll.set(mangaUrl, main.scrollTop);
-  };
-  const openMarkBefore = (chapter) => {
-    setMarkBefore({ chapter });
-  };
-
   const markBeforeIndex = markBefore
     ? ordered.findIndex((chapter) => chapter.url === markBefore.chapter.url)
     : -1;
@@ -833,6 +946,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     setPendingChapterJump(currentChapter.url);
   };
 
+  const { availH, fullH } = synopsisSize || {};
+  const overflow = fullH > availH;
   const fade = Math.min(48, (overflow ? availH : 0) * 0.4);
   const synMask = !expanded && overflow && fade > 4
     ? `linear-gradient(to bottom, #000 calc(100% - ${Math.round(fade)}px), rgba(0,0,0,0.55) calc(100% - ${Math.round(fade * 0.45)}px), transparent 100%)`
@@ -864,12 +979,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
 
       <div
         className="flex flex-col md:flex-row"
-        style={{
-          gap: px(24, scale, 19),
-          minHeight: `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})`,
-          maxHeight: expanded || animate ? undefined : `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})`,
-          overflow: expanded || animate ? undefined : 'hidden'
-        }}
+        style={{ gap: px(24, scale, 19), minHeight: `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})` }}
       >
         <div
           ref={coverRef}
@@ -886,52 +996,53 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <h1
-            className="font-extrabold tracking-tight text-foreground"
-            style={{ fontSize: `${Math.round(32 * scale)}px`, lineHeight: 1.1 }}
-          >
-            {d.title}
-          </h1>
-          {d.facts.autor && (
-            <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(17 * scale)}px` }}>
-              Por {d.facts.autor}
-            </div>
-          )}
-          <div className="mt-1">
-            <SourceLine sourceId={sourceId} scale={scale} />
-          </div>
-          <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(15 * scale)}px` }}>
-            {d.altTitles?.slice(0, 160)}
-          </div>
-
-          <div
-            className="flex flex-wrap items-center"
-            style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 9) }}
-          >
-            {(d.facts.estado || d.facts.status) && (
-              <Badge style={badgeStyle}>{(d.facts.estado || d.facts.status)}</Badge>
+          <div ref={metadataRef} className="flow-root">
+            <h1
+              className="font-extrabold tracking-tight text-foreground"
+              style={{ fontSize: `${Math.round(32 * scale)}px`, lineHeight: 1.1 }}
+            >
+              {d.title}
+            </h1>
+            {d.facts.autor && (
+              <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(17 * scale)}px` }}>
+                Por {d.facts.autor}
+              </div>
             )}
-            {d.facts.tipo && <Badge style={badgeStyle}>{d.facts.tipo}</Badge>}
-            {d.genres.slice(0, 6).map((g) => (
-              <Badge key={g} variant="outline" style={badgeStyle}>
-                {g}
-              </Badge>
-            ))}
-          </div>
-
-          {(d.facts.publicacion || d.facts.periodicidad || d.facts.proximo) && (
-            <div className="mt-2 flex flex-wrap gap-x-2 text-muted-foreground" style={{ fontSize: `${Math.round(13 * scale)}px` }}>
-              {d.facts.publicacion && <span>Publicado: {d.facts.publicacion}</span>}
-              {d.facts.periodicidad && <span>Periodicidad: {d.facts.periodicidad}</span>}
-              {d.facts.proximo && <span>Próximo capítulo: {d.facts.proximo}</span>}
+            <div className="mt-1">
+              <SourceLine sourceId={sourceId} scale={scale} />
             </div>
-          )}
+            <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(15 * scale)}px` }}>
+              {d.altTitles?.slice(0, 160)}
+            </div>
+
+            <div
+              className="flex flex-wrap items-center"
+              style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 9) }}
+            >
+              {(d.facts.estado || d.facts.status) && (
+                <Badge style={badgeStyle}>{(d.facts.estado || d.facts.status)}</Badge>
+              )}
+              {d.facts.tipo && <Badge style={badgeStyle}>{d.facts.tipo}</Badge>}
+              {d.genres.slice(0, 6).map((g) => (
+                <Badge key={g} variant="outline" style={badgeStyle}>
+                  {g}
+                </Badge>
+              ))}
+            </div>
+
+            {(d.facts.publicacion || d.facts.periodicidad || d.facts.proximo) && (
+              <div className="mt-2 flex flex-wrap gap-x-2 text-muted-foreground" style={{ fontSize: `${Math.round(13 * scale)}px` }}>
+                {d.facts.publicacion && <span>Publicado: {d.facts.publicacion}</span>}
+                {d.facts.periodicidad && <span>Periodicidad: {d.facts.periodicidad}</span>}
+                {d.facts.proximo && <span>Próximo capítulo: {d.facts.proximo}</span>}
+              </div>
+            )}
+          </div>
 
           <div style={{ marginTop: px(12, scale, 9) }}>
             <div
-              ref={synRef}
               style={{
-                maxHeight: expanded ? (fullH || undefined) : (availH || undefined),
+                maxHeight: expanded ? fullH : availH,
                 overflow: 'hidden',
                 transition: animate ? 'max-height 320ms cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
                 WebkitMaskImage: synMask,
@@ -943,21 +1054,10 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 if (event.propertyName === 'max-height') setAnimate(false);
               }}
             >
-              <p>{d.sinopsis}</p>
-              {!expanded && overflow && (
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute inset-x-0 bottom-0 backdrop-blur-[3px]"
-                  style={{
-                    height: `${Math.round(fade)}px`,
-                    WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.5) 55%, #000 100%)',
-                    maskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.5) 55%, #000 100%)'
-                  }}
-                />
-              )}
+              <p ref={synRef}>{synopsis}</p>
             </div>
             {overflow && (
-              <div className="mt-1 flex items-center gap-3">
+              <div className="flex items-center gap-3" style={{ marginTop: SYNOPSIS_CONTROL_GAP }}>
                 <span className="h-px flex-1 bg-border" />
                 <button
                   type="button"
@@ -966,7 +1066,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                     setExpanded((v) => !v);
                   }}
                   aria-label={expanded ? 'Ver menos' : 'Ver más'}
-                  className="grid place-items-center w-6 h-6 rounded-full text-muted-foreground transition-colors hover:bg-accent"
+                  aria-expanded={expanded}
+                  className="grid place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent"
+                  style={{ width: SYNOPSIS_CONTROL_SIZE, height: SYNOPSIS_CONTROL_SIZE }}
                 >
                   <ChevronDown className={cn('w-4 h-4 transition-transform duration-300', expanded && 'rotate-180')} />
                 </button>
@@ -990,7 +1092,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             className="shadow-none"
             onClick={(e) => {
               e.currentTarget.blur();
-              saveDetailScroll();
+              saveDetailScroll(mangaUrl);
               window.location.hash = `#/leer?u=${encodeURIComponent(resume.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}${readerBackParam}`;
             }}
             style={{
@@ -1187,7 +1289,15 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         onClose={() => setAniListOpen(false)}
       />
 
-      <div className="border-t border-border pt-3" style={{ marginTop: px(20, scale, 14) }}>
+      {err && (
+        <div className="mt-4 flex flex-wrap items-center gap-3" role="status">
+          <p className="min-w-0 break-words text-sm text-muted-foreground">
+            {d.chapters.length ? 'No se pudo actualizar la lista. Se muestran los capítulos guardados.' : err}
+          </p>
+          <Button size="sm" variant="secondary" onClick={() => setDetailRetry((attempt) => attempt + 1)}>Reintentar</Button>
+        </div>
+      )}
+      {chapters.length > 0 && <div className="border-t border-border pt-3" style={{ marginTop: px(20, scale, 14) }}>
         <div className="mb-2 flex items-center gap-2">
           <button
             type="button"
@@ -1275,7 +1385,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           {chapterGroups.length > 1 && (
             <Dropdown
               scale={scale}
-              value={groupFilter}
+              value={selectedGroup}
               onChange={changeGroupFilter}
               ariaLabel="Filtrar por scanlation"
               options={[
@@ -1286,105 +1396,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             />
           )}
         </div>
-      </div>
+      </div>}
 
-      <div
-        className={chaptersPerRow > 1 ? 'grid gap-2' : 'flex flex-col gap-2'}
-        style={chaptersPerRow > 1 ? { gridTemplateColumns: `repeat(${chaptersPerRow}, minmax(0, 1fr))` } : undefined}
-      >
-        {chapters.slice(0, visibleChapterCount).map((c, i) => {
-          const cap = progress.get(c.url, sourceId);
-          const read = !!cap?.read;
-          const inCourse = !read && cap && Number.isInteger(cap?.page) && cap.page > 0;
-          return (
-            <a
-              key={i}
-              ref={(element) => {
-                if (element) chapterRefs.current.set(c.url, element);
-                else chapterRefs.current.delete(c.url);
-              }}
-              className={cn(
-                'group relative flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-2.5 hover:bg-accent/50 transition-colors',
-                highlightedChapter === c.url && 'cx-chapter-pulse',
-                read && 'opacity-45 hover:opacity-70'
-              )}
-              style={{ minHeight: `${Math.round(52 * scale)}px` }}
-              onClick={(e) => { e.currentTarget.blur(); saveDetailScroll(e); }}
-              href={`#/leer?u=${encodeURIComponent(c.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}${readerBackParam}`}
-            >
-              <span className="flex-1 min-w-0">
-                <span
-                  className="block font-semibold truncate"
-                  style={{ fontSize: `${Math.round(15 * scale)}px` }}
-                >
-                  {c.title}
-                </span>
-                <span
-                  className={cn('block text-muted-foreground', chaptersPerRow === 3 && 'truncate')}
-                  style={{
-                    fontSize: `${Math.round(13 * scale)}px`,
-                    lineHeight: `${Math.round(20 * scale)}px`,
-                    minHeight: `${Math.round(20 * scale)}px`
-                  }}
-                >
-                  {formatChapterDate(c.date)}
-                  {c.group ? ` · ${c.group}` : ''}
-                  {inCourse && Number.isInteger(cap.total) && cap.total > 0
-                    ? ` · pág. ${cap.page + 1}/${cap.total}`
-                    : ''}
-                </span>
-              </span>
-              <span className="shrink-0 flex items-center gap-2">
-                {read ? (
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    title="Marcar como no leído"
-                    aria-label={`Marcar ${c.title} como no leído`}
-                    className="order-2 shrink-0 flex items-center gap-1 text-primary rounded-md hover:bg-accent"
-                    style={{ fontSize: `${Math.round(13 * scale)}px` }}
-                    onClick={(e) => { e.preventDefault(); progress.markUnread(c.url, sourceId, mangaUrl); setProgressTick((t) => t + 1); }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markUnread(c.url, sourceId, mangaUrl); setProgressTick((t) => t + 1); }
-                    }}
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    Leído
-                  </span>
-                ) : (
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    title="Marcar como leído"
-                    aria-label={`Marcar ${c.title} como leído`}
-                    className="order-2 shrink-0 flex items-center gap-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded-md hover:bg-accent hover:text-foreground transition-opacity"
-                    style={{ fontSize: `${Math.round(13 * scale)}px` }}
-                    onClick={(e) => { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0, mangaUrl); setProgressTick((t) => t + 1); }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0, mangaUrl); setProgressTick((t) => t + 1); }
-                    }}
-                  >
-                    <Check className="w-4 h-4" />
-                    Leído
-                  </span>
-                )}
-                <span className="relative order-1">
-                  <button
-                    type="button"
-                    title="Marcar todos los anteriores como leídos"
-                    aria-label={`Marcar anteriores a ${c.title} como leídos`}
-                    className="shrink-0 flex items-center rounded-md text-muted-foreground/70 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-accent hover:text-foreground transition-opacity"
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); openMarkBefore(c); }}
-                  >
-                    <CheckCheck className="w-4 h-4" />
-                    <ChevronDown className="w-3.5 h-3.5 ml-1.5" />
-                  </button>
-                </span>
-              </span>
-            </a>
-          );
-        })}
-      </div>
+      {chapterList}
 
       {visibleChapterCount < chapters.length && (
         <div className="flex justify-center" style={{ paddingTop: px(16, scale, 12) }}>

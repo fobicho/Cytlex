@@ -43,7 +43,7 @@ async function avisarExtensiones() {
 async function countChapters(manga) {
   const sourceId = manga.sourceId || 'leercapitulo';
   const d = await api.detail(manga.url, sourceId, { cacheResult: false });
-  if (!Array.isArray(d?.chapters)) return null;
+  if (!Array.isArray(d?.chapters) || !d.chapters.length) return null;
   chapterIndex.set(manga.url, sourceId, d.chapters.map((chapter) => chapter.url));
   return d.chapters.length;
 }

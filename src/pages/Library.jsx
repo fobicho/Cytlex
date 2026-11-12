@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { RefreshCw, ArrowUpDown } from 'lucide-react';
-import { isUnresolvedMihonSource, lib } from '../lib/library.js';
+import { isMangaCover, isUnresolvedMihonSource, lib } from '../lib/library.js';
 import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
 import VirtualMangaGrid from '../components/VirtualMangaGrid.jsx';
@@ -17,7 +17,7 @@ import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
-import { discardLibraryCover, getLibraryCover, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy, restoreLibraryCover } from '../lib/covers.js';
+import { useLibraryCover } from '../lib/useLibraryCover.js';
 import { libraryScroll, recallCover } from '../lib/searchState.js';
 
 let sessionCategoria = '';
@@ -148,90 +148,15 @@ chapterIndex.subscribe((change) => {
 });
 
 function CachedLibraryCover({ cover, title, className, cachedOnly = false, cachedCover = '' }) {
-  const coverRef = useRef(null);
-  const loadedCoverKey = useRef('');
-  const proxyCover = requiresImageProxy(cover);
-  const localCachedCover = /^(data:|blob:)/i.test(cachedCover) ? cachedCover : '';
-  const [coverState, setCoverState] = useState(() => ({
-    key: cover,
-    src: localCachedCover || getLibraryCover(cover) || (cachedOnly || proxyCover ? '' : cover)
-  }));
-  const src = coverState.key === cover
-    ? coverState.src
-    : localCachedCover || getLibraryCover(cover) || (cachedOnly || proxyCover ? '' : cover);
-
-  useEffect(() => {
-    if (!/^https?:\/\//i.test(cover || '')) return undefined;
-    let alive = true;
-    if (cachedOnly) {
-      const restoreCached = () => restoreLibraryCover(cover).then((local) => local || preloadLibraryCover(cover)).then((local) => {
-        if (alive && local && loadedCoverKey.current !== cover) setCoverState({ key: cover, src: local });
-      });
-      const target = coverRef.current;
-      if (!target || !('IntersectionObserver' in window)) {
-        restoreCached();
-        return () => { alive = false; };
-      }
-      const observer = new IntersectionObserver((entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          observer.disconnect();
-          restoreCached();
-        }
-      }, { root: document.querySelector('main'), rootMargin: '220px 0px' });
-      observer.observe(target);
-      return () => { alive = false; observer.disconnect(); };
-    }
-    if (proxyCover) {
-      restoreLibraryCover(cover).then((cached) => cached || preloadLibraryCover(cover)).then((local) => {
-        if (alive && loadedCoverKey.current !== cover) setCoverState({ key: cover, src: local || cover });
-      });
-      return () => { alive = false; };
-    }
-    const restore = () => restoreLibraryCover(cover).then((local) => {
-      if (alive && loadedCoverKey.current !== cover) setCoverState({ key: cover, src: local || cover });
-    });
-    const target = coverRef.current;
-    if (!target || !('IntersectionObserver' in window)) {
-      restore();
-      return () => { alive = false; };
-    }
-    const root = document.querySelector('main');
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        observer.disconnect();
-        restore();
-      }
-    }, { root, rootMargin: '220px 0px' });
-    observer.observe(target);
-    return () => { alive = false; observer.disconnect(); };
-  }, [cachedOnly, cover, localCachedCover, proxyCover]);
+  const { ref, src, onError, onLoad } = useLibraryCover(cover, {
+    cachedOnly,
+    cachedCover: /^(data:|blob:)/i.test(cachedCover) ? cachedCover : ''
+  });
 
   return (
-    <div ref={coverRef} className="h-full w-full">
+    <div ref={ref} className="h-full w-full">
       {src ? (
-        <img
-          src={src}
-          alt={title}
-          loading="lazy"
-          decoding="sync"
-          referrerPolicy="no-referrer"
-          className={className}
-          onLoad={() => {
-            loadedCoverKey.current = cover;
-            markLibraryCoverLoaded(src);
-            if (!cachedOnly && /^https?:\/\//i.test(cover || '')) preloadLibraryCover(cover);
-          }}
-          onError={() => {
-            if (src !== cover) {
-              discardLibraryCover(cover, src);
-              setCoverState({ key: cover, src: cachedOnly ? '' : cover });
-            } else if (!cachedOnly && /^https?:\/\//i.test(cover || '')) {
-              preloadLibraryCover(cover).then((local) => {
-                if (local) setCoverState({ key: cover, src: local });
-              });
-            }
-          }}
-        />
+        <img src={src} alt={title} loading="lazy" decoding="async" referrerPolicy="no-referrer" className={className} onLoad={onLoad} onError={onError} />
       ) : <div className="h-full w-full bg-muted/40" />}
     </div>
   );
@@ -634,11 +559,12 @@ const Library = memo(function Library({ active = true }) {
                   const sid = sourceIdFor(m);
                   const sourceNotOffered = isUnavailableMangaSource(sid);
                   const adultBlocked = !isExtensionAllowed(extensions.manifest(sid), showAdultExtensions);
-                  const cover = m.cover || recallCover(m.url, sid);
+                  const validCover = isMangaCover(m.cover, m.url);
+                  const cover = (validCover && m.cover) || recallCover(m.url, sid);
                   return (
                     <MangaCard
                       key={`${sid}|${m.url}`}
-                      m={m.cover === cover ? m : { ...m, cover }}
+                      m={validCover && m.cover === cover ? m : { ...m, cover, ...(!validCover && { coverCached: '', coverLocal: '' }) }}
                       sourceId={sid}
                       unavailable={!extensions.isInstalled(sid) || adultBlocked}
                       canOpenUnavailable={sourceNotOffered}
@@ -658,7 +584,8 @@ const Library = memo(function Library({ active = true }) {
               >
                 {categoryItems.map((m) => {
                   const sid = sourceIdFor(m);
-                  const cover = m.cover || recallCover(m.url, sid);
+                  const validCover = isMangaCover(m.cover, m.url);
+                  const cover = (validCover && m.cover) || recallCover(m.url, sid);
                   const unreadCount = unread[unreadKeyFor(m, sid)] ?? unreadCountCache.get(unreadKeyFor(m, sid));
                   const sourceManifest = extensions.manifest(sid);
                   const savedSourceName = String(m.sourceName || '');
@@ -688,7 +615,7 @@ const Library = memo(function Library({ active = true }) {
                           style={{ width: px(68 * coverSize / 160, scale, 56), height: px(102 * coverSize / 160, scale, 82) }}
                         >
                           {cover && (
-                            <CachedLibraryCover cover={cover} title={m.title} className="w-full h-full object-cover bg-black" cachedOnly={unavailable} cachedCover={m.coverCached || m.coverLocal || ''} />
+                            <CachedLibraryCover cover={cover} title={m.title} className="w-full h-full object-cover bg-black" cachedOnly={unavailable} cachedCover={validCover ? m.coverCached || m.coverLocal || '' : ''} />
                           )}
                           {unavailable && (
                             <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 px-0.5 text-center font-semibold leading-tight text-white" style={{ fontSize: px(8, scale, 7) }}>

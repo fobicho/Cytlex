@@ -23,16 +23,26 @@ function webProxyDevMiddleware() {
             for await (const chunk of req) chunks.push(chunk);
           }
           const body = method === 'POST' ? Buffer.concat(chunks) : undefined;
+          const controller = new AbortController();
+          res.once('close', () => controller.abort());
           const request = new Request(new URL(req.url, `http://${req.headers.host || 'localhost'}`), {
             method,
             headers,
+            signal: controller.signal,
             ...(body ? { body } : {})
           });
           const response = await handleWebProxy({ request });
+          if (res.destroyed) {
+            await response.body?.cancel();
+            return;
+          }
           res.statusCode = response.status;
           response.headers.forEach((value, name) => res.setHeader(name, value));
           if (!response.body) return res.end();
-          Readable.fromWeb(response.body).pipe(res);
+          const stream = Readable.fromWeb(response.body);
+          res.once('close', () => stream.destroy());
+          stream.once('error', (error) => res.destroy(error));
+          stream.pipe(res);
         } catch (error) {
           next(error);
         }

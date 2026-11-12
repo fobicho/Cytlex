@@ -179,6 +179,14 @@ function validImageResult(bytes, contentType = '') {
   return { mime, base64: btoa(binary) };
 }
 
+export async function fetchCoverBlob(url, signal) {
+  const response = await browserRequest(url, { signal });
+  const blob = await response.blob();
+  const prefix = new Uint8Array(await blob.slice(0, 512).arrayBuffer());
+  const mime = imageMimeFromBytes(prefix, blob.type);
+  return mime ? blob.slice(0, blob.size, mime) : null;
+}
+
 function imageFromBase64(image) {
   if (!image?.base64) return null;
   try {

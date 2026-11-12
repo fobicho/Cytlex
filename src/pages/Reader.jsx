@@ -374,7 +374,7 @@ export default function Reader() {
     if (zoomResetFrame.current) cancelAnimationFrame(zoomResetFrame.current);
   }, []);
 
-  useEffect(() => () => {
+  useLayoutEffect(() => () => {
     const main = document.querySelector('main');
     if (main) main.scrollTop = 0;
     window.scrollTo(0, 0);

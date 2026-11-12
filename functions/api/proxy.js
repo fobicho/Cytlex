@@ -193,7 +193,7 @@ function isDnsNotFound(error) {
   return (error?.cause?.code || error?.code) === 'ENOTFOUND';
 }
 
-async function fetchTarget(initialTarget, method, headers, body) {
+async function fetchTarget(initialTarget, method, headers, body, signal) {
   let target = initialTarget;
   let currentMethod = method;
   let currentBody = body;
@@ -204,15 +204,20 @@ async function fetchTarget(initialTarget, method, headers, body) {
     let response;
     const retries = target.hostname === 'd33y4i2dmzjqjh.cloudfront.net' ? 4 : UPSTREAM_RETRIES;
     for (let attempt = 0; ; attempt += 1) {
+      signal.throwIfAborted();
+      const firstMangaRequest = attempt === 0 && currentMethod === 'GET'
+        && target.hostname === 'www.leercapitulo.co' && target.pathname.startsWith('/manga/');
+      const attemptSignal = firstMangaRequest ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : signal;
       try {
         response = await fetch(target, {
           method: currentMethod,
           headers: currentHeaders,
           body: currentMethod === 'GET' || currentMethod === 'HEAD' ? undefined : currentBody,
-          redirect: 'manual'
+          redirect: 'manual',
+          signal: attemptSignal
         });
       } catch (error) {
-        if (isDnsNotFound(error) || !retryableMethod || attempt >= retries) throw error;
+        if (signal.aborted || isDnsNotFound(error) || !retryableMethod || attempt >= retries) throw error;
         await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
         continue;
       }
@@ -260,8 +265,11 @@ export async function onRequest(context) {
     if (body.byteLength > 1_000_000) return errorResponse('Request body is too large', 413);
   }
 
+  const deadline = new AbortController();
+  const timeout = setTimeout(() => deadline.abort(), 12000);
+  const signal = AbortSignal.any([request.signal, deadline.signal]);
   try {
-    const upstream = await fetchTarget(target, method, forwardedHeaders(request, target), body);
+    const upstream = await fetchTarget(target, method, forwardedHeaders(request, target), body, signal);
     const headers = new Headers({
       'cache-control': 'no-store',
       'x-cytlex-proxy': '1'
@@ -280,6 +288,9 @@ export async function onRequest(context) {
       headers
     });
   } catch (error) {
+    if (deadline.signal.aborted) return errorResponse('The source took too long to respond', 504, false, 'timeout');
     return errorResponse('The source could not be reached', 502, false, isDnsNotFound(error) ? 'dns-not-found' : '');
+  } finally {
+    clearTimeout(timeout);
   }
 }

@@ -43,6 +43,24 @@ export const libraryKey = (url, sourceId = 'leercapitulo') => {
   return `${sourceId}|${identity.startsWith('mangadex.org/title/') ? identity : sameUrlKey(url)}`;
 };
 export const libraryIdentityKey = (url) => `url|${libraryUrlKey(url)}`;
+export const mangaSourceUrl = (url, sourceId) => {
+  if (sourceId !== 'mangadex' && sourceId !== 'mangadex-en') return url;
+  const identity = libraryUrlKey(url);
+  return identity.startsWith('mangadex.org/title/') ? `https://${identity}` : url;
+};
+export function isMangaCover(cover, mangaUrl) {
+  const identity = libraryUrlKey(mangaUrl);
+  if (!identity.startsWith('mangadex.org/title/')) return true;
+  try {
+    const image = new URL(cover);
+    const coverId = image.hostname === 'uploads.mangadex.org'
+      ? image.pathname.match(/^\/covers\/([\da-f-]{36})\//i)?.[1]
+      : '';
+    return !coverId || coverId.toLowerCase() === identity.split('/').at(-1);
+  } catch {
+    return true;
+  }
+}
 export const isLibraryManga = (manga, sourceId, keys) =>
   keys.has(libraryKey(manga.url, sourceId))
   || keys.has(libraryIdentityKey(manga.url));

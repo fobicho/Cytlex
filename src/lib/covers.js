@@ -1,4 +1,4 @@
-import { fetchImage } from './browserHttp.js';
+import { browserImageUrl, fetchCoverBlob, fetchImage } from './browserHttp.js';
 
 const THUMB_WIDTH = 240;
 const SEARCH_THUMB_WIDTH = 320;
@@ -20,6 +20,8 @@ const libraryCoverCache = new Map();
 const loadedLibraryCovers = new Map();
 const libraryCoverVersions = new Map();
 const libraryCoverWaiters = [];
+const failedLibraryCovers = new Map();
+const failedCoverHosts = new Map();
 let libraryCoverDbPromise;
 let searchCoverGeneration = 0;
 let activeSearchCoverLoads = 0;
@@ -133,6 +135,8 @@ export async function clearPersistentLibraryCoverCache() {
   libraryCoverCache.clear();
   loadedLibraryCovers.clear();
   libraryCoverVersions.clear();
+  failedLibraryCovers.clear();
+  failedCoverHosts.clear();
 
   if (!globalThis.indexedDB) return;
   await new Promise((resolve, reject) => {
@@ -255,9 +259,11 @@ export function getLibraryCover(url) {
   return cached;
 }
 
-export async function preloadLibraryCover(url) {
+export async function preloadLibraryCover(url, { web = false } = {}) {
   if (!url || typeof window === 'undefined') return '';
-  if (!window.cytlex?.fetchImage && !/^(data:|blob:)/i.test(url)) return '';
+  const browserProxy = web && browserImageUrl(url) !== url;
+  if (!browserProxy && !window.cytlex?.fetchImage && !/^(data:|blob:)/i.test(url)) return '';
+  const host = browserProxy ? new URL(url).hostname : '';
   const cached = libraryCoverCache.get(url);
   if (cached) {
     libraryCoverCache.delete(url);
@@ -268,6 +274,7 @@ export async function preloadLibraryCover(url) {
   let pending;
   pending = (async () => {
     let acquired = false;
+    let originalObjectUrl;
     const version = libraryCoverVersions.get(url) || 0;
     try {
       const persisted = await readPersistedLibraryCover(url);
@@ -275,14 +282,41 @@ export async function preloadLibraryCover(url) {
       await acquireLibraryCoverSlot();
       acquired = true;
       let original = url;
-      if (!url.startsWith('data:')) {
+      if (browserProxy) {
+        const now = Date.now();
+        if ((failedLibraryCovers.get(url) || 0) > now || (failedCoverHosts.get(host)?.until || 0) > now) return '';
+        const signal = AbortSignal.timeout(6000);
+        try {
+          const image = await fetchCoverBlob(url, signal);
+          if (!image) throw new Error('Invalid image');
+          failedLibraryCovers.delete(url);
+          originalObjectUrl = URL.createObjectURL(image);
+          original = originalObjectUrl;
+        } catch (error) {
+          failedLibraryCovers.delete(url);
+          failedLibraryCovers.set(url, Date.now() + 60000);
+          if (failedLibraryCovers.size > MAX_LIBRARY_COVERS) failedLibraryCovers.delete(failedLibraryCovers.keys().next().value);
+          const dnsFailure = /\bENOTFOUND\b/.test(error.message);
+          if (dnsFailure || signal.aborted || /\bHTTP (502|503|504)\b/.test(error.message)) {
+            const at = Date.now();
+            const previous = failedCoverHosts.get(host);
+            const count = previous && at - previous.at < 15000 ? previous.count + 1 : 1;
+            failedCoverHosts.delete(host);
+            failedCoverHosts.set(host, { at, count, until: dnsFailure || count >= 2 ? at + 15000 : 0 });
+            if (failedCoverHosts.size > MAX_LIBRARY_COVERS) failedCoverHosts.delete(failedCoverHosts.keys().next().value);
+          }
+          return '';
+        }
+      } else if (!/^(data:|blob:)/i.test(url)) {
         const fetched = await fetchImage(url);
         if (!fetched?.base64) return '';
         original = `data:${fetched.mime};base64,${fetched.base64}`;
       }
       const blob = await makeCoverThumbBlob(original);
-      if (!blob || blob.size > MAX_DATAURL) return '';
-      const objectUrl = URL.createObjectURL(blob);
+      const thumbnail = blob && blob.size <= MAX_DATAURL ? blob : null;
+      if (!thumbnail && !originalObjectUrl) return '';
+      const objectUrl = thumbnail ? URL.createObjectURL(thumbnail) : originalObjectUrl;
+      if (!thumbnail) originalObjectUrl = undefined;
       const decoded = await decodeCover(objectUrl);
       if (!decoded) {
         URL.revokeObjectURL(objectUrl);
@@ -301,11 +335,12 @@ export async function preloadLibraryCover(url) {
       }
       libraryCoverCache.set(url, objectUrl);
       pruneLibraryCoverCache();
-      persistLibraryCover(url, blob, version);
+      if (thumbnail) persistLibraryCover(url, thumbnail, version);
       return objectUrl;
     } catch {
       return '';
     } finally {
+      if (originalObjectUrl) URL.revokeObjectURL(originalObjectUrl);
       if (acquired) releaseLibraryCoverSlot();
       if (libraryCoverCache.get(url) === pending) libraryCoverCache.delete(url);
     }

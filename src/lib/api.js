@@ -1,5 +1,6 @@
 import { extensions, isExtensionAllowed } from './extensions.js';
 import { settings } from './settings.js';
+import { mangaSourceUrl } from './library.js';
 
 function bridge() {
   if (typeof window !== 'undefined' && window.cytlex) return window.cytlex;
@@ -26,6 +27,7 @@ async function resolveSource(sourceId) {
 
 const DETAIL_TTL_MS = 10 * 60 * 1000;
 const DETAIL_CACHE_MAX = 40;
+const DETAIL_TIMEOUT_MS = 16000;
 const DETAIL_NOT_FOUND_TTL_MS = 60 * 1000;
 const CHAPTER_TTL_MS = 2 * 60 * 1000;
 const CHAPTER_CACHE_MAX = 40;
@@ -39,6 +41,20 @@ const catalogFiltersCache = new Map();
 const detailKey = (url, sourceId) => `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}|${url}`;
 const chapterKey = (url, sourceId) => `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}|${url}`;
 const titleKey = (value) => String(value || '').normalize('NFKC').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+
+async function withDetailDeadline(request) {
+  let timer;
+  try {
+    return await Promise.race([
+      request,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('La fuente tardó demasiado en responder.')), DETAIL_TIMEOUT_MS);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function sameAuthor(expected, actual) {
   const expectedNames = String(expected || '').split(/[,;|&]|\s+y\s+/i).map((name) => name.trim()).filter(Boolean);
@@ -111,11 +127,7 @@ function catalogFiltersFor(sourceId, src) {
 
 const freshEntry = (key) => {
   const hit = detailCache.get(key);
-  if (!hit) return null;
-  if (Date.now() - hit.at > DETAIL_TTL_MS) {
-    detailCache.delete(key);
-    return null;
-  }
+  if (!hit || Date.now() - hit.at > DETAIL_TTL_MS) return null;
   detailCache.delete(key);
   detailCache.set(key, hit);
   return hit.value;
@@ -132,7 +144,7 @@ const pruneCache = (cache, ttl, max) => {
 const storeDetail = (key, value) => {
   detailCache.delete(key);
   detailCache.set(key, { at: Date.now(), value });
-  pruneCache(detailCache, DETAIL_TTL_MS, DETAIL_CACHE_MAX);
+  while (detailCache.size > DETAIL_CACHE_MAX) detailCache.delete(detailCache.keys().next().value);
 };
 
 export const api = {
@@ -167,15 +179,15 @@ export const api = {
     if (failed) detailNotFound.delete(key);
     let request = detailRequests.get(key);
     if (!request) {
-      request = (async () => {
+      request = withDetailDeadline((async () => {
         const src = await resolveSource(sourceId);
-        return src.detail(url);
-      })();
+        return src.detail(mangaSourceUrl(url, sourceId));
+      })());
       detailRequests.set(key, request);
     }
     try {
       const result = await request;
-      if (cacheResult) storeDetail(key, result);
+      if (cacheResult && result?.chapters?.length) storeDetail(key, result);
       return result;
     } catch (error) {
       if (/\bHTTP 404\b/.test(String(error?.message || error))) {
@@ -190,12 +202,12 @@ export const api = {
 
   async refreshDetail(url, sourceId) {
     const src = await resolveSource(sourceId);
-    return src.detail(url);
+    return src.detail(mangaSourceUrl(url, sourceId));
   },
 
   async findManga({ url, title, author = '' }, sourceId) {
     const src = await resolveSource(sourceId);
-    return findManga(src, url, title, author);
+    return withDetailDeadline(findManga(src, url, title, author));
   },
 
   async chapter(url, sourceId, { fresh = false } = {}) {

@@ -212,13 +212,16 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
 
   async function detail(url) {
     const manga = mangaData(url);
-    const doc = parse(await fetchText(manga.url));
+    const [html, chaptersData] = await Promise.all([
+      fetchText(manga.url),
+      chapterList(manga.id)
+    ]);
+    const doc = parse(html);
     const title = text(doc, 'h1') || clean(doc.querySelector('meta[property="og:title"]')?.getAttribute('content')) || clean(doc.title);
     const cover = coverFrom(doc);
     const synopsis = synopsisFrom(doc, title);
     const genres = [...doc.querySelectorAll('a[href*="genre"], a[href*="genero"], [class*="genre"] a, [class*="genero"] a')]
       .map((element) => clean(element.textContent)).filter(Boolean);
-    const chaptersData = await chapterList(manga.id);
     const chapters = chaptersData
       .sort((a, b) => Number(a.number) - Number(b.number))
       .map((item) => ({

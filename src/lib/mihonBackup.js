@@ -1,4 +1,6 @@
 
+import { isMangaCover, libraryIdentityKey } from './library.js';
+
 const FAVORITES_KEY = 'cytlex:favs';
 const CATEGORIES_KEY = 'cytlex:cats:v1';
 const MAX_EXPANDED_SIZE = 250 * 1024 * 1024;
@@ -280,6 +282,7 @@ export async function previewMihonBackup(input, installedSources, availableExten
     const source = sources.find((item) => item.id === manga.source);
     const sourceId = manifest?.id || `mihon-${manga.source}`;
     const url = resolveUrl(manga.url, manifest);
+    const cover = resolveUrl(manga.cover, manifest, url);
     const chapterProgress = manga.chapters.map((chapter) => ({
       url: resolveUrl(chapter.url, manifest, url),
       name: chapter.name,
@@ -298,7 +301,7 @@ export async function previewMihonBackup(input, installedSources, availableExten
         description: manga.description,
         genres: manga.genres,
         status: manga.status,
-        cover: resolveUrl(manga.cover, manifest, url),
+        cover: isMangaCover(cover, url) ? cover : '',
         chapterTotal: manga.chapters.length,
         chapterReadCount: manga.chapters.filter((chapter) => chapter.read).length,
         cats: manga.categoryIds.map((index) => categoryByIndex.get(String(index))).filter(Boolean),
@@ -346,11 +349,16 @@ const mangaWorkKey = (manga) => {
 const mangaTitleKey = (manga) => normalizeMangaName(manga.title);
 
 function mergeDuplicateFavorite(kept, duplicate) {
+  const sameEntry = kept.sourceId === duplicate.sourceId && libraryIdentityKey(kept.url) === libraryIdentityKey(duplicate.url);
+  const hasKeptCover = isMangaCover(kept.cover, kept.url);
+  const cover = (hasKeptCover && kept.cover) || (sameEntry && isMangaCover(duplicate.cover, kept.url) && duplicate.cover) || '';
+  const coverOwner = cover === kept.cover && hasKeptCover ? kept : sameEntry && cover ? duplicate : null;
   return {
     ...duplicate,
     ...kept,
-    cover: kept.cover || duplicate.cover,
-    coverLocal: kept.coverLocal || duplicate.coverLocal || '',
+    cover,
+    coverLocal: coverOwner?.coverLocal || '',
+    coverCached: coverOwner?.coverCached || '',
     chapterTotal: Math.max(Number(kept.chapterTotal) || 0, Number(duplicate.chapterTotal) || 0),
     mihonProgress: mergeChapterProgress(kept.mihonProgress, duplicate.mihonProgress),
     cats: [...new Set([...(kept.cats || []), ...(duplicate.cats || [])])]
@@ -547,6 +555,11 @@ export function importMihonBackup(candidate) {
       added += 1;
     } else {
       const existing = favorites[index];
+      const url = matchedByWork ? existing.url : manga.url;
+      const sameEntry = libraryIdentityKey(existing.url) === libraryIdentityKey(manga.url);
+      const keepExistingCover = isMangaCover(existing.cover, url) && (matchedByWork || sameEntry);
+      const incomingCover = !matchedByWork || sameEntry ? manga.cover : '';
+      const cover = (keepExistingCover && existing.cover) || incomingCover || '';
       const existingCats = Array.isArray(existing.cats) ? existing.cats : [];
       const keptCategories = existingCats.filter((id) => !previousMihonCategoryIds.has(id)
         && !(defaultCategoryId === id && manga.cats.length));
@@ -556,16 +569,16 @@ export function importMihonBackup(candidate) {
         sourceId: matchedByWork ? existing.sourceId : manga.sourceId,
         sourceName: matchedByWork || !isPlaceholderSourceName(existing.sourceName) ? existing.sourceName : manga.sourceName,
         sourceIcon: existing.sourceIcon || manga.sourceIcon,
-        url: matchedByWork ? existing.url : manga.url,
+        url,
         title: existing.title || manga.title,
         author: existing.author || manga.author,
         description: existing.description || manga.description,
         genres: existing.genres?.length ? existing.genres : manga.genres,
-        cover: matchedByWork ? existing.cover || manga.cover : manga.cover || existing.cover,
+        cover,
         chapterTotal: Math.max(Number(existing.chapterTotal) || 0, Number(manga.chapterTotal) || 0),
         chapterReadCount: Math.max(Number(existing.chapterReadCount) || 0, Number(manga.chapterReadCount) || 0),
-        coverLocal: matchedByWork ? existing.coverLocal || '' : manga.cover ? '' : existing.coverLocal || '',
-        coverCached: matchedByWork ? existing.coverCached || '' : manga.cover ? '' : existing.coverCached || '',
+        coverLocal: keepExistingCover && cover === existing.cover ? existing.coverLocal || '' : '',
+        coverCached: keepExistingCover && cover === existing.cover ? existing.coverCached || '' : '',
         cats: [...new Set([...keptCategories, ...manga.cats])]
       };
       byManga.set(key, index);
