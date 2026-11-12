@@ -6,7 +6,7 @@ import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
 import VirtualMangaGrid from '../components/VirtualMangaGrid.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
-import { extensions, isExtensionAllowed } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed, isRetiredExtension } from '../lib/extensions.js';
 import { checkLibrary } from '../lib/notify.js';
 import { progress } from '../lib/progress.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
@@ -621,6 +621,7 @@ const Library = memo(function Library({ active = true }) {
                 responsiveCards
                 renderCard={(m, cardWidth) => {
                   const sid = sourceIdFor(m);
+                  const retired = isRetiredExtension(sid);
                   const adultBlocked = !isExtensionAllowed(extensions.manifest(sid), showAdultExtensions);
                   const cover = m.cover || recallCover(m.url, sid);
                   return (
@@ -629,7 +630,8 @@ const Library = memo(function Library({ active = true }) {
                       m={m.cover === cover ? m : { ...m, cover }}
                       sourceId={sid}
                       unavailable={!extensions.isInstalled(sid) || adultBlocked}
-                      unavailableLabel={adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}
+                      canOpenUnavailable={retired}
+                      unavailableLabel={retired ? 'Fuente retirada' : adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}
                       minimal
                       from="biblioteca"
                       coverSize={cardWidth}
@@ -660,13 +662,15 @@ const Library = memo(function Library({ active = true }) {
                   };
                   const adultBlocked = !isExtensionAllowed(sourceManifest, showAdultExtensions);
                   const unavailable = !extensions.isInstalled(sid) || adultBlocked;
+                  const retired = isRetiredExtension(sid);
+                  const linkDisabled = unavailable && !retired;
                   return (
                     <div key={`${sid}|${m.url}`} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5">
                       <a
                         href={`#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sid)}&from=biblioteca`}
-                        className={cn('flex items-end gap-3 flex-1 min-w-0', unavailable && 'pointer-events-none opacity-60')}
-                        aria-disabled={unavailable}
-                        tabIndex={unavailable ? -1 : undefined}
+                        className={cn('flex items-end gap-3 flex-1 min-w-0', unavailable && 'opacity-60', linkDisabled && 'pointer-events-none')}
+                        aria-disabled={linkDisabled}
+                        tabIndex={linkDisabled ? -1 : undefined}
                       >
                         <span
                           className="relative rounded-lg shrink-0 overflow-hidden bg-muted"
@@ -677,7 +681,7 @@ const Library = memo(function Library({ active = true }) {
                           )}
                           {unavailable && (
                             <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 px-0.5 text-center font-semibold leading-tight text-white" style={{ fontSize: px(8, scale, 7) }}>
-                              <span>{adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}</span>
+                              <span>{retired ? 'Fuente retirada' : adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}</span>
                               <span className="flex max-w-full min-w-0 items-center rounded-full bg-black/80 py-0.5 pl-0.5 pr-1 text-left" style={{ gap: px(4, scale, 3) }} title={sourceInfo.name}>
                                 <SourceBadge m={sourceInfo} className="rounded-full bg-white shadow-sm" style={{ width: px(18, scale, 16), height: px(18, scale, 16), fontSize: px(8, scale, 7) }} />
                                 <span className="min-w-0 truncate" style={{ fontSize: px(8, scale, 7) }}>{sourceInfo.name}</span>

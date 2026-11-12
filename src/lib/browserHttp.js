@@ -32,11 +32,11 @@ export function browserImageUrl(url, referer = '') {
     const onfCdn = hostname === 'd33y4i2dmzjqjh.cloudfront.net';
     const mangaDexImage = hostname === 'uploads.mangadex.org' || hostname.endsWith('.mangadex.network');
     const sourceImage = hostname === 'images.mangalect.org' || hostname === 'mangalect.org'
-      || hostname === 'imagesolymp.xyz' || hostname === 'olympusxyz.com' || hostname.endsWith('.olympusxyz.com')
+      || hostname === 'imagesolymp.xyz' || hostname === 'media.imagesolymp.xyz'
+      || hostname === 'olympusxyz.com' || hostname.endsWith('.olympusxyz.com')
       || hostname === 'ntr-files.online' || hostname.endsWith('.ntr-files.online')
       || hostname === 'www.leercapitulo.co' || hostname === 'leercapitulo.co' || hostname.endsWith('.t34798ndc.com')
-      || hostname === 'zonatmo.org' || hostname.endsWith('.zonatmo.org')
-      || hostname === 'plotnofansub.com' || hostname.endsWith('.plotnofansub.com');
+      || hostname === 'zonatmo.org' || hostname.endsWith('.zonatmo.org');
     if (hostname === 'intomanga.com' || hostname.endsWith('.intomanga.com') || onfCdn || mangaDexImage || sourceImage || (hostname === 'onfmangas.com' && referer)) {
       const proxy = new URL(proxyUrl(url));
       if (referer || onfCdn) proxy.searchParams.set('referer', referer || 'https://onfmangas.com/');

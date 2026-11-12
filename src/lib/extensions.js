@@ -8,6 +8,9 @@ const KEY = 'cytlex:extensions:v1';
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
 const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
 const isPlaceholderExtension = (record) => /^mihon-\d+$/i.test(String(record?.manifest?.id || ''));
+export const isRetiredExtension = (id) => id === 'plottwistnofansub';
+const keepInstalledExtension = (record) => record?.manifest?.type !== 'builtin'
+  && !isPlaceholderExtension(record) && !isRetiredExtension(record?.manifest?.id);
 let recordsCache = null;
 
 function freshIndexUrl(indexUrl) {
@@ -35,7 +38,7 @@ function parseRepositoryIndex(text, indexUrl) {
     throw new Error(`No se pudo leer el índice ${displayUrl}. Respuesta cerca del error: “${excerpt}” (${error.message})`);
   }
   if (!Array.isArray(list)) throw new Error('El índice no es un array JSON');
-  return list;
+  return list.filter((manifest) => !isRetiredExtension(manifest?.id));
 }
 
 export function isAdultExtension(source) {
@@ -54,14 +57,14 @@ const read = () => {
   if (recordsCache) return recordsCache;
   let list = [];
   try { list = JSON.parse(localStorage.getItem(KEY)) || []; } catch { list = []; }
-  recordsCache = list.filter((r) => r?.manifest?.type !== 'builtin' && !isPlaceholderExtension(r));
+  recordsCache = list.filter(keepInstalledExtension);
   if (recordsCache.length !== list.length) {
     try { localStorage.setItem(KEY, JSON.stringify(recordsCache)); } catch {}
   }
   return recordsCache;
 };
 const write = (v) => {
-  recordsCache = v.filter((r) => r?.manifest?.type !== 'builtin' && !isPlaceholderExtension(r));
+  recordsCache = v.filter(keepInstalledExtension);
   localStorage.setItem(KEY, JSON.stringify(recordsCache));
 };
 
@@ -305,6 +308,7 @@ export const extensions = {
     return out;
   },
   manifest(id) {
+    if (isRetiredExtension(id)) return { id, name: 'Plot Twist No Fansub', contentWarning: 'MIXED' };
     const rec = findRecord(id);
     if (!rec) {
       const fallback = defaultExtensionIndex.find((manifest) => manifest.id === id
@@ -459,6 +463,7 @@ export const extensions = {
   },
 
   async install(manifest, indexUrl) {
+    if (isRetiredExtension(manifest.id)) throw new Error('Esta extensión fue retirada.');
     let code = null;
     if (manifest.type === 'module') {
       if (!manifest.main) throw new Error('La extensión no define "main"');

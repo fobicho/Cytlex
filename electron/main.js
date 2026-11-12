@@ -152,7 +152,6 @@ const REFERER_RULES = [
   { hosts: ['imagesolymp.xyz', 'olympusxyz.com'], referer: 'https://olympusxyz.com/' },
   { hosts: ['zonatmo.org'], referer: 'https://zonatmo.org/' },
   { hosts: ['ntr-files.online'], referer: 'https://manga-oni.com/' },
-  { hosts: ['plotnofansub.com'], referer: 'https://plotnofansub.com/' },
   { hosts: ['inmanga.com', 'intomanga.com', 'pack-yak.intomanga.com'], referer: 'https://inmanga.com/' }
 ];
 
@@ -716,18 +715,13 @@ ipcMain.handle('http:get', async (_e, url, requestId, options = {}) => {
   const parsed = validateUrl(url);
   const onf = parsed.origin === 'https://onfmangas.com';
   const mangaDexApi = parsed.hostname.toLowerCase() === 'api.mangadex.org';
-  const plotTwist = parsed.hostname.toLowerCase() === 'plotnofansub.com'
-    || parsed.hostname.toLowerCase().endsWith('.plotnofansub.com');
   const headers = {
     'User-Agent': mangaDexApi
       ? 'Cytlex/0.1.0 (+https://github.com/fobicho/Cytlex)'
-      : plotTwist
-        ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-        : onf
-          ? `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome || '131.0.0.0'} Safari/537.36`
+      : onf
+        ? `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome || '131.0.0.0'} Safari/537.36`
         : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
     ...(mangaDexApi ? { Accept: 'application/json' } : {}),
-    ...(plotTwist ? { Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'Accept-Language': 'es-419,es;q=0.9,en;q=0.8' } : {}),
     ...(onf ? {
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
       'Accept-Language': 'es-419,es;q=0.9,en;q=0.8',

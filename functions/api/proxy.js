@@ -5,20 +5,18 @@ const ALLOWED_HOSTS = new Set([
   'fobicho.github.io',
   'images.mangalect.org',
   'imagesolymp.xyz',
-  'imagenes.plotnofansub.com',
   'inmanga.com',
   'intomanga.com',
   'jumpg-assets.tokyo-cdn.com',
   'manga-oni.com',
   'mangalect.org',
   'mangadex.org',
+  'media.imagesolymp.xyz',
   'olympusxyz.com',
   'onfmangas.com',
   'panel.olympusxyz.com',
   'pack-yak.intomanga.com',
-  'plotnofansub.com',
   'uploads.mangadex.org',
-  'www.plotnofansub.com',
   'www.leercapitulo.co',
   'zonatmo.org'
 ]);
@@ -108,7 +106,6 @@ function forwardedHeaders(request, target) {
   const headers = new Headers();
   const isMangaDexApi = target.hostname === 'api.mangadex.org';
   const isMangaDexImage = target.hostname === 'uploads.mangadex.org' || target.hostname.endsWith('.mangadex.network');
-  const isPlotTwist = target.hostname === 'plotnofansub.com' || target.hostname.endsWith('.plotnofansub.com');
   for (const name of ['accept', 'content-type', 'x-requested-with', 'user-agent', 'accept-language']) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
@@ -182,11 +179,6 @@ function forwardedHeaders(request, target) {
       headers.set('sec-fetch-mode', 'navigate');
       headers.set('upgrade-insecure-requests', '1');
     }
-  }
-  if (isPlotTwist) {
-    headers.set('referer', 'https://plotnofansub.com/');
-    headers.set('accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8');
-    if (!headers.has('accept-language')) headers.set('accept-language', 'es-419,es;q=0.9,en;q=0.8');
   }
   if (target.hostname === 'd33y4i2dmzjqjh.cloudfront.net') {
     headers.set('referer', onfReferer(request));

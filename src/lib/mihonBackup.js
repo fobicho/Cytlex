@@ -1,4 +1,3 @@
-import defaultExtensionIndex from '../../docs/index.json' with { type: 'json' };
 
 const FAVORITES_KEY = 'cytlex:favs';
 const CATEGORIES_KEY = 'cytlex:cats:v1';
@@ -195,7 +194,7 @@ function normalizeMangaName(value) {
 function sourceLookup(installedSources, mihonSources, availableExtensions) {
   const catalog = installedSources.map(({ manifest }) => ({ manifest, installed: true }));
   const knownIds = new Set(catalog.map(({ manifest }) => manifest.id));
-  for (const extension of [...defaultExtensionIndex, ...availableExtensions]) {
+  for (const extension of availableExtensions) {
     const subs = extension.config?.sources;
     const manifests = Array.isArray(subs) && subs.length
       ? subs.map((source) => ({ ...extension, ...source }))
@@ -380,26 +379,8 @@ function mergeChapterProgress(...lists) {
   return [...merged.values()];
 }
 
-export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
-  const excludedKeys = new Set();
-  const excludedUrls = new Set();
-  const excludedIdentities = new Set();
-  for (const entry of excludedEntries) {
-    const sources = [[entry.manga?.sourceId, entry.manga?.url], [entry.legacySourceId, entry.legacyUrl]];
-    for (const [sourceId, url] of sources) {
-      if (url) excludedUrls.add(urlKey(url));
-      if (sourceId && url) {
-        excludedKeys.add(`${sourceId}|${urlKey(url)}`);
-        excludedKeys.add(`${sourceId}|${pathKey(url)}`);
-      }
-    }
-    const identityKey = mangaIdentityKey(entry.manga || {});
-    if (identityKey) excludedIdentities.add(identityKey);
-  }
-  const importableEntries = candidate.entries.filter((entry) => (
-    !excludedKeys.has(`${entry.manga?.sourceId || ''}|${urlKey(entry.manga?.url)}`)
-    && !excludedIdentities.has(mangaIdentityKey(entry.manga || {}))
-  ));
+export function importMihonBackup(candidate, { matchByWork = true } = {}) {
+  const importableEntries = candidate.entries;
   const previous = Object.fromEntries([FAVORITES_KEY, CATEGORIES_KEY].map((key) => [key, localStorage.getItem(key)]));
   const currentCategories = readStored(CATEGORIES_KEY, [{ id: 'todos', name: 'Todos' }]);
   const categories = Array.isArray(currentCategories) && currentCategories.length ? currentCategories : [{ id: 'todos', name: 'Todos' }];
@@ -424,18 +405,13 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
     categories.splice(0, categories.length, ...before, ...importedCategories, ...after);
   }
   const currentFavorites = readStored(FAVORITES_KEY, []);
-  const storedFavorites = (Array.isArray(currentFavorites) ? currentFavorites : []).filter((manga) => (
-    !excludedUrls.has(urlKey(manga.url))
-    && !excludedKeys.has(`${manga.sourceId || 'leercapitulo'}|${urlKey(manga.url)}`)
-    && !excludedKeys.has(`${manga.sourceId || 'leercapitulo'}|${pathKey(manga.url)}`)
-    && !excludedIdentities.has(mangaIdentityKey(manga))
-  ));
-  const incomingIdentityKeys = new Set(importableEntries
+  const storedFavorites = Array.isArray(currentFavorites) ? currentFavorites : [];
+  const incomingIdentityKeys = new Set((matchByWork ? importableEntries : [])
     .map((entry) => mangaIdentityKey(entry.manga))
     .filter(Boolean));
   const incomingWorkSources = new Map();
   const incomingTitleSources = new Map();
-  importableEntries.forEach(({ manga }) => {
+  (matchByWork ? importableEntries : []).forEach(({ manga }) => {
     const workKey = mangaWorkKey(manga);
     if (workKey) {
       const sourceIds = incomingWorkSources.get(workKey) || new Set();
@@ -543,16 +519,16 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
     manga.cats = [...new Set(manga.cats.map((name) => categoryIds.get(normalizeName(name))).filter(Boolean))];
     if (!manga.cats.length && categories[0]?.id) manga.cats = [categories[0].id];
     const key = `${manga.sourceId}|${urlKey(manga.url)}`;
-    const legacyKey = `${entry.legacySourceId}|${pathKey(entry.legacyUrl)}`;
+    const legacyKey = entry.legacySourceId && entry.legacyUrl ? `${entry.legacySourceId}|${pathKey(entry.legacyUrl)}` : '';
     const originalKey = entry.originalUrl ? `${manga.sourceId}|${urlKey(entry.originalUrl)}` : '';
     const pathMatchKey = `${manga.sourceId}|${pathKey(manga.url)}`;
-    const identityKey = mangaIdentityKey(manga);
-    const workKey = mangaWorkKey(manga);
-    const titleKey = mangaTitleKey(manga);
+    const identityKey = matchByWork ? mangaIdentityKey(manga) : '';
+    const workKey = matchByWork ? mangaWorkKey(manga) : '';
+    const titleKey = matchByWork ? mangaTitleKey(manga) : '';
     const index = byManga.get(key)
       ?? (originalKey ? byManga.get(originalKey) : undefined)
       ?? byManga.get(pathMatchKey)
-      ?? byManga.get(legacyKey)
+      ?? (legacyKey ? byManga.get(legacyKey) : undefined)
       ?? (identityKey ? byManga.get(`identity|${identityKey}`) : undefined)
       ?? (workKey ? byManga.get(`work|${workKey}`) : undefined)
       ?? (titleKey ? byManga.get(`title|${titleKey}`) : undefined);
@@ -570,7 +546,7 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
       if (workKey) byManga.set(`work|${workKey}`, favorites.length);
       if (titleKey) byManga.set(`title|${titleKey}`, favorites.length);
       if (originalKey) byManga.set(originalKey, favorites.length);
-      byManga.set(legacyKey, favorites.length);
+      if (legacyKey) byManga.set(legacyKey, favorites.length);
       favorites.push(manga);
       added += 1;
     } else {
@@ -602,7 +578,7 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
       if (workKey) byManga.set(`work|${workKey}`, index);
       if (titleKey && incomingTitleSources.has(titleKey)) byManga.set(`title|${titleKey}`, index);
       if (originalKey) byManga.set(originalKey, index);
-      byManga.set(legacyKey, index);
+      if (legacyKey) byManga.set(legacyKey, index);
       updated += 1;
     }
     const favorite = favorites[index === undefined ? favorites.length - 1 : index];
@@ -628,5 +604,5 @@ export function importMihonBackup(candidate, { excludedEntries = [] } = {}) {
     }
     throw error;
   }
-  return { added, updated, excluded: candidate.entries.length - importableEntries.length };
+  return { added, updated };
 }

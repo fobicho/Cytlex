@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Keyboard, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, X, Database, Download, Upload, CircleHelp, Settings as SettingsIcon } from 'lucide-react';
 import { CONTENT_WARNING_RATINGS, resolveMode, settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
@@ -14,6 +14,7 @@ import { chapterIndex } from '../lib/chapterIndex.js';
 import { compressBackup, createBackup, parseBackup, readBackupFile, restoreBackup } from '../lib/backup.js';
 import { importMihonBackup, previewMihonBackup } from '../lib/mihonBackup.js';
 import { reconcileMihonProgress } from '../lib/mihonProgress.js';
+import { startMihonMigration } from '../lib/mihonMigration.js';
 import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { api } from '../lib/api.js';
 import { Button } from '../components/ui/button.jsx';
@@ -39,20 +40,8 @@ function throwIfAborted(signal) {
   throw error;
 }
 
-async function refreshImportedMihonCovers(candidate, excludedEntries, signal) {
-  const excluded = new Set(excludedEntries.map((entry) => `${entry.manga?.sourceId || ''}|${entry.manga?.url || ''}`));
-  const entries = candidate.entries.filter(({ manga }) => {
-    if (excluded.has(`${manga?.sourceId || ''}|${manga?.url || ''}`)) return false;
-    const sourceId = extensions.resolveInstalledSource(manga?.sourceId, manga?.sourceName, manga?.url) || manga?.sourceId;
-    if (!extensions.isInstalled(sourceId)) return false;
-    if (sourceId !== manga.sourceId) {
-      manga.sourceId = sourceId;
-      const manifest = extensions.manifest(sourceId);
-      manga.sourceName = manifest?.name || manga.sourceName;
-      manga.sourceIcon = manifest?.icon || manga.sourceIcon;
-    }
-    return true;
-  });
+async function refreshImportedMihonCovers(candidate, signal) {
+  const entries = candidate.entries.filter(({ manga }) => extensions.isInstalled(manga.sourceId));
   let cursor = 0;
   await Promise.all(Array.from({ length: Math.min(4, entries.length) }, async () => {
     while (cursor < entries.length && !signal?.aborted) {
@@ -246,6 +235,7 @@ let sessionSeccion = '';
 
 export default function Settings({ tutorialPreview = false }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const [s, setS] = useState(settings.get());
   const [section, setSection] = useState(() => sessionSeccion || 'apariencia');
   const [cats, setCats] = useState(() => lib.cats());
@@ -273,11 +263,9 @@ export default function Settings({ tutorialPreview = false }) {
   const [backupUnavailableSources, setBackupUnavailableSources] = useState([]);
   const [backupInstallManifests, setBackupInstallManifests] = useState([]);
   const [mihonCandidate, setMihonCandidate] = useState(null);
-  const [mihonBlockedEntries, setMihonBlockedEntries] = useState([]);
-  const [mihonMissingEntries, setMihonMissingEntries] = useState([]);
   const [mihonInstallManifests, setMihonInstallManifests] = useState([]);
   const [mihonUnknownEntries, setMihonUnknownEntries] = useState([]);
-  const [mihonKeepUnavailable, setMihonKeepUnavailable] = useState(false);
+  const [mihonMigrateUnavailable, setMihonMigrateUnavailable] = useState(false);
   const [mihonReviewOpen, setMihonReviewOpen] = useState(false);
   const [mihonInstallOpen, setMihonInstallOpen] = useState(false);
   const [mihonBusy, setMihonBusy] = useState(false);
@@ -650,10 +638,19 @@ export default function Settings({ tutorialPreview = false }) {
   const loadMihonBackup = async (bytes, fileName) => {
     try {
       const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
-      let repository = [];
-      try { repository = await extensions.repoIndex(indexUrl); } catch {}
+      const [repository, repositoryError] = await extensions.repoIndex(indexUrl)
+        .then((index) => [index.filter(canInstallExtension), null], (error) => [[], error]);
       const candidate = await previewMihonBackup(bytes, extensions.sources(), repository);
-      setMihonCandidate({ ...candidate, fileName });
+      if (repositoryError && candidate.unmatchedCount) {
+        toast({
+          title: 'No se pudieron comprobar las extensiones',
+          description: 'Vuelve a intentar la importación cuando el repositorio esté disponible.',
+          variant: 'error'
+        });
+        return;
+      }
+      setMihonUnknownEntries([]);
+      setMihonCandidate({ ...candidate, fileName, repository, indexUrl });
     } catch (error) {
       toast({ title: 'Respaldo de Mihon no válido', description: error.message, variant: 'error' });
     }
@@ -677,7 +674,7 @@ export default function Settings({ tutorialPreview = false }) {
     }
   };
 
-  const finishMihonImport = async (excludedEntries = [], progressToastId = null, importController = null) => {
+  const finishMihonImport = async (migrateUnavailable = false, progressToastId = null, importController = null) => {
     if (!mihonCandidate) return;
     const controller = importController || new AbortController();
     if (!importController) mihonImportControllerRef.current = controller;
@@ -691,22 +688,21 @@ export default function Settings({ tutorialPreview = false }) {
     });
     setMihonBusy(true);
     try {
+      const unavailable = new Set(mihonUnknownEntries);
       const candidate = {
         ...mihonCandidate,
-        entries: mihonCandidate.entries.map((entry) => ({ ...entry, manga: { ...entry.manga } }))
+        entries: mihonCandidate.entries.filter((entry) => !unavailable.has(entry))
+          .map((entry) => ({ ...entry, manga: { ...entry.manga } }))
       };
-      await refreshImportedMihonCovers(candidate, excludedEntries, controller.signal);
+      await refreshImportedMihonCovers(candidate, controller.signal);
       throwIfAborted(controller.signal);
-      const excluded = new Set(excludedEntries.map((entry) => `${entry.manga?.sourceId || ''}|${entry.manga?.url || ''}`));
       const importedCoverUrls = candidate.entries
-        .filter((entry) => !excluded.has(`${entry.manga?.sourceId || ''}|${entry.manga?.url || ''}`))
         .map((entry) => entry.manga?.cover)
         .filter((cover) => /^https?:\/\//i.test(cover || ''));
       await invalidateLibraryCovers(importedCoverUrls);
       throwIfAborted(controller.signal);
-      const result = importMihonBackup(candidate, { excludedEntries });
+      const result = importMihonBackup(candidate);
       candidate.entries.forEach((entry) => {
-        if (excluded.has(`${entry.manga?.sourceId || ''}|${entry.manga?.url || ''}`)) return;
         const chapters = entry.importedDetail?.chapters;
         if (!Array.isArray(chapters) || !chapters.length) {
           chapterIndex.drop(entry.manga.url, entry.manga.sourceId);
@@ -717,21 +713,22 @@ export default function Settings({ tutorialPreview = false }) {
       });
       clearLibraryUnreadCache();
       setMihonCandidate(null);
-      setMihonBlockedEntries([]);
-      setMihonMissingEntries([]);
       setMihonInstallManifests([]);
       setMihonUnknownEntries([]);
-      setMihonKeepUnavailable(false);
+      setMihonMigrateUnavailable(false);
       setMihonReviewOpen(false);
       setMihonInstallOpen(false);
       dismiss(activeToastId);
-      toast({
-        title: 'Respaldo de Mihon importado',
-        description: `${result.added + result.updated} mangas importados${result.excluded ? `, ${result.excluded} omitidos` : ''}. La app se reiniciará en 3 segundos.`,
-        variant: 'success',
-        duration: 3000
-      });
-      window.setTimeout(() => window.location.reload(), 3000);
+      if (migrateUnavailable && mihonUnknownEntries.length) {
+        navigate(startMihonMigration(mihonUnknownEntries));
+      } else {
+        setCats(lib.cats());
+        toast({
+          title: 'Respaldo de Mihon importado',
+          description: `${result.added + result.updated} mangas importados${unavailable.size ? `, ${unavailable.size} omitidos` : ''}.`,
+          variant: 'success'
+        });
+      }
     } catch (error) {
       dismiss(activeToastId);
       if (!controller.signal.aborted && error?.name !== 'AbortError') {
@@ -745,44 +742,24 @@ export default function Settings({ tutorialPreview = false }) {
 
   const confirmMihonImport = async () => {
     if (!mihonCandidate) return;
-    setMihonKeepUnavailable(false);
+    setMihonMigrateUnavailable(false);
     setMihonBusy(true);
     try {
-      const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
-      const installedSourceId = (manga) => extensions.resolveInstalledSource(manga.sourceId, manga.sourceName, manga.url) || manga.sourceId;
-      const notInstalled = mihonCandidate.entries.filter(({ manga }) => !extensions.isInstalled(installedSourceId(manga)));
-      let repository = [];
-      if (notInstalled.length) {
-        try { repository = await extensions.repoIndex(indexUrl); } catch {}
-      }
-      const showAdultExtensions = !!settings.get().showAdultExtensions;
-      const sourceManifest = (manga) => {
-        const sourceId = installedSourceId(manga);
-        return extensionForSource(repository, sourceId) || extensions.manifest(sourceId);
-      };
-      const blockedEntries = mihonCandidate.entries.filter(({ manga }) => (
-        !isExtensionAllowed(sourceManifest(manga), showAdultExtensions)
-      ));
-      const blockedKeys = new Set(blockedEntries.map(({ manga }) => `${manga.sourceId}|${manga.url}`));
-      const missingEntries = notInstalled.filter(({ manga }) => !blockedKeys.has(`${manga.sourceId}|${manga.url}`));
-      if (blockedEntries.length || missingEntries.length) {
+      const missingEntries = mihonCandidate.entries.filter(({ manga }) => !extensions.isInstalled(manga.sourceId));
+      if (missingEntries.length) {
         const manifests = new Map();
-        const knownMissingEntries = [];
         const unknownEntries = [];
         for (const entry of missingEntries) {
-          const manifest = extensionForSource(repository, entry.manga.sourceId);
+          const manifest = extensionForSource(mihonCandidate.repository, entry.manga.sourceId);
           if (manifest) {
-            manifests.set(manifest.id, manifest);
-            knownMissingEntries.push(entry);
+            if (isExtensionAllowed(manifest, !!settings.get().showAdultExtensions)) manifests.set(manifest.id, manifest);
           } else {
             unknownEntries.push(entry);
           }
         }
-        setMihonBlockedEntries(blockedEntries);
-        setMihonMissingEntries(knownMissingEntries);
         setMihonInstallManifests([...manifests.values()]);
         setMihonUnknownEntries(unknownEntries);
-        if (blockedEntries.length || unknownEntries.length) {
+        if (unknownEntries.length) {
           setMihonReviewOpen(true);
         } else if (manifests.size) {
           setMihonInstallOpen(true);
@@ -799,30 +776,18 @@ export default function Settings({ tutorialPreview = false }) {
     }
   };
 
-  const continueMihonImport = async () => {
+  const continueMihonImport = async (migrateUnavailable) => {
     setMihonReviewOpen(false);
+    setMihonMigrateUnavailable(migrateUnavailable);
     if (mihonInstallManifests.length) {
       setMihonInstallOpen(true);
       return;
     }
-    await finishMihonImport([...mihonBlockedEntries, ...mihonUnknownEntries]);
-  };
-
-  const keepUnavailableMihonEntries = async () => {
-    setMihonReviewOpen(false);
-    if (mihonInstallManifests.length) {
-      setMihonKeepUnavailable(true);
-      setMihonInstallOpen(true);
-      return;
-    }
-    await finishMihonImport();
+    await finishMihonImport(migrateUnavailable);
   };
 
   const skipMihonMissingSources = async () => {
-    const excludedEntries = mihonKeepUnavailable
-      ? []
-      : [...mihonBlockedEntries, ...mihonMissingEntries, ...mihonUnknownEntries];
-    await finishMihonImport(excludedEntries);
+    await finishMihonImport(mihonMigrateUnavailable);
   };
 
   const installMihonSources = async () => {
@@ -839,15 +804,14 @@ export default function Settings({ tutorialPreview = false }) {
     });
     setMihonBusy(true);
     try {
-      const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
+      const indexUrl = mihonCandidate.indexUrl;
       for (const manifest of mihonInstallManifests) {
         throwIfAborted(controller.signal);
         if (!extensions.isInstalled(manifest.id)) await extensions.install(manifest, indexUrl);
       }
       throwIfAborted(controller.signal);
       setMihonInstallOpen(false);
-      const excludedEntries = mihonKeepUnavailable ? [] : [...mihonBlockedEntries, ...mihonUnknownEntries];
-      await finishMihonImport(excludedEntries, progressToastId, controller);
+      await finishMihonImport(mihonMigrateUnavailable, progressToastId, controller);
     } catch (error) {
       dismiss(progressToastId);
       if (!controller.signal.aborted && error?.name !== 'AbortError') {
@@ -2020,7 +1984,7 @@ export default function Settings({ tutorialPreview = false }) {
           <div>{mihonCandidate?.mangaCount || 0} mangas · {mihonCandidate?.categoryNames?.length || 0} categorías</div>
           {mihonCandidate?.unmatchedCount > 0 && (
             <div style={{ marginTop: px(6, scale, 4) }}>
-              {mihonCandidate.unmatchedCount} mangas requieren extensiones no instaladas.
+              {mihonCandidate.unmatchedCount} sin una fuente instalada.
             </div>
           )}
         </div>
@@ -2047,21 +2011,14 @@ export default function Settings({ tutorialPreview = false }) {
         onClose={() => {
           setMihonReviewOpen(false);
         }}
-        title="Mangas inválidos"
-        description={[
-          mihonBlockedEntries.length
-            ? `${mihonBlockedEntries.length} con ${mihonBlockedEntries.length === 1 ? 'extensión bloqueada' : 'extensiones bloqueadas'}`
-            : '',
-          mihonUnknownEntries.length
-            ? `${mihonUnknownEntries.length} sin extensión disponible`
-            : '',
-        ].filter(Boolean).join(' · ')}
+        title="¿Migrar los mangas sin fuente disponible?"
+        description={`${mihonUnknownEntries.length} ${mihonUnknownEntries.length === 1 ? 'manga del respaldo usa una fuente que Cytlex no ofrece' : 'mangas del respaldo usan fuentes que Cytlex no ofrece'}. Puedes buscar otra fuente para cada manga u omitirlos de esta importación.`}
         hideDivider
         bodyClassName="pb-6"
         scrollableBody={false}
         scale={scale}
       >
-        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+        <div className="flex flex-wrap justify-end" style={{ gap: px(8, scale, 6) }}>
           <Button
             variant="outline"
             onClick={() => setMihonReviewOpen(false)}
@@ -2071,16 +2028,16 @@ export default function Settings({ tutorialPreview = false }) {
           </Button>
           <Button
             variant="outline"
-            onClick={continueMihonImport}
+            onClick={() => continueMihonImport(false)}
             style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            Omitir y continuar
+            Omitir estos mangas
           </Button>
           <Button
-            onClick={keepUnavailableMihonEntries}
+            onClick={() => continueMihonImport(true)}
             style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            Mantener y continuar
+            Migrar uno por uno
           </Button>
         </div>
       </Dialog>
@@ -2088,15 +2045,13 @@ export default function Settings({ tutorialPreview = false }) {
         open={mihonInstallOpen && !mihonBusy}
         onClose={() => setMihonInstallOpen(false)}
         title="Instalar extensiones faltantes"
-        description={mihonKeepUnavailable
-          ? `${mihonInstallManifests.length} extensiones disponibles para ${mihonMissingEntries.length} mangas. También puedes conservarlos sin instalarlas.`
-          : `${mihonInstallManifests.length} extensiones pueden instalarse para abrir ${mihonMissingEntries.length} mangas del respaldo. Si las omites, esos mangas no se guardarán.`}
+        description={`Puedes instalar ${mihonInstallManifests.length} extensiones para abrir mangas del respaldo. Si continúas sin instalarlas, los mangas se conservarán en tu Biblioteca.`}
         hideDivider
         bodyClassName="pb-6"
         scrollableBody={false}
         scale={scale}
       >
-        <div className="space-y-2 text-muted-foreground" style={{ fontSize: px(13, scale, 11), marginBottom: px(18, scale, 14) }}>
+        <div className="dd-scroll max-h-[40vh] space-y-2 overflow-y-auto text-muted-foreground" style={{ fontSize: px(13, scale, 11), marginBottom: px(18, scale, 14) }}>
           {mihonInstallManifests.map((manifest) => (
             <div key={manifest.id} className="flex items-center justify-between gap-4">
               <div className="flex min-w-0 items-center" style={{ gap: px(8, scale, 6) }}>
@@ -2120,14 +2075,14 @@ export default function Settings({ tutorialPreview = false }) {
             </div>
           ))}
         </div>
-        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+        <div className="flex flex-wrap justify-end" style={{ gap: px(8, scale, 6) }}>
           <Button
             variant="outline"
             onClick={skipMihonMissingSources}
             disabled={mihonBusy}
             style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            {mihonBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Cargando</> : mihonKeepUnavailable ? 'Mantener sin instalar' : 'Omitirlas y continuar'}
+            {mihonBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Cargando</> : 'Continuar sin instalar'}
           </Button>
           <Button
             onClick={installMihonSources}

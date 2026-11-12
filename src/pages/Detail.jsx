@@ -1,3 +1,4 @@
+import { MigrationSources } from '../components/MigrationSources.jsx';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Link2, ArrowRightLeft, Crosshair } from 'lucide-react';
@@ -5,7 +6,7 @@ import { api } from '../lib/api.js';
 import { lib } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { reconcileMihonProgress } from '../lib/mihonProgress.js';
-import { extensions, isExtensionAllowed } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed, isRetiredExtension } from '../lib/extensions.js';
 import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
@@ -26,6 +27,14 @@ import Catalog from './Catalog.jsx';
 
 const EXPAND_CTRL_H = 16;
 const COVER_BASE = 184;
+const chapterDateFormat = new Intl.DateTimeFormat('es');
+
+function formatChapterDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(value)) return value;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : chapterDateFormat.format(date);
+}
+
 const norm = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
 const chapterNum = (chapter) => {
   const match = String(chapter?.title || '').match(/[\d.]+/);
@@ -55,35 +64,6 @@ function SourceLine({ sourceId, scale }) {
       </span>
       <span className="flex items-center self-stretch">{m.name}</span>
     </span>
-  );
-}
-
-function ExtensionChoice({ manifest, current, checked, onChange, scale }) {
-  const [logoUnavailable, setLogoUnavailable] = useState(false);
-  return (
-    <label className={cn(
-      'flex items-center rounded-lg border border-border px-3 py-2.5',
-      current ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-accent/50',
-      checked && !current && 'bg-accent/40'
-    )} style={{ gap: px(12, scale, 9), minHeight: px(56, scale, 46) }}>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={current}
-        onChange={onChange}
-        aria-label={current ? `${manifest.name}, fuente actual` : `Buscar en ${manifest.name}`}
-        style={{ accentColor: 'hsl(var(--primary))', width: px(16, scale, 13), height: px(16, scale, 13), flexShrink: 0 }}
-      />
-      <span className="grid shrink-0 place-items-center overflow-hidden rounded-md bg-secondary text-secondary-foreground font-semibold" style={{ width: px(36, scale, 30), height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
-        {manifest.icon && !logoUnavailable
-          ? <img src={manifest.icon} alt="" className="h-full w-full object-cover" onError={() => setLogoUnavailable(true)} />
-          : (manifest.name?.[0] || '?').toUpperCase()}
-      </span>
-      <span className="min-w-0 flex-1 truncate font-medium" style={{ fontSize: px(14, scale, 12) }}>{manifest.name}</span>
-      <span className="shrink-0 text-muted-foreground" style={{ fontSize: px(12, scale, 10) }}>
-        {current ? 'Fuente actual' : ''}
-      </span>
-    </label>
   );
 }
 
@@ -278,7 +258,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
   const proxyCover = requiresImageProxy(finalCover) && !!window.cytlex?.fetchImage;
   useEffect(() => {
-    if (!proxyCover || !finalCover) return undefined;
+    if (!sourceAvailable || !proxyCover || !finalCover) return undefined;
     let alive = true;
     const loadCover = async () => {
       const candidates = [...new Set([finalCover, knownCover].filter(Boolean))];
@@ -296,7 +276,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     };
     loadCover();
     return () => { alive = false; };
-  }, [coverKey, finalCover, knownCover, proxyCover]);
+  }, [coverKey, finalCover, knownCover, proxyCover, sourceAvailable]);
   const coverImg = (alt) => (
     <>
       {visibleCover && visibleCover !== finalCover && (
@@ -678,6 +658,32 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
 
   if (!mangaUrl)
     return <EmptyState face="¯\\_(ツ)_/¯" title="Sin manga seleccionado." />;
+  if (isRetiredExtension(sourceId)) {
+    const saved = lib.fav(mangaUrl, sourceId);
+    const targets = migrationTargets.filter((manifest) => isExtensionAllowed(manifest, showAdultExtensions));
+    const canMigrate = Boolean(saved?.title && targets.length);
+    return (
+      <EmptyState
+        title={saved?.title || 'Fuente retirada'}
+        description={canMigrate ? 'La fuente fue retirada. Puedes buscar este manga en otra extensión.' : 'La fuente fue retirada.'}
+        action={
+          <div className="flex flex-wrap justify-center gap-2">
+            {canMigrate && (
+              <Button onClick={() => {
+                const params = new URLSearchParams(loc.search);
+                params.set('migrationSearch', '1');
+                params.set('migrationTargets', targets.map(({ id }) => id).join(','));
+                params.set('migrationQuery', saved.title);
+                params.set('migrationSearchId', String(Date.now()));
+                navigate({ pathname: loc.pathname, search: params.toString() });
+              }}>Migrar fuente</Button>
+            )}
+            <Button variant="secondary" onClick={() => navigate(backTo)}>Volver</Button>
+          </div>
+        }
+      />
+    );
+  }
   if (adultExtensionDisabled)
     return (
       <EmptyState
@@ -1321,7 +1327,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                     minHeight: `${Math.round(20 * scale)}px`
                   }}
                 >
-                  {c.date}
+                  {formatChapterDate(c.date)}
                   {c.group ? ` · ${c.group}` : ''}
                   {inCourse && Number.isInteger(cap.total) && cap.total > 0
                     ? ` · pág. ${cap.page + 1}/${cap.total}`
@@ -1484,50 +1490,13 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       >
         {migration && (
           <>
-            <div className="mb-2 flex items-center justify-between" style={{ fontSize: px(13, scale, 11) }}>
-              <span className="text-muted-foreground">
-                {migration.targetIds.length} de {migrationTargets.length} fuentes seleccionadas
-              </span>
-              <div className="flex items-center" style={{ gap: px(12, scale, 9) }}>
-                <button
-                  type="button"
-                  className="text-primary hover:underline disabled:opacity-50"
-                  disabled={migration.targetIds.length === migrationTargets.length}
-                  onClick={() => setMigration((current) => current ? { ...current, targetIds: migrationTargets.map((manifest) => manifest.id) } : current)}
-                >
-                  Todas
-                </button>
-                <button
-                  type="button"
-                  className="text-primary hover:underline disabled:opacity-50"
-                  disabled={migration.targetIds.length === 0}
-                  onClick={() => setMigration((current) => current ? { ...current, targetIds: [] } : current)}
-                >
-                  Ninguna
-                </button>
-              </div>
-            </div>
-            <div className="dd-scroll flex flex-col overflow-y-auto pr-1" style={{ maxHeight: px(300, scale, 240), gap: px(6, scale, 4) }}>
-              {installedExtensions.map((manifest) => {
-                const current = manifest.id === sourceId;
-                const checked = !current && migration.targetIds.includes(manifest.id);
-                return (
-                  <ExtensionChoice
-                    key={manifest.id}
-                    manifest={manifest}
-                    current={current}
-                    checked={checked}
-                    onChange={() => setMigration((state) => state ? {
-                      ...state,
-                      targetIds: checked
-                        ? state.targetIds.filter((id) => id !== manifest.id)
-                        : [...state.targetIds, manifest.id]
-                    } : state)}
-                    scale={scale}
-                  />
-                );
-              })}
-            </div>
+            <MigrationSources
+              manifests={installedExtensions}
+              sourceId={sourceId}
+              targetIds={migration.targetIds}
+              onChange={(targetIds) => setMigration((state) => state ? { ...state, targetIds } : state)}
+              scale={scale}
+            />
             <div className="flex justify-end" style={{ gap: px(8, scale, 6), paddingTop: px(16, scale, 12) }}>
               <Button
                 variant="secondary"

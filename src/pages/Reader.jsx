@@ -788,7 +788,7 @@ export default function Reader() {
     return <EmptyState face="¯\\_(ツ)_/¯" title="Sin capítulo seleccionado." />;
   const chapterReady = !!ch && chUrl === chapterUrl && !err;
   const verticalZoom = 1 + wheelZoom / 100;
-  const selectorStyle = { height: 'var(--reader-control-height)', gap: 4, paddingInline: 'clamp(8px, 1.4vw, 14px)' };
+  const selectorStyle = { height: 'var(--reader-control-height)', gap: 4, paddingInline: '14px' };
   const selectorClass = 'rounded-xl bg-[color:var(--reader-control-bg)] font-medium tabular-nums hover:bg-[color:var(--reader-control-active)] aria-expanded:bg-[color:var(--reader-control-active)]';
   const selectorMenuClass = 'inset-x-0 top-full w-full rounded-xl shadow-lg';
   const chapterArrowClass = 'h-full w-7 shrink-0 rounded-none bg-[color:var(--reader-arrow-bg)] text-foreground transition-colors hover:bg-[color:var(--reader-control-hover)] disabled:opacity-30 focus-visible:z-10 focus-visible:ring-inset active:scale-100 sm:w-9';
@@ -814,9 +814,10 @@ export default function Reader() {
         <fieldset
           aria-label="Controles de lectura"
           disabled={!chapterReady}
-          className="col-start-1 row-start-2 mx-auto grid w-full min-w-0 max-w-[32rem] grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_minmax(0,0.85fr)] gap-1.5 disabled:opacity-60 md:col-start-2 md:row-start-1 md:w-[28rem] md:gap-2 lg:w-[32rem]"
+          className="col-start-1 row-start-2 mx-auto grid w-full min-w-0 max-w-[33rem] grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-1.5 disabled:opacity-60 min-[420px]:grid-cols-[minmax(0,1.2fr)_minmax(0,1.55fr)_minmax(0,1fr)] md:col-start-2 md:row-start-1 md:w-[31rem] md:gap-2 lg:w-[33rem]"
         >
           <Dropdown
+            className="col-span-2 min-[420px]:col-span-1"
             menuClassName={selectorMenuClass}
             buttonClassName={selectorClass}
             buttonStyle={selectorStyle}

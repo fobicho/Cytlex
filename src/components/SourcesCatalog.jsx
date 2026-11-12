@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ArrowUpDown, ChevronDown, Filter, Loader2, Search, X } from 'lucide-react';
+import { ArrowLeft, ArrowUpDown, Filter, Loader2, Search } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import MangaCard from './MangaCard.jsx';
 import VirtualMangaGrid from './VirtualMangaGrid.jsx';
@@ -153,7 +153,6 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   );
   const [filters, setFilters] = useState(() => restore?.filters || []);
   const [filterValues, setFilterValues] = useState(() => restore?.filterValues || {});
-  const [filterSearches, setFilterSearches] = useState({});
   const [loadedParams, setLoadedParams] = useState(() => restore?.loadedParams || { q: restore?.query || '', ...(restore?.filterValues || {}) });
   const [filtersOpen, setFiltersOpen] = useState(() => !!restore?.filtersOpen);
   const [filterPanelPosition, setFilterPanelPosition] = useState(null);
@@ -184,6 +183,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const pendingScrollTop = useRef(restore?.scrollTop ?? null);
   const selected = useMemo(() => sources.find((source) => source.manifest.id === sourceId), [sources, sourceId]);
   const isZonaTmo = sourceId === 'zonatmo';
+  const useCompactFilterFields = isZonaTmo || sourceId === 'mangalect';
   const filterPanelWidth = px(isZonaTmo ? 480 : 360, scale, 300);
 
   useLayoutEffect(() => {
@@ -220,12 +220,18 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     positionPanel();
     const resize = new ResizeObserver(positionPanel);
     if (filterBodyRef.current) resize.observe(filterBodyRef.current);
+    const closeOnPageScroll = ({ target }) => {
+      if (target === document || target === window ||
+        (target instanceof Element && target.contains(filterRootRef.current))) {
+        setFiltersOpen(false);
+      }
+    };
     window.addEventListener('resize', positionPanel);
-    window.addEventListener('scroll', positionPanel, true);
+    window.addEventListener('scroll', closeOnPageScroll, true);
     return () => {
       resize.disconnect();
       window.removeEventListener('resize', positionPanel);
-      window.removeEventListener('scroll', positionPanel, true);
+      window.removeEventListener('scroll', closeOnPageScroll, true);
     };
   }, [filtersOpen, filterPanelWidth, sourceId]);
 
@@ -233,10 +239,11 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     if (!filtersOpen) return undefined;
     filterPanelRef.current?.focus({ preventScroll: true });
     const onPointerDown = (event) => {
+      if (event.target instanceof Element && event.target.closest('.source-filter-menu')) return;
       if (!filterRootRef.current?.contains(event.target) && !filterPanelRef.current?.contains(event.target)) setFiltersOpen(false);
     };
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !filterPanelRef.current?.querySelector('[aria-haspopup="listbox"][aria-expanded="true"]')) {
         setFiltersOpen(false);
         filterRootRef.current?.querySelector('button')?.focus();
       }
@@ -409,7 +416,6 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     requestId.current += 1;
     setQuery('');
     setFilterValues({});
-    setFilterSearches({});
     setFiltersOpen(false);
     setItems([]);
     setQueuedItems([]);
@@ -489,7 +495,6 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const reset = () => {
     setQuery('');
     setFilterValues({});
-    setFilterSearches({});
     setFiltersOpen(false);
     loadCatalog(sourceId, { q: '', ...(sourceId === 'leercapitulo' ? { sort: loadedParams.sort || 'az' } : {}) });
   };
@@ -522,19 +527,19 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   }, [displayFilters, sourceId]);
 
   const renderFilter = (filter) => {
-    const selectedValues = Array.isArray(filterValues[filter.id]) ? filterValues[filter.id] : [];
-    const genreSearch = normalizeGenreLabel(filterSearches[filter.id]);
-    const genreOptions = filter.type === 'multiselect'
-      ? (filter.options || []).filter((option) => normalizeGenreLabel(option.label).includes(genreSearch))
-      : [];
-    const selectOptions = (filter.options || []).map((option) =>
-      typeof option === 'string' ? { value: option, label: option } : option);
+    const multiple = filter.type === 'multiselect';
+    const value = filterValues[filter.id] ?? filter.defaultValue;
+    const selectedValues = Array.isArray(value) ? value : value ? String(value).split(',').map((item) => item.trim()).filter(Boolean) : [];
+    const options = (filter.options || []).map((option) => {
+      const item = typeof option === 'string' ? { value: option, label: option } : option;
+      const direction = isZonaTmo && filter.id === 'orderDirection'
+        ? { asc: 'Ascendente', desc: 'Descendente' }[item.value]
+        : null;
+      return direction ? { ...item, label: direction } : item;
+    });
     return (
       <div key={filter.id} className={`flex min-w-0 flex-col text-muted-foreground ${isZonaTmo && filter.id === 'author' ? 'col-span-2' : ''}`} style={{ gap: px(5, scale, 4), fontSize: px(12, scale, 10) }}>
-        <div className="flex items-center justify-between gap-1.5 font-medium leading-tight">
-          <span>{filter.label}</span>
-          {selectedValues.length > 0 && <span className="rounded-md bg-secondary px-1.5 py-0.5 text-foreground tabular-nums">{selectedValues.length}</span>}
-        </div>
+        <span className="font-medium leading-tight">{filter.label}</span>
         {filter.type === 'text' ? (
           <Input
             aria-label={filter.label}
@@ -543,59 +548,21 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
             placeholder={filter.placeholder || filter.label}
             style={{ height: px(36, scale, 30), fontSize: px(13, scale, 11) }}
           />
-        ) : filter.type === 'multiselect' ? (
-          <div className="min-w-0 rounded-lg border border-border bg-background p-2">
-            <Input
-              value={filterSearches[filter.id] || ''}
-              onChange={(event) => setFilterSearches((current) => ({ ...current, [filter.id]: event.target.value }))}
-              placeholder="Buscar género…"
-              aria-label={`Buscar en ${filter.label}`}
-              className="mb-2"
-              style={{ height: px(30, scale, 26), fontSize: px(12, scale, 10) }}
-            />
-            <div className="h-36 overflow-y-auto overscroll-contain pr-1">
-              {genreOptions.length === 0 && <p className="px-1 py-2 text-xs">No se encontraron géneros.</p>}
-              {genreOptions.map((option) => (
-                  <label key={option.value} className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-foreground hover:bg-accent has-[:checked]:bg-secondary">
-                    <input
-                      type="checkbox"
-                      className="shrink-0 accent-primary"
-                      checked={selectedValues.includes(option.value)}
-                      onChange={(event) => setFilterValues((current) => {
-                        const values = Array.isArray(current[filter.id]) ? current[filter.id] : [];
-                        return { ...current, [filter.id]: event.target.checked ? [...values, option.value] : values.filter((value) => value !== option.value) };
-                      })}
-                    />
-                    <span className="min-w-0 break-words">{option.label}</span>
-                  </label>
-              ))}
-            </div>
-          </div>
-        ) : isZonaTmo ? (
-          <div className="relative">
-            <select
-              aria-label={filter.label}
-              className="h-9 w-full min-w-0 appearance-none truncate rounded-lg border border-border bg-secondary/60 pl-2.5 pr-7 text-sm text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              value={filterValues[filter.id] ?? filter.defaultValue ?? ''}
-              onChange={(event) => setFilterValues((current) => ({ ...current, [filter.id]: event.target.value }))}
-            >
-              {selectOptions.map((option) => {
-                const directionLabel = filter.id === 'orderDirection' && { asc: 'Ascendente', desc: 'Descendente' }[option.value];
-                return <option key={option.value} value={option.value} className="bg-card text-foreground">{directionLabel || option.label}</option>;
-              })}
-            </select>
-            <ChevronDown aria-hidden className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
-          </div>
         ) : (
           <Dropdown
             scale={scale}
-            value={filterValues[filter.id] ?? filter.defaultValue ?? ''}
+            multiple={multiple}
+            value={multiple ? selectedValues : value ?? ''}
             onChange={(value) => setFilterValues((current) => ({ ...current, [filter.id]: value }))}
             ariaLabel={filter.label}
-            placeholder={filter.placeholder || `Selecciona ${filter.label.toLocaleLowerCase()}`}
-            menuMaxHeight={sourceId === 'leercapitulo' && filter.id === 'genre' ? 288 : 256}
-            style={{ width: '100%' }}
-            options={selectOptions}
+            placeholder={filter.placeholder || (multiple ? 'Elegir' : `Selecciona ${filter.label.toLocaleLowerCase()}`)}
+            portal
+            menuWidth
+            menuClassName="source-filter-menu"
+            menuMaxHeight={multiple ? 288 : 256}
+            buttonClassName={useCompactFilterFields ? 'rounded-md border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80' : undefined}
+            buttonStyle={useCompactFilterFields ? { height: px(36, scale, 30) } : undefined}
+            options={options}
           />
         )}
       </div>
@@ -761,24 +728,6 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                           transformOrigin: 'top left'
                         }}
                       >
-                        {isZonaTmo && (
-                          <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
-                            <h2 className="text-sm font-semibold">Filtros de ZonaTMO</h2>
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="ghost"
-                              className="h-8 w-8"
-                              aria-label="Cerrar filtros"
-                              onClick={() => {
-                                setFiltersOpen(false);
-                                filterRootRef.current?.querySelector('button')?.focus();
-                              }}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        )}
                         <div ref={filterBodyRef} className="grid min-h-0 grid-cols-1 content-start gap-4 overflow-y-auto overscroll-contain p-3 sm:p-4">
                           {filterGroups.primary.length > 0 && (
                             <div className={isZonaTmo ? 'grid grid-cols-2 gap-3' : 'grid grid-cols-1 gap-3 sm:grid-cols-2'}>
@@ -786,7 +735,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                             </div>
                           )}
                           {filterGroups.genres.length > 0 && (
-                            <div className={isZonaTmo ? 'grid min-w-0 grid-cols-2 items-start gap-3' : 'grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2'}>
+                            <div className={isZonaTmo ? 'grid min-w-0 grid-cols-2 items-start gap-3' : 'grid min-w-0 gap-3'}>
                               {filterGroups.genres.map(renderFilter)}
                             </div>
                           )}
@@ -801,11 +750,11 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                             </div>
                           )}
                         </div>
-                        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-3 py-2 sm:px-4">
-                          <Button type="button" variant="ghost" className="min-h-11 sm:min-h-9" onClick={reset} disabled={!hasActiveFilters || loading}>
+                        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-3 py-1.5 sm:px-4">
+                          <Button type="button" variant="ghost" size="sm" className="h-10 sm:h-8" onClick={reset} disabled={!hasActiveFilters || loading}>
                             Limpiar
                           </Button>
-                          <Button type="button" className="min-h-11 sm:min-h-9" onClick={search} disabled={loading}>
+                          <Button type="button" size="sm" className="h-10 sm:h-8" onClick={search} disabled={loading}>
                             Aplicar filtros
                           </Button>
                         </div>

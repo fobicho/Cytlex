@@ -20,13 +20,16 @@ export default function createSource({ fetchText, parse }) {
     }
   };
 
-  async function catalog({ q = '', genre = '', page: p = 1, __cytlexRequestId } = {}) {
+  async function catalog({ q = '', genre = [], type = '', minChapters = '', page: p = 1, __cytlexRequestId } = {}) {
     const params = new URLSearchParams({
       page: String(p),
       page_size: String(PAGE_SIZE)
     });
     if (q) params.set('query', q);
-    if (genre) params.set('generos', genre);
+    const genres = Array.isArray(genre) ? genre.join(',') : genre;
+    if (genres) params.set('generos', genres);
+    if (type) params.set('tipo', type);
+    if (minChapters) params.set('capitulos', minChapters);
 
     const data = await json(`${base}/api/buscar_mangas/?${params}`, __cytlexRequestId);
     if (!data) return { items: [], totalPages: 1, totalText: '' };
@@ -55,8 +58,20 @@ export default function createSource({ fetchText, parse }) {
     };
   }
 
-  function catalogFilters() {
-    return [{ id: 'genre', label: 'Género', type: 'text', placeholder: 'Nombre o identificador del género' }];
+  async function catalogFilters() {
+    const data = await json(`${base}/api/generos/`);
+    const genres = Array.isArray(data) ? [...new Set(data.map((genre) => genre?.nombre?.trim()).filter(Boolean))] : [];
+    return [
+      ...(genres.length ? [{
+        id: 'genre', label: 'Géneros', type: 'multiselect', group: 'genres', placeholder: 'Elegir géneros',
+        options: genres.sort((a, b) => a.localeCompare(b, 'es'))
+      }] : []),
+      { id: 'type', label: 'Tipo', type: 'select', options: [{ value: '', label: 'Ver todo' }, 'Manga', 'Manhwa', 'Manhua', 'Novela'] },
+      {
+        id: 'minChapters', label: 'Mínimo de capítulos', type: 'select',
+        options: [{ value: '', label: 'Cualquiera' }, ...[10, 30, 50, 100].map((value) => ({ value: String(value), label: `${value} o más` }))]
+      }
+    ];
   }
 
   async function detail(mangaUrl) {

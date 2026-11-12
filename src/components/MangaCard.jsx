@@ -21,7 +21,7 @@ function prefetch(url, sourceId) {
   api.prefetchDetail(url, sourceId);
 }
 
-function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', returnTo = '', onSelect, coverSize, scale: uiScale = 1, chapterCount, useLibraryCoverCache = false, savedInLibrary = false }) {
+function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenUnavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', returnTo = '', onSelect, coverSize, scale: uiScale = 1, chapterCount, useLibraryCoverCache = false, savedInLibrary = false }) {
   const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}${returnTo ? `&back=${encodeURIComponent(returnTo)}` : ''}`;
   const sourceManifest = extensions.manifest(sourceId);
   const savedSourceName = String(m.sourceName || '');
@@ -34,8 +34,9 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, unavaila
       : (manifestSourceName && !/^(mihon-|Fuente Mihon)/i.test(manifestSourceName) ? manifestSourceName : sourceId),
     icon: sourceManifest.icon || m.sourceIcon
   };
-  const linkCls = cn(unavailable && 'pointer-events-none');
-  const linkA11y = unavailable ? { 'aria-disabled': true, tabIndex: -1 } : {};
+  const linkDisabled = unavailable && !canOpenUnavailable;
+  const linkCls = cn(linkDisabled && 'pointer-events-none');
+  const linkA11y = linkDisabled ? { 'aria-disabled': true, tabIndex: -1 } : {};
 
   const localCover = m.coverLocal?.startsWith('data:') ? m.coverLocal : '';
   const cachedCover = m.coverCached || '';
