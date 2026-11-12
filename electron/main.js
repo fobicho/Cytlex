@@ -801,13 +801,25 @@ ipcMain.handle('http:post', async (_e, payload = {}, requestId) => {
   if (!url) throw new Error('Falta la URL de la petición POST');
   const parsed = validateUrl(url);
   const urlStr = parsed.toString();
+  const onf = parsed.origin === 'https://onfmangas.com';
+  const postHeaders = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
+    ...headers
+  };
+  if (onf) {
+    const cookie = mergeOnfCookies(onfCookieJar.get(parsed.origin), payload.onfCookie);
+    if (cookie) postHeaders.Cookie = cookie;
+    if (typeof payload.onfReferer === 'string') {
+      try {
+        const referer = validateUrl(payload.onfReferer);
+        if (referer.origin === parsed.origin && referer.pathname.startsWith('/lector/')) postHeaders.Referer = referer.href;
+      } catch {}
+    }
+  }
   const res = await requestPublic(urlStr, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
-      ...headers
-    },
+    headers: postHeaders,
     body: typeof body === 'string' ? body : JSON.stringify(body),
     timeout: HTTP_GET_TIMEOUT_MS,
     requestId

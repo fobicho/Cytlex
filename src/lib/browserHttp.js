@@ -136,6 +136,8 @@ export async function httpPost(payload, requestId) {
   if (bridge?.httpPost) return bridge.httpPost(payload, requestId);
   const response = await browserRequest(payload.url, {
     method: 'POST',
+    onfReferer: payload.onfReferer,
+    onfCookie: payload.onfCookie,
     headers: { 'Content-Type': 'application/json', ...payload.headers },
     body: typeof payload.body === 'string' ? payload.body : JSON.stringify(payload.body)
   });

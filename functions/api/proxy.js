@@ -164,13 +164,19 @@ function forwardedHeaders(request, target) {
   }
   if (target.hostname === 'onfmangas.com') {
     headers.set('user-agent', request.headers.get('user-agent') || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
-    headers.set('accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8');
     headers.set('accept-language', 'es-419,es;q=0.9,en;q=0.8');
-    headers.set('sec-fetch-dest', 'document');
-    headers.set('sec-fetch-mode', 'navigate');
     headers.set('sec-fetch-site', 'same-origin');
-    headers.set('upgrade-insecure-requests', '1');
     headers.set('referer', onfReferer(request));
+    if (request.method.toUpperCase() === 'POST') {
+      headers.set('accept', 'application/json, text/plain, */*');
+      headers.set('sec-fetch-dest', 'empty');
+      headers.set('sec-fetch-mode', 'cors');
+    } else {
+      headers.set('accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8');
+      headers.set('sec-fetch-dest', 'document');
+      headers.set('sec-fetch-mode', 'navigate');
+      headers.set('upgrade-insecure-requests', '1');
+    }
   }
   if (isPlotTwist) {
     headers.set('referer', 'https://plotnofansub.com/');

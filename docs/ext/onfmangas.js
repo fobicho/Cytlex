@@ -1,4 +1,4 @@
-export default function createSource({ fetchText, parse }) {
+export default function createSource({ fetchText, fetchPostText, parse }) {
   const base = 'https://onfmangas.com';
   let onfCookie = '';
 
@@ -304,6 +304,35 @@ export default function createSource({ fetchText, parse }) {
     return [...new Set(fallbackImages)];
   };
 
+  function decodeReaderPageResponse(response, chapterUrl) {
+    const list = decodePageList(response);
+    if (!list) return [];
+    const entries = Array.isArray(list) ? list : [list];
+    return [...new Set(entries.map(imageUrl).map((value) => {
+      try {
+        const resolved = new URL(value, chapterUrl);
+        return ['http:', 'https:'].includes(resolved.protocol) ? resolved.href : '';
+      } catch { return ''; }
+    }).filter(Boolean))];
+  }
+
+  function findReaderAccess(html, outer) {
+    const tokenPattern = /^[A-Za-z0-9_-]{128,}$/;
+    const candidates = [];
+    for (const node of outer.querySelectorAll('[name="access"], [data-access], #access')) {
+      candidates.push(node.getAttribute('value'), node.getAttribute('data-access'), node.getAttribute('content'));
+    }
+    const patterns = [
+      /(?:["']?access["']?)\s*:\s*["']([A-Za-z0-9_-]{128,})["']/i,
+      /(?:["']?access["']?)\s*=\s*["']([A-Za-z0-9_-]{128,})["']/i
+    ];
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) candidates.push(match[1]);
+    }
+    return candidates.find((candidate) => typeof candidate === 'string' && tokenPattern.test(candidate)) || '';
+  }
+
   function mapCards(doc) {
     return [...doc.querySelectorAll('.manga-card')]
       .map((el) => {
@@ -381,7 +410,23 @@ export default function createSource({ fetchText, parse }) {
       html = await fetchText(url, undefined, { onfCookie, onfReferer: url });
     }
     const outer = parse(html);
-    const pages = decodePageImages(html, outer, url);
+    let pages = decodePageImages(html, outer, url);
+    if (!pages.length && typeof fetchPostText === 'function') {
+      const access = findReaderAccess(html, outer);
+      if (access) {
+        const response = await fetchPostText({
+          url: `${base}/reader_pages.php`,
+          body: { access },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          onfCookie,
+          onfReferer: url
+        });
+        pages = decodeReaderPageResponse(response, url);
+      }
+    }
     if (!pages.length) {
       const challengeMarkup = /cf-chl-|__cf_chl|challenge-platform|cdn-cgi\/challenge|cloudflare ray id|verificando/i.test(html);
       const visibleText = html
