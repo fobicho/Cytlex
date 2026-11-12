@@ -121,6 +121,9 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
 let repoCache = { url: '', available: null, updates: null };
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
 const DEFAULT_EXTENSION_REPOSITORY = 'https://fobicho.github.io/Cytlex/index.json';
+const extensionRepositoryUrl = (url) => import.meta.env.DEV && (!url || url === DEFAULT_EXTENSION_REPOSITORY)
+  ? new URL('/docs/index.json', window.location.href).href
+  : url;
 
 const readExtConfig = () => {
   try { return JSON.parse(localStorage.getItem(EXT_CONFIG_KEY)) || {}; } catch { return {}; }
@@ -143,7 +146,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   const { toast } = useToast();
   const scale = useScale();
   const configuredRepo = (settings.get().extIndexUrl || '').trim();
-  const initialRepo = configuredRepo || (tutorialPreview ? DEFAULT_EXTENSION_REPOSITORY : '');
+  const initialRepo = extensionRepositoryUrl(configuredRepo || (tutorialPreview ? DEFAULT_EXTENSION_REPOSITORY : ''));
   const cacheHit = !!initialRepo && initialRepo === repoCache.url && repoCache.available !== null;
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [installed, setInstalled] = useState(() => extensions.installed());
@@ -377,7 +380,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
 
   useEffect(() => settings.subscribe((s) => {
     const nextRepo = (s.extIndexUrl || '').trim();
-    setRepoUrl(nextRepo || (tutorialPreview ? DEFAULT_EXTENSION_REPOSITORY : ''));
+    setRepoUrl(extensionRepositoryUrl(nextRepo || (tutorialPreview ? DEFAULT_EXTENSION_REPOSITORY : '')));
     setShowAdultExtensions(!!s.showAdultExtensions);
   }), [tutorialPreview]);
   useEffect(() => {

@@ -1,4 +1,20 @@
 const electronBridge = () => (typeof window !== 'undefined' ? window.cytlex : null);
+let onfCookieJar = '';
+
+function mergeCookiePairs(...values) {
+  const cookies = new Map();
+  for (const value of values) {
+    for (const part of String(value || '').split(';')) {
+      const pair = part.trim();
+      const separator = pair.indexOf('=');
+      if (separator <= 0 || /[\r\n;]/.test(pair)) continue;
+      const name = pair.slice(0, separator).trim();
+      if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(name)) continue;
+      cookies.set(name, pair);
+    }
+  }
+  return [...cookies.values()].join('; ').slice(0, 4096);
+}
 
 function proxyUrl(targetUrl, referer = '') {
   const configuredProxy = import.meta.env.VITE_CYTLEX_PROXY_URL;
@@ -30,7 +46,7 @@ export function browserImageUrl(url, referer = '') {
   return url;
 }
 
-function proxyRequestOptions(url, options) {
+function proxyRequestOptions(url, options, onfCookie = '') {
   const headers = new Headers(options.headers || {});
   const proxyHeaders = new Headers(headers);
   const target = new URL(url);
@@ -46,6 +62,10 @@ function proxyRequestOptions(url, options) {
   if (requestedReferer && new URL(requestedReferer).origin === target.origin) {
     proxyHeaders.set('x-cytlex-upstream-referer', requestedReferer);
   }
+  if (target.origin === 'https://onfmangas.com') {
+    const cookie = mergeCookiePairs(onfCookie, options.onfCookie);
+    if (cookie) proxyHeaders.set('x-cytlex-onf-cookie', cookie);
+  }
 
   return { ...options, headers: proxyHeaders };
 }
@@ -55,21 +75,36 @@ async function browserRequest(url, options = {}) {
   const { onfCookie = '', onfReferer = '', ...fetchOptions } = options;
   const requestHeaders = new Headers(fetchOptions.headers || {});
   const isOnf = target.origin === 'https://onfmangas.com';
-  if (isOnf && /^[A-Za-z0-9!#$%&'*+.^_`|~-]+=[A-Za-z0-9!#$%&'()*+,.\/:=?@_`|~-]{1,2048}$/.test(onfCookie)) {
-    requestHeaders.set('x-cytlex-onf-cookie', onfCookie);
-  }
+  const requestCookie = isOnf ? mergeCookiePairs(onfCookieJar, onfCookie) : '';
+  if (isOnf && requestCookie) requestHeaders.set('x-cytlex-onf-cookie', requestCookie);
   let response;
   const requestOptions = { credentials: 'omit', redirect: 'follow', ...fetchOptions, headers: requestHeaders };
   const directOptions = { ...fetchOptions, headers: new Headers(fetchOptions.headers || {}) };
 
-  try {
-    const proxied = await fetch(proxyUrl(url, isOnf ? onfReferer : ''), proxyRequestOptions(url, requestOptions));
-    const proxyIsLive = proxied.headers.get('x-cytlex-proxy') === '1';
-    const proxyDeniedTarget = proxied.headers.get('x-cytlex-proxy-denied') === '1';
-    response = proxyIsLive && !proxyDeniedTarget ? proxied : await fetch(url, directOptions);
-  } catch (error) {
-    if (requestOptions.signal?.aborted) throw error;
-    throw new Error('El navegador bloqueó la conexión a esta fuente. Para fuentes sin acceso CORS, publica Cytlex con su proxy web habilitado.');
+  if (target.origin === window.location.origin) {
+    response = await fetch(url, directOptions);
+  } else {
+    try {
+      let proxied = await fetch(proxyUrl(url, isOnf ? onfReferer : ''), proxyRequestOptions(url, requestOptions, requestCookie));
+      const proxyIsLive = proxied.headers.get('x-cytlex-proxy') === '1';
+      const proxyDeniedTarget = proxied.headers.get('x-cytlex-proxy-denied') === '1';
+      response = proxyIsLive && !proxyDeniedTarget ? proxied : await fetch(url, directOptions);
+      if (isOnf && proxyIsLive && !proxyDeniedTarget) {
+        const receivedCookie = proxied.headers.get('x-cytlex-onf-cookie') || '';
+        const nextCookie = mergeCookiePairs(requestCookie, receivedCookie);
+        if (receivedCookie) onfCookieJar = nextCookie;
+        if (nextCookie && nextCookie !== requestCookie && (fetchOptions.method || 'GET').toUpperCase() === 'GET') {
+          try { await proxied.body?.cancel(); } catch {}
+          proxied = await fetch(proxyUrl(url, onfReferer), proxyRequestOptions(url, requestOptions, nextCookie));
+          const refreshedCookie = proxied.headers.get('x-cytlex-onf-cookie') || '';
+          if (refreshedCookie) onfCookieJar = mergeCookiePairs(nextCookie, refreshedCookie);
+          response = proxied;
+        }
+      }
+    } catch (error) {
+      if (requestOptions.signal?.aborted) throw error;
+      throw new Error('El navegador bloqueó la conexión a esta fuente. Para fuentes sin acceso CORS, publica Cytlex con su proxy web habilitado.');
+    }
   }
   if (!response.ok) {
     const retryAfter = response.headers.get('retry-after');

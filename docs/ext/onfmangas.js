@@ -19,21 +19,32 @@ export default function createSource({ fetchText, parse }) {
       const bytes = Uint8Array.from(compact.match(/.{2}/g) || [], (byte) => parseInt(byte, 16));
       candidates.push(new TextDecoder().decode(bytes));
     }
-    try {
-      const base64 = compact.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(compact.length / 4) * 4, '=');
-      const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
-      candidates.push(new TextDecoder().decode(bytes));
-    } catch {}
+    const decodeBase64 = (candidate) => {
+      const normalized = candidate.replace(/-/g, '+').replace(/_/g, '/');
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalized)) return '';
+      try {
+        const base64 = normalized.replace(/=+$/, '').padEnd(Math.ceil(normalized.replace(/=+$/, '').length / 4) * 4, '=');
+        const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+        return new TextDecoder().decode(bytes);
+      } catch { return ''; }
+    };
+    let encodedCandidate = compact;
+    for (let depth = 0; depth < 3; depth += 1) {
+      encodedCandidate = decodeBase64(encodedCandidate);
+      if (!encodedCandidate) break;
+      candidates.push(encodedCandidate);
+      encodedCandidate = encodedCandidate.trim();
+    }
 
     const asPageList = (candidate) => {
       try {
         let parsed = candidate;
         for (let depth = 0; depth < 2 && typeof parsed === 'string'; depth += 1) parsed = JSON.parse(parsed);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed) && parsed.length) return parsed;
         if (parsed && typeof parsed === 'object') {
           for (const [key, nested] of Object.entries(parsed)) {
             if (!/(?:pages?|images?|reader|chapter|data|result|items)/i.test(key)) continue;
-            if (Array.isArray(nested)) return nested;
+            if (Array.isArray(nested) && nested.length) return nested;
             if (nested && (typeof nested === 'object' || typeof nested === 'string')) {
               const list = asPageList(nested);
               if (list) return list;
@@ -57,9 +68,10 @@ export default function createSource({ fetchText, parse }) {
     if (Array.isArray(page)) return page.map((item) => imageUrl(item, depth + 1)).find(Boolean) || '';
 
     const preferredKeys = [
-      'url', 'src', 'image', 'img', 'source', 'original', 'fallback',
+      'url', 'src', 'href', 'link', 'image', 'img', 'picture', 'source', 'original', 'fallback',
       'srcUrl', 'pageUrl', 'imageUrl', 'image_url', 'src_url', 'img_url',
-      'fileUrl', 'file_url', 'originalUrl', 'original_url', 'webp', 'path', 'file'
+      'fileUrl', 'file_url', 'originalUrl', 'original_url', 'downloadUrl', 'webp',
+      'imagePath', 'pagePath', 'path', 'file', 'data'
     ];
     for (const key of preferredKeys) {
       const value = page[key];
@@ -68,9 +80,29 @@ export default function createSource({ fetchText, parse }) {
     }
 
     for (const [key, value] of Object.entries(page)) {
-      if (!/(?:url|src|image|img|file|page|original|fallback|webp|path)/i.test(key)) continue;
+      if (!/(?:url|src|href|link|image|img|picture|file|page|original|fallback|download|webp|path|data)/i.test(key)) continue;
       const found = typeof value === 'string' ? value : imageUrl(value, depth + 1);
       if (found) return found;
+    }
+
+    // Mihon's PageDto can gain/rename fields independently of the site reader.
+    // As a fallback, accept only strings that clearly point to an image asset.
+    const imageAsset = (value) => {
+      if (typeof value !== 'string' || !value.trim()) return false;
+      try {
+        const url = new URL(value.trim(), base);
+        if (!['http:', 'https:'].includes(url.protocol)) return false;
+        return url.hostname === 'd33y4i2dmzjqjh.cloudfront.net'
+          || /\.(?:avif|gif|jpe?g|png|webp)(?:$|[?#])/i.test(value)
+          || /\/(?:pages?|images?)\//i.test(url.pathname);
+      } catch { return false; }
+    };
+    for (const value of Object.values(page)) {
+      if (typeof value === 'string' && imageAsset(value)) return value;
+      if (value && typeof value === 'object') {
+        const found = imageUrl(value, depth + 1);
+        if (found && imageAsset(found)) return found;
+      }
     }
     return '';
   };
@@ -158,6 +190,25 @@ export default function createSource({ fetchText, parse }) {
     return payloads;
   }
 
+  function fallbackPagePayloads(html, outer) {
+    const payloads = [];
+    // Prefer page-related data attributes, even if ONF renames the attribute.
+    for (const node of outer.querySelectorAll('*')) {
+      for (const name of node.getAttributeNames?.() || []) {
+        if (!name.startsWith('data-') || /^(?:data-src|data-srcset|data-original|data-original-src)$/i.test(name)) continue;
+        const value = node.getAttribute(name)?.trim() || '';
+        if (value.length >= 40 && /^[A-Za-z0-9+/_=-]+$/.test(value)) payloads.push(value);
+      }
+    }
+    // Some reader builds place the encoded page list in a renamed JS variable.
+    for (const script of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+      for (const match of script[1].matchAll(/(?:['"`])([A-Za-z0-9+/_=-]{80,})(?:['"`])/g)) {
+        payloads.push(match[1]);
+      }
+    }
+    return payloads;
+  }
+
   const imageElementUrl = (image) => {
     if (!image) return '';
     for (const attr of ['data-src', 'data-lazy-src', 'data-original', 'data-original-src', 'data-srcset', 'srcset', 'src']) {
@@ -173,35 +224,6 @@ export default function createSource({ fetchText, parse }) {
   };
 
   const decodePageImages = (html, outer, chapterUrl) => {
-    const viewer = outer.querySelector('#viewerContainer, #reader, #manga-reader, .viewer-container, .reader-container, .manga-pages, .chapter-reader');
-    const payloadNode = outer.querySelector('[data-reader-pages], [data-page-list], [data-pages], [data-images], [data-pages-json], [data-chapter-pages], [data-image-list]');
-    const encodedPages = viewer?.getAttribute('data-reader-pages')
-      || viewer?.getAttribute('data-pages')
-      || viewer?.getAttribute('data-images')
-      || payloadNode?.getAttribute('data-reader-pages')
-      || payloadNode?.getAttribute('data-page-list')
-      || payloadNode?.getAttribute('data-pages')
-      || payloadNode?.getAttribute('data-images')
-      || payloadNode?.getAttribute('data-pages-json')
-      || payloadNode?.getAttribute('data-chapter-pages')
-      || payloadNode?.getAttribute('data-image-list');
-
-    let pageList = decodePageList(encodedPages);
-    if (!pageList) {
-      for (const script of outer.querySelectorAll('script[type="application/json"]')) {
-        const payload = script.textContent || '';
-        if (!payload.includes('"src"')) continue;
-        pageList = decodePageList(payload);
-        if (pageList) break;
-      }
-    }
-    if (!pageList) {
-      for (const payload of assignedPagePayloads(html)) {
-        pageList = decodePageList(payload);
-        if (pageList) break;
-      }
-    }
-
     const resolvePageUrl = (value) => {
       if (!value || typeof value !== 'string') return '';
       try {
@@ -209,11 +231,45 @@ export default function createSource({ fetchText, parse }) {
         return ['http:', 'https:'].includes(resolved.protocol) ? resolved.href : '';
       } catch { return ''; }
     };
+    const fromPayloads = (payloads) => {
+      for (const payload of payloads) {
+        const pageList = decodePageList(payload);
+        const urls = Array.isArray(pageList)
+          ? pageList.map(imageUrl).map(resolvePageUrl).filter(Boolean)
+          : [];
+        if (urls.length) return [...new Set(urls)];
+      }
+      return [];
+    };
 
-    const fromPayload = Array.isArray(pageList)
-      ? pageList.map(imageUrl).map(resolvePageUrl).filter(Boolean)
-      : [];
-    if (fromPayload.length) return [...new Set(fromPayload)];
+    // Follow Mihon's exact reader attribute first, then inspect alternate wrappers.
+    const attributeNames = [
+      'data-reader-pages', 'data-page-list', 'data-pages', 'data-images',
+      'data-pages-json', 'data-chapter-pages', 'data-image-list'
+    ];
+    const nodes = [
+      outer.querySelector('#viewerContainer'),
+      ...outer.querySelectorAll('#reader, #manga-reader, .viewer-container, .reader-container, .manga-pages, .chapter-reader'),
+      ...outer.querySelectorAll('[data-reader-pages], [data-page-list], [data-pages], [data-images], [data-pages-json], [data-chapter-pages], [data-image-list]')
+    ].filter(Boolean);
+    const seenNodes = new Set();
+    const attributePayloads = [];
+    for (const node of nodes) {
+      if (seenNodes.has(node)) continue;
+      seenNodes.add(node);
+      for (const name of attributeNames) {
+        const value = node.getAttribute(name);
+        if (value) attributePayloads.push(value);
+      }
+    }
+    const fromAttributes = fromPayloads(attributePayloads);
+    if (fromAttributes.length) return fromAttributes;
+
+    const scriptPayloads = [...outer.querySelectorAll('script[type="application/json"]')]
+      .map((script) => script.textContent || '')
+      .filter((payload) => /(?:src|url|image|page)/i.test(payload));
+    const fromScripts = fromPayloads([...scriptPayloads, ...assignedPagePayloads(html), ...fallbackPagePayloads(html, outer)]);
+    if (fromScripts.length) return fromScripts;
 
     const imageNodes = outer.querySelectorAll(
       '#viewerContainer img, #reader img, #manga-reader img, .viewer-container img, .reader-container img, .reader-page img, .page-container img, .page-item img, .manga-pages img, .chapter-reader img, img.manga-page, img[data-page-url]'
@@ -339,9 +395,13 @@ export default function createSource({ fetchText, parse }) {
       const challengeTitle = /^(?:just a moment|attention required|security check|access denied|captcha|verify (?:that )?you are human)/i.test(fullTitle);
       const looksLikeOnfChapter = /cap[ií]tulo\s+[\d.]+/i.test(fullTitle) && /onf\s*manga/i.test(fullTitle);
       const blocked = !!challengePhrase || challengeTitle || (challengeMarkup && !looksLikeOnfChapter);
+      const viewer = outer.querySelector('#viewerContainer');
+      const pagePayload = viewer?.getAttribute('data-reader-pages') || '';
+      const readerInfo = `#viewerContainer ${viewer ? 'presente' : 'ausente'}, data-reader-pages ${pagePayload ? `${pagePayload.length} caracteres` : 'vacío'}, imágenes HTML: ${outer.querySelectorAll('img').length}`;
       const responseInfo = [
         challengePhrase?.[0] || (challengeTitle ? 'título de verificación' : challengeMarkup && !looksLikeOnfChapter ? 'marcas de desafío anti-bot' : ''),
-        responseTitle && `título: «${responseTitle}»`
+        responseTitle && `título: «${responseTitle}»`,
+        readerInfo
       ].filter(Boolean).join('; ');
       throw new Error(blocked
         ? `ONF devolvió una verificación o bloqueo en vez de las páginas del capítulo${responseInfo ? ` (${responseInfo})` : ''}. Inténtalo de nuevo más tarde.`

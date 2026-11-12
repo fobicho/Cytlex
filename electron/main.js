@@ -675,6 +675,30 @@ const HTTP_GET_TIMEOUT_MS = 15_000;
 const HTTP_HEAD_TIMEOUT_MS = 5_000;
 const HTTP_BODY_MAX_BYTES = 10 * 1024 * 1024;
 const IMAGE_BODY_MAX_BYTES = 50 * 1024 * 1024;
+const onfCookieJar = new Map();
+
+function mergeOnfCookies(...values) {
+  const cookies = new Map();
+  for (const value of values) {
+    for (const part of String(value || '').split(';')) {
+      const pair = part.trim();
+      const separator = pair.indexOf('=');
+      if (separator <= 0 || /[\r\n;]/.test(pair)) continue;
+      const name = pair.slice(0, separator).trim();
+      if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(name)) continue;
+      cookies.set(name, pair);
+    }
+  }
+  return [...cookies.values()].join('; ').slice(0, 4096);
+}
+
+function responseOnfCookies(headers = {}) {
+  const values = Array.isArray(headers['set-cookie']) ? headers['set-cookie'] : [headers['set-cookie'] || ''];
+  return values.map((value) => String(value).split(';', 1)[0].trim()).filter((pair) => {
+    const separator = pair.indexOf('=');
+    return separator > 0 && /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(pair.slice(0, separator)) && !/[\r\n]/.test(pair);
+  });
+}
 
 ipcMain.on('http:cancel', (_event, requestId) => {
   if (typeof requestId !== 'string' || !requestId) return;
@@ -699,11 +723,23 @@ ipcMain.handle('http:get', async (_e, url, requestId, options = {}) => {
       ? 'Cytlex/0.1.0 (+https://github.com/fobicho/Cytlex)'
       : plotTwist
         ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+        : onf
+          ? `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome || '131.0.0.0'} Safari/537.36`
         : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
     ...(mangaDexApi ? { Accept: 'application/json' } : {}),
     ...(plotTwist ? { Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'Accept-Language': 'es-419,es;q=0.9,en;q=0.8' } : {}),
+    ...(onf ? {
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'Accept-Language': 'es-419,es;q=0.9,en;q=0.8',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'same-origin',
+      'Upgrade-Insecure-Requests': '1'
+    } : {}),
     Referer: refererFor(parsed.toString())
   };
+  const onfRequestCookie = onf ? mergeOnfCookies(onfCookieJar.get(parsed.origin), options?.onfCookie) : '';
+  if (onfRequestCookie) headers.Cookie = onfRequestCookie;
   if (onf && typeof options?.onfReferer === 'string') {
     try {
       const referer = validateUrl(options.onfReferer);
@@ -715,12 +751,28 @@ ipcMain.handle('http:get', async (_e, url, requestId, options = {}) => {
     && /^[A-Za-z0-9!#$%&'*+.^_`|~-]+=[A-Za-z0-9!#$%&'()*+,.\/:=?@_`|~-]{1,2048}$/.test(options.onfCookie)) {
     headers.Cookie = options.onfCookie;
   }
-  const { response: res, body } = await requestPublic(parsed.toString(), {
+  let result = await requestPublic(parsed.toString(), {
     method: 'GET',
     headers,
     timeout: HTTP_GET_TIMEOUT_MS,
     requestId
   }, 0, HTTP_BODY_MAX_BYTES);
+  if (onf) {
+    const receivedCookies = responseOnfCookies(result.response.headers);
+    const updatedCookie = mergeOnfCookies(onfRequestCookie, ...receivedCookies);
+    if (receivedCookies.length) onfCookieJar.set(parsed.origin, updatedCookie);
+    if (updatedCookie && updatedCookie !== onfRequestCookie) {
+      result = await requestPublic(parsed.toString(), {
+        method: 'GET',
+        headers: { ...headers, Cookie: updatedCookie },
+        timeout: HTTP_GET_TIMEOUT_MS,
+        requestId
+      }, 0, HTTP_BODY_MAX_BYTES);
+      const refreshedCookies = responseOnfCookies(result.response.headers);
+      if (refreshedCookies.length) onfCookieJar.set(parsed.origin, mergeOnfCookies(updatedCookie, ...refreshedCookies));
+    }
+  }
+  const { response: res, body } = result;
   if (res.statusCode < 200 || res.statusCode >= 300) {
     const retryAfter = res.headers['retry-after'];
     res.resume();

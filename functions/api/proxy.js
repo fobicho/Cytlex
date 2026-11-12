@@ -26,6 +26,25 @@ const ALLOWED_HOSTS = new Set([
 const ALLOWED_SUFFIXES = ['t34798ndc.com', 'mangadex.network', 'ntr-files.online'];
 const REDIRECT_LIMIT = 5;
 const UPSTREAM_RETRIES = 2;
+const ONF_COOKIE_PAIR = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+=[^;\r\n]{1,2048}$/;
+
+function onfCookiePairs(request) {
+  const raw = request.headers.get('x-cytlex-onf-cookie') || '';
+  return raw.split(';').map((part) => part.trim()).filter((part) => ONF_COOKIE_PAIR.test(part)).slice(0, 20);
+}
+
+function responseOnfCookies(response) {
+  const values = typeof response.headers.getSetCookie === 'function'
+    ? response.headers.getSetCookie()
+    : [response.headers.get('set-cookie') || ''];
+  const cookies = new Map();
+  for (const value of values) {
+    const pair = value.split(';', 1)[0].trim();
+    if (!ONF_COOKIE_PAIR.test(pair)) continue;
+    cookies.set(pair.slice(0, pair.indexOf('=')), pair);
+  }
+  return [...cookies.values()];
+}
 
 function isAllowedHost(hostname) {
   const host = hostname.toLowerCase().replace(/\.$/, '');
@@ -108,10 +127,9 @@ function forwardedHeaders(request, target) {
     } catch {}
   }
 
-  const onfCookie = request.headers.get('x-cytlex-onf-cookie');
-  if (target.hostname === 'onfmangas.com' && onfCookie && onfCookie.length <= 2048
-    && /^[A-Za-z0-9!#$%&'*+.^_`|~-]+=[A-Za-z0-9!#$%&'()*+,.\/:=?@_`|~-]{1,2048}$/.test(onfCookie)) {
-    headers.set('cookie', onfCookie);
+  const onfCookies = target.hostname === 'onfmangas.com' ? onfCookiePairs(request) : [];
+  if (onfCookies.length) {
+    headers.set('cookie', onfCookies.join('; ').slice(0, 4096));
   }
 
   if (isMangaDexApi) {
@@ -145,6 +163,13 @@ function forwardedHeaders(request, target) {
     headers.set('referer', inmangaReferer(request));
   }
   if (target.hostname === 'onfmangas.com') {
+    headers.set('user-agent', request.headers.get('user-agent') || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
+    headers.set('accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8');
+    headers.set('accept-language', 'es-419,es;q=0.9,en;q=0.8');
+    headers.set('sec-fetch-dest', 'document');
+    headers.set('sec-fetch-mode', 'navigate');
+    headers.set('sec-fetch-site', 'same-origin');
+    headers.set('upgrade-insecure-requests', '1');
     headers.set('referer', onfReferer(request));
   }
   if (isPlotTwist) {
@@ -236,6 +261,10 @@ export async function onRequest(context) {
     for (const name of ['content-type', 'last-modified', 'accept-ranges']) {
       const value = upstream.headers.get(name);
       if (value) headers.set(name, value);
+    }
+    if (target.hostname === 'onfmangas.com') {
+      const cookies = responseOnfCookies(upstream);
+      if (cookies.length) headers.set('x-cytlex-onf-cookie', cookies.join('; ').slice(0, 4096));
     }
 
     return new Response(method === 'HEAD' ? null : upstream.body, {

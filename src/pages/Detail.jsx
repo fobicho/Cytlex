@@ -21,6 +21,7 @@ import { Dropdown } from '../components/ui/dropdown.jsx';
 import AniListPanel from '../components/AniListPanel.jsx';
 import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
+import { browserImageUrl } from '../lib/browserHttp.js';
 import Catalog from './Catalog.jsx';
 
 const EXPAND_CTRL_H = 16;
@@ -275,7 +276,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     setFailedCover('');
   }, [coverSrc]);
   const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
-  const proxyCover = requiresImageProxy(finalCover);
+  const proxyCover = requiresImageProxy(finalCover) && !!window.cytlex?.fetchImage;
   useEffect(() => {
     if (!proxyCover || !finalCover) return undefined;
     let alive = true;
@@ -311,7 +312,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         <img
           key={`${coverKey}|source|${finalCover}`}
           className="absolute inset-0 w-full h-full object-cover"
-          src={finalCover}
+          src={browserImageUrl(finalCover)}
           alt={alt}
           referrerPolicy="no-referrer"
           onLoad={() => {

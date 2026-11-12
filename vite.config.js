@@ -1,7 +1,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { setDefaultResultOrder } from 'node:dns';
 import { Readable } from 'node:stream';
 import { onRequest as handleWebProxy } from './functions/api/proxy.js';
+
+setDefaultResultOrder('ipv4first');
 
 function webProxyDevMiddleware() {
   return {
