@@ -84,6 +84,18 @@
     "desc": "Manga en español."
   },
   {
+    "id": "komiwa",
+    "name": "Komiwa",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "contentWarning": "MIXED",
+    "main": "ext/komiwa.js",
+    "baseUrl": "https://www.komiwa.net",
+    "icon": "https://www.google.com/s2/favicons?domain=komiwa.net&sz=128",
+    "desc": "Manga, manhwa y manhua en español."
+  },
+  {
     "id": "mangadex",
     "name": "MangaDex",
     "lang": "multi",

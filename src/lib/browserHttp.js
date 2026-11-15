@@ -32,6 +32,7 @@ export function browserImageUrl(url, referer = '') {
     const onfCdn = hostname === 'd33y4i2dmzjqjh.cloudfront.net';
     const mangaDexImage = hostname === 'uploads.mangadex.org' || hostname.endsWith('.mangadex.network');
     const sourceImage = hostname === 'images.mangalect.org' || hostname === 'mangalect.org'
+      || hostname === 'images.komiwa.net' || hostname === 'media.mangavault.lat'
       || hostname === 'imagesolymp.xyz' || hostname === 'media.imagesolymp.xyz'
       || hostname === 'olympusxyz.com' || hostname.endsWith('.olympusxyz.com')
       || hostname === 'ntr-files.online' || hostname.endsWith('.ntr-files.online')

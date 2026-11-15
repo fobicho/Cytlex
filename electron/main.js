@@ -153,7 +153,8 @@ const REFERER_RULES = [
   { hosts: ['imagesolymp.xyz', 'olympusxyz.com'], referer: 'https://olympusxyz.com/' },
   { hosts: ['zonatmo.org'], referer: 'https://zonatmo.org/' },
   { hosts: ['ntr-files.online'], referer: 'https://manga-oni.com/' },
-  { hosts: ['inmanga.com', 'intomanga.com', 'pack-yak.intomanga.com'], referer: 'https://inmanga.com/' }
+  { hosts: ['inmanga.com', 'intomanga.com', 'pack-yak.intomanga.com'], referer: 'https://inmanga.com/' },
+  { hosts: ['images.komiwa.net', 'media.mangavault.lat'], referer: 'https://www.komiwa.net/' }
 ];
 
 const ALLOWED_PROTOCOLS = ['http:', 'https:'];
@@ -838,6 +839,14 @@ ipcMain.handle('image:fetch', async (_e, url, requestedReferer, requestedCookie)
       try {
         const candidate = validateUrl(requestedReferer);
         if (candidate.origin === 'https://onfmangas.com' && candidate.pathname.startsWith('/lector/')) {
+          imageReferer = candidate.href;
+        }
+      } catch {}
+    }
+    if (host === 'media.mangavault.lat' && typeof requestedReferer === 'string') {
+      try {
+        const candidate = validateUrl(requestedReferer);
+        if (candidate.origin === 'https://www.komiwa.net' && candidate.pathname.startsWith('/chapter/')) {
           imageReferer = candidate.href;
         }
       } catch {}

@@ -1,14 +1,17 @@
 const ALLOWED_HOSTS = new Set([
   'api.anilist.co',
   'api.mangadex.org',
+  'b78sk.komiwa.net',
   'd33y4i2dmzjqjh.cloudfront.net',
   'fobicho.github.io',
   'images.mangalect.org',
+  'images.komiwa.net',
   'imagesolymp.xyz',
   'inmanga.com',
   'intomanga.com',
   'jumpg-assets.tokyo-cdn.com',
   'manga-oni.com',
+  'media.mangavault.lat',
   'mangalect.org',
   'mangadex.org',
   'media.imagesolymp.xyz',
@@ -18,6 +21,7 @@ const ALLOWED_HOSTS = new Set([
   'pack-yak.intomanga.com',
   'uploads.mangadex.org',
   'www.leercapitulo.co',
+  'www.komiwa.net',
   'zonatmo.org'
 ]);
 
