@@ -75,7 +75,7 @@
     "id": "inmanga",
     "name": "InManga",
     "lang": "es",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "type": "module",
     "contentWarning": "SAFE",
     "main": "ext/inmanga.js",

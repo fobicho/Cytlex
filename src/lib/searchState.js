@@ -6,6 +6,7 @@ export const SOURCE_CATALOG_HOME_EVENT = 'cytlex:source-catalog-home';
 
 const seenCovers = new Map();
 const MAX_SEEN_COVERS = 120;
+const mangaPreviews = new Map();
 
 const coverCacheKey = (url, sourceId = '') => `${sourceId || ''}|${mangaSourceUrl(url, sourceId) || ''}`;
 
@@ -25,6 +26,27 @@ export function recallCover(url, sourceId = '') {
     seenCovers.set(key, cover);
   }
   return cover;
+}
+
+export function rememberMangaPreview(manga, sourceId, image) {
+  if (!manga?.url) return;
+  const key = coverCacheKey(manga.url, sourceId);
+  const previous = mangaPreviews.get(key);
+  mangaPreviews.delete(key);
+  mangaPreviews.set(key, {
+    title: manga.title || previous?.title,
+    author: manga.author || manga.artist || previous?.author || '',
+    cover: manga.cover,
+    image: image?.complete && image.naturalWidth > 0
+      ? image.currentSrc
+      : previous?.cover === manga.cover ? previous?.image || '' : ''
+  });
+  while (mangaPreviews.size > MAX_SEEN_COVERS) mangaPreviews.delete(mangaPreviews.keys().next().value);
+  rememberCover(manga.url, manga.cover, sourceId);
+}
+
+export function recallMangaPreview(url, sourceId) {
+  return mangaPreviews.get(coverCacheKey(url, sourceId));
 }
 
 export const scrollMemory = { catalog: 0 };

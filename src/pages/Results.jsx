@@ -13,6 +13,7 @@ import { SourceBadge } from '../components/SourceBadge.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { useScale, px } from '../lib/useScale.js';
+import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 
 export default function Results() {
   const navigate = useNavigate();
@@ -41,7 +42,7 @@ export default function Results() {
     setHideSavedManga(!!s.hideSavedManga);
   }), []);
 
-  const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
+  const cs = useResponsiveCoverSize(coverSize);
   const adultExtensionHidden = !isExtensionAllowed(manifest, showAdultExtensions);
   const currentGroup = groupOverride?.id === sourceId ? groupOverride : group;
   const items = currentGroup?.items || [];

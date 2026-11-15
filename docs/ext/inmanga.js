@@ -117,7 +117,13 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
   const factValue = (doc, labels) => {
     const wanted = new Set(labels.map(normalized));
     for (const label of doc.querySelectorAll('label, dt, th, strong, b, span, div, p')) {
-      if (normalized(label.textContent) && wanted.has(normalized(label.textContent))) {
+      const labelText = clean(label.textContent);
+      const normalizedLabel = normalized(labelText);
+      if (label.children.length === 0 && labelText.length < 160) {
+        const inlineValue = labelText.match(new RegExp(`^(?:${labels.join('|')})\\s*[:：-]\\s*(.+)$`, 'i'));
+        if (inlineValue?.[1]) return clean(inlineValue[1]);
+      }
+      if (normalizedLabel && wanted.has(normalizedLabel)) {
         const adjacent = [label.previousElementSibling, label.nextElementSibling]
           .map((element) => clean(element?.textContent))
           .find((value) => value && !wanted.has(normalized(value)));
@@ -240,7 +246,8 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
         estado: factValue(doc, ['Estado', 'Status']),
         status: factValue(doc, ['Estado', 'Status']),
         tipo: factValue(doc, ['Tipo', 'Type']) || 'Manga',
-        autor: factValue(doc, ['Autor', 'Author', 'Artist']),
+        autor: factValue(doc, ['Autor', 'Author', 'Artist'])
+          || clean(doc.querySelector('meta[name="author"], meta[property="article:author"]')?.getAttribute('content')),
         vistas: factValue(doc, ['Vistas', 'Views']),
         publicacion: factValue(doc, ['Publicación', 'Publication']),
         periodicidad: factValue(doc, ['Periodicidad', 'Frequency']),

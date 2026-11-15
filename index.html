@@ -12,13 +12,14 @@
           var mode = (s && s.mode) || 'light';
           if (theme === 'dark') theme = 'default';
           if (theme === 'light') { theme = 'default'; mode = 'light'; }
-          var themes = ['default','beige','esmeralda','violeta','rosa','oceano'];
+          var themes = ['default','monocromatico','beige','esmeralda','violeta','rosa','oceano'];
           if (themes.indexOf(theme) === -1) theme = 'default';
           if (mode !== 'dark' && mode !== 'light') mode = 'dark';
           document.documentElement.setAttribute('data-theme', theme);
           document.documentElement.setAttribute('data-mode', mode);
           var bg = {
             default: { dark: '#09090b', light: '#ffffff' },
+            monocromatico: { dark: '#141414', light: '#f7f7f7' },
             beige: { dark: '#241d14', light: '#f7f1e6' },
             esmeralda: { dark: '#131b18', light: '#f2f8f5' },
             violeta: { dark: '#16121c', light: '#f7f4fa' },

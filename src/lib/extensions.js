@@ -318,8 +318,8 @@ export const extensions = {
       const sub = subSources(fallback)?.find((source) => source.id === id);
       return sub ? { ...fallback, ...sub } : fallback;
     }
-    const sub = subSources(rec.manifest)?.find((s) => s.id === id);
-    return sub ? { ...rec.manifest, ...sub } : rec.manifest;
+      const sub = subSources(rec.manifest)?.find((s) => s.id === id);
+      return sub ? { ...rec.manifest, ...sub, icon: sub.icon || rec.manifest.icon } : rec.manifest;
   },
   isInstalled(id) {
     return !!findRecord(id);

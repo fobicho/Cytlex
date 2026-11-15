@@ -86,6 +86,22 @@ export const progress = {
     if (wasRead) notify({ type: 'read', mangaUrl, sourceId });
   },
 
+  removeMany(urls, sourceId, mangaUrl = '') {
+    const data = read();
+    let changed = false;
+    let wasRead = false;
+    [...new Set((urls || []).filter(Boolean))].forEach((url) => {
+      const key = cap(url, sourceId);
+      if (!Object.hasOwn(data, key)) return;
+      wasRead ||= data[key]?.read;
+      delete data[key];
+      changed = true;
+    });
+    if (!changed) return;
+    write(data);
+    if (wasRead) notify({ type: 'read', mangaUrl, sourceId });
+  },
+
   reassignSource(oldId, newId) {
     if (!oldId || !newId || oldId === newId) return;
     const data = read();

@@ -6,18 +6,22 @@ import MangaCard from './MangaCard.jsx';
 import VirtualMangaGrid from './VirtualMangaGrid.jsx';
 import { SourceBadge } from './SourceBadge.jsx';
 import { api } from '../lib/api.js';
+import { sourceErrorMessage } from '../lib/browserHttp.js';
 import { isLibraryManga } from '../lib/library.js';
 import { extensions } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
-import { SOURCE_CATALOG_HOME_EVENT, rememberCover, sourceCatalogState } from '../lib/searchState.js';
+import { SOURCE_CATALOG_HOME_EVENT, rememberMangaPreview, sourceCatalogState } from '../lib/searchState.js';
 import { Button } from './ui/button.jsx';
 import { Card } from './ui/card.jsx';
 import { Dropdown } from './ui/dropdown.jsx';
 import { EmptyState } from './ui/empty-state.jsx';
 import { Input } from './ui/input.jsx';
 import { useScale, px } from '../lib/useScale.js';
+import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 
 const CATALOG_BATCH_SIZE = 20;
+const isMangaDex = (id) => id === 'mangadex' || id === 'mangadex-en';
+
 const GENRE_TRANSLATIONS = new Map([
   ['+15', 'Clasificación +15'], ['+18', 'Clasificación +18'], ['+19', 'Clasificación +19'],
   ['adaptation', 'Adaptación'], ['adaptación', 'Adaptación'],
@@ -133,7 +137,7 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
     pagesFetched += 1;
     const result = await api.catalog({ ...params, page: currentPage, __cytlexRequestId: requestId }, id);
     const received = result.items || [];
-    received.forEach((item) => rememberCover(item.url, item.cover, id));
+    received.forEach((item) => rememberMangaPreview(item, id));
     addUnique(received);
     canFetchNextPage = result.hasMore ?? currentPage < (result.totalPages || 1);
     while (batch.length < CATALOG_BATCH_SIZE && queued.length) batch.push(queued.shift());
@@ -167,9 +171,10 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const [hasMore, setHasMore] = useState(() => !!restore?.hasMore);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
   const [restoring, setRestoring] = useState(() => !!restore?.sourceId);
   const requestId = useRef(0);
+  const filterRequestScope = useRef(0);
   const requestSequence = useRef(0);
   const activeHttpRequest = useRef('');
   const [sourceSort, setSourceSort] = useState(() => {
@@ -185,6 +190,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const isZonaTmo = sourceId === 'zonatmo';
   const useCompactFilterFields = isZonaTmo || sourceId === 'mangalect';
   const filterPanelWidth = px(isZonaTmo ? 480 : 360, scale, 300);
+  const getFilterRoot = () => filterRootRef.current;
 
   useLayoutEffect(() => {
     if (!filtersOpen) {
@@ -192,7 +198,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       return undefined;
     }
     const positionPanel = () => {
-      const trigger = filterRootRef.current?.querySelector('button');
+      const trigger = getFilterRoot()?.querySelector('button');
       const panel = filterPanelRef.current;
       if (!trigger || !panel) return;
       const rect = trigger.getBoundingClientRect();
@@ -222,7 +228,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     if (filterBodyRef.current) resize.observe(filterBodyRef.current);
     const closeOnPageScroll = ({ target }) => {
       if (target === document || target === window ||
-        (target instanceof Element && target.contains(filterRootRef.current))) {
+        (target instanceof Element && filterRootRef.current && target.contains(filterRootRef.current))) {
         setFiltersOpen(false);
       }
     };
@@ -245,7 +251,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     const onKeyDown = (event) => {
       if (event.key === 'Escape' && !filterPanelRef.current?.querySelector('[aria-haspopup="listbox"][aria-expanded="true"]')) {
         setFiltersOpen(false);
-        filterRootRef.current?.querySelector('button')?.focus();
+        getFilterRoot()?.querySelector('button')?.focus();
       }
     };
     document.addEventListener('pointerdown', onPointerDown);
@@ -287,9 +293,21 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     if (activeHttpRequest.current === request) activeHttpRequest.current = '';
   };
 
+  const loadCatalogFilters = (id) => {
+    const scope = filterRequestScope.current;
+    void api.catalogFilters(id).then((nextFilters) => {
+      if (scope === filterRequestScope.current) setFilters(Array.isArray(nextFilters) ? nextFilters : []);
+    }).catch(() => {});
+  };
+
   useEffect(() => {
     if (sourceId && !sources.some((source) => source.manifest.id === sourceId)) setSourceId('');
   }, [sources, sourceId]);
+
+  useEffect(() => {
+    if (!active || sourceId || !sources.some((source) => source.manifest.id === 'leercapitulo')) return;
+    void api.catalogFilters('leercapitulo').catch(() => {});
+  }, [active, sourceId, sources]);
 
   useEffect(() => {
     const showAllSources = () => {
@@ -304,7 +322,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     if (!id) return;
     const runId = ++requestId.current;
     const httpRequestId = beginHttpRequest();
-    setError('');
+    setError(null);
     if (append) setLoadingMore(true);
     else {
       setLoading(true);
@@ -328,8 +346,9 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       setPage(result.page);
       setApiHasMore(result.apiHasMore);
       setHasMore(result.hasMore);
+      if (isMangaDex(id) && !filters.length) loadCatalogFilters(id);
     } catch (loadError) {
-      if (runId === requestId.current) setError(String(loadError?.message || 'No se pudo cargar el catálogo de esta fuente.'));
+      if (runId === requestId.current) setError({ cause: loadError, params, append });
     } finally {
       if (runId === requestId.current) {
         setLoading(false);
@@ -339,7 +358,11 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     }
   };
 
-  useEffect(() => () => cancelActiveRequest(), [sourceId]);
+  useEffect(() => () => {
+    requestId.current += 1;
+    filterRequestScope.current += 1;
+    cancelActiveRequest();
+  }, [sourceId]);
 
   useEffect(() => {
     if (!sourceId) return undefined;
@@ -359,25 +382,25 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         setHasMore(!!snapshot.hasMore);
         setRestoring(false);
         setLoading(false);
-        setError('');
+        setError(null);
         setCatalogReadySourceId(sourceId);
         return undefined;
       }
       let active = true;
       const runId = ++requestId.current;
       setLoading(true);
-      setError('');
+      setError(null);
       const httpRequestId = beginHttpRequest();
+      const params = snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) };
       (async () => {
         try {
-          const nextFilters = await api.catalogFilters(sourceId).catch(() => []);
+          if (!isMangaDex(sourceId)) loadCatalogFilters(sourceId);
           const restoredItems = [];
           const urls = new Set();
           let result = { hasMore: false, totalPages: 1 };
-          const params = snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) };
           for (let nextPage = 1; nextPage <= Math.max(1, snapshot.page || 1); nextPage += 1) {
             result = await api.catalog({ ...params, page: nextPage, __cytlexRequestId: httpRequestId }, sourceId);
-            (result.items || []).forEach((item) => rememberCover(item.url, item.cover, sourceId));
+            (result.items || []).forEach((item) => rememberMangaPreview(item, sourceId));
             for (const item of result.items || []) {
               if (item.url && !urls.has(item.url)) {
                 urls.add(item.url);
@@ -386,7 +409,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
             }
           }
           if (!active || runId !== requestId.current) return;
-          setFilters(Array.isArray(nextFilters) ? nextFilters : []);
+          if (isMangaDex(sourceId)) loadCatalogFilters(sourceId);
           setItems(restoredItems.slice(0, CATALOG_BATCH_SIZE));
           setQueuedItems([...(snapshot.queuedItems || []), ...restoredItems.slice(CATALOG_BATCH_SIZE)]);
           setLoadedParams(snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) });
@@ -399,7 +422,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         } catch (loadError) {
           if (active && runId === requestId.current) {
             pendingScrollTop.current = null;
-            setError(String(loadError?.message || 'No se pudo restaurar el catálogo de esta fuente.'));
+            setError({ cause: loadError, params });
           }
         } finally {
           if (active && runId === requestId.current) {
@@ -413,7 +436,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       return () => { active = false; if (activeHttpRequest.current === httpRequestId) cancelActiveRequest(); };
     }
     let active = true;
-    requestId.current += 1;
+    const runId = ++requestId.current;
     setQuery('');
     setFilterValues({});
     setFiltersOpen(false);
@@ -423,22 +446,18 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     setPage(1);
     setApiHasMore(false);
     setHasMore(false);
-    setError('');
+    setError(null);
     setLoading(true);
     setFilters([]);
     const httpRequestId = beginHttpRequest();
+    const params = { q: '', ...(sourceId === 'leercapitulo' ? { sort: 'az' } : {}) };
     (async () => {
       try {
-        const loadFilters = () => api.catalogFilters(sourceId).catch(() => []).then((nextFilters) => {
-          const safeFilters = Array.isArray(nextFilters) ? nextFilters : [];
-          if (active) setFilters(safeFilters);
-          return safeFilters;
-        });
-        const params = { q: '', ...(sourceId === 'leercapitulo' ? { sort: 'az' } : {}) };
         const resultPromise = fetchCatalogBatch({ id: sourceId, params, page: 0, requestId: httpRequestId });
-        loadFilters();
+        if (!isMangaDex(sourceId)) loadCatalogFilters(sourceId);
         const result = await resultPromise;
-        if (!active) return;
+        if (!active || runId !== requestId.current) return;
+        if (isMangaDex(sourceId)) loadCatalogFilters(sourceId);
         setItems(result.items);
         setQueuedItems(result.queuedItems);
         setLoadedParams(params);
@@ -446,7 +465,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         setApiHasMore(result.apiHasMore);
         setHasMore(result.hasMore);
       } catch (loadError) {
-        if (active) setError(String(loadError?.message || 'No se pudo cargar el catálogo de esta fuente.'));
+        if (active && runId === requestId.current) setError({ cause: loadError, params });
       } finally {
         if (active) {
           setLoading(false);
@@ -568,6 +587,23 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       </div>
     );
   };
+  const renderFiltersButton = (ref, className = '') => (
+    <div ref={ref} className={`shrink-0 ${className}`}>
+      <Button
+        type="button"
+        variant="secondary"
+        className="shrink-0 rounded-md"
+        onClick={() => setFiltersOpen((open) => !open)}
+        aria-label={activeFilterCount ? `Filtros, ${activeFilterCount} seleccionados` : 'Filtros'}
+        aria-expanded={filtersOpen}
+        aria-controls="source-filters"
+        style={{ width: px(96, scale, 88), height: px(36, scale, 30), fontSize: px(14, scale, 12) }}
+      >
+        <Filter className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
+        Filtros{activeFilterCount > 0 && <span className="ml-1 tabular-nums">{activeFilterCount}</span>}
+      </Button>
+    </div>
+  );
 
   if (!sources.length) {
     const hidden = allSources.length > 0 && !settings.get().showAdultExtensions;
@@ -580,7 +616,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     );
   }
 
-  const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
+  const cs = useResponsiveCoverSize(coverSize);
   const visibleItems = hideSavedManga
     ? items.filter((manga) => !isLibraryManga(manga, sourceId, savedMangaKeys))
     : items;
@@ -645,131 +681,116 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     <div data-source-catalog-active="true" data-source-catalog-selected={sourceId ? 'true' : 'false'} className="flex min-h-full flex-col" style={{ gap: px(16, scale, 12) }}>
       {selected && (
         <>
-          <div className="flex min-w-0 items-center" style={{ gap: px(10, scale, 8) }}>
+          <div className="flex min-w-0 items-center" style={{ gap: px(10, scale, 8), minHeight: px(36, scale, 30) }}>
             <Button type="button" variant="ghost" size="icon" onClick={() => { sourceCatalogState.clear(); setSourceId(''); }} title="Volver a Fuentes" aria-label="Volver a Fuentes" style={{ width: px(34, scale, 28), height: px(34, scale, 28) }}>
               <ArrowLeft style={{ width: px(18, scale, 15), height: px(18, scale, 15) }} />
             </Button>
             <SourceBadge m={selected.manifest} style={{ width: px(30, scale, 24), height: px(30, scale, 24) }} />
-            <div className="relative flex min-w-0 items-center" style={{ gap: px(10, scale, 8) }}>
-              <h2 className="min-w-0 truncate font-semibold" style={{ maxWidth: px(520, scale, 260), fontSize: px(16, scale, 13) }}>{selected.manifest.name}</h2>
-              {sourceId === 'leercapitulo' && (
-                <>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={() => {
-                      const sort = leercapituloSort === 'az' ? 'za' : 'az';
-                      loadCatalog(sourceId, { ...loadedParams, q: query.trim(), ...filterValues, sort });
+            <h2 className="min-w-0 flex-1 truncate font-semibold" style={{ fontSize: px(16, scale, 13) }}>{selected.manifest.name}</h2>
+            {sourceId === 'leercapitulo' && (
+              <div className="ml-auto flex shrink-0 items-center" style={{ gap: px(8, scale, 6) }}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => {
+                    const sort = leercapituloSort === 'az' ? 'za' : 'az';
+                    loadCatalog(sourceId, { ...loadedParams, q: query.trim(), ...filterValues, sort });
+                  }}
+                  disabled={loading}
+                  title={`Orden actual: ${leercapituloSort.toUpperCase()}. Cambiar a ${leercapituloSort === 'az' ? 'Z-A' : 'A-Z'}`}
+                  style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+                >
+                  <ArrowUpDown className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                  {leercapituloSort === 'az' ? 'A-Z' : 'Z-A'}
+                </Button>
+                {genreFilter?.options?.length > 0 && (
+                  <Dropdown
+                    scale={scale}
+                    value={filterValues.genre || ''}
+                    options={[{ value: '', label: 'Todos' }, ...genreFilter.options]}
+                    ariaLabel="Filtrar por género"
+                    placeholder="Género"
+                    menuMaxHeight={288}
+                    buttonClassName="rounded-md border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                    buttonStyle={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+                    style={{ width: px(190, scale, 160) }}
+                    onChange={(genre) => {
+                      setFilterValues((current) => ({ ...current, genre }));
+                      loadCatalog(sourceId, { ...loadedParams, q: query.trim(), ...filterValues, genre, sort: leercapituloSort });
                     }}
-                    disabled={loading}
-                    title={`Orden actual: ${leercapituloSort.toUpperCase()}. Cambiar a ${leercapituloSort === 'az' ? 'Z-A' : 'A-Z'}`}
-                    style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9), marginLeft: px(4, scale, 3) }}
-                  >
-                    <ArrowUpDown className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    {leercapituloSort === 'az' ? 'A-Z' : 'Z-A'}
-                  </Button>
-                  {genreFilter?.options?.length > 0 && (
-                    <Dropdown
-                      scale={scale}
-                      value={filterValues.genre || ''}
-                      options={[{ value: '', label: 'Todos' }, ...genreFilter.options]}
-                      ariaLabel="Filtrar por género"
-                      placeholder="Género"
-                      menuMaxHeight={288}
-                      buttonClassName="rounded-md border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80"
-                      buttonStyle={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
-                      style={{ width: px(190, scale, 160) }}
-                      onChange={(genre) => {
-                        setFilterValues((current) => ({ ...current, genre }));
-                        loadCatalog(sourceId, { ...loadedParams, q: query.trim(), ...filterValues, genre, sort: leercapituloSort });
+                  />
+                )}
+              </div>
+            )}
+            {sourceId !== 'leercapitulo' && filters.length > 0 && (
+              <>
+                {renderFiltersButton(filterRootRef, 'ml-auto')}
+                {createPortal(
+                  <AnimatePresence initial={false}>
+                  {filtersOpen && (
+                    <motion.div
+                      ref={filterPanelRef}
+                      id="source-filters"
+                      key="source-filters"
+                      role="dialog"
+                      aria-label="Filtros de búsqueda"
+                      tabIndex={-1}
+                      initial={{ opacity: 0, y: -4, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                      transition={{ duration: reduceMotion ? 0 : 0.16, ease: [0.22, 1, 0.36, 1] }}
+                      className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-lg outline-none"
+                      style={{
+                        width: filterPanelPosition?.width || filterPanelWidth,
+                        maxWidth: filterPanelPosition ? undefined : 'calc(100vw - 32px)',
+                        maxHeight: filterPanelPosition?.maxHeight || 'calc(100dvh - 32px)',
+                        left: filterPanelPosition?.left ?? 16,
+                        top: filterPanelPosition?.top ?? 16,
+                        transformOrigin: 'top left'
                       }}
-                    />
+                    >
+                      <div ref={filterBodyRef} className="grid min-h-0 grid-cols-1 content-start gap-4 overflow-y-auto overscroll-contain p-3 sm:p-4">
+                        {filterGroups.primary.length > 0 && (
+                          <div className={isZonaTmo ? 'grid grid-cols-2 gap-3' : 'grid grid-cols-1 gap-3 sm:grid-cols-2'}>
+                            {filterGroups.primary.map(renderFilter)}
+                          </div>
+                        )}
+                        {filterGroups.genres.length > 0 && (
+                          <div className={isZonaTmo ? 'grid min-w-0 grid-cols-2 items-start gap-3' : 'grid min-w-0 gap-3'}>
+                            {filterGroups.genres.map(renderFilter)}
+                          </div>
+                        )}
+                        {filterGroups.sorting.length > 0 && (
+                          <div className="grid grid-cols-2 gap-3">
+                            {filterGroups.sorting.map(renderFilter)}
+                          </div>
+                        )}
+                        {filterGroups.other.length > 0 && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(10.625rem,1fr))]" style={{ gap: px(12, scale, 9) }}>
+                            {filterGroups.other.map(renderFilter)}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-3 py-1.5 sm:px-4">
+                        <Button type="button" variant="ghost" size="sm" className="h-10 sm:h-8" onClick={reset} disabled={!hasActiveFilters || loading}>
+                          Limpiar
+                        </Button>
+                        <Button type="button" size="sm" className="h-10 sm:h-8" onClick={search} disabled={loading}>
+                          Aplicar filtros
+                        </Button>
+                      </div>
+                    </motion.div>
                   )}
-                </>
-              )}
-              {sourceId !== 'leercapitulo' && filters.length > 0 && (
-                <div ref={filterRootRef} className="shrink-0">
-                  <Button
-                    type="button"
-                    variant={filtersOpen || activeFilterCount ? 'secondary' : 'outline'}
-                    className="min-h-11 shrink-0 sm:min-h-9"
-                    onClick={() => setFiltersOpen((open) => !open)}
-                    aria-label={activeFilterCount ? `Filtros, ${activeFilterCount} seleccionados` : 'Filtros'}
-                    aria-expanded={filtersOpen}
-                    aria-controls="source-filters"
-                    style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}
-                  >
-                    <Filter className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
-                    Filtros{activeFilterCount > 0 && <span className="ml-1 tabular-nums">{activeFilterCount}</span>}
-                  </Button>
-                  {createPortal(
-                    <AnimatePresence initial={false}>
-                    {filtersOpen && (
-                      <motion.div
-                        ref={filterPanelRef}
-                        id="source-filters"
-                        key="source-filters"
-                        role="dialog"
-                        aria-label="Filtros de búsqueda"
-                        tabIndex={-1}
-                        initial={{ opacity: 0, y: -4, scale: 0.98 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: -4, scale: 0.98 }}
-                        transition={{ duration: reduceMotion ? 0 : 0.16, ease: [0.22, 1, 0.36, 1] }}
-                        className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-lg outline-none"
-                        style={{
-                          width: filterPanelPosition?.width || filterPanelWidth,
-                          maxWidth: filterPanelPosition ? undefined : 'calc(100vw - 32px)',
-                          maxHeight: filterPanelPosition?.maxHeight || 'calc(100dvh - 32px)',
-                          left: filterPanelPosition?.left ?? 16,
-                          top: filterPanelPosition?.top ?? 16,
-                          transformOrigin: 'top left'
-                        }}
-                      >
-                        <div ref={filterBodyRef} className="grid min-h-0 grid-cols-1 content-start gap-4 overflow-y-auto overscroll-contain p-3 sm:p-4">
-                          {filterGroups.primary.length > 0 && (
-                            <div className={isZonaTmo ? 'grid grid-cols-2 gap-3' : 'grid grid-cols-1 gap-3 sm:grid-cols-2'}>
-                              {filterGroups.primary.map(renderFilter)}
-                            </div>
-                          )}
-                          {filterGroups.genres.length > 0 && (
-                            <div className={isZonaTmo ? 'grid min-w-0 grid-cols-2 items-start gap-3' : 'grid min-w-0 gap-3'}>
-                              {filterGroups.genres.map(renderFilter)}
-                            </div>
-                          )}
-                          {filterGroups.sorting.length > 0 && (
-                            <div className="grid grid-cols-2 gap-3">
-                              {filterGroups.sorting.map(renderFilter)}
-                            </div>
-                          )}
-                          {filterGroups.other.length > 0 && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(10.625rem,1fr))]" style={{ gap: px(12, scale, 9) }}>
-                              {filterGroups.other.map(renderFilter)}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-3 py-1.5 sm:px-4">
-                          <Button type="button" variant="ghost" size="sm" className="h-10 sm:h-8" onClick={reset} disabled={!hasActiveFilters || loading}>
-                            Limpiar
-                          </Button>
-                          <Button type="button" size="sm" className="h-10 sm:h-8" onClick={search} disabled={loading}>
-                            Aplicar filtros
-                          </Button>
-                        </div>
-                      </motion.div>
-                    )}
-                    </AnimatePresence>,
-                    document.body
-                  )}
-                </div>
-              )}
+                  </AnimatePresence>,
+                  document.body
+                )}
+              </>
+            )}
             </div>
-          </div>
 
-          {catalogReadySourceId === sourceId && (
-            <div className="w-full">
+          <div className="w-full">
               <form className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center" onSubmit={(event) => { event.preventDefault(); if (query.trim()) search(); }} style={{ gap: px(8, scale, 6) }}>
                 <div className="relative min-w-0 flex-1">
                   <Search
@@ -785,16 +806,21 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                     style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(36, scale, 30), paddingRight: px(12, scale, 9) }}
                   />
                 </div>
-                <Button type="submit" disabled={loading || !query.trim()} style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
+                <Button type="submit" disabled={loading || !query.trim()} style={{ width: px(96, scale, 88), height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
                   <Search className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
                   Buscar
                 </Button>
               </form>
-            </div>
-          )}
+          </div>
 
-          {error ? (
-            <EmptyState face="(；_；)" tone="error" title="No se pudo cargar esta fuente" description={error} />
+          {error && !error.append ? (
+            <EmptyState
+              face="(；_；)"
+              tone="error"
+              title="No se pudo cargar esta fuente"
+              description={sourceErrorMessage(error.cause, selected.manifest.name, 'No se pudo cargar el catálogo.')}
+              action={<Button variant="secondary" onClick={() => loadCatalog(sourceId, error.params)}>Reintentar</Button>}
+            />
           ) : loading ? (
             <div className="flex items-center justify-center text-muted-foreground" style={{ gap: px(10, scale, 8), padding: `${px(44, scale, 32)} 0` }}>
               <Loader2 className="animate-spin" style={{ width: px(20, scale, 16), height: px(20, scale, 16) }} />
@@ -826,9 +852,10 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
               )}
               {hasMore && (
                 <div className="flex flex-col items-center" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 8) }}>
-                  <Button variant="secondary" onClick={() => loadCatalog(sourceId, { ...loadedParams, q: query.trim(), ...filterValues }, true)} disabled={loadingMore} style={{ height: px(40, scale, 33), fontSize: px(14, scale, 12), paddingLeft: px(16, scale, 12), paddingRight: px(16, scale, 12), gap: px(8, scale, 6) }}>
+                  {error?.append && <p role="status" className="max-w-full text-center text-sm text-muted-foreground [overflow-wrap:anywhere]">{sourceErrorMessage(error.cause, selected.manifest.name, 'No se pudo cargar más mangas.')}</p>}
+                  <Button variant="secondary" onClick={() => loadCatalog(sourceId, loadedParams, true)} disabled={loadingMore} style={{ height: px(40, scale, 33), fontSize: px(14, scale, 12), paddingLeft: px(16, scale, 12), paddingRight: px(16, scale, 12), gap: px(8, scale, 6) }}>
                     {loadingMore && <Loader2 className="animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />}
-                    {loadingMore ? 'Cargando…' : 'Cargar más mangas'}
+                    {loadingMore ? 'Cargando…' : error?.append ? 'Reintentar' : 'Cargar más mangas'}
                   </Button>
                 </div>
               )}

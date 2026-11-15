@@ -1,18 +1,21 @@
 import { MigrationSources } from '../components/MigrationSources.jsx';
 import { memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, CheckCircle2, Puzzle, Link2, ArrowRightLeft, Crosshair } from 'lucide-react';
+import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, Puzzle, Link2, ArrowRightLeft, Crosshair } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { isMangaCover, lib, mangaSourceUrl, storedCoverThumbnail } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { reconcileMihonProgress } from '../lib/mihonProgress.js';
 import { extensions, isExtensionAllowed, isUnavailableMangaSource } from '../lib/extensions.js';
 import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
-import { chapterOrder, detailScroll, recallCover, sourceCatalogState } from '../lib/searchState.js';
+import { chapterOrder, detailScroll, recallCover, recallMangaPreview, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { reconcileChapterProgress } from '../lib/mangaMigration.js';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
+import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
+import { useLibraryCover } from '../lib/useLibraryCover.js';
+import { getSourceIconResult, preloadSourceIcon } from '../components/SourceBadge.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { Badge } from '../components/ui/badge.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
@@ -22,13 +25,14 @@ import { Dropdown } from '../components/ui/dropdown.jsx';
 import AniListPanel from '../components/AniListPanel.jsx';
 import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
-import { browserImageUrl } from '../lib/browserHttp.js';
+import { browserImageUrl, sourceErrorMessage } from '../lib/browserHttp.js';
 import Catalog from './Catalog.jsx';
 
 const SYNOPSIS_CONTROL_SIZE = 24;
 const SYNOPSIS_CONTROL_GAP = 4;
 const COVER_BASE = 184;
 const FIRST_CHAPTERS = 48;
+const CHAPTER_ACTION_HOVER = 'rounded-md hover:bg-accent hover:text-foreground transition-[opacity,background-color,color]';
 const chapterDateFormat = new Intl.DateTimeFormat('es');
 const compareChapterGroups = new Intl.Collator('es', { sensitivity: 'base', numeric: true }).compare;
 const compareChapterDates = new Intl.Collator('es', { numeric: true }).compare;
@@ -49,6 +53,16 @@ const chapterNum = (chapter) => {
   const match = String(chapter?.title || '').match(/[\d.]+/);
   return match ? parseFloat(match[0]) : NaN;
 };
+const chapterButtonTitle = (chapter) => {
+  const title = String(chapter?.title || '').trim();
+  const explicitNumber = chapter?.number ?? chapter?.chapterNumber;
+  const match = title.match(/(?:cap[ií]tulo|chapter)\s*#?\s*(-?\d+(?:[.,]\d+)?)/i)
+    || title.match(/-?\d+(?:[.,]\d+)?/);
+  const number = explicitNumber != null && String(explicitNumber).trim() !== '' && Number.isFinite(Number(explicitNumber))
+    ? String(explicitNumber)
+    : match?.[1] || match?.[0];
+  return number ? `Capítulo ${number}` : title;
+};
 const byNumber = (a, b, direction = 1) => {
   const na = chapterNum(a);
   const nb = chapterNum(b);
@@ -59,26 +73,37 @@ const byNumber = (a, b, direction = 1) => {
   return compareChapterDates(a.date, b.date) * direction;
 };
 
-function SourceLine({ sourceId, scale }) {
-  const m = extensions.manifest(sourceId);
-  const [ok, setOk] = useState(true);
+function SourceLine({ sourceId, manifest, scale, iconFailed = false }) {
+  const m = manifest || extensions.manifest(sourceId);
+  const [failed, setFailed] = useState(iconFailed);
   return (
-    <span className="inline-flex items-center leading-none text-muted-foreground" style={{ gap: px(6, scale, 4), fontSize: px(12, scale, 10) }}>
-      <span className="rounded bg-secondary text-secondary-foreground grid place-items-center overflow-hidden shrink-0" style={{ width: px(20, scale, 16), height: px(20, scale, 16) }}>
-        {m.icon && ok ? (
-          <img src={m.icon} alt="" className="w-full h-full object-cover" onError={() => setOk(false)} />
-        ) : (
+    <span className="inline-flex max-w-full min-w-0 items-center leading-none text-muted-foreground" style={{ gap: px(6, scale, 4), fontSize: px(12, scale, 10) }}>
+      <span aria-hidden="true" className={cn('relative rounded grid place-items-center overflow-hidden shrink-0', (!m.icon || failed) && 'bg-secondary text-secondary-foreground')} style={{ width: px(20, scale, 16), height: px(20, scale, 16) }}>
+        {(!m.icon || failed) && (
           <span className="font-bold" style={{ fontSize: px(9, scale, 8) }}>{(m.name?.[0] || '?').toUpperCase()}</span>
         )}
+        {m.icon && !failed && (
+          <img
+            src={m.icon}
+            alt=""
+            loading="eager"
+            fetchPriority="high"
+            decoding="sync"
+            className="absolute inset-0 w-full h-full object-cover"
+            onError={() => setFailed(true)}
+          />
+        )}
       </span>
-      <span className="flex items-center self-stretch">{m.name}</span>
+      <span className="min-w-0 truncate flex items-center self-stretch">{m.name}</span>
     </span>
   );
 }
 
-function DuplicateRow({ cover, title, author, sourceId, scale, coverScale = 1, selected, selectable, onSelect }) {
+function DuplicateRow({ cover, mangaUrl, title, author, sourceId, scale, coverScale = 1, selected, selectable, onSelect }) {
+  const validCover = isMangaCover(cover, mangaUrl) ? cover : '';
+  const coverImage = useLibraryCover(validCover);
   return (
-    <div className={`flex items-center border-b border-border ${selected && selectable ? 'bg-accent/50' : ''}`} style={{ gap: px(16, scale, 12), paddingTop: px(16, scale, 12), paddingBottom: px(16, scale, 12) }}>
+    <div className={cn('flex items-start', selected && selectable && 'rounded-lg bg-accent/50')} style={{ gap: px(12, scale, 9) }}>
       {selectable && (
         <input
           type="radio"
@@ -89,16 +114,25 @@ function DuplicateRow({ cover, title, author, sourceId, scale, coverScale = 1, s
           style={{ accentColor: 'hsl(var(--primary))', flexShrink: 0 }}
         />
       )}
-      {cover ? (
-        <img src={cover} alt="" referrerPolicy="no-referrer" className="aspect-[5/7] object-cover shrink-0 bg-black" style={{ width: px(128 * coverScale, scale, 80), borderRadius: px(12, scale, 9) }} />
-      ) : (
-        <div className="aspect-[5/7] shrink-0 bg-secondary" style={{ width: px(128 * coverScale, scale, 80), borderRadius: px(12, scale, 9) }} />
-      )}
+      <div ref={coverImage.ref} aria-hidden="true" className="aspect-[5/7] shrink-0 overflow-hidden rounded-lg border border-border/50 bg-muted/50" style={{ width: px(128 * coverScale, scale, 80) }}>
+        {coverImage.src && (
+          <img
+            src={browserImageUrl(coverImage.src)}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            referrerPolicy="no-referrer"
+            className="h-full w-full object-cover"
+            onLoad={coverImage.onLoad}
+            onError={coverImage.onError}
+          />
+        )}
+      </div>
       <div className="flex-1 min-w-0">
         <div className="font-semibold leading-snug line-clamp-2" style={{ fontSize: px(18, scale, 15) }}>{title}</div>
-        {author && <div className="text-muted-foreground truncate" style={{ marginTop: px(8, scale, 6), fontSize: px(12, scale, 10) }}>{author}</div>}
-        <div style={{ marginTop: px(4, scale, 3) }}>
-          <SourceLine sourceId={sourceId} scale={scale} />
+        {author && <div className="text-muted-foreground truncate" style={{ marginTop: px(3, scale, 2), fontSize: px(12, scale, 10) }}>{author}</div>}
+        <div style={{ marginTop: px(6, scale, 4) }}>
+          <SourceLine key={sourceId} sourceId={sourceId} scale={scale} />
         </div>
       </div>
     </div>
@@ -129,6 +163,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const mangaUrl = queryUrl(loc);
   const sourceId = querySourceId(loc);
   const sourceManifest = extensions.manifest(sourceId);
+  const sourceName = sourceManifest?.name;
   const backTo = backToFor(loc);
   const fromParam = new URLSearchParams(loc.search).get('from') || 'biblioteca';
   const routeParams = new URLSearchParams(loc.search);
@@ -158,12 +193,49 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const sourceAvailable = extensions.isInstalled(sourceId);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [coverSetting, setCoverSetting] = useState(() => settings.get().coverSize);
+  const duplicateCoverScale = useResponsiveCoverSize(coverSetting) / 160;
   const adultExtensionDisabled = !isExtensionAllowed(extensions.manifest(sourceId), showAdultExtensions);
   const detailKey = `${sourceId}|${mangaUrl}`;
+  const detailDelayKey = `${detailKey}|${active ? 'active' : 'inactive'}`;
+  const preloadedDetail = api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId);
   const [detailState, setDetailState] = useState(() => ({
     key: detailKey,
-    data: api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId)
+    data: preloadedDetail
   }));
+  const [detailDelay, setDetailDelay] = useState(() => ({ key: detailDelayKey, elapsed: Boolean(preloadedDetail) }));
+  const detailDelayElapsed = detailDelay.key === detailDelayKey
+    ? detailDelay.elapsed
+    : Boolean(preloadedDetail);
+  const sourceIconKey = `${detailDelayKey}|${sourceManifest?.icon || ''}`;
+  const [sourceIconState, setSourceIconState] = useState({ key: '', ready: false, failed: false });
+  const preloadedSourceIcon = getSourceIconResult(sourceManifest?.icon);
+  const sourceIconReady = !sourceManifest?.icon
+    || preloadedSourceIcon !== null
+    || (sourceIconState.key === sourceIconKey && sourceIconState.ready);
+  const sourceIconFailed = preloadedSourceIcon === false
+    || (sourceIconState.key === sourceIconKey && sourceIconState.failed);
+  useLayoutEffect(() => {
+    if (!active || !sourceManifest?.icon) return undefined;
+    let cancelled = false;
+    preloadSourceIcon(sourceManifest.icon).then((loaded) => {
+      if (!cancelled) setSourceIconState({ key: sourceIconKey, ready: true, failed: !loaded });
+    });
+    return () => { cancelled = true; };
+  }, [active, sourceIconKey, sourceManifest?.icon]);
+  useEffect(() => {
+    if (!active) {
+      setDetailDelay({ key: detailDelayKey, elapsed: false });
+      return undefined;
+    }
+    let alive = true;
+    const timer = setTimeout(() => {
+      if (alive) setDetailDelay({ key: detailDelayKey, elapsed: true });
+    }, 500);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [active, detailDelayKey]);
   const d = detailState.key === detailKey ? detailState.data : api.peekStaleDetail(mangaUrl, sourceId);
   const [err, setErr] = useState('');
   const [detailRetry, setDetailRetry] = useState(0);
@@ -194,6 +266,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const renderedChapterCount = chapterListReadyKey === detailKey
     ? visibleChapterCount : Math.min(visibleChapterCount, FIRST_CHAPTERS);
   const [dup, setDup] = useState(null);
+  const [replacingDuplicate, setReplacingDuplicate] = useState(false);
+  const [duplicateReplaceError, setDuplicateReplaceError] = useState('');
   const [migration, setMigration] = useState(null);
   const [catPick, setCatPick] = useState(null);
   const catMenuRef = useRef(null);
@@ -211,6 +285,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const [highlightedChapter, setHighlightedChapter] = useState('');
   const chapterRefs = useRef(new Map());
   const chapterHighlightTimer = useRef(null);
+  const chapterScrollFrame = useRef(null);
+  const chapterScrollCleanup = useRef(null);
   const chapterJumpContext = useRef(null);
   const [aniListOpen, setAniListOpen] = useState(false);
   const [aniLinked, setAniLinked] = useState(() => !!tracking.get(mangaUrl, sourceId));
@@ -224,6 +300,14 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const migrationTargets = installedExtensions.filter((manifest) => manifest.id !== sourceId);
 
   const savedManga = useMemo(() => lib.fav(mangaUrl, sourceId), [mangaUrl, sourceId, coverTick, fav]);
+  useEffect(() => {
+    if (!active || !savedManga || !d?.title || savedManga.title === d.title) return;
+    lib.updateFav(mangaUrl, { title: d.title }, sourceId);
+  }, [active, mangaUrl, sourceId, d?.title, savedManga]);
+
+  const preview = recallMangaPreview(mangaUrl, sourceId);
+  const previewTitle = preview?.title || savedManga?.title;
+  const author = d?.facts?.autor || d?.author || d?.artist || d?.facts?.author || d?.facts?.artist || savedManga?.author || preview?.author || '';
   const synopsis = d?.sinopsis?.trim() || savedManga?.description?.trim() || '';
   const knownCover = useMemo(() => {
     const valid = isMangaCover(savedManga?.cover, mangaUrl);
@@ -254,33 +338,37 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const coverKey = `${sourceId}|${mangaUrl}`;
   const coverKeyRef = useRef(coverKey);
   coverKeyRef.current = coverKey;
-  const warmCover = getLibraryCover(knownCover)
-    || getSearchCover(knownCover)
-    || (hasLibraryCoverLoaded(knownCover) ? knownCover : '');
-  const [displayedCover, setDisplayedCover] = useState(() => ({
-    key: coverKey,
-    src: getLibraryCover(coverSrc) || getSearchCover(coverSrc) || (hasLibraryCoverLoaded(coverSrc) ? coverSrc : '')
-  }));
+  const [displayedCover, setDisplayedCover] = useState(null);
+  const [resolvedCover, setResolvedCover] = useState(null);
   const [failedCover, setFailedCover] = useState('');
-  const visibleCover = (displayedCover.key === coverKey && displayedCover.src)
-    || warmCover;
+  const [failedPreviews, setFailedPreviews] = useState(() => new Set());
   useEffect(() => {
     setCoverError(false);
     setFailedCover('');
   }, [coverSrc]);
   const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
-  const proxyCover = browserImageUrl(finalCover) !== finalCover
+  const sourceCover = browserImageUrl(finalCover);
+  const proxyCover = sourceCover !== finalCover
     || (requiresImageProxy(finalCover) && !!window.cytlex?.fetchImage);
+  const cachedCover = getLibraryCover(finalCover) || getSearchCover(finalCover);
+  const warmCover = getLibraryCover(knownCover) || getSearchCover(knownCover)
+    || (/^(data:|blob:)/i.test(knownCover) || hasLibraryCoverLoaded(knownCover) ? knownCover : '');
+  const visibleCover = [displayedCover, preview?.image, cachedCover, warmCover]
+    .map((candidate) => candidate && browserImageUrl(candidate))
+    .find((candidate) => candidate && !failedPreviews.has(candidate));
+  const incomingCover = proxyCover
+    ? cachedCover || (resolvedCover?.key === finalCover ? resolvedCover.src : '')
+    : sourceCover;
   useEffect(() => {
-    if (!active || !sourceAvailable || !proxyCover || !finalCover) return undefined;
+    if (!active || !sourceAvailable || !proxyCover || !finalCover || cachedCover) return undefined;
     let alive = true;
     const loadCover = async () => {
       const candidates = [...new Set([finalCover, knownCover].filter(Boolean))];
       for (const candidate of candidates) {
-        const local = getLibraryCover(candidate) || getSearchCover(candidate) || await preloadLibraryCover(candidate, { web: true });
+        const local = getLibraryCover(candidate) || getSearchCover(candidate) || await preloadLibraryCover(candidate, { web: true, priority: true });
         if (!alive) return;
         if (local) {
-          setDisplayedCover({ key: coverKey, src: local });
+          setResolvedCover({ key: finalCover, src: local });
           setFailedCover('');
           return;
         }
@@ -289,40 +377,50 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     };
     loadCover();
     return () => { alive = false; };
-  }, [active, coverKey, finalCover, knownCover, proxyCover, sourceAvailable]);
-  const coverImg = (alt) => (
-    <>
-      {visibleCover && visibleCover !== finalCover && (
+  }, [active, cachedCover, finalCover, knownCover, proxyCover, sourceAvailable]);
+  const hasCoverFallback = Boolean(visibleCover && visibleCover !== incomingCover);
+  const coverImg = (alt, loadingError = false) => (
+    <div
+      ref={coverRef}
+      className="relative aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
+      style={{ width: `${coverSize}px` }}
+    >
+      {!visibleCover && !loadingError && (!finalCover || failedCover !== finalCover) && (
+        <Skeleton className="absolute inset-0 rounded-xl" />
+      )}
+      {visibleCover && (hasCoverFallback || failedCover === finalCover) && (
         <img
-          key={`${coverKey}|cached|${visibleCover}`}
+          key={visibleCover}
           className="absolute inset-0 w-full h-full object-cover"
           src={visibleCover}
           alt={alt}
           referrerPolicy="no-referrer"
+          onError={() => setFailedPreviews((failed) => new Set([...failed, visibleCover]))}
         />
       )}
-      {finalCover && !proxyCover && failedCover !== finalCover && (
+      {incomingCover && failedCover !== finalCover && (
         <img
-          key={`${coverKey}|source|${finalCover}`}
-          className="absolute inset-0 w-full h-full object-cover"
-          src={browserImageUrl(finalCover)}
-          alt={alt}
+          key={incomingCover}
+          className={cn('absolute inset-0 w-full h-full object-cover', hasCoverFallback && 'opacity-0')}
+          src={incomingCover}
+          alt={hasCoverFallback ? '' : alt}
           referrerPolicy="no-referrer"
           onLoad={() => {
             if (coverKeyRef.current !== coverKey) return;
-            if (!/^https?:\/\//i.test(finalCover || '')) markLibraryCoverLoaded(finalCover);
-            setDisplayedCover({ key: coverKey, src: finalCover });
+            markLibraryCoverLoaded(incomingCover);
+            setDisplayedCover(incomingCover);
             setFailedCover('');
-            if (/^https?:\/\//i.test(finalCover || '')) preloadLibraryCover(finalCover);
+            if (!proxyCover && /^https?:\/\//i.test(finalCover)) preloadLibraryCover(finalCover);
           }}
           onError={async () => {
             if (coverKeyRef.current !== coverKey) return;
-            if (/^https?:\/\//i.test(finalCover || '')) {
+            setFailedPreviews((failed) => new Set([...failed, incomingCover]));
+            if (!proxyCover && /^https?:\/\//i.test(finalCover || '')) {
               const local = await preloadLibraryCover(finalCover);
               if (coverKeyRef.current !== coverKey) return;
               if (local) {
-                setDisplayedCover({ key: coverKey, src: local });
-                setFailedCover('');
+                setDisplayedCover(local);
+                setFailedCover(finalCover);
                 return;
               }
             }
@@ -331,7 +429,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           }}
         />
       )}
-    </>
+    </div>
   );
 
   useEffect(() => tracking.subscribe(() => { setAniLinked(!!tracking.get(mangaUrl, sourceId)); setCoverTick((t) => t + 1); }), []);
@@ -437,7 +535,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         const message = String(e?.message || e);
         if (/\bHTTP 404\b/.test(message) && !mangaSourceUrl(mangaUrl, sourceId).startsWith('https://mangadex.org/title/')) {
           const favorite = lib.fav(mangaUrl, sourceId);
-          const title = favorite?.title || d?.title || decodeURIComponent(mangaUrl.split('/').filter(Boolean).at(-1) || '').replace(/-/g, ' ');
+          const title = favorite?.title || d?.title || previewTitle || decodeURIComponent(mangaUrl.split('/').filter(Boolean).at(-1) || '').replace(/-/g, ' ');
           if (title) {
             try {
               const recovered = await api.findManga({ url: mangaUrl, title, author: favorite?.author || d?.facts?.autor || '' }, sourceId);
@@ -457,14 +555,14 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             } catch {}
           }
         }
-        if (alive) setErr(message);
+        if (alive) setErr(sourceErrorMessage(e, sourceName, 'No se pudo cargar el manga.'));
       });
 
     return () => { alive = false; };
-  }, [mangaUrl, sourceId, migrationSearchMode, detailRetry]);
+  }, [mangaUrl, sourceId, sourceName, migrationSearchMode, detailRetry]);
 
   useLayoutEffect(() => {
-    if (!active) return undefined;
+    if (!active || !d || !detailDelayElapsed || !sourceIconReady) return undefined;
     const cover = coverRef.current;
     const syn = synRef.current;
     if (!cover || !syn) return undefined;
@@ -474,28 +572,43 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       const synopsisBounds = syn.getBoundingClientRect();
       if (!coverBounds.height || !synopsisBounds.width) return;
       const synopsisStyle = getComputedStyle(syn);
-      const zoom = synopsisBounds.width / parseFloat(synopsisStyle.width);
+      const computedWidth = parseFloat(synopsisStyle.width);
+      const zoom = computedWidth > 0 ? synopsisBounds.width / computedWidth : 1;
       const controlOffset = SYNOPSIS_CONTROL_GAP + SYNOPSIS_CONTROL_SIZE / 2;
-      const fullH = parseFloat(synopsisStyle.height);
-      const availH = coverBounds.right <= synopsisBounds.left
-        ? Math.max(0, (coverBounds.bottom - synopsisBounds.top) / zoom - controlOffset)
-        : parseFloat(synopsisStyle.lineHeight) * 6;
+      const fontSize = parseFloat(synopsisStyle.fontSize) || Math.round(15 * scale);
+      const lineHeight = parseFloat(synopsisStyle.lineHeight) || fontSize * 1.625;
+      const fullH = syn.scrollHeight;
+      const isMobileLayout = window.matchMedia('(max-width: 767px)').matches;
+      let availH = lineHeight * 6;
+      if (!isMobileLayout && coverBounds.right <= synopsisBounds.left) {
+        availH = Math.max(0, (coverBounds.bottom - synopsisBounds.top) / zoom - controlOffset);
+      }
+      if (![zoom, fullH, availH].every(Number.isFinite)) return;
       setSynopsisSize((previous) => previous?.availH === availH && previous.fullH === fullH
         ? previous
         : { availH, fullH });
     };
 
+    let disposed = false;
+    const updateAfterFonts = () => {
+      if (!disposed) update();
+    };
+    setSynopsisSize(null);
     update();
     const resizeObserver = new ResizeObserver(update);
     resizeObserver.observe(cover);
     resizeObserver.observe(syn);
     if (metadataRef.current) resizeObserver.observe(metadataRef.current);
+    document.fonts?.ready.then(updateAfterFonts);
+    document.fonts?.addEventListener('loadingdone', update);
     window.addEventListener('resize', update);
     return () => {
+      disposed = true;
       resizeObserver.disconnect();
+      document.fonts?.removeEventListener('loadingdone', update);
       window.removeEventListener('resize', update);
     };
-  }, [active, d, scale, synopsis]);
+  }, [active, d, detailDelayElapsed, sourceIconReady, scale, synopsis]);
 
   const addToLibrary = (manga, catIds) => {
     if (!Array.isArray(catIds) || catIds.length === 0) return;
@@ -508,9 +621,28 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     });
   };
 
-  const replaceLibraryEntry = (existing, manga) => {
+  const replaceLibraryEntry = async (existing, manga) => {
     const existingSourceId = existing.sourceId || 'leercapitulo';
     const chapterUrls = (d?.chapters || []).map((chapter) => chapter.url).filter(Boolean);
+    const previousIndex = chapterIndex.peek(existing.url, existingSourceId) || [];
+    let previousDetail = api.peekDetail(existing.url, existingSourceId) || api.peekStaleDetail(existing.url, existingSourceId);
+    if (!previousDetail?.chapters?.length) {
+      try { previousDetail = await api.restoreDetail(existing.url, existingSourceId); } catch {}
+    }
+    if (!previousDetail?.chapters?.length) {
+      try { previousDetail = await api.detail(existing.url, existingSourceId); } catch {}
+    }
+    const previousChapters = previousDetail?.chapters || [];
+    if (!previousChapters.length && previousIndex.some((url) => progress.get(url, existingSourceId))) {
+      throw new Error('No se pudo cargar el progreso del manga existente. No se reemplazó.');
+    }
+    const targetChapterUrls = new Set(chapterUrls);
+    const oldProgressUrls = [...new Set([
+      ...previousIndex,
+      ...previousChapters.map((chapter) => chapter.url).filter(Boolean)
+    ])].filter((url) => existingSourceId !== manga.sourceId || !targetChapterUrls.has(url));
+    tracking.move(existing.url, manga.url, existingSourceId, manga.sourceId);
+    chapterOrder.move(existing.url, manga.url);
     chapterIndex.drop(existing.url, existingSourceId);
     chapterIndex.set(manga.url, manga.sourceId, chapterUrls);
     lib.updateFav(existing.url, {
@@ -521,13 +653,27 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       coverLocal: '',
       coverCached: ''
     }, existingSourceId);
-    tracking.move(existing.url, manga.url, existingSourceId, manga.sourceId);
-    chapterOrder.move(existing.url, manga.url);
+    reconcileChapterProgress(previousChapters, d?.chapters || [], existingSourceId, manga.sourceId, manga.url);
+    reconcileMihonProgress(manga.url, manga.sourceId, d?.chapters || []);
+    progress.removeMany(oldProgressUrls, existingSourceId);
     setFav(true);
     makeCoverThumb(manga.cover).then((local) => {
       if (local) lib.updateFav(manga.url, { coverLocal: local }, manga.sourceId);
     });
+    setReplacingDuplicate(false);
     setDup(null);
+  };
+
+  const confirmDuplicateReplacement = async (existing, manga) => {
+    if (replacingDuplicate) return;
+    setReplacingDuplicate(true);
+    setDuplicateReplaceError('');
+    try {
+      await replaceLibraryEntry(existing, manga);
+    } catch (error) {
+      setReplacingDuplicate(false);
+      setDuplicateReplaceError(error?.message || 'No se pudo completar el reemplazo.');
+    }
   };
 
   const openCatMenu = (manga, selected) => {
@@ -584,7 +730,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       cover: d.cover,
       type: d.facts.tipo,
       genres: d.genres,
-      author: d.facts.autor,
+      author,
       sourceId,
       sourceName: sourceManifest.name,
       sourceIcon: sourceManifest.icon
@@ -597,7 +743,11 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     else openCatMenu(manga);
   };
 
-  useEffect(() => () => clearTimeout(chapterHighlightTimer.current), []);
+  useEffect(() => () => {
+    clearTimeout(chapterHighlightTimer.current);
+    chapterScrollCleanup.current?.();
+    cancelAnimationFrame(chapterScrollFrame.current);
+  }, []);
   useEffect(() => {
     if (!active || renderedChapterCount >= visibleChapterCount) return undefined;
     let fillFrame;
@@ -620,16 +770,60 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       setChapterWindow({ key: context.chapterWindowKey, count: context.chapters.length });
       return;
     }
+    if (renderedChapterCount <= index) {
+      startTransition(() => setChapterListReadyKey(detailKey));
+      return;
+    }
     const element = chapterRefs.current.get(pendingChapterJump);
     if (!element) return;
     setPendingChapterJump('');
+    setHighlightedChapter('');
+    clearTimeout(chapterHighlightTimer.current);
+    chapterScrollCleanup.current?.();
+    chapterScrollCleanup.current = null;
+    cancelAnimationFrame(chapterScrollFrame.current);
+    chapterScrollFrame.current = null;
+    const scrollContainer = element.closest('main') || document;
     element.scrollIntoView({
       behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
       block: 'center'
     });
-    setHighlightedChapter(pendingChapterJump);
-    clearTimeout(chapterHighlightTimer.current);
-    chapterHighlightTimer.current = setTimeout(() => setHighlightedChapter(''), 1800);
+    let completed = false;
+    const finish = () => {
+      if (completed) return;
+      completed = true;
+      scrollContainer.removeEventListener('scrollend', finish);
+      cancelAnimationFrame(chapterScrollFrame.current);
+      chapterScrollFrame.current = null;
+      chapterScrollCleanup.current = null;
+      setHighlightedChapter(pendingChapterJump);
+      chapterHighlightTimer.current = setTimeout(() => setHighlightedChapter(''), 1200);
+    };
+    chapterScrollCleanup.current = () => {
+      completed = true;
+      scrollContainer.removeEventListener('scrollend', finish);
+      cancelAnimationFrame(chapterScrollFrame.current);
+      chapterScrollFrame.current = null;
+    };
+    scrollContainer.addEventListener('scrollend', finish, { once: true });
+    let previousTop = element.getBoundingClientRect().top;
+    let stableFrames = 0;
+    const waitForScroll = () => {
+      if (completed) return;
+      if (!element.isConnected) {
+        finish();
+        return;
+      }
+      const top = element.getBoundingClientRect().top;
+      stableFrames = Math.abs(top - previousTop) < 0.5 ? stableFrames + 1 : 0;
+      previousTop = top;
+      if (stableFrames >= 12) {
+        finish();
+        return;
+      }
+      chapterScrollFrame.current = requestAnimationFrame(waitForScroll);
+    };
+    chapterScrollFrame.current = requestAnimationFrame(waitForScroll);
   }, [pendingChapterJump, detailKey, chapterWindow, groupFilter, d, renderedChapterCount]);
 
   useEffect(() => {
@@ -647,21 +841,17 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     [d?.chapters]
   );
   const resume = useMemo(() => {
-    let firstUnread;
-    let inProgress;
     for (const chapter of chaptersOldestFirst) {
       const saved = progress.get(chapter.url, sourceId);
-      if (saved?.read) continue;
-      firstUnread ??= chapter;
-      if (Number.isInteger(saved?.page)
-        && (!inProgress || (saved.updatedAt || 0) > (inProgress.progress.updatedAt || 0))) {
-        inProgress = { chapter, progress: saved };
+      if (!saved?.read) {
+        return { chapter, progress: Number.isInteger(saved?.page) && saved.page > 0 ? saved : null };
       }
     }
-    const chapter = inProgress?.chapter || firstUnread || chaptersOldestFirst.at(-1);
-    return chapter ? { chapter, progress: inProgress?.progress } : null;
+    const chapter = chaptersOldestFirst.at(-1);
+    return chapter ? { chapter, progress: null } : null;
   }, [chaptersOldestFirst, sourceId, progressRevision]);
   const currentChapter = resume?.chapter;
+  const currentChapterTitle = chapterButtonTitle(currentChapter);
   const currentProgress = resume?.progress;
   const chapters = useMemo(() => {
     if (selectedGroup === 'all' && chapterSort === 'chapter' && asc) return chaptersOldestFirst;
@@ -675,26 +865,6 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       return byNumber(a, b, direction);
     });
   }, [asc, chapterSort, chaptersOldestFirst, d?.chapters, selectedGroup]);
-
-  useEffect(() => {
-    if (migrationSearchMode || !active || !currentChapter || !currentProgress || currentProgress.total > 0) return undefined;
-
-    let alive = true;
-    const timer = setTimeout(() => {
-      api.chapter(currentChapter.url, sourceId).then((chapter) => {
-        if (!alive || !Array.isArray(chapter?.pages) || !chapter.pages.length) return;
-        const latest = progress.get(currentChapter.url, sourceId);
-        if (!latest || latest.read || latest.page !== currentProgress.page || latest.total > 0) return;
-        progress.savePage(currentChapter.url, sourceId, latest.page, chapter.pages.length);
-        setProgressTick((tick) => tick + 1);
-      }).catch(() => {});
-    }, 500);
-
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [active, currentChapter, currentProgress, migrationSearchMode, sourceId]);
 
   const chapterList = useMemo(() => (
       <div
@@ -717,7 +887,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 highlightedChapter === c.url && 'cx-chapter-pulse',
                 read && 'opacity-45 hover:opacity-70'
               )}
-              style={{ contentVisibility: 'auto', containIntrinsicBlockSize: `auto ${Math.round(42 * scale)}px`, minHeight: `${Math.round(52 * scale)}px` }}
+              style={{ contentVisibility: 'auto', containIntrinsicBlockSize: `auto ${Math.round(64 * scale)}px`, minHeight: `${Math.round(52 * scale)}px` }}
               onClick={(e) => { e.currentTarget.blur(); saveDetailScroll(mangaUrl); }}
               href={`#/leer?u=${encodeURIComponent(c.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}${readerBackParam}`}
             >
@@ -743,22 +913,36 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                     : ''}
                 </span>
               </span>
-              <span className="shrink-0 flex items-center gap-2">
+              <span className="shrink-0 grid grid-cols-[auto_auto] items-center gap-1">
+                <span className="relative">
+                  <button
+                    type="button"
+                    title="Marcar todos los anteriores como leídos"
+                    aria-label={`Marcar anteriores a ${c.title} como leídos`}
+                    className={cn('shrink-0 flex min-h-8 min-w-10 items-center justify-center px-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100 max-md:min-h-11 max-md:min-w-11', CHAPTER_ACTION_HOVER)}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMarkBefore({ chapter: c }); }}
+                  >
+                    <CheckCheck className="w-4 h-4" />
+                    <ChevronDown className="w-3.5 h-3.5 ml-0.5" />
+                  </button>
+                </span>
                 {read ? (
                   <span
                     role="button"
                     tabIndex={0}
                     title="Marcar como no leído"
                     aria-label={`Marcar ${c.title} como no leído`}
-                    className="order-2 shrink-0 flex items-center gap-1 text-primary rounded-md hover:bg-accent"
+                    className={cn('shrink-0 flex min-h-8 min-w-10 items-center justify-center px-1 text-primary max-md:min-h-11 max-md:min-w-11', CHAPTER_ACTION_HOVER)}
                     style={{ fontSize: `${Math.round(13 * scale)}px` }}
                     onClick={(e) => { e.preventDefault(); progress.markUnread(c.url, sourceId, mangaUrl); setProgressTick((t) => t + 1); }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markUnread(c.url, sourceId, mangaUrl); setProgressTick((t) => t + 1); }
                     }}
                   >
-                    <CheckCircle2 className="w-4 h-4" />
-                    Leído
+                    <span className="relative inline-grid h-4 w-4 place-items-center">
+                      <CheckCheck className="h-4 w-4" />
+                      <span aria-hidden="true" className="absolute inset-x-0 top-1/2 h-px rotate-45 bg-current" />
+                    </span>
                   </span>
                 ) : (
                   <span
@@ -766,29 +950,16 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                     tabIndex={0}
                     title="Marcar como leído"
                     aria-label={`Marcar ${c.title} como leído`}
-                    className="order-2 shrink-0 flex items-center gap-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded-md hover:bg-accent hover:text-foreground transition-opacity"
+                    className={cn('shrink-0 flex min-h-8 min-w-10 items-center justify-center px-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100 max-md:min-h-11 max-md:min-w-11', CHAPTER_ACTION_HOVER)}
                     style={{ fontSize: `${Math.round(13 * scale)}px` }}
                     onClick={(e) => { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0, mangaUrl); setProgressTick((t) => t + 1); }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0, mangaUrl); setProgressTick((t) => t + 1); }
                     }}
                   >
-                    <Check className="w-4 h-4" />
-                    Leído
+                    <CheckCheck className="w-4 h-4" />
                   </span>
                 )}
-                <span className="relative order-1">
-                  <button
-                    type="button"
-                    title="Marcar todos los anteriores como leídos"
-                    aria-label={`Marcar anteriores a ${c.title} como leídos`}
-                    className="shrink-0 flex items-center rounded-md text-muted-foreground/70 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-accent hover:text-foreground transition-opacity"
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMarkBefore({ chapter: c }); }}
-                  >
-                    <CheckCheck className="w-4 h-4" />
-                    <ChevronDown className="w-3.5 h-3.5 ml-1.5" />
-                  </button>
-                </span>
               </span>
             </a>
           );
@@ -864,7 +1035,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         }
       />
     );
-  if (err && !savedManga && !d)
+  if (err && !previewTitle && !d)
     return (
       <EmptyState
         face="（╯°□°）╯︵ ┻━┻"
@@ -874,7 +1045,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         action={<Button variant="secondary" onClick={() => setDetailRetry((attempt) => attempt + 1)}>Reintentar</Button>}
       />
     );
-  if (!d)
+  if (!d || !detailDelayElapsed || !sourceIconReady)
     return (
       <div className="min-h-full flex flex-col">
         <Button
@@ -893,30 +1064,27 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         </Button>
 
         <div
-          className="flex flex-col md:flex-row"
-          style={{ gap: px(24, scale, 19) }}
+          className="grid grid-cols-[auto_minmax(0,1fr)]"
+          style={{ columnGap: px(24, scale, 19), rowGap: px(8, scale, 6), minHeight: `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})` }}
         >
-          {coverSrc ? (
-            <div
-              className="relative aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
-              style={{ width: `${coverSize}px` }}
-            >
-              {!visibleCover && failedCover !== finalCover && <Skeleton className="absolute inset-0 rounded-xl" />}
-              {coverImg('')}
+          <div className="md:row-span-4">{coverImg(previewTitle || '', Boolean(err))}</div>
+          <div className="min-w-0 self-start">
+            <div ref={metadataRef} className="flow-root">
+              {previewTitle ? (
+                <h1 className="font-extrabold tracking-tight text-foreground break-words" style={{ fontSize: `${Math.round(32 * scale)}px`, lineHeight: 1.1 }}>
+                  {previewTitle}
+                </h1>
+              ) : (
+                <Skeleton style={{ height: px(32, scale, 25), width: '66%', maxWidth: px(448, scale, 350) }} />
+              )}
+              {author ? (
+                <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(17 * scale)}px` }}>
+                  Por {author}
+                </div>
+              ) : (
+                <Skeleton style={{ height: px(17, scale, 13), width: px(160, scale, 125), marginTop: px(4, scale, 3) }} />
+              )}
             </div>
-          ) : err ? (
-            <div className="aspect-[2/3] rounded-xl shrink-0 bg-muted/50" style={{ width: `${coverSize}px` }} />
-          ) : (
-            <Skeleton className="aspect-[2/3] rounded-xl shrink-0" style={{ width: `${coverSize}px` }} />
-          )}
-          <div className="flex-1 min-w-0">
-            {savedManga?.title ? (
-              <h1 className="font-extrabold tracking-tight text-foreground break-words" style={{ fontSize: `${Math.round(32 * scale)}px`, lineHeight: 1.1 }}>
-                {savedManga.title}
-              </h1>
-            ) : (
-              <Skeleton style={{ height: px(32, scale, 25), width: '66%', maxWidth: px(448, scale, 350) }} />
-            )}
             {err ? (
               <div className="mt-5 text-sm text-muted-foreground" role="status">
                 <p className="font-medium text-foreground">No se pudieron cargar los capítulos.</p>
@@ -924,22 +1092,24 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 <Button className="mt-3" variant="secondary" onClick={() => setDetailRetry((attempt) => attempt + 1)}>Reintentar</Button>
               </div>
             ) : (
-              <>
-                <Skeleton style={{ height: px(17, scale, 13), width: px(160, scale, 125), marginTop: px(4, scale, 3) }} />
-                <div className="flex flex-wrap items-center" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 9) }}>
-                  <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(96, scale, 75) }} />
-                  <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(80, scale, 63) }} />
-                  <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(112, scale, 88) }} />
-                  <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(96, scale, 75) }} />
-                </div>
-                <div className="flex flex-col" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 9) }}>
-                  <Skeleton style={{ height: px(14, scale, 11) }} />
-                  <Skeleton style={{ height: px(14, scale, 11) }} />
-                  <Skeleton style={{ height: px(14, scale, 11), width: '80%' }} />
-                </div>
-              </>
+              <div className="mt-2 flex flex-wrap items-center" style={{ gap: px(8, scale, 6) }}>
+                <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(96, scale, 75) }} />
+                <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(80, scale, 63) }} />
+                <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(112, scale, 88) }} />
+                <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(96, scale, 75) }} />
+              </div>
             )}
           </div>
+          {!err && (
+            <div className="col-span-2 min-w-0 md:col-span-1 md:col-start-2" style={{ marginTop: px(4, scale, 3) }}>
+              <div className="flex flex-col" style={{ gap: px(8, scale, 6) }}>
+                <Skeleton style={{ height: px(14, scale, 11) }} />
+                <Skeleton style={{ height: px(14, scale, 11) }} />
+                <Skeleton style={{ height: px(14, scale, 11) }} />
+                <Skeleton style={{ height: px(14, scale, 11), width: '80%' }} />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -970,7 +1140,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
 
   const { availH, fullH } = synopsisSize || {};
   const overflow = fullH > availH;
-  const fade = Math.min(48, (overflow ? availH : 0) * 0.4);
+  const fallbackSynopsisHeight = Math.round(Math.round(15 * scale) * 1.625 * 6);
+  const collapsedSynopsisHeight = availH ?? fallbackSynopsisHeight;
+  const fade = Math.min(48, (overflow ? collapsedSynopsisHeight : 0) * 0.4);
   const synMask = !expanded && overflow && fade > 4
     ? `linear-gradient(to bottom, #000 calc(100% - ${Math.round(fade)}px), rgba(0,0,0,0.55) calc(100% - ${Math.round(fade * 0.45)}px), transparent 100%)`
     : undefined;
@@ -1000,67 +1172,53 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       </Button>
 
       <div
-        className="flex flex-col md:flex-row"
-        style={{ gap: px(24, scale, 19), minHeight: `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})` }}
+        className="grid grid-cols-[auto_minmax(0,1fr)]"
+        style={{ columnGap: px(24, scale, 19), rowGap: px(8, scale, 6), minHeight: `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})` }}
       >
-        <div
-          ref={coverRef}
-          className="relative aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
-          style={{ width: `${coverSize}px` }}
-        >
-          {coverSrc ? (
-            <>
-              {!visibleCover && failedCover !== finalCover && <Skeleton className="absolute inset-0 rounded-xl" />}
-              {coverImg(d.title)}
-            </>
-          ) : (
-            <Skeleton className="absolute inset-0 rounded-xl" />
+        <div className="md:row-span-4">{coverImg(d.title)}</div>
+        <div ref={metadataRef} className="min-w-0 flow-root self-start">
+          <h1
+            className="break-words font-extrabold tracking-tight text-foreground"
+            style={{ fontSize: `${Math.round(32 * scale)}px`, lineHeight: 1.1 }}
+          >
+            {d.title}
+          </h1>
+          {author && (
+            <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(17 * scale)}px` }}>
+              Por {author}
+            </div>
           )}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div ref={metadataRef} className="flow-root">
-            <h1
-              className="font-extrabold tracking-tight text-foreground"
-              style={{ fontSize: `${Math.round(32 * scale)}px`, lineHeight: 1.1 }}
-            >
-              {d.title}
-            </h1>
-            {d.facts.autor && (
-              <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(17 * scale)}px` }}>
-                Por {d.facts.autor}
-              </div>
-            )}
-            <div className="mt-1">
-              <SourceLine sourceId={sourceId} scale={scale} />
-            </div>
-            <div
-              className="flex flex-wrap items-center"
-              style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 9) }}
-            >
-              {(d.facts.estado || d.facts.status) && (
-                <Badge style={badgeStyle}>{(d.facts.estado || d.facts.status)}</Badge>
-              )}
-              {d.facts.tipo && <Badge style={badgeStyle}>{d.facts.tipo}</Badge>}
-              {d.genres.slice(0, 6).map((g) => (
-                <Badge key={g} variant="outline" style={badgeStyle}>
-                  {g}
-                </Badge>
-              ))}
-            </div>
-
-            {(d.facts.publicacion || d.facts.periodicidad || d.facts.proximo) && (
-              <div className="mt-2 flex flex-wrap gap-x-2 text-muted-foreground" style={{ fontSize: `${Math.round(13 * scale)}px` }}>
-                {d.facts.publicacion && <span>Publicado: {d.facts.publicacion}</span>}
-                {d.facts.periodicidad && <span>Periodicidad: {d.facts.periodicidad}</span>}
-                {d.facts.proximo && <span>Próximo capítulo: {d.facts.proximo}</span>}
-              </div>
-            )}
+          <div className="mt-1">
+            <SourceLine key={sourceId} sourceId={sourceId} manifest={sourceManifest} scale={scale} iconFailed={sourceIconFailed} />
           </div>
+          <div className="mt-2 flex flex-wrap items-center" style={{ gap: px(8, scale, 6) }}>
+            {(d.facts.estado || d.facts.status) && (
+              <Badge style={badgeStyle}>{(d.facts.estado || d.facts.status)}</Badge>
+            )}
+            {d.facts.tipo && <Badge style={badgeStyle}>{d.facts.tipo}</Badge>}
+            {d.genres.slice(0, 6).map((g) => (
+              <Badge key={g} variant="outline" style={badgeStyle}>
+                {g}
+              </Badge>
+            ))}
+          </div>
+        </div>
 
-          <div style={{ marginTop: px(12, scale, 9) }}>
+        {(d.facts.publicacion || d.facts.periodicidad || d.facts.proximo) && (
+          <div className="col-span-2 min-w-0 md:col-span-1 md:col-start-2">
+            <div className="flex flex-wrap gap-x-2 text-muted-foreground" style={{ fontSize: `${Math.round(13 * scale)}px` }}>
+              {d.facts.publicacion && <span>Publicado: {d.facts.publicacion}</span>}
+              {d.facts.periodicidad && <span>Periodicidad: {d.facts.periodicidad}</span>}
+              {d.facts.proximo && <span>Próximo capítulo: {d.facts.proximo}</span>}
+            </div>
+          </div>
+        )}
+
+        <div className="col-span-2 min-w-0 md:col-span-1 md:col-start-2">
+          <div style={{ marginTop: px(4, scale, 3) }}>
             <div
               style={{
-                maxHeight: expanded ? fullH : availH,
+                maxHeight: expanded ? fullH : collapsedSynopsisHeight,
                 overflow: 'hidden',
                 transition: animate ? 'max-height 320ms cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
                 WebkitMaskImage: synMask,
@@ -1127,7 +1285,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             ) : (
               <Play className="mr-2 shrink-0" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
             )}
-            {currentProgress ? 'Continuar' : 'Leer'} {currentChapter.title}
+            {currentProgress ? 'Continuar' : 'Leer'} {currentChapterTitle}
             {currentProgress && (
               <span className="opacity-70 ml-2">
                 · {currentProgress.page + 1}/{currentProgress.total || '?'}
@@ -1151,7 +1309,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 title: d.title,
                 cover: d.cover,
                 type: d.facts.tipo,
-                author: d.facts.autor,
+                author,
                 sourceId,
                 sourceName: sourceManifest.name,
                 sourceIcon: sourceManifest.icon
@@ -1310,7 +1468,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       {err && (
         <div className="mt-4 flex flex-wrap items-center gap-3" role="status">
           <p className="min-w-0 break-words text-sm text-muted-foreground">
-            {d.chapters.length ? 'No se pudo actualizar la lista. Se muestran los capítulos guardados.' : err}
+            {err}{d.chapters.length ? ' Se muestran los capítulos guardados.' : ''}
           </p>
           <Button size="sm" variant="secondary" onClick={() => setDetailRetry((attempt) => attempt + 1)}>Reintentar</Button>
         </div>
@@ -1478,35 +1636,47 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
 
       <Dialog
         open={!!dup}
-        onClose={() => setDup(null)}
+        onClose={() => {
+          if (replacingDuplicate) return;
+          setDup(null);
+          setDuplicateReplaceError('');
+        }}
         scale={scale}
         dialogStyle={{ maxWidth: px(512, scale, 400) }}
         title="Posible duplicado"
-        description="Reemplaza una entrada existente; se conservarán sus categorías."
+        description="Ya tienes guardado un manga con esta entrada, ¿estás seguro de querer reemplazarlo?"
+        hideDivider
+        headerPaddingTop={16}
+        headerPaddingBottom={8}
+        descriptionMarginTop={2}
+        bodyPaddingTop={8}
+        bodyPaddingBottom={16}
       >
         {dup && (
           <>
-            <div>
+            <div className="space-y-2">
               {dup.list.map((f, i) => (
                 <DuplicateRow
                   key={`${f.sourceId || 'leercapitulo'}|${f.url}`}
                   cover={f.cover}
+                  mangaUrl={f.url}
                   title={f.title}
                   author={f.author}
                   sourceId={f.sourceId}
                   scale={scale}
-                  coverScale={coverSetting / 160}
+                  coverScale={duplicateCoverScale}
                   selected={dup.selectedIndex === i}
                   selectable={dup.list.length > 1}
                   onSelect={() => setDup((current) => current ? { ...current, selectedIndex: i } : current)}
                 />
               ))}
             </div>
-            <div className="flex justify-end" style={{ gap: px(8, scale, 6), paddingTop: px(20, scale, 15) }}>
-              <Button variant="secondary" onClick={() => replaceLibraryEntry(dup.list[dup.selectedIndex], dup.pending)} style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: px(14, scale, 12) }}>
-                Reemplazar
+            {duplicateReplaceError && <p role="alert" className="text-sm text-destructive">{duplicateReplaceError}</p>}
+            <div className="flex justify-end" style={{ gap: px(8, scale, 6), paddingTop: px(12, scale, 9) }}>
+              <Button variant="secondary" disabled={replacingDuplicate} onClick={() => confirmDuplicateReplacement(dup.list[dup.selectedIndex], dup.pending)} style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: px(14, scale, 12) }}>
+                {replacingDuplicate ? 'Reemplazando…' : 'Reemplazar'}
               </Button>
-              <Button onClick={() => setDup(null)} style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: px(14, scale, 12) }}>
+              <Button disabled={replacingDuplicate} onClick={() => { setDup(null); setDuplicateReplaceError(''); }} style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: px(14, scale, 12) }}>
                 Cancelar
               </Button>
             </div>

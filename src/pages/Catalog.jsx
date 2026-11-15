@@ -1,13 +1,15 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Search, Loader2, ChevronRight, ChevronLeft, CircleHelp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
+import { sourceErrorMessage } from '../lib/browserHttp.js';
 import { isLibraryManga, lib, libraryIdentityKey, libraryKey } from '../lib/library.js';
 import { extensions, isExtensionAllowed, isUnavailableMangaSource } from '../lib/extensions.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { settings } from '../lib/settings.js';
-import { lastSearch, scrollMemory, rememberCover, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
+import { lastSearch, scrollMemory, rememberMangaPreview, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import { clearSearchCoverCache, preloadSearchCover } from '../lib/covers.js';
 import MangaCard from '../components/MangaCard.jsx';
 import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
@@ -19,6 +21,7 @@ import { Input } from '../components/ui/input.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
+import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 import { migrateSavedManga } from '../lib/mangaMigration.js';
 
 const TABS = [
@@ -164,7 +167,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
       {!visibleItems.length ? (
         <p className="text-sm text-muted-foreground">
           {r.status === 'error'
-            ? 'No se pudo buscar en esta extensión.'
+            ? r.errorMessage || 'No se pudo buscar en esta extensión.'
             : r.items.length
               ? 'Los resultados de esta página ya están en Biblioteca.'
               : 'Sin resultados en esta extensión.'}
@@ -258,6 +261,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const loc = locationOverride;
   const navigate = useNavigate();
   const searchParams = new URLSearchParams(loc.search);
+  const excludedSourceId = searchParams.get('excludeSource') || '';
   const migrationFromUrl = searchParams.get('migrationFrom') || '';
   const migrationFromSource = searchParams.get('migrationSource') || '';
   const migrationSourceIds = (searchParams.get('migrationTargets') || '').split(',').filter(Boolean);
@@ -282,7 +286,32 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const [migrationSelection, setMigrationSelection] = useState(null);
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationError, setMigrationError] = useState('');
+  const [selectionTipOpen, setSelectionTipOpen] = useState(false);
+  const [selectionTipPosition, setSelectionTipPosition] = useState(null);
+  const selectionTipRef = useRef(null);
   const scale = useScale();
+
+  useEffect(() => {
+    if (!selectionTipOpen) return undefined;
+    const closeOnOutsidePress = (event) => {
+      if (!selectionTipRef.current?.contains(event.target)) {
+        setSelectionTipOpen(false);
+        setSelectionTipPosition(null);
+      }
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') {
+        setSelectionTipOpen(false);
+        setSelectionTipPosition(null);
+      }
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePress);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePress);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [selectionTipOpen]);
 
   useEffect(() => settings.subscribe((s) => {
     setShowAdultExtensions(!!s.showAdultExtensions);
@@ -311,7 +340,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   }, [tutorialPreview]);
   useEffect(() => () => { animateSearch = false; }, []);
 
-  const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
+  const cs = useResponsiveCoverSize(coverSize);
   const savedMangaKeys = useMemo(
     () => new Set(lib.favs().flatMap((manga) => [
       libraryKey(manga.url, manga.sourceId || 'leercapitulo'),
@@ -359,8 +388,8 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     const migrationSources = new Set(migrationSourceIds);
     const list = migrationMode
       ? extensions.sources().filter(({ manifest }) => migrationSources.has(manifest.id))
-      : enabledSources(adultExtensionsEnabled);
-    if (!list.length) return;
+      : enabledSources(adultExtensionsEnabled).filter(({ manifest }) => manifest.id !== excludedSourceId);
+    if (!list.length && !excludedSourceId) return;
     if (!migrationMode) scrollMemory.catalog = 0;
     const main = document.querySelector('main');
     if (main) main.scrollTop = 0;
@@ -396,7 +425,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
         const loadedItems = items.map((m) => cachedCovers.has(m.url)
           ? { ...m, coverCached: cachedCovers.get(m.url) }
           : m);
-        items.forEach((m) => rememberCover(m.url, m.cover, s.manifest.id));
+        items.forEach((m) => rememberMangaPreview(m, s.manifest.id));
         if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
         updateResults((prev) =>
           prev ? prev.map((x) => (x.id === s.manifest.id
@@ -414,7 +443,8 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
       } catch (e) {
         console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);
         if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
-        updateResults((prev) => (prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'error' } : x)) : prev));
+        const errorMessage = sourceErrorMessage(e, s.manifest.name);
+        updateResults((prev) => (prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'error', errorMessage } : x)) : prev));
       }
     });
   };
@@ -467,7 +497,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   }, [showAdultExtensions, tab, migrationMode]);
 
   useEffect(() => {
-    if (!migrationMode && tab !== 'fuentes' && lastSearch.results && lastSearch.results.some((r) => r.status === 'loading')) {
+    if (!migrationMode && !searchParams.get('q') && tab !== 'fuentes' && lastSearch.results?.some((r) => r.status === 'loading')) {
       runSearch(lastSearch.q);
     }
   }, [migrationMode]);
@@ -476,6 +506,11 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     const t = new URLSearchParams(loc.search).get('tab');
     if (t === 'mangas' || t === 'extensiones' || t === 'fuentes') setTab(t);
   }, [loc.search]);
+
+  useLayoutEffect(() => {
+    const main = document.querySelector('main');
+    if (main) main.scrollLeft = 0;
+  }, [tab, loc.pathname]);
 
   useLayoutEffect(() => {
     const params = new URLSearchParams(loc.search);
@@ -501,18 +536,24 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
 
   return (
     <div
-      className="min-h-full flex flex-col"
+      className="min-h-full min-w-0 flex flex-col"
       data-explore-start={tab === 'extensiones' || tab === 'fuentes' || (!q.trim() && !results) ? 'true' : 'false'}
     >
       <div
-        className="-mt-1 flex flex-wrap items-center mb-3"
+        className={cn(
+          '-mt-1 max-md:-mt-2 flex flex-wrap items-center mb-3',
+          tab !== 'mangas' && 'max-md:flex-nowrap'
+        )}
         style={{
           gap: `${Math.max(16, Math.round(24 * scale))}px`,
           marginBottom: `${Math.max(8, Math.round(12 * scale))}px`,
           minHeight: px(36, scale, 30)
         }}
       >
-        <div className="flex items-center" style={{ gap: `${Math.max(16, Math.round(24 * scale))}px` }}>
+        <div
+          className="flex max-w-full flex-wrap items-center max-md:min-w-0 max-md:flex-1 max-md:flex-nowrap max-md:overflow-x-auto max-md:overscroll-x-contain max-md:whitespace-nowrap max-md:no-scrollbar"
+          style={{ gap: 'inherit', minHeight: px(36, scale, 30) }}
+        >
           {migrationInline ? (
             <Button
               size="sm"
@@ -566,7 +607,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                   navigate({ pathname: loc.pathname, search: `?${params}` }, { replace: true });
                 }}
                 className={cn(
-                  'relative font-medium transition-colors',
+                  'relative shrink-0 font-medium transition-colors',
                   active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
                 )}
                 style={{
@@ -587,28 +628,59 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
             );
           })}
           {tab === 'extensiones' && (
-            <span
-              className="group relative flex self-center items-center text-muted-foreground hover:text-foreground focus-visible:outline-none"
-              tabIndex={0}
+            <button
+              ref={selectionTipRef}
+              type="button"
+              className="group relative flex shrink-0 self-center items-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="Información sobre selección de extensiones"
               aria-describedby="extension-selection-tip"
+              onClick={() => {
+                if (window.innerWidth < 768) {
+                  if (selectionTipOpen) {
+                    setSelectionTipOpen(false);
+                    setSelectionTipPosition(null);
+                    return;
+                  }
+                  const rect = selectionTipRef.current?.getBoundingClientRect();
+                  const width = Math.min(224, window.innerWidth - 16);
+                  if (rect) {
+                    setSelectionTipPosition({
+                      left: Math.min(Math.max(8, rect.left), window.innerWidth - width - 8),
+                      top: rect.bottom + 8,
+                      width
+                    });
+                    setSelectionTipOpen(true);
+                  }
+                }
+              }}
               style={{ paddingBottom: px(8, scale, 6) }}
             >
               <CircleHelp aria-hidden="true" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
               <span
                 id="extension-selection-tip"
                 role="tooltip"
-                className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-56 rounded-lg border border-border bg-card px-3 py-2 text-xs text-card-foreground opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus:opacity-100"
+                className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-56 rounded-lg border border-border bg-card px-3 py-2 text-left text-xs text-card-foreground opacity-0 shadow-lg transition-opacity duration-150 md:group-hover:opacity-100 md:group-focus-visible:opacity-100"
               >
                 Pro Tip: Puedes seleccionar varias extensiones para instalarlas o desinstalarlas juntas.
               </span>
-            </span>
+              {selectionTipOpen && selectionTipPosition && createPortal(
+                <span
+                  role="tooltip"
+                  className="pointer-events-none fixed z-[100] max-w-[calc(100vw-16px)] rounded-lg border border-border bg-card px-3 py-2 text-left text-xs text-card-foreground shadow-lg"
+                  style={selectionTipPosition}
+                >
+                  Pro Tip: Puedes seleccionar varias extensiones para instalarlas o desinstalarlas juntas.
+                </span>,
+                document.body
+              )}
+            </button>
           )}
         </div>
 
         {tab === 'extensiones' && (
           <div
             id="extensions-toolbar"
-            className="ml-auto self-center flex items-center"
+            className="ml-auto flex shrink-0 items-center self-center empty:hidden max-md:justify-end"
             style={{ gap: px(8, scale, 6) }}
           />
         )}
@@ -616,14 +688,14 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
         {tab === 'fuentes' && (
           <div
             id="sources-toolbar"
-            className="ml-auto self-center flex items-center"
+            className="ml-auto flex items-center self-center empty:hidden max-md:justify-end"
             style={{ gap: px(8, scale, 6) }}
           />
         )}
 
         {tab === 'mangas' && catalogSources.length > 0 && !migrationMode && (
-          <div className="ml-auto self-center flex items-center" style={{ gap: px(12, scale, 9) }}>
-            <div className="relative w-full sm:w-auto" style={{ width: px(288, scale, 190) }}>
+          <div className="ml-auto flex min-w-0 items-center self-center max-md:basis-full max-md:justify-end" style={{ gap: px(12, scale, 9) }}>
+            <div className="relative min-w-0" style={{ width: px(288, scale, 190) }}>
               <Search
                 className="absolute top-1/2 -translate-y-1/2 text-muted-foreground"
                 style={{

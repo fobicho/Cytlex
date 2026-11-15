@@ -5,6 +5,7 @@ import { anilist, anilistList, setScoreScale } from '../lib/anilist.js';
 import { session } from '../lib/session.js';
 import { tracking } from '../lib/tracking.js';
 import { settings } from '../lib/settings.js';
+import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 import { seedFromAniList } from '../lib/sync.js';
 import { Dialog } from './ui/dialog.jsx';
 import { Badge } from './ui/badge.jsx';
@@ -751,7 +752,8 @@ function CharactersDialog({ open, onClose, mediaId, connected }) {
 
 export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose }) {
   const scale = useScale();
-  const [coverScale, setCoverScale] = useState(() => settings.get().coverSize / 160);
+  const [coverSize, setCoverSize] = useState(() => settings.get().coverSize);
+  const coverScale = useResponsiveCoverSize(coverSize) / 160;
   const [linkedId, setLinkedId] = useState(() => tracking.get(mangaUrl, sourceId)?.id || null);
   const [data, setData] = useState(null);
   const [entry, setEntry] = useState(null);
@@ -775,7 +777,7 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
     () => tracking.subscribe(() => setLinkedId(tracking.get(mangaUrl, sourceId)?.id || null)),
     [mangaUrl, sourceId]
   );
-  useEffect(() => settings.subscribe((s) => setCoverScale(s.coverSize / 160)), []);
+  useEffect(() => settings.subscribe((s) => setCoverSize(s.coverSize)), []);
 
   useEffect(() => {
     let alive = true;

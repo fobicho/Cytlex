@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { ArrowLeft, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { extensions, isExtensionAllowed } from '../lib/extensions.js';
@@ -10,8 +10,8 @@ import { tracking } from '../lib/tracking.js';
 import { chapterOrder, detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
-import { browserImageUrl, fetchImage } from '../lib/browserHttp.js';
-import { Button } from '../components/ui/button.jsx';
+import { browserImageUrl, fetchImage, fetchImageBlob, sourceErrorMessage } from '../lib/browserHttp.js';
+import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
@@ -98,8 +98,15 @@ const imageMimeFor = (mime, src, base64) => {
   }
 };
 
-function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading = 'eager', imageReferer, imageCookie, imageClassName, wrapperClassName, placeholderStyle, onContextMenu, onLoaded, onRetry }) {
+function OnfChapterLink({ href }) {
+  return <a href={href} target="_blank" rel="noopener noreferrer" className={buttonVariants({ size: 'sm', variant: 'secondary' })}>
+    Abrir en ONF Mangas
+  </a>;
+}
+
+function ReaderPanel({ id, src, displaySrc = '', preloadFailed, preloadError, sourceName, blockedChapterUrl, alternativeSourcesUrl, fallbackSrc = '', alt, loading = 'eager', imageReferer, imageCookie, imageClassName, wrapperClassName, placeholderStyle, onContextMenu, onLoaded, onRetry }) {
   const [status, setStatus] = useState('loading');
+  const [imageError, setImageError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [usingFallback, setUsingFallback] = useState(false);
   const [srcOverride, setSrcOverride] = useState('');
@@ -107,9 +114,12 @@ function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading 
   const [cachedDisplaySrc, setCachedDisplaySrc] = useState(displaySrc);
   const imageFallback = useRef(null);
   const autoRetried = useRef(false);
+  const retrying = useRef(false);
   const imageRef = useRef(null);
-  const imageSrc = srcOverride || (!usingFallback && !displaySrcFailed ? cachedDisplaySrc : '')
-    || browserImageUrl(usingFallback ? fallbackSrc : src, imageReferer);
+  const browserSrc = browserImageUrl(src, imageReferer);
+  const usePreload = browserSrc !== src;
+  const imageSrc = usePreload ? displaySrc : srcOverride || (!usingFallback && !displaySrcFailed ? cachedDisplaySrc : '')
+    || (usingFallback ? browserImageUrl(fallbackSrc, imageReferer) : browserSrc);
 
   useEffect(() => () => {
     imageFallback.current?.abort();
@@ -124,6 +134,16 @@ function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading 
   }, [onLoaded]);
 
   useLayoutEffect(() => {
+    if (usePreload) {
+      if (preloadFailed && !retrying.current) setStatus('error');
+      else if (displaySrc !== cachedDisplaySrc) {
+        setCachedDisplaySrc(displaySrc);
+        const img = imageRef.current;
+        if (img?.complete && img.naturalWidth > 0) finishImageLoad();
+        else setStatus('loading');
+      }
+      return;
+    }
     if (status === 'loaded') return;
     const img = imageRef.current;
     if (status === 'loading' && img?.complete && img.naturalWidth > 0 && img.currentSrc === img.src) {
@@ -138,10 +158,10 @@ function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading 
     setUsingFallback(false);
     setCachedDisplaySrc(displaySrc);
     setStatus('loading');
-  }, [attempt, cachedDisplaySrc, displaySrc, displaySrcFailed, finishImageLoad, imageSrc, status]);
+  }, [attempt, cachedDisplaySrc, displaySrc, displaySrcFailed, finishImageLoad, imageSrc, preloadFailed, status, usePreload]);
 
   useEffect(() => {
-    if (status !== 'loading' || loading !== 'eager') return undefined;
+    if (usePreload || status !== 'loading' || loading !== 'eager') return undefined;
     const timeout = setTimeout(() => {
       if (!autoRetried.current) {
         autoRetried.current = true;
@@ -151,7 +171,7 @@ function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading 
       }
     }, 15_000);
     return () => clearTimeout(timeout);
-  }, [attempt, cachedDisplaySrc, loading, src, status, usingFallback]);
+  }, [attempt, cachedDisplaySrc, loading, src, status, usePreload, usingFallback]);
 
   return (
     <div id={id} className={cn('relative grid place-items-center', wrapperClassName)} style={status === 'loaded' ? undefined : placeholderStyle}>
@@ -162,31 +182,42 @@ function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading 
       )}
       {status === 'error' && (
         <div role="alert" className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/90 px-3 text-center text-sm text-muted-foreground">
-          <span>No se pudo cargar {alt.toLowerCase()}.</span>
-          <Button size="sm" variant="secondary" onClick={async () => {
-            autoRetried.current = false;
-            imageFallback.current?.abort();
-            imageFallback.current = null;
-            setStatus('loading');
-            if (onRetry) {
-              if (await onRetry()) {
-                setSrcOverride('');
-                setDisplaySrcFailed(false);
-                setUsingFallback(false);
-                setAttempt((n) => n + 1);
+          <span>{preloadError || imageError || `No se pudo cargar ${alt.toLowerCase()}.`}</span>
+          <div className="flex flex-wrap justify-center gap-2">
+            {blockedChapterUrl && alternativeSourcesUrl && (
+              <Link to={alternativeSourcesUrl} className={buttonVariants({ size: 'sm' })}>Buscar otras fuentes</Link>
+            )}
+            {blockedChapterUrl && <OnfChapterLink href={blockedChapterUrl} />}
+            <Button size="sm" variant="secondary" onClick={async () => {
+              if (retrying.current) return;
+              setImageError('');
+              autoRetried.current = false;
+              imageFallback.current?.abort();
+              imageFallback.current = null;
+              setStatus('loading');
+              if (onRetry) {
+                retrying.current = true;
+                const recovered = await onRetry();
+                retrying.current = false;
+                if (recovered) {
+                  setSrcOverride('');
+                  setDisplaySrcFailed(false);
+                  setUsingFallback(false);
+                  setAttempt((n) => n + 1);
+                } else {
+                  setStatus('error');
+                }
               } else {
-                setStatus('error');
+                setAttempt((n) => n + 1);
               }
-            } else {
-              setAttempt((n) => n + 1);
-            }
-          }}>
-            Reintentar
-          </Button>
+            }}>
+              Reintentar
+            </Button>
+          </div>
         </div>
       )}
-      <img
-        key={attempt}
+      {imageSrc && <img
+        key={usePreload ? imageSrc : attempt}
         ref={imageRef}
         src={imageSrc}
         alt={alt}
@@ -194,9 +225,13 @@ function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading 
         draggable={false}
         referrerPolicy="no-referrer"
         onDragStart={(e) => e.preventDefault()}
-        onContextMenu={onContextMenu}
+        onContextMenu={(event) => onContextMenu?.(event, usingFallback ? fallbackSrc : src)}
         onLoad={finishImageLoad}
         onError={() => {
+          if (usePreload) {
+            setStatus('error');
+            return;
+          }
           if (!usingFallback && !srcOverride && cachedDisplaySrc && !displaySrcFailed) {
             setDisplaySrcFailed(true);
             autoRetried.current = false;
@@ -224,8 +259,11 @@ function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading 
               } else {
                 setStatus('error');
               }
-            }).catch(() => {
-              if (!controller.signal.aborted) setStatus('error');
+            }).catch((error) => {
+              if (!controller.signal.aborted) {
+                setImageError(sourceErrorMessage(error, sourceName));
+                setStatus('error');
+              }
             }).finally(() => {
               if (imageFallback.current === controller) imageFallback.current = null;
             });
@@ -233,8 +271,8 @@ function ReaderPanel({ id, src, displaySrc = '', fallbackSrc = '', alt, loading 
           }
           setStatus('error');
         }}
-        className={cn(imageClassName, 'transition-opacity duration-150', status === 'loaded' ? 'opacity-100' : 'opacity-0')}
-      />
+        className={cn(imageClassName, loading === 'lazy' && 'transition-opacity duration-150', status === 'loaded' ? 'opacity-100' : 'opacity-0')}
+      />}
     </div>
   );
 }
@@ -245,6 +283,7 @@ export default function Reader() {
   const chapterUrl = params.get('u') || '';
   const mangaUrl = params.get('m') || '';
   const sourceId = params.get('s') || 'leercapitulo';
+  const sourceName = extensions.manifest(sourceId)?.name;
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const adultExtensionDisabled = !isExtensionAllowed(extensions.manifest(sourceId), showAdultExtensions);
   const fromParam = params.get('from') || '';
@@ -265,7 +304,8 @@ export default function Reader() {
   const mangaKey = `${sourceId}|${currentMangaUrl}`;
   const detail = mangaDetail?.key === mangaKey ? mangaDetail.value : null;
   const savedTitle = useMemo(() => currentMangaUrl ? lib.fav(currentMangaUrl, sourceId)?.title : '', [currentMangaUrl, sourceId]);
-  const mangaTitle = detail?.title || savedTitle || 'Lector';
+  const knownMangaTitle = detail?.title || savedTitle;
+  const mangaTitle = knownMangaTitle || 'Lector';
   const [err, setErr] = useState('');
   const [retryTick, setRetryTick] = useState(0);
   const [mode, setMode] = useState(() => {
@@ -307,9 +347,11 @@ export default function Reader() {
   const [verticalAtEnd, setVerticalAtEnd] = useState(false);
   const [lastSeen, setLastSeen] = useState(0);
   const pendingScrollRef = useRef(null);
-  const pageRef = useRef(page);
-  pageRef.current = page;
+  const pageRef = useRef({ page, useDouble });
+  pageRef.current = { page, useDouble };
   const preloadedPagesRef = useRef(new Map());
+  const retryPreloadedPageRef = useRef(null);
+  const pumpPreloadedPagesRef = useRef(null);
   const [, setPreloadRevision] = useState(0);
   const areaRef = useRef(null);
   const verticalScrollerRef = useRef(null);
@@ -422,7 +464,7 @@ export default function Reader() {
         if (!r?.pages?.length) r = await api.chapter(chapterUrl, sourceId, { fresh: true });
         if (!active) return;
         if (!r?.pages?.length) {
-          setErr('El capítulo no devolvió páginas. La fuente puede estar bloqueando el acceso temporalmente.');
+          setErr('La extensión no encontró páginas para este capítulo.');
           return;
         }
         setCh(r);
@@ -437,12 +479,12 @@ export default function Reader() {
           setToast(`Continuando desde la página ${sp + 1}`);
         }
       } catch (e) {
-        if (active) setErr(String(e));
+        if (active) setErr(sourceErrorMessage(e, sourceName, 'No se pudo obtener la lista de páginas.'));
       }
     })();
     scrollToTop();
     return () => { active = false; };
-  }, [chapterUrl, sourceId, showAdultExtensions, retryTick]);
+  }, [chapterUrl, sourceId, sourceName, showAdultExtensions, retryTick]);
 
   const updateVerticalEnd = useCallback(() => {
     const mainEl = verticalScrollerRef.current;
@@ -537,60 +579,129 @@ export default function Reader() {
   }, [ch, mode]);
 
   const pageSources = ch?.pages;
+  const pageFallbacks = ch?.pageFallbacks;
   const imageReferer = ch?.imageReferer;
   const imageCookie = ch?.imageCookie || '';
+  const onfChapterUrl = sourceId === 'onfmangas' && chapterUrl.startsWith('https://onfmangas.com/lector/') ? chapterUrl : '';
+  const alternativeSourcesUrl = onfChapterUrl && knownMangaTitle
+    ? `/explorar?${new URLSearchParams({ tab: 'mangas', q: knownMangaTitle, excludeSource: sourceId })}`
+    : '';
   useEffect(() => {
     if (!pageSources?.length || chUrl !== chapterUrl) return;
-    const start = Math.min(Math.max(pageRef.current, 0), pageSources.length - 1);
+    const start = Math.min(Math.max(pageRef.current.page, 0), pageSources.length - 1);
     const orderedPages = [...pageSources.slice(start), ...pageSources.slice(0, start)];
-    // Fetch the visible panel through the authenticated image path too. Some
-    // sources return an HTML challenge to <img> requests even when the reader
-    // API supplied a valid page URL.
-    const queue = orderedPages.filter((src) => src && !preloadedPagesRef.current.has(src));
+    const queue = [...new Set(orderedPages)].filter((src) => src && !preloadedPagesRef.current.has(src));
     if (!queue.length) return;
     let cancelled = false;
-    let cursor = 0;
     const controllers = new Set();
-    const load = async (src) => {
-      let image = null;
-      for (let attempt = 0; attempt < 2 && !cancelled; attempt += 1) {
-        const controller = new AbortController();
-        controllers.add(controller);
-        try {
-          image = await fetchImage(src, controller.signal, imageReferer, imageCookie);
-          if (image?.base64 && !cancelled) break;
-          image = null;
-        } catch {
-          image = null;
-        } finally {
-          controllers.delete(controller);
-        }
-        if (!cancelled && attempt === 0) await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-      if (cancelled || !image?.base64) return;
-      preloadedPagesRef.current.set(src, `data:${imageMimeFor(image.mime, src, image.base64)};base64,${image.base64}`);
+    const results = new Map();
+    let checkOnfAccess = !!onfChapterUrl && queue[0].startsWith('https://onfmangas.com/')
+      && browserImageUrl(queue[0], imageReferer) !== queue[0];
+    let onfAccessRejected = false;
+    const saveResult = (src, value) => {
+      const previous = results.get(src);
+      if (typeof previous === 'string') URL.revokeObjectURL(previous);
+      results.set(src, value);
+      preloadedPagesRef.current.set(src, value);
       setPreloadRevision((revision) => revision + 1);
     };
+    const load = async (src) => {
+      const usePreload = browserImageUrl(src, imageReferer) !== src;
+      const fallback = pageFallbacks?.[pageSources.indexOf(src)];
+      const candidates = usePreload && fallback && fallback !== src ? [src, fallback] : [src];
+      let accessRejected = false;
+      let failure;
+      for (const candidate of candidates) {
+        const isOnfImage = usePreload && !!onfChapterUrl && candidate.startsWith('https://onfmangas.com/');
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 14_000);
+        controllers.add(controller);
+        try {
+          const image = await fetchImageBlob(candidate, controller.signal, imageReferer, imageCookie);
+          if (cancelled) return false;
+          if (image) {
+            saveResult(src, URL.createObjectURL(image));
+            return true;
+          }
+        } catch (error) {
+          if (cancelled) return false;
+          if (!accessRejected) failure = controller.signal.aborted
+            ? new Error('La imagen no terminó de cargar a tiempo.')
+            : error;
+          if (isOnfImage && error?.status === 403) {
+            accessRejected = true;
+            failure = error;
+          }
+        } finally {
+          clearTimeout(timeout);
+          controllers.delete(controller);
+        }
+        if (cancelled) return false;
+      }
+      if (accessRejected) onfAccessRejected = true;
+      if (usePreload) saveResult(src, { failure, accessRejected });
+      return false;
+    };
+    retryPreloadedPageRef.current = load;
 
     let active = 0;
     const pump = () => {
-      while (!cancelled && active < 3 && cursor < queue.length) {
-        const src = queue[cursor++];
+      while (!cancelled && active < (checkOnfAccess ? 1 : 3) && queue.length) {
+        const { page: currentPage, useDouble: showTwoPages } = pageRef.current;
+        let nextIndex = queue.indexOf(pageSources[currentPage]);
+        if (nextIndex === -1 && showTwoPages) nextIndex = queue.indexOf(pageSources[currentPage + 1]);
+        if (nextIndex === -1 && onfAccessRejected) {
+          nextIndex = queue.findIndex((src) => !src.startsWith('https://onfmangas.com/'));
+          if (nextIndex === -1) break;
+        }
+        const [src] = queue.splice(Math.max(nextIndex, 0), 1);
         active += 1;
         load(src).finally(() => {
+          checkOnfAccess = false;
           active -= 1;
           pump();
         });
       }
     };
+    pumpPreloadedPagesRef.current = pump;
     pump();
 
     return () => {
       cancelled = true;
+      retryPreloadedPageRef.current = null;
+      pumpPreloadedPagesRef.current = null;
       controllers.forEach((controller) => controller.abort());
       controllers.clear();
+      for (const [src, objectUrl] of results) {
+        if (preloadedPagesRef.current.get(src) === objectUrl) preloadedPagesRef.current.delete(src);
+        if (typeof objectUrl === 'string') URL.revokeObjectURL(objectUrl);
+      }
     };
-  }, [pageSources, imageReferer, imageCookie, chUrl, chapterUrl]);
+  }, [pageSources, pageFallbacks, imageReferer, imageCookie, chUrl, chapterUrl, onfChapterUrl]);
+
+  useEffect(() => {
+    pumpPreloadedPagesRef.current?.();
+  }, [page, useDouble]);
+
+  const panelImageProps = (src, index) => {
+    const result = preloadedPagesRef.current.get(src);
+    return {
+      displaySrc: typeof result === 'string' ? result : '',
+      preloadFailed: !!result && typeof result !== 'string',
+      preloadError: result?.failure ? sourceErrorMessage(result.failure, sourceName) : '',
+      blockedChapterUrl: result?.accessRejected ? onfChapterUrl : '',
+      sourceName,
+      alternativeSourcesUrl,
+      fallbackSrc: pageFallbacks?.[index],
+      imageReferer,
+      imageCookie,
+      onRetry: sourceId.startsWith('mangadex') || sourceId === 'onfmangas'
+        ? retryChapterImages
+        : browserImageUrl(src, imageReferer) !== src
+          ? () => retryPreloadedPageRef.current?.(src)
+          : undefined
+    };
+  };
 
   useEffect(() => {
     if (!currentMangaUrl || adultExtensionDisabled) return;
@@ -693,14 +804,24 @@ export default function Reader() {
   const openPanelMenu = (e, url, label) => {
     e.preventDefault();
     if (!appWindow.canDownload()) return;
-    setMenu({ x: e.clientX, y: e.clientY, url, label });
+    setMenu({ x: e.clientX, y: e.clientY, url, label, displayedUrl: e.currentTarget.currentSrc });
   };
 
   const downloadPanel = async () => {
     const target = menu;
     setMenu(null);
     if (!target?.url) return;
-    const result = await appWindow.downloadImage(target.url, `${ch.label} - ${target.label}`);
+    const result = await appWindow.downloadImage(target.url, `${ch.label} - ${target.label}`, async () => {
+      const displayed = new URL(target.displayedUrl || target.url, window.location.href);
+      if (displayed.protocol === 'blob:' || displayed.protocol === 'data:' || displayed.origin === window.location.origin) {
+        const response = await fetch(displayed).catch(() => null);
+        if (response?.ok) {
+          const blob = await response.blob();
+          if (blob.type.startsWith('image/')) return blob;
+        }
+      }
+      return fetchImageBlob(target.url, undefined, ch.imageReferer, ch.imageCookie);
+    });
     if (result?.ok) setToast('Panel descargado');
     else if (!result?.canceled) setToast(result?.error || 'No se pudo descargar');
   };
@@ -911,7 +1032,11 @@ export default function Reader() {
           title="No se pudo cargar el capítulo"
           description={err}
           action={
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {alternativeSourcesUrl && (
+                <Link to={alternativeSourcesUrl} className={buttonVariants()}>Buscar otras fuentes</Link>
+              )}
+              {onfChapterUrl && <OnfChapterLink href={onfChapterUrl} />}
               <Button onClick={() => { setErr(''); setRetryTick((t) => t + 1); }}>Reintentar</Button>
               <Button variant="secondary" onClick={goBack}>Volver al detalle</Button>
             </div>
@@ -936,14 +1061,10 @@ export default function Reader() {
                 key={`${i}:${src}`}
                 id={`pg-${i}`}
                 src={src}
-                displaySrc={preloadedPagesRef.current.get(src) || ''}
-                fallbackSrc={ch.pageFallbacks?.[i]}
-                onRetry={sourceId.startsWith('mangadex') || sourceId === 'onfmangas' ? retryChapterImages : undefined}
+                {...panelImageProps(src, i)}
                 alt={`Página ${i + 1}`}
-                imageReferer={ch.imageReferer}
-                imageCookie={ch.imageCookie}
                 loading="lazy"
-                onContextMenu={(e) => openPanelMenu(e, src, `Página ${i + 1}`)}
+                onContextMenu={(e, url) => openPanelMenu(e, url, `Página ${i + 1}`)}
                 onLoaded={() => {
                   if (i === ch.pages.length - 1) requestAnimationFrame(updateVerticalEnd);
                 }}
@@ -1039,13 +1160,9 @@ export default function Reader() {
                      <ReaderPanel
                        key={`${idx}:${src}`}
                        src={src}
-                       displaySrc={preloadedPagesRef.current.get(src) || ''}
-                       fallbackSrc={ch.pageFallbacks?.[idx]}
-                       onRetry={sourceId.startsWith('mangadex') || sourceId === 'onfmangas' ? retryChapterImages : undefined}
+                       {...panelImageProps(src, idx)}
                        alt={`Página ${idx + 1}`}
-                       imageReferer={ch.imageReferer}
-                       imageCookie={ch.imageCookie}
-                       onContextMenu={(e) => openPanelMenu(e, src, `Página ${idx + 1}`)}
+                       onContextMenu={(e, url) => openPanelMenu(e, url, `Página ${idx + 1}`)}
                        wrapperClassName="grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] h-full min-h-0 min-w-0 flex-1"
                        imageClassName={cn('block h-full w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                      />
@@ -1057,13 +1174,9 @@ export default function Reader() {
               <ReaderPanel
                 key={`${page}:${ch.pages[page]}`}
                 src={ch.pages[page]}
-                displaySrc={preloadedPagesRef.current.get(ch.pages[page]) || ''}
-                fallbackSrc={ch.pageFallbacks?.[page]}
-                onRetry={sourceId.startsWith('mangadex') || sourceId === 'onfmangas' ? retryChapterImages : undefined}
+                {...panelImageProps(ch.pages[page], page)}
                 alt={`Página ${page + 1}`}
-                imageReferer={ch.imageReferer}
-                imageCookie={ch.imageCookie}
-                onContextMenu={(e) => openPanelMenu(e, ch.pages[page], `Página ${page + 1}`)}
+                onContextMenu={(e, url) => openPanelMenu(e, url, `Página ${page + 1}`)}
                 wrapperClassName="grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] h-full min-h-0 w-full"
                 imageClassName={cn('block h-full w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                />

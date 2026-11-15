@@ -68,9 +68,10 @@ Dos detalles que rompen la app si no los respetas:
 Si la portada de tu fuente no carga, es el `Referer`: la app lo falsea para los
 dominios conocidos en `hookImageHeaders()` (`electron/main.js`). Añade el tuyo ahí.
 
-Un aviso que conviene tener presente al escribir una: una extensión es código que
-se descarga y se ejecuta dentro de la app, sin sandbox. Instala solo desde sitios en
-los que confíes.
+Un aviso que conviene tener presente al escribir una: los módulos se ejecutan dentro
+de un `iframe` con sandbox y origen opaco. Solo pueden pedir operaciones HTTP al
+intermediario de Cytlex; no reciben acceso directo al puente de Electron. Aun así,
+instala extensiones solo desde índices en los que confíes.
 
 ## Legal
 

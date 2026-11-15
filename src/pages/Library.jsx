@@ -18,7 +18,8 @@ import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 import { useLibraryCover } from '../lib/useLibraryCover.js';
-import { libraryScroll, recallCover } from '../lib/searchState.js';
+import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
+import { libraryScroll, recallCover, rememberMangaPreview } from '../lib/searchState.js';
 
 let sessionCategoria = '';
 let libraryCheckInFlight = false;
@@ -179,7 +180,14 @@ const Library = memo(function Library({ active = true }) {
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('cytlex:librarySort') || 'title-asc');
   const [unread, setUnread] = useState({});
   const unreadVersions = useRef(new Map());
+  const categoryTabsRef = useRef(null);
   const scale = useScale();
+
+  useEffect(() => {
+    const activeTab = categoryTabsRef.current?.querySelector('[aria-current="page"]');
+    activeTab?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [sel]);
+
   useEffect(
     () => settings.subscribe((s) => {
       setShowUnread(s.libraryShowUnread);
@@ -241,7 +249,7 @@ const Library = memo(function Library({ active = true }) {
     return () => libraryCheckProgressListeners.delete(syncProgress);
   }, []);
 
-  const cs = Math.min(Math.max(Number(coverSize) || 160, 60), 260);
+  const displayCoverSize = useResponsiveCoverSize(coverSize);
 
   const runCheck = async () => {
     if (libraryCheckInFlight || remainingLibraryCheckCooldown() > 0) return;
@@ -442,42 +450,50 @@ const Library = memo(function Library({ active = true }) {
   return (
     <div className="min-h-full flex flex-col">
       <div
-        className="-mt-1 flex flex-wrap items-center mb-3"
+        className="-mt-1 max-md:-mt-2 flex min-w-0 flex-nowrap items-center mb-3"
         style={{
           gap: `${Math.max(16, Math.round(24 * scale))}px`,
           marginBottom: `${Math.max(8, Math.round(12 * scale))}px`,
           minHeight: px(36, scale, 30)
         }}
       >
-        {cats.map((c) => {
-          const active = c.id === sel;
-          return (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => selectCategory(c.id)}
-              className={cn(
-                'relative font-medium transition-colors',
-                active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-              )}
-              style={{
-                fontSize: `${Math.round(14 * scale)}px`,
-                paddingBottom: px(8, scale, 6)
-              }}
-            >
-              {c.name}
-              {active && (
-                <motion.span
-                  layoutId="cat-underline"
-                  className="absolute left-0 right-0 bottom-0 rounded-full bg-primary"
-                  style={{ height: `${Math.max(1.5, Math.round(2 * scale))}px` }}
-                  transition={{ type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }}
-                />
-              )}
-            </button>
-          );
-        })}
-        <div className="ml-auto self-center flex items-center" style={{ gap: px(8, scale, 6) }}>
+        <nav
+          ref={categoryTabsRef}
+          aria-label="Categorías de Biblioteca"
+          className="flex min-w-0 flex-1 items-center overflow-x-auto overscroll-x-contain whitespace-nowrap no-scrollbar"
+          style={{ gap: `${Math.max(16, Math.round(24 * scale))}px`, minHeight: px(36, scale, 30) }}
+        >
+          {cats.map((c) => {
+            const active = c.id === sel;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                aria-current={active ? 'page' : undefined}
+                onClick={() => selectCategory(c.id)}
+                className={cn(
+                  'relative shrink-0 font-medium transition-colors',
+                  active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+                )}
+                style={{
+                  fontSize: `${Math.round(14 * scale)}px`,
+                  paddingBottom: px(8, scale, 6)
+                }}
+              >
+                {c.name}
+                {active && (
+                  <motion.span
+                    layoutId="cat-underline"
+                    className="absolute left-0 right-0 bottom-0 rounded-full bg-primary"
+                    style={{ height: `${Math.max(1.5, Math.round(2 * scale))}px` }}
+                    transition={{ type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }}
+                  />
+                )}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="ml-auto flex shrink-0 items-center" style={{ gap: px(8, scale, 6) }}>
           <Button
             size="sm"
             variant="secondary"
@@ -507,6 +523,7 @@ const Library = memo(function Library({ active = true }) {
             variant="secondary"
             disabled={!favs.length || checking || checkCooldown > 0}
             aria-busy={checking}
+            aria-label={checking ? 'Buscando actualizaciones' : 'Buscar actualizaciones'}
             onClick={runCheck}
             title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
             className="rounded-md"
@@ -519,23 +536,25 @@ const Library = memo(function Library({ active = true }) {
           >
             {checking ? (
               <RefreshCw
-                className="mr-2 animate-spin"
+                className="mr-2 animate-spin max-md:mr-0"
                 style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }}
               />
             ) : (
               <RefreshCw
-                className="mr-2"
+                className="mr-2 max-md:mr-0"
                 style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }}
               />
             )}
-            {checking ? (
-              <>
-                Buscando
-                <span className="ml-2 tabular-nums opacity-75" aria-live="polite">
-                  {checkProgress.current}/{checkProgress.total}
-                </span>
-              </>
-            ) : 'Buscar actualizaciones'}
+            <span className="max-md:hidden">
+              {checking ? (
+                <>
+                  Buscando
+                  <span className="ml-2 tabular-nums opacity-75" aria-live="polite">
+                    {checkProgress.current}/{checkProgress.total}
+                  </span>
+                </>
+              ) : 'Buscar actualizaciones'}
+            </span>
           </Button>
         </div>
       </div>
@@ -554,7 +573,7 @@ const Library = memo(function Library({ active = true }) {
             ) : view === 'grid' ? (
               <VirtualMangaGrid
                 items={categoryItems}
-                coverSize={cs}
+                coverSize={displayCoverSize}
                 scale={scale}
                 active={active && selected}
                 overscanRows={2}
@@ -611,12 +630,13 @@ const Library = memo(function Library({ active = true }) {
                       <a
                         href={`#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sid)}&from=biblioteca`}
                         className={cn('flex items-end gap-3 flex-1 min-w-0', unavailable && 'opacity-60', linkDisabled && 'pointer-events-none')}
+                        onClick={(event) => rememberMangaPreview(m, sid, event.currentTarget.querySelector('img'))}
                         aria-disabled={linkDisabled}
                         tabIndex={linkDisabled ? -1 : undefined}
                       >
                         <span
                           className="relative rounded-lg shrink-0 overflow-hidden bg-muted"
-                          style={{ width: px(68 * coverSize / 160, scale, 56), height: px(102 * coverSize / 160, scale, 82) }}
+                          style={{ width: px(68 * displayCoverSize / 160, scale, 56), height: px(102 * displayCoverSize / 160, scale, 82) }}
                         >
                           {cover && (
                             <CachedLibraryCover cover={cover} title={m.title} className="w-full h-full object-cover bg-black" cachedOnly={unavailable} cachedCover={validCover ? storedCoverThumbnail(m) : ''} />

@@ -20,6 +20,7 @@ const libraryCoverCache = new Map();
 const loadedLibraryCovers = new Map();
 const libraryCoverVersions = new Map();
 const libraryCoverWaiters = [];
+const priorityLibraryCovers = new Set();
 const failedLibraryCovers = new Map();
 const failedCoverHosts = new Map();
 let libraryCoverDbPromise;
@@ -105,9 +106,20 @@ export function hasLibraryCoverLoaded(url) {
   return !!url && (loadedLibraryCovers.has(url) || loadedSearchCovers.has(url));
 }
 
-async function acquireLibraryCoverSlot() {
-  if (activeLibraryCoverLoads < MAX_LIBRARY_COVER_LOADS) activeLibraryCoverLoads += 1;
-  else await new Promise((resolve) => libraryCoverWaiters.push(resolve));
+function startWaitingLibraryCover() {
+  const priorityIndex = libraryCoverWaiters.findIndex((waiter) => waiter.priority);
+  const limit = priorityIndex >= 0 ? MAX_LIBRARY_COVER_LOADS : MAX_LIBRARY_COVER_LOADS - 1;
+  if (!libraryCoverWaiters.length || activeLibraryCoverLoads >= limit) return;
+  const [next] = libraryCoverWaiters.splice(Math.max(priorityIndex, 0), 1);
+  activeLibraryCoverLoads += 1;
+  next.resolve();
+}
+
+function acquireLibraryCoverSlot(url, priority) {
+  return new Promise((resolve) => {
+    libraryCoverWaiters.push({ url, priority, resolve });
+    startWaitingLibraryCover();
+  });
 }
 
 function openLibraryCoverDb() {
@@ -227,9 +239,8 @@ export async function invalidateLibraryCovers(urls) {
 }
 
 function releaseLibraryCoverSlot() {
-  const next = libraryCoverWaiters.shift();
-  if (next) next();
-  else activeLibraryCoverLoads -= 1;
+  activeLibraryCoverLoads -= 1;
+  startWaitingLibraryCover();
 }
 
 export function clearSearchCoverCache() {
@@ -259,13 +270,21 @@ export function getLibraryCover(url) {
   return cached;
 }
 
-export async function preloadLibraryCover(url, { web = false } = {}) {
+export async function preloadLibraryCover(url, { web = false, priority = false } = {}) {
   if (!url || typeof window === 'undefined') return '';
   const browserProxy = web && browserImageUrl(url) !== url;
   if (!browserProxy && !window.cytlex?.fetchImage && !/^(data:|blob:)/i.test(url)) return '';
   const host = browserProxy ? new URL(url).hostname : '';
   const cached = libraryCoverCache.get(url);
   if (cached) {
+    if (priority && typeof cached !== 'string') {
+      priorityLibraryCovers.add(url);
+      const queued = libraryCoverWaiters.find((waiter) => waiter.url === url);
+      if (queued) {
+        queued.priority = true;
+        startWaitingLibraryCover();
+      }
+    }
     libraryCoverCache.delete(url);
     libraryCoverCache.set(url, cached);
     return cached;
@@ -279,7 +298,7 @@ export async function preloadLibraryCover(url, { web = false } = {}) {
     try {
       const persisted = await readPersistedLibraryCover(url);
       if (persisted) return persisted;
-      await acquireLibraryCoverSlot();
+      await acquireLibraryCoverSlot(url, priority || priorityLibraryCovers.has(url));
       acquired = true;
       let original = url;
       if (browserProxy) {
@@ -340,6 +359,7 @@ export async function preloadLibraryCover(url, { web = false } = {}) {
     } catch {
       return '';
     } finally {
+      priorityLibraryCovers.delete(url);
       if (originalObjectUrl) URL.revokeObjectURL(originalObjectUrl);
       if (acquired) releaseLibraryCoverSlot();
       if (libraryCoverCache.get(url) === pending) libraryCoverCache.delete(url);

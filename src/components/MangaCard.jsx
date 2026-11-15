@@ -7,8 +7,8 @@ import { tracking } from '../lib/tracking.js';
 import { extensions } from '../lib/extensions.js';
 import { isMangaCover, lib, mangaSourceUrl, storedCoverThumbnail } from '../lib/library.js';
 import { discardLibraryCover, getLibraryCover, preloadLibraryCover, preloadSearchCover, requiresImageProxy, restoreLibraryCover } from '../lib/covers.js';
-import { sourceCatalogState } from '../lib/searchState.js';
-import { SourceBadge } from './SourceBadge.jsx';
+import { rememberMangaPreview, sourceCatalogState } from '../lib/searchState.js';
+import { SourceBadge, preloadSourceIcon } from './SourceBadge.jsx';
 import { browserImageUrl } from '../lib/browserHttp.js';
 import { useLibraryCover } from '../lib/useLibraryCover.js';
 
@@ -35,6 +35,9 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
       : (manifestSourceName && !/^(mihon-|Fuente Mihon)/i.test(manifestSourceName) ? manifestSourceName : sourceId),
     icon: sourceManifest.icon || m.sourceIcon
   };
+  useEffect(() => {
+    if (sourceInfo.icon) void preloadSourceIcon(sourceInfo.icon);
+  }, [sourceInfo.icon]);
   const linkDisabled = unavailable && !canOpenUnavailable;
   const linkCls = cn(linkDisabled && 'pointer-events-none');
   const linkA11y = linkDisabled ? { 'aria-disabled': true, tabIndex: -1 } : {};
@@ -58,6 +61,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
   const hasElectronImageProxy = typeof window !== 'undefined' && !!window.cytlex?.fetchImage;
   const proxyCover = requiresImageProxy(preferredCover) && hasElectronImageProxy;
   const coverRef = useRef(null);
+  const coverImageRef = useRef(null);
   const [coverState, setCoverState] = useState(() => {
     const cached = unavailable ? unavailableCachedCover : getLibraryCover(preferredCover);
     return { key: preferredCover, src: cached || (unavailable || proxyCover ? '' : preferredCover) };
@@ -115,9 +119,15 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
     if (main) sourceCatalogState.saveScroll(main.scrollTop);
   };
   const handleSelect = (event) => {
-    if (!onSelect || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    event.preventDefault();
-    onSelect(m, sourceId);
+    event.currentTarget.blur();
+    if (linkDisabled || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    rememberMangaPreview(m, sourceId, coverImageRef.current);
+    if (onSelect) {
+      event.preventDefault();
+      onSelect(m, sourceId);
+    } else if (from === 'fuentes') {
+      saveSourceScroll();
+    }
   };
   useEffect(() => () => clearTimeout(hoverTimer.current), []);
   const box = coverSize ? { width: `${coverSize}px` } : { aspectRatio: '2 / 3' };
@@ -144,7 +154,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
         aria-label={m.title}
         title={m.title}
         className={linkCls}
-        onClick={(e) => { e.currentTarget.blur(); if (onSelect) { handleSelect(e); } else if (from === 'fuentes') { saveSourceScroll(e); } }}
+        onClick={handleSelect}
         onMouseEnter={schedulePrefetch}
         onMouseLeave={cancelPrefetch}
         onFocus={schedulePrefetch}
@@ -154,6 +164,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
         <div ref={libraryCover ? libraryImage.ref : coverRef} className="relative rounded-xl overflow-hidden bg-muted/50 border border-border/50 shadow-sm aspect-[2/3]" style={box}>
           {src ? (
             <img
+              ref={coverImageRef}
               loading="lazy"
               decoding="async"
               src={browserImageUrl(src)}
@@ -240,7 +251,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
           style={titleStyle}
           href={detailHash}
           title={m.title}
-          onClick={(e) => { e.currentTarget.blur(); if (onSelect) { handleSelect(e); } else if (from === 'fuentes') { saveSourceScroll(e); } }}
+          onClick={handleSelect}
           {...linkA11y}
         >
           {m.title}

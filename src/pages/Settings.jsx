@@ -204,6 +204,8 @@ export default function Settings({ tutorialPreview = false }) {
   const location = useLocation();
   const [s, setS] = useState(settings.get());
   const [section, setSection] = useState(() => sessionSeccion || 'apariencia');
+  const [libraryUnreadTipOpen, setLibraryUnreadTipOpen] = useState(false);
+  const libraryUnreadTipRef = useRef(null);
   const [cats, setCats] = useState(() => lib.cats());
   const [newCat, setNewCat] = useState('');
   const [repoInput, setRepoInput] = useState('');
@@ -242,12 +244,38 @@ export default function Settings({ tutorialPreview = false }) {
   const mihonFileInputRef = useRef(null);
   const mihonImportControllerRef = useRef(null);
   const removeRepoRef = useRef(null);
+  const mobileSectionNavRef = useRef(null);
   const [showDonate, setShowDonate] = useState(
     () => !document.body.classList.contains('tutorial-open') && !settings.get().donationSeen
   );
   const scale = useScale();
   const reduceMotion = useReducedMotion();
   const isBrowserApp = typeof window !== 'undefined' && !window.cytlex;
+
+  useEffect(() => {
+    if (!libraryUnreadTipOpen) return undefined;
+    const closeOnOutsidePress = (event) => {
+      if (!libraryUnreadTipRef.current?.contains(event.target)) setLibraryUnreadTipOpen(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setLibraryUnreadTipOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePress);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePress);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [libraryUnreadTipOpen]);
+
+  useEffect(() => {
+    const activeTab = mobileSectionNavRef.current?.querySelector('[aria-current="page"]');
+    activeTab?.scrollIntoView({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'nearest',
+      inline: 'nearest'
+    });
+  }, [section, reduceMotion]);
 
   const resetWebData = async () => {
     setWebDataResetBusy(true);
@@ -899,20 +927,28 @@ export default function Settings({ tutorialPreview = false }) {
           title={
             <>
               Mostrar capítulos sin leer{' '}
-              <span
-                className="group relative inline-flex align-middle text-muted-foreground hover:text-foreground focus-visible:outline-none"
-                tabIndex={0}
+              <button
+                ref={libraryUnreadTipRef}
+                type="button"
+                className="group relative inline-flex align-middle rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="Información sobre capítulos sin leer"
                 aria-describedby="library-unread-tip"
+                onClick={() => {
+                  if (window.innerWidth < 768) setLibraryUnreadTipOpen((open) => !open);
+                }}
               >
                 <CircleHelp aria-hidden="true" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                 <span
                   id="library-unread-tip"
                   role="tooltip"
-                  className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-64 rounded-lg border border-border bg-card px-3 py-2 text-xs text-card-foreground opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus:opacity-100"
+                  className={cn(
+                    'pointer-events-none absolute left-0 top-full z-50 mt-2 w-64 rounded-lg border border-border bg-card px-3 py-2 text-left text-xs text-card-foreground opacity-0 shadow-lg transition-opacity duration-150 md:group-hover:opacity-100 md:group-focus-visible:opacity-100',
+                    libraryUnreadTipOpen && 'max-md:opacity-100'
+                  )}
                 >
                   Pro Tip: Desactivar esta opción podría mejorar el rendimiento en computadores de gama baja-media. Desactivala si ves que el desplazamiento en la biblioteca es muy lento.
                 </span>
-              </span>
+              </button>
             </>
           }
           desc="Muestra un contador de capítulos restantes de los mangas en la biblioteca"
@@ -1659,8 +1695,41 @@ export default function Settings({ tutorialPreview = false }) {
           </motion.div>
         )}
       </AnimatePresence>
+      <nav
+        ref={mobileSectionNavRef}
+        className="-mt-1 max-md:-mt-2 mb-3 flex w-full min-w-0 items-center overflow-x-auto overscroll-x-contain whitespace-nowrap no-scrollbar md:hidden"
+        aria-label="Secciones de ajustes"
+        style={{ gap: px(24, scale, 16), marginBottom: px(12, scale, 8), minHeight: px(36, scale, 30) }}
+      >
+        {SECTIONS.map((sec) => {
+          const on = sec.id === section;
+          return (
+            <button
+              key={sec.id}
+              type="button"
+              aria-current={on ? 'page' : undefined}
+              onClick={() => { setSection(sec.id); sessionSeccion = sec.id; }}
+              className={cn(
+                'relative shrink-0 font-medium transition-colors',
+                on ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+              )}
+              style={{ fontSize: `${Math.round(14 * scale)}px`, paddingBottom: px(8, scale, 6) }}
+            >
+              {sec.label}
+              {on && (
+                <motion.span
+                  layoutId="settings-section-underline"
+                  className="absolute bottom-0 left-0 right-0 rounded-full bg-primary"
+                  style={{ height: `${Math.max(1.5, Math.round(2 * scale))}px` }}
+                  transition={{ type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }}
+                />
+              )}
+            </button>
+          );
+        })}
+      </nav>
       <div
-        className="grid items-stretch flex-1"
+        className="hidden flex-1 items-stretch md:grid"
         style={{
           gap: px(24, scale, 16),
           gridTemplateColumns: `${px(220, scale, 190)} 1fr`
@@ -1713,6 +1782,9 @@ export default function Settings({ tutorialPreview = false }) {
           <div key={section} style={{ padding: px(24, scale, 16) }}>{content}</div>
         </Card>
       </div>
+      <Card className="flex-1 hover:shadow-sm md:hidden">
+        <div key={section} style={{ padding: px(24, scale, 16) }}>{content}</div>
+      </Card>
 
       <Dialog
         open={confirmBackground}

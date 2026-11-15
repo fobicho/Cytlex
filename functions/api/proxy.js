@@ -24,7 +24,53 @@ const ALLOWED_HOSTS = new Set([
 const ALLOWED_SUFFIXES = ['t34798ndc.com', 'mangadex.network', 'ntr-files.online'];
 const REDIRECT_LIMIT = 5;
 const UPSTREAM_RETRIES = 2;
+const PROXY_RESPONSE_MAX_BYTES = 50 * 1024 * 1024;
 const ONF_COOKIE_PAIR = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+=[^;\r\n]{1,2048}$/;
+
+function limitResponseBody(body, maxBytes, onFinish, abortUpstream) {
+  const reader = body.getReader();
+  let received = 0;
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    onFinish();
+  };
+
+  return new ReadableStream({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          controller.close();
+          finish();
+          return;
+        }
+        received += value.byteLength;
+        if (received > maxBytes) {
+          const error = new Error('Upstream response is too large');
+          abortUpstream();
+          try { await reader.cancel(error); } catch {}
+          controller.error(error);
+          finish();
+          return;
+        }
+        controller.enqueue(value);
+      } catch (error) {
+        controller.error(error);
+        finish();
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason);
+      } finally {
+        abortUpstream();
+        finish();
+      }
+    }
+  });
+}
 
 function onfCookiePairs(request) {
   const raw = request.headers.get('x-cytlex-onf-cookie') || '';
@@ -73,6 +119,7 @@ function validateTarget(value) {
 
 function errorResponse(message, status, deniedTarget = false, upstreamError = '') {
   const headers = { 'cache-control': 'no-store', 'x-cytlex-proxy': '1' };
+  headers['x-cytlex-error-origin'] = upstreamError ? 'connection' : 'cytlex';
   if (deniedTarget) headers['x-cytlex-proxy-denied'] = '1';
   if (upstreamError) headers['x-cytlex-upstream-error'] = upstreamError;
   return Response.json({ error: message }, {
@@ -189,8 +236,8 @@ function forwardedHeaders(request, target) {
   return headers;
 }
 
-function isDnsNotFound(error) {
-  return (error?.cause?.code || error?.code) === 'ENOTFOUND';
+function isDnsFailure(error) {
+  return ['ENOTFOUND', 'EAI_AGAIN'].includes(error?.cause?.code || error?.code);
 }
 
 async function fetchTarget(initialTarget, method, headers, body, signal) {
@@ -208,8 +255,7 @@ async function fetchTarget(initialTarget, method, headers, body, signal) {
       signal.throwIfAborted();
       const firstMangaRequest = attempt === 0 && currentMethod === 'GET'
         && target.hostname === 'www.leercapitulo.co' && target.pathname.startsWith('/manga/');
-      const attemptTimeout = firstMangaRequest ? 5000 : mangaDexApi && attempt === 0 ? 6500 : 0;
-      const attemptSignal = attemptTimeout ? AbortSignal.any([signal, AbortSignal.timeout(attemptTimeout)]) : signal;
+      const attemptSignal = firstMangaRequest ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : signal;
       try {
         response = await fetch(target, {
           method: currentMethod,
@@ -219,7 +265,7 @@ async function fetchTarget(initialTarget, method, headers, body, signal) {
           signal: attemptSignal
         });
       } catch (error) {
-        if (signal.aborted || isDnsNotFound(error) || !retryableMethod || attempt >= retries) throw error;
+        if (signal.aborted || isDnsFailure(error) || !retryableMethod || attempt >= retries) throw error;
         await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
         continue;
       }
@@ -228,13 +274,13 @@ async function fetchTarget(initialTarget, method, headers, body, signal) {
       await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
     }
 
-    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    if (![301, 302, 303, 307, 308].includes(response.status)) return { upstream: response };
     const location = response.headers.get('location');
-    if (!location) return response;
-    if (redirects === REDIRECT_LIMIT) return new Response('Too many redirects', { status: 508 });
+    if (!location) return { upstream: response };
+    if (redirects === REDIRECT_LIMIT) return { proxyError: errorResponse('Too many redirects', 508) };
 
     const nextTarget = validateTarget(new URL(location, target).href);
-    if (!nextTarget) return new Response('Redirect target is not allowed', { status: 403 });
+    if (!nextTarget) return { proxyError: errorResponse('Redirect target is not allowed', 403) };
 
     if (nextTarget.origin !== target.origin && currentHeaders.has('cookie')) {
       currentHeaders = new Headers(currentHeaders);
@@ -270,12 +316,31 @@ export async function onRequest(context) {
   const deadline = new AbortController();
   const timeout = setTimeout(() => deadline.abort(), 12000);
   const signal = AbortSignal.any([request.signal, deadline.signal]);
+  let streaming = false;
   try {
-    const upstream = await fetchTarget(target, method, forwardedHeaders(request, target), body, signal);
+    const { upstream, proxyError } = await fetchTarget(target, method, forwardedHeaders(request, target), body, signal);
+    if (proxyError) return proxyError;
+
+    let responseBody = null;
+    if (method !== 'HEAD' && upstream.body) {
+      const contentLength = Number(upstream.headers.get('content-length'));
+      if (Number.isFinite(contentLength) && contentLength > PROXY_RESPONSE_MAX_BYTES) {
+        await upstream.body.cancel();
+        return errorResponse('The source response is too large', 502, false, 'response-too-large');
+      }
+      responseBody = limitResponseBody(
+        upstream.body,
+        PROXY_RESPONSE_MAX_BYTES,
+        () => clearTimeout(timeout),
+        () => deadline.abort()
+      );
+    }
+
     const headers = new Headers({
       'cache-control': 'no-store',
       'x-cytlex-proxy': '1'
     });
+    if (!upstream.ok) headers.set('x-cytlex-error-origin', 'source');
     for (const name of ['content-type', 'last-modified', 'accept-ranges', 'retry-after']) {
       const value = upstream.headers.get(name);
       if (value) headers.set(name, value);
@@ -285,14 +350,16 @@ export async function onRequest(context) {
       if (cookies.length) headers.set('x-cytlex-onf-cookie', cookies.join('; ').slice(0, 4096));
     }
 
-    return new Response(method === 'HEAD' ? null : upstream.body, {
+    const response = new Response(responseBody, {
       status: upstream.status,
       headers
     });
+    streaming = Boolean(responseBody);
+    return response;
   } catch (error) {
     if (deadline.signal.aborted) return errorResponse('The source took too long to respond', 504, false, 'timeout');
-    return errorResponse('The source could not be reached', 502, false, isDnsNotFound(error) ? 'dns-not-found' : '');
+    return errorResponse('The source could not be reached', 502, false, isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
   } finally {
-    clearTimeout(timeout);
+    if (!streaming) clearTimeout(timeout);
   }
 }

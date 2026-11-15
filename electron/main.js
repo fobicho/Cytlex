@@ -50,6 +50,7 @@ async function ensureDevServer() {
 function themeBg() {
   const map = {
     default: { dark: '#09090b', light: '#ffffff' },
+    monocromatico: { dark: '#141414', light: '#f7f7f7' },
     beige: { dark: '#241d14', light: '#f7f1e6' },
     esmeralda: { dark: '#131b18', light: '#f2f8f5' },
     violeta: { dark: '#16121c', light: '#f7f4fa' },
@@ -869,32 +870,19 @@ ipcMain.handle('image:fetch', async (_e, url, requestedReferer, requestedCookie)
 });
 
 ipcMain.handle('image:download', async (e, payload = {}) => {
-  const { url, suggested } = payload;
-  if (!url) return { ok: false };
+  const { bytes, filename, extension } = payload;
+  if (!(bytes instanceof Uint8Array) || !bytes.byteLength || bytes.byteLength > IMAGE_BODY_MAX_BYTES) {
+    return { ok: false, error: 'La imagen supera el tamaño permitido o está vacía.' };
+  }
   try {
-    const parsed = validateUrl(url);
-    const urlStr = parsed.toString();
-    const res = await requestPublic(urlStr, {
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cytlex/0.1',
-        Referer: parsed.origin + '/'
-      },
-      timeout: HTTP_GET_TIMEOUT_MS
-    });
-    if (res.statusCode < 200 || res.statusCode >= 300) return { ok: false, error: `HTTP ${res.statusCode}` };
-    const buf = await readResponse(res, IMAGE_BODY_MAX_BYTES);
-
-    const ext = (parsed.pathname.match(/\.(jpe?g|png|webp|gif|avif)$/i)?.[1] || 'jpg').toLowerCase();
-    const safe = String(suggested || '').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'panel';
-    const defaultPath = /\.[a-z0-9]+$/i.test(safe) ? safe : `${safe}.${ext}`;
-
+    const ext = /^(jpe?g|png|webp|gif|avif|bmp|svg|img)$/.test(extension) ? extension : 'img';
+    const defaultPath = String(filename || '').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').trim() || `panel.${ext}`;
     const win = BrowserWindow.fromWebContents(e.sender);
     const opts = { defaultPath, filters: [{ name: 'Imagen', extensions: [ext] }] };
     const { canceled, filePath } = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);
     if (canceled || !filePath) return { ok: false, canceled: true };
 
-    await writeFile(filePath, buf);
+    await writeFile(filePath, bytes);
     return { ok: true, path: filePath };
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };

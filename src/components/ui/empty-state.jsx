@@ -58,7 +58,7 @@ export function EmptyState({
 
       {description && (
         <p
-          className="text-muted-foreground max-w-sm"
+          className="text-muted-foreground w-full max-w-sm [overflow-wrap:anywhere]"
           style={{
             fontSize: px(compact ? 12 : 14, scale, compact ? 10 : 11),
             marginTop: px(6, scale, 4),

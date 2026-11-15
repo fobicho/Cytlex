@@ -58,7 +58,7 @@ async function withDetailDeadline(request) {
     return await Promise.race([
       request,
       new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('La fuente tardó demasiado en responder.')), DETAIL_TIMEOUT_MS);
+        timer = setTimeout(() => reject(new Error('Cytlex agotó el tiempo de espera al cargar el manga.')), DETAIL_TIMEOUT_MS);
       })
     ]);
   } finally {
@@ -248,8 +248,14 @@ export const api = {
   },
 
   async findManga({ url, title, author = '' }, sourceId) {
+    const versionKey = sourceCacheKey(sourceId);
     const src = await resolveSource(sourceId);
-    return withDetailDeadline(findManga(src, url, title, author));
+    const found = await withDetailDeadline(findManga(src, url, title, author));
+    if (found?.detail?.chapters?.length && versionKey === sourceCacheKey(sourceId)) {
+      const key = detailKey(found.url, sourceId);
+      if (!freshEntry(key)) storeDetail(key, found.detail);
+    }
+    return found;
   },
 
   async chapter(url, sourceId, { fresh = false } = {}) {

@@ -26,28 +26,35 @@ export function seedFromAniList(anilistId) {
 }
 
 let timer = null;
-let pending = null;
+let pending = new Map();
 let inFlight = false;
 
 async function flush() {
-  if (!pending || inFlight) return;
-  const task = pending;
-  pending = null;
+  if (!pending.size || inFlight) return;
+  const tasks = [...pending.values()];
+  pending.clear();
   inFlight = true;
   try {
-    await task();
-  } catch (e) {
-    console.warn('[Cytlex] no se pudo sincronizar con AniList:', e?.message || e);
+    for (const task of tasks) {
+      try {
+        await task();
+      } catch (e) {
+        console.warn('[Cytlex] no se pudo sincronizar con AniList:', e?.message || e);
+      }
+    }
   } finally {
     inFlight = false;
-    if (pending) flush();
+    if (pending.size) void flush();
   }
 }
 
-const schedule = (task) => {
-  pending = task;
+const schedule = (key, task) => {
+  pending.set(key, task);
   if (timer) clearTimeout(timer);
-  timer = setTimeout(flush, DEBOUNCE_MS);
+  timer = setTimeout(() => {
+    timer = null;
+    void flush();
+  }, DEBOUNCE_MS);
 };
 
 function bestChapter(chapters, sourceId) {
@@ -70,7 +77,7 @@ export const sync = {
     const best = bestChapter(chapters, sourceId);
     if (!best) return;
 
-    schedule(async () => {
+    schedule(linked.id, async () => {
       const st = await session.status();
       if (!st.connected) return;
       const entry = await anilistList.entry(linked.id);

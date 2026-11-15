@@ -10,6 +10,7 @@ import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px } from '../lib/useScale.js';
 import { settings } from '../lib/settings.js';
+import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 
 const STATUS_ES = {
   CURRENT: 'Leyendo',
@@ -21,6 +22,13 @@ const STATUS_ES = {
 };
 
 const STATUS_ORDER = ['CURRENT', 'PLANNING', 'PAUSED', 'REPEATING', 'COMPLETED', 'DROPPED'];
+const SCORE_DENOMINATOR = {
+  POINT_100: 100,
+  POINT_10: 10,
+  POINT_10_DECIMAL: 10,
+  POINT_5: 5,
+  POINT_3: 3
+};
 
 export default function Tracking() {
   const [auth, setAuth] = useState(null);
@@ -28,10 +36,12 @@ export default function Tracking() {
   const [entries, setEntries] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const [coverScale, setCoverScale] = useState(() => settings.get().coverSize / 160);
+  const [coverSize, setCoverSize] = useState(() => settings.get().coverSize);
+  const coverScale = useResponsiveCoverSize(coverSize) / 160;
   const scale = useScale();
+  const scoreDenominator = SCORE_DENOMINATOR[viewer?.scoreFormat] || 10;
 
-  useEffect(() => settings.subscribe((s) => setCoverScale(s.coverSize / 160)), []);
+  useEffect(() => settings.subscribe((s) => setCoverSize(s.coverSize)), []);
 
   const load = async () => {
     setBusy(true);
@@ -232,7 +242,7 @@ export default function Tracking() {
                     </div>
                   </div>
                   {e.score != null && (
-                    <Badge variant="outline" className="shrink-0">{e.score}/10</Badge>
+                    <Badge variant="outline" className="shrink-0">{e.score}/{scoreDenominator}</Badge>
                   )}
                   {local && <BookOpen className="w-4 h-4 text-muted-foreground shrink-0" />}
                 </>

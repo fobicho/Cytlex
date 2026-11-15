@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown, Settings as SettingsIcon, X, CheckSquare } from 'lucide-react';
+import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown, Settings as SettingsIcon, X, Check, CheckSquare } from 'lucide-react';
 import { extensions, isAdultExtension, isExtensionAllowed, isNewer } from '../lib/extensions.js';
 import { extUpdates } from '../lib/extUpdates.js';
 import { settings } from '../lib/settings.js';
@@ -576,15 +576,15 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             }}
           >
             <RefreshCw
-              className={cn('mr-2', checkingUpdates && 'animate-spin')}
+              className={cn('mr-2 max-md:mr-0', checkingUpdates && 'animate-spin')}
               style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
             />
-            Buscar actualizaciones
+            <span className="max-md:hidden">Buscar actualizaciones</span>
           </Button>
         </>,
         toolbarTarget
       )}
-      <div className="flex flex-col" style={{ gap: px(32, scale, 22) }}>
+      <div className="flex min-w-0 flex-col" style={{ gap: px(32, scale, 22) }}>
       {err && (
         <Card className="border-destructive/40 hover:shadow-sm">
           <div
@@ -602,15 +602,15 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
 
       <section>
         <div
-          className="flex items-center justify-between"
-          style={{ gap: px(16, scale, 11), marginBottom: px(12, scale, 9), height: px(36, scale, 30) }}
+          className="flex flex-wrap items-center justify-between"
+          style={{ gap: px(8, scale, 6), marginBottom: px(12, scale, 9), minHeight: px(36, scale, 30) }}
         >
           <div className="flex items-center" style={{ gap: px(12, scale, 8) }}>
             <h3 className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
               Instaladas
             </h3>
           </div>
-          <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
+          <div className="flex min-w-0 max-w-full items-center justify-end" style={{ gap: px(8, scale, 6) }}>
             <AnimatePresence initial={false}>
               {!tutorialPreview && selectedInstalledIds.size > 0 && (
                 <motion.div
@@ -624,12 +624,14 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                   <Button
                     variant="secondary"
                     size="sm"
+                    aria-label="Limpiar selecciones"
+                    title="Limpiar selecciones"
                     onClick={() => { setSelectedInstalledIds(new Set()); setConfirmBulk(null); }}
                     disabled={busy !== '' || updating !== ''}
                     style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
                   >
-                    <X className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    Limpiar selecciones
+                    <X className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    <span className="max-md:hidden">Limpiar selecciones</span>
                   </Button>
                 </motion.div>
               )}
@@ -645,12 +647,14 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                   <Button
                     variant="secondary"
                     size="sm"
+                    aria-label="Seleccionar todo"
+                    title="Seleccionar todo"
                     onClick={() => { setSelectedInstalledIds(new Set(sortedInstalled.map(({ manifest }) => manifest.id))); setConfirmBulk(null); }}
                     disabled={busy !== '' || updating !== ''}
                     style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
                   >
-                    <CheckSquare className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    Seleccionar todo
+                    <CheckSquare className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    <span className="max-md:hidden">Seleccionar todo</span>
                   </Button>
                 </motion.div>
               )}
@@ -667,6 +671,9 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                   <Button
                     variant="destructive"
                     size="sm"
+                    className="bg-red-600 text-white hover:bg-red-700"
+                    aria-label={confirmBulk === 'uninstall' ? 'Confirmar desinstalación' : 'Desinstalar seleccionadas'}
+                    title={confirmBulk === 'uninstall' ? 'Confirmar desinstalación' : 'Desinstalar seleccionadas'}
                     onClick={() => handleBulkAction('uninstall')}
                     disabled={busy !== '' || updating !== ''}
                     style={{
@@ -678,8 +685,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                   >
                     <span className="grid">
                       <span className="invisible col-start-1 row-start-1 flex items-center" aria-hidden="true">
-                        <Trash2 className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                        Desinstalar seleccionadas
+                        <Trash2 className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                        <span className="max-md:hidden">Desinstalar seleccionadas</span>
                       </span>
                       <AnimatePresence mode="wait" initial={false}>
                         {confirmBulk === 'uninstall' ? (
@@ -691,7 +698,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                             transition={{ duration: 0.15, ease: 'easeOut' }}
                             className="col-start-1 row-start-1 justify-self-center"
                           >
-                            ¿Seguro?
+                            <><Check className="hidden max-md:block" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} /><span className="max-md:hidden">¿Seguro?</span></>
                           </motion.span>
                         ) : (
                           <motion.span
@@ -702,8 +709,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                             transition={{ duration: 0.15, ease: 'easeOut' }}
                             className="col-start-1 row-start-1 flex items-center justify-self-center"
                           >
-                            <Trash2 className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                            Desinstalar seleccionadas
+                            <Trash2 className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                            <span className="max-md:hidden">Desinstalar seleccionadas</span>
                           </motion.span>
                         )}
                       </AnimatePresence>
@@ -790,11 +797,11 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             title="No hay extensiones instaladas"
           />
         ) : installed.length > 0 ? (
-          <div className="grid">
+          <div className="grid min-w-0">
           <div className="invisible col-start-1 row-start-1 pointer-events-none" aria-hidden="true">
             <EmptyState compact face="（・_・）" title="No hay extensiones instaladas" animateFace={false} />
           </div>
-          <div className="grid col-start-1 row-start-1" style={{ ...grid, alignContent: 'start' }}>
+          <div className="grid min-w-0 col-start-1 row-start-1" style={{ ...grid, alignContent: 'start' }}>
             {sortedInstalled.map(({ manifest: m }) => {
               const upd = visibleUpdates.find((u) => u.id === m.id);
               const blocked = !isExtensionAllowed(m, showAdultExtensions);
@@ -932,13 +939,13 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
 
       <section>
         <div
-          className="flex items-center justify-between"
-          style={{ gap: px(16, scale, 11), marginBottom: px(12, scale, 9), height: px(36, scale, 30) }}
+          className="flex flex-wrap items-center justify-between"
+          style={{ gap: px(8, scale, 6), marginBottom: px(12, scale, 9), minHeight: px(36, scale, 30) }}
         >
           <h3 className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
             Disponibles
           </h3>
-          <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
+          <div className="flex min-w-0 max-w-full items-center justify-end" style={{ gap: px(8, scale, 6) }}>
             <AnimatePresence initial={false}>
               {!tutorialPreview && selectedAvailableIds.size > 0 && (
                 <motion.div
@@ -952,12 +959,14 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                   <Button
                     variant="secondary"
                     size="sm"
+                    aria-label="Limpiar selecciones"
+                    title="Limpiar selecciones"
                     onClick={() => { setSelectedAvailableIds(new Set()); setConfirmBulk(null); }}
                     disabled={busy !== '' || loading || updating !== ''}
                     style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
                   >
-                    <X className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    Limpiar selecciones
+                    <X className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    <span className="max-md:hidden">Limpiar selecciones</span>
                   </Button>
                 </motion.div>
               )}
@@ -973,12 +982,14 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                   <Button
                     variant="secondary"
                     size="sm"
+                    aria-label="Seleccionar todo"
+                    title="Seleccionar todo"
                     onClick={() => { setSelectedAvailableIds(new Set(sortedAvailable.map((manifest) => manifest.id))); setConfirmBulk(null); }}
                     disabled={busy !== '' || loading || updating !== ''}
                     style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
                   >
-                    <CheckSquare className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    Seleccionar todo
+                    <CheckSquare className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    <span className="max-md:hidden">Seleccionar todo</span>
                   </Button>
                 </motion.div>
               )}
@@ -994,6 +1005,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                 >
                   <Button
                     size="sm"
+                    aria-label={confirmBulk === 'install' ? 'Confirmar instalación' : 'Instalar seleccionadas'}
+                    title={confirmBulk === 'install' ? 'Confirmar instalación' : 'Instalar seleccionadas'}
                     onClick={() => handleBulkAction('install')}
                     disabled={busy !== '' || loading || updating !== ''}
                     style={{
@@ -1005,8 +1018,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                   >
                     <span className="grid">
                       <span className="invisible col-start-1 row-start-1 flex items-center" aria-hidden="true">
-                        <Download className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                        Instalar seleccionadas
+                        <Download className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                        <span className="max-md:hidden">Instalar seleccionadas</span>
                       </span>
                       <AnimatePresence mode="wait" initial={false}>
                         {confirmBulk === 'install' ? (
@@ -1018,7 +1031,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                             transition={{ duration: 0.15, ease: 'easeOut' }}
                             className="col-start-1 row-start-1 justify-self-center"
                           >
-                            ¿Seguro?
+                            <><Check className="hidden max-md:block" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} /><span className="max-md:hidden">¿Seguro?</span></>
                           </motion.span>
                         ) : (
                           <motion.span
@@ -1029,8 +1042,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                             transition={{ duration: 0.15, ease: 'easeOut' }}
                             className="col-start-1 row-start-1 flex items-center justify-self-center"
                           >
-                            <Download className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                            Instalar seleccionadas
+                            <Download className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                            <span className="max-md:hidden">Instalar seleccionadas</span>
                           </motion.span>
                         )}
                       </AnimatePresence>
@@ -1074,11 +1087,11 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             title="No quedan extensiones por instalar"
           />
         ) : (
-          <div className="grid">
+          <div className="grid min-w-0">
             <div className="invisible col-start-1 row-start-1 pointer-events-none" aria-hidden="true">
               <EmptyState compact face="ヽ(・∀・)ﾉ" title="No quedan extensiones por instalar" animateFace={false} />
             </div>
-            <div className="grid col-start-1 row-start-1" style={{ ...grid, alignContent: 'start' }}>
+            <div className="grid min-w-0 col-start-1 row-start-1" style={{ ...grid, alignContent: 'start' }}>
             {sortedAvailable.map((m) => (
               <div key={m.id}>
                 <ExtensionCard
