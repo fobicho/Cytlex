@@ -21,6 +21,7 @@ export function Dropdown({
   portal,
   menuWidth,
   menuMaxHeight = 256,
+  scrollToSelectedOnOpen = true,
   style,
   scale
 }) {
@@ -83,11 +84,11 @@ export function Dropdown({
   }, [open]);
 
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open || !scrollToSelectedOnOpen) return;
     const list = listRef.current;
     const sel = selectedRef.current;
     if (list && sel) list.scrollTop = Math.max(0, sel.offsetTop - list.clientHeight / 2 + sel.offsetHeight / 2);
-  }, [open]);
+  }, [open, scrollToSelectedOnOpen]);
 
   useEffect(() => {
     if (!open) return undefined;

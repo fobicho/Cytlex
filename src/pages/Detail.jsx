@@ -868,7 +868,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
 
   const chapterList = useMemo(() => (
       <div
-        className={chaptersPerRow > 1 ? 'grid gap-2' : 'flex flex-col gap-2'}
+        className={chaptersPerRow > 1 ? 'grid gap-2 max-md:flex max-md:flex-col' : 'flex flex-col gap-2'}
         style={chaptersPerRow > 1 ? { gridTemplateColumns: `repeat(${chaptersPerRow}, minmax(0, 1fr))` } : undefined}
       >
         {chapters.slice(0, renderedChapterCount).map((c, i) => {
@@ -1076,13 +1076,6 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 </h1>
               ) : (
                 <Skeleton style={{ height: px(32, scale, 25), width: '66%', maxWidth: px(448, scale, 350) }} />
-              )}
-              {author ? (
-                <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(17 * scale)}px` }}>
-                  Por {author}
-                </div>
-              ) : (
-                <Skeleton style={{ height: px(17, scale, 13), width: px(160, scale, 125), marginTop: px(4, scale, 3) }} />
               )}
             </div>
             {err ? (
@@ -1504,7 +1497,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             size="sm"
             variant="secondary"
             title="Capítulos por fila"
-            className="rounded-lg"
+            className="hidden rounded-lg md:inline-flex"
             onClick={() => {
               const order = [1, 2, 3];
               const next = order[(order.indexOf(chaptersPerRow) + 1) % order.length];
@@ -1519,7 +1512,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               height: px(32, scale, 27),
               fontSize: px(13, scale, 11),
               paddingLeft: px(10, scale, 8),
-              paddingRight: px(10, scale, 8)
+              paddingRight: px(10, scale, 8),
+              borderRadius: px(8, scale, 6)
             }}
           >
             {chaptersPerRow} por fila
@@ -1527,12 +1521,21 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           <Button
             size="icon"
             variant="secondary"
-            className="rounded-lg"
+            className="aspect-square shrink-0 rounded-lg p-0"
             title={currentChapter ? `Ir a ${currentChapter.title}` : 'No hay un capítulo actual'}
             aria-label={currentChapter ? `Ir al capítulo actual: ${currentChapter.title}` : 'No hay un capítulo actual'}
             disabled={!currentChapter}
             onClick={goToCurrentChapter}
-            style={{ width: px(32, scale, 27), height: px(32, scale, 27), flexShrink: 0 }}
+            style={{
+              width: px(32, scale, 27),
+              height: px(32, scale, 27),
+              minWidth: px(32, scale, 27),
+              minHeight: px(32, scale, 27),
+              aspectRatio: '1 / 1',
+              boxSizing: 'border-box',
+              borderRadius: px(8, scale, 6),
+              flexShrink: 0
+            }}
           >
             <Crosshair style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
           </Button>

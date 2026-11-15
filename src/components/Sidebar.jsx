@@ -130,12 +130,12 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                       window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
                       return;
                     }
-                    if (item.to === '/explorar' && main?.querySelector('[data-explore-start="true"]')) {
+                    if (main?.scrollTop > 1) {
+                      main.scrollTo({ top: 0, behavior: 'smooth' });
                       event.preventDefault();
                       return;
                     }
-                    if (main?.scrollTop > 1) {
-                      main.scrollTo({ top: 0, behavior: 'smooth' });
+                    if (item.to === '/explorar' && main?.querySelector('[data-explore-start="true"]')) {
                       event.preventDefault();
                       return;
                     }

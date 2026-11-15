@@ -73,7 +73,7 @@ function Row({ title, desc, right, first, last, className, scale = 1 }) {
   return (
     <div
       className={cn(
-        'flex items-center justify-between',
+        'flex min-w-0 items-center justify-between',
         !last && 'border-b border-border',
         className
       )}
@@ -182,6 +182,12 @@ const SECTIONS = [
   { id: 'atajos', label: 'Atajos', icon: Keyboard }
 ];
 
+const READER_MODES = [
+  { value: 'vertical', label: 'Vertical' },
+  { value: 'paginado', label: 'Paginado (ID)' },
+  { value: 'paginado-rtl', label: 'Paginado (DI)' }
+];
+
 const SHORTCUTS = [
   { keys: ['Ctrl', 'Espacio'], desc: 'Abrir la búsqueda rápida de mangas' },
   { keys: ['F11'], desc: 'Pantalla completa' },
@@ -206,6 +212,8 @@ export default function Settings({ tutorialPreview = false }) {
   const [section, setSection] = useState(() => sessionSeccion || 'apariencia');
   const [libraryUnreadTipOpen, setLibraryUnreadTipOpen] = useState(false);
   const libraryUnreadTipRef = useRef(null);
+  const [chaptersPerRowTipOpen, setChaptersPerRowTipOpen] = useState(false);
+  const chaptersPerRowTipRef = useRef(null);
   const [cats, setCats] = useState(() => lib.cats());
   const [newCat, setNewCat] = useState('');
   const [repoInput, setRepoInput] = useState('');
@@ -245,6 +253,7 @@ export default function Settings({ tutorialPreview = false }) {
   const mihonImportControllerRef = useRef(null);
   const removeRepoRef = useRef(null);
   const mobileSectionNavRef = useRef(null);
+  const sectionScrollTimerRef = useRef(null);
   const [showDonate, setShowDonate] = useState(
     () => !document.body.classList.contains('tutorial-open') && !settings.get().donationSeen
   );
@@ -252,13 +261,24 @@ export default function Settings({ tutorialPreview = false }) {
   const reduceMotion = useReducedMotion();
   const isBrowserApp = typeof window !== 'undefined' && !window.cytlex;
 
+  const handleSectionScroll = (event) => {
+    const scrollArea = event.currentTarget;
+    scrollArea.classList.add('is-scrolling');
+    clearTimeout(sectionScrollTimerRef.current);
+    sectionScrollTimerRef.current = setTimeout(() => scrollArea.classList.remove('is-scrolling'), 700);
+  };
+
   useEffect(() => {
-    if (!libraryUnreadTipOpen) return undefined;
+    if (!libraryUnreadTipOpen && !chaptersPerRowTipOpen) return undefined;
     const closeOnOutsidePress = (event) => {
       if (!libraryUnreadTipRef.current?.contains(event.target)) setLibraryUnreadTipOpen(false);
+      if (!chaptersPerRowTipRef.current?.contains(event.target)) setChaptersPerRowTipOpen(false);
     };
     const closeOnEscape = (event) => {
-      if (event.key === 'Escape') setLibraryUnreadTipOpen(false);
+      if (event.key === 'Escape') {
+        setLibraryUnreadTipOpen(false);
+        setChaptersPerRowTipOpen(false);
+      }
     };
     document.addEventListener('pointerdown', closeOnOutsidePress);
     document.addEventListener('keydown', closeOnEscape);
@@ -266,7 +286,7 @@ export default function Settings({ tutorialPreview = false }) {
       document.removeEventListener('pointerdown', closeOnOutsidePress);
       document.removeEventListener('keydown', closeOnEscape);
     };
-  }, [libraryUnreadTipOpen]);
+  }, [libraryUnreadTipOpen, chaptersPerRowTipOpen]);
 
   useEffect(() => {
     const activeTab = mobileSectionNavRef.current?.querySelector('[aria-current="page"]');
@@ -386,6 +406,10 @@ export default function Settings({ tutorialPreview = false }) {
   };
 
   const set = (patch) => setS(settings.set(patch));
+  const adjustCoverSize = (amount) => {
+    const next = Math.min(240, Math.max(100, s.coverSize + amount));
+    if (next !== s.coverSize) set({ coverSize: next });
+  };
   const setAppearance = (patch) => {
     const run = () => flushSync(() => set(patch));
     if (typeof document !== 'undefined' && typeof document.startViewTransition === 'function') {
@@ -808,7 +832,7 @@ export default function Settings({ tutorialPreview = false }) {
           title="Tamaño de portadas"
           desc="Ajusta las portadas en Biblioteca, Explorar, Fuentes y fichas de manga"
           right={
-            <div className="flex items-center" style={{ gap: px(10, scale, 7) }}>
+            <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
               <Button
                 type="button"
                 variant="ghost"
@@ -816,22 +840,21 @@ export default function Settings({ tutorialPreview = false }) {
                 aria-label="Reducir tamaño de portadas"
                 className="hover:bg-transparent hover:text-foreground"
                 disabled={s.coverSize <= 100}
-                onClick={() => set({ coverSize: Math.max(100, s.coverSize - 10) })}
+                onClick={() => adjustCoverSize(-10)}
                 style={{ width: px(28, scale, 24), height: px(28, scale, 24), fontSize: px(18, scale, 15), lineHeight: 1, alignSelf: 'center' }}
               >
                 −
               </Button>
-              <input
-                type="range"
-                min="100"
-                max="240"
-                step="10"
-                value={s.coverSize}
-                aria-label="Tamaño de portadas"
-                onChange={(event) => set({ coverSize: Number(event.target.value) })}
-                className="cursor-pointer accent-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
-                style={{ width: px(160, scale, 120), display: 'block', alignSelf: 'center' }}
-              />
+              <div className="relative shrink-0">
+                <output
+                  aria-label={`Tamaño de portadas: ${s.coverSize} px`}
+                  className="flex items-center justify-center gap-1 rounded-lg border border-border bg-background tabular-nums"
+                  style={{ width: px(56, scale, 52), height: px(32, scale, 28), fontSize: px(14, scale, 12) }}
+                >
+                  {s.coverSize}
+                  <span className="text-muted-foreground" style={{ fontSize: px(12, scale, 10) }}>px</span>
+                </output>
+              </div>
               <Button
                 type="button"
                 variant="ghost"
@@ -839,19 +862,16 @@ export default function Settings({ tutorialPreview = false }) {
                 aria-label="Aumentar tamaño de portadas"
                 className="hover:bg-transparent hover:text-foreground"
                 disabled={s.coverSize >= 240}
-                onClick={() => set({ coverSize: Math.min(240, s.coverSize + 10) })}
+                onClick={() => adjustCoverSize(10)}
                 style={{ width: px(28, scale, 24), height: px(28, scale, 24), fontSize: px(18, scale, 15), lineHeight: 1, alignSelf: 'center' }}
               >
                 +
               </Button>
-              <span className="tabular-nums text-muted-foreground" style={{ minWidth: px(42, scale, 36), fontSize: px(12, scale, 10) }}>
-                {s.coverSize}px
-              </span>
             </div>
           }
         />
         <div style={{ paddingTop: px(16, scale, 11) }}>
-          <h3 className="font-medium leading-tight mb-3" style={{ fontSize: px(14, scale, 12) }}>
+          <h3 className="mb-3 font-medium leading-tight md:mb-2" style={{ fontSize: px(14, scale, 12) }}>
             Tema
           </h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -911,15 +931,46 @@ export default function Settings({ tutorialPreview = false }) {
         />
         <Row
           scale={scale}
-          title="Capítulos por fila"
+          title={
+            <>
+              Capítulos por fila{' '}
+              <button
+                ref={chaptersPerRowTipRef}
+                type="button"
+                className="group relative inline-flex align-middle rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="Información sobre capítulos por fila"
+                aria-describedby="chapters-per-row-tip"
+                onClick={() => {
+                  if (window.innerWidth < 768) setChaptersPerRowTipOpen((open) => !open);
+                }}
+              >
+                <CircleHelp aria-hidden="true" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                <span
+                  id="chapters-per-row-tip"
+                  role="tooltip"
+                  className={cn(
+                    'pointer-events-none absolute left-1/2 top-full z-50 mt-2 w-64 -translate-x-1/2 rounded-lg border border-border bg-card px-3 py-2 text-left text-xs text-card-foreground opacity-0 shadow-lg transition-opacity duration-150 md:group-hover:opacity-100 md:group-focus-visible:opacity-100',
+                    chaptersPerRowTipOpen && 'max-md:opacity-100'
+                  )}
+                >
+                  Pro Tip: En celulares se fuerza a un solo capítulo por fila para evitar el desbordamiento de la información.
+                </span>
+              </button>
+            </>
+          }
           desc="Cantidad de capítulos por fila en la ficha de un manga"
           right={
-            <Segmented
-              scale={scale}
-              value={s.chaptersPerRow}
-              onChange={(v) => set({ chaptersPerRow: v })}
-              options={[[1, '1'], [2, '2'], [3, '3']]}
-            />
+            <>
+              <span className="rounded-lg border border-border bg-muted px-3 py-2 text-sm md:hidden">1 por fila</span>
+              <div className="hidden md:block">
+                <Segmented
+                  scale={scale}
+                  value={s.chaptersPerRow}
+                  onChange={(v) => set({ chaptersPerRow: v })}
+                  options={[[1, '1'], [2, '2'], [3, '3']]}
+                />
+              </div>
+            </>
           }
         />
         <Row
@@ -942,11 +993,11 @@ export default function Settings({ tutorialPreview = false }) {
                   id="library-unread-tip"
                   role="tooltip"
                   className={cn(
-                    'pointer-events-none absolute left-0 top-full z-50 mt-2 w-64 rounded-lg border border-border bg-card px-3 py-2 text-left text-xs text-card-foreground opacity-0 shadow-lg transition-opacity duration-150 md:group-hover:opacity-100 md:group-focus-visible:opacity-100',
+                    'pointer-events-none absolute left-1/2 top-full z-50 mt-2 w-64 -translate-x-1/2 rounded-lg border border-border bg-card px-3 py-2 text-left text-xs text-card-foreground opacity-0 shadow-lg transition-opacity duration-150 md:group-hover:opacity-100 md:group-focus-visible:opacity-100',
                     libraryUnreadTipOpen && 'max-md:opacity-100'
                   )}
                 >
-                  Pro Tip: Desactivar esta opción podría mejorar el rendimiento en computadores de gama baja-media. Desactivala si ves que el desplazamiento en la biblioteca es muy lento.
+                  Pro Tip: Desactivar esta opción podría mejorar el rendimiento en dispositivos de gama baja-media. Desactivala si ves que el desplazamiento en la biblioteca es muy lento.
                 </span>
               </button>
             </>
@@ -986,11 +1037,14 @@ export default function Settings({ tutorialPreview = false }) {
           title="Modo por defecto"
           desc="Elige tu modo de lectura predeterminado"
           right={
-            <Segmented
+            <Dropdown
               scale={scale}
+              style={{ width: px(180, scale, 144) }}
               value={s.readerMode}
-              onChange={(m) => set({ readerMode: m })}
-              options={[['vertical', 'Vertical'], ['paginado', 'Paginado (ID)'], ['paginado-rtl', 'Paginado (DI)']]}
+              onChange={(readerMode) => set({ readerMode })}
+              ariaLabel="Modo por defecto"
+              portal
+              options={READER_MODES}
             />
           }
         />
@@ -1630,7 +1684,7 @@ export default function Settings({ tutorialPreview = false }) {
   }
 
   return (
-    <div className="min-h-full flex flex-col">
+    <div className="flex h-full min-h-0 flex-col max-md:mr-[-5px]">
       <AnimatePresence initial={false}>
         {showDonate && (
           <motion.div
@@ -1640,22 +1694,24 @@ export default function Settings({ tutorialPreview = false }) {
             style={{ overflow: 'hidden', marginBottom: px(20, scale, 15) }}
           >
             <div
-              className="relative flex flex-col rounded-xl border border-primary/25 bg-primary/5 md:flex-row md:items-center"
+              className="relative grid grid-cols-[auto_minmax(0,1fr)] items-start rounded-xl border border-primary/25 bg-primary/5 md:flex md:items-center"
               style={{ gap: px(12, scale, 9), padding: px(16, scale, 12), paddingRight: px(48, scale, 38) }}
             >
-              <div
-                className="grid shrink-0 place-items-center rounded-full bg-primary/10 text-primary"
-                aria-hidden="true"
-                style={{ width: px(36, scale, 30), height: px(36, scale, 30) }}
-              >
-                <Heart style={{ width: px(18, scale, 15), height: px(18, scale, 15) }} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-semibold leading-tight" style={{ fontSize: px(14, scale, 12) }}>
-                  ¿Te gusta Cytlex?
+              <div className="contents md:flex md:min-w-0 md:flex-1 md:items-center" style={{ gap: px(12, scale, 9) }}>
+                <div
+                  className="grid shrink-0 place-items-center rounded-full bg-primary/10 text-primary"
+                  aria-hidden="true"
+                  style={{ width: px(36, scale, 30), height: px(36, scale, 30) }}
+                >
+                  <Heart style={{ width: px(18, scale, 15), height: px(18, scale, 15) }} />
                 </div>
-                <div className="text-muted-foreground leading-relaxed" style={{ fontSize: px(13, scale, 11), marginTop: px(4, scale, 3) }}>
-                  Si quieres, puedes apoyar su mantenimiento con una donación. Cada aporte ayuda a seguir mejorando la aplicación.
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold leading-tight" style={{ fontSize: px(14, scale, 12) }}>
+                    ¿Te gusta <span className="font-display font-bold tracking-tight">Cytlex</span>?
+                  </div>
+                  <div className="text-muted-foreground leading-relaxed" style={{ fontSize: px(13, scale, 11), marginTop: px(4, scale, 3) }}>
+                    Si quieres, puedes apoyar su mantenimiento con una donación. Cada aporte ayuda a seguir mejorando la aplicación.
+                  </div>
                 </div>
               </div>
               <Button
@@ -1665,7 +1721,7 @@ export default function Settings({ tutorialPreview = false }) {
                   if (window.cytlex?.openExternal) window.cytlex.openExternal(url);
                   else window.open(url, '_blank', 'noopener');
                 }}
-                className="shrink-0 self-start md:self-center"
+                className="col-start-2 min-h-11 shrink-0 self-start shadow-lg shadow-primary/20 md:col-auto md:min-h-0 md:self-center"
                 style={{
                   height: px(34, scale, 28),
                   fontSize: px(13, scale, 11),
@@ -1729,7 +1785,7 @@ export default function Settings({ tutorialPreview = false }) {
         })}
       </nav>
       <div
-        className="hidden flex-1 items-stretch md:grid"
+        className="hidden min-h-0 flex-1 items-stretch md:grid md:grid-rows-[minmax(0,1fr)]"
         style={{
           gap: px(24, scale, 16),
           gridTemplateColumns: `${px(220, scale, 190)} 1fr`
@@ -1778,12 +1834,16 @@ export default function Settings({ tutorialPreview = false }) {
           </nav>
         </Card>
 
-        <Card className="hover:shadow-sm">
-          <div key={section} style={{ padding: px(24, scale, 16) }}>{content}</div>
+        <Card key={section} className="flex min-h-0 flex-col overflow-hidden hover:shadow-sm">
+          <div className="settings-section-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain" onScroll={handleSectionScroll}>
+            <div className="min-w-0" style={{ padding: px(24, scale, 16) }}>{content}</div>
+          </div>
         </Card>
       </div>
-      <Card className="flex-1 hover:shadow-sm md:hidden">
-        <div key={section} style={{ padding: px(24, scale, 16) }}>{content}</div>
+      <Card key={section} className="flex min-h-0 flex-1 flex-col overflow-hidden hover:shadow-sm md:hidden">
+        <div className="settings-section-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain" onScroll={handleSectionScroll}>
+          <div className="min-w-0" style={{ padding: px(24, scale, 16) }}>{content}</div>
+        </div>
       </Card>
 
       <Dialog
@@ -1890,7 +1950,7 @@ export default function Settings({ tutorialPreview = false }) {
             </div>
           ))}
         </div>
-        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+        <div className="flex flex-wrap justify-end" style={{ gap: px(8, scale, 6) }}>
           <Button
             variant="outline"
             onClick={cancelBackupInstall}

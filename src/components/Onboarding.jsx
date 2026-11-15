@@ -1,7 +1,7 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon, Check, LoaderCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon, Check, CheckCheck, LoaderCircle } from 'lucide-react';
 import { THEMES, MODES } from '../lib/themes.js';
 import { resolveMode, settings } from '../lib/settings.js';
 import { cn } from '../lib/utils.js';
@@ -33,7 +33,7 @@ const STEPS = [
 const DEFAULT_EXTENSION_REPOSITORY = 'https://fobicho.github.io/Cytlex/index.json';
 const WALKTHROUGH_VIEWS = [
   { id: 'biblioteca', label: 'Biblioteca', icon: Library, desc: 'Organiza tus mangas de manera sencilla en distintas categorías.' },
-  { id: 'explorar', label: 'Explorar', icon: Compass, desc: 'Busca tus mangas preferidos y administra tus extensiones.' },
+  { id: 'explorar', label: 'Explorar', icon: Compass, desc: 'Busca tus mangas preferidos, administra tus extensiones y revisa las fuentes.' },
   { id: 'ajustes', label: 'Ajustes', icon: SettingsIcon, desc: 'Configura la aplicación a tu gusto, con una amplia gama de modificaciones distintas.' }
 ];
 const SETTINGS_SECTION_IDS = ['apariencia', 'biblioteca', 'lector', 'categorias', 'extensiones', 'notificaciones', 'seguimiento', 'respaldo', 'atajos'];
@@ -51,6 +51,8 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const [walkthroughView, setWalkthroughView] = useState('biblioteca');
   const [repoUrl, setRepoUrl] = useState(() => (settings.get().extIndexUrl || '').trim());
   const [addingRepository, setAddingRepository] = useState(false);
+  const onboardingContentRef = useRef(null);
+  const [onboardingContentHeight, setOnboardingContentHeight] = useState(0);
   const previousStep = useRef(step);
   const hasMounted = useRef(false);
   const scale = useScale();
@@ -71,6 +73,20 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   useEffect(() => {
     document.body.classList.add('tutorial-open');
     return () => document.body.classList.remove('tutorial-open');
+  }, []);
+
+  useLayoutEffect(() => {
+    const element = onboardingContentRef.current;
+    if (!element) return undefined;
+    const updateHeight = () => {
+      const styles = window.getComputedStyle(element);
+      const verticalPadding = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
+      setOnboardingContentHeight(Math.max(0, element.clientHeight - verticalPadding));
+    };
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -159,7 +175,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
 
   return (
     <motion.div
-      className={`fixed inset-0 z-[60] p-4 transition-colors duration-300 ${step === 1 ? 'pointer-events-none bg-transparent' : 'pointer-events-auto bg-background flex items-center justify-center'}`}
+      className={`fixed inset-0 z-[60] p-3 sm:p-4 transition-colors duration-300 ${step === 1 ? 'pointer-events-none bg-transparent' : 'pointer-events-auto bg-background flex flex-col items-center overflow-y-auto'}`}
       initial={{ y: '0%' }}
       animate={{ y: exiting ? '-100%' : '0%' }}
       transition={{ duration: exiting ? 0.8 : 0, ease: exiting ? [0.76, 0, 0.24, 1] : 'linear' }}
@@ -171,7 +187,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
               key="step-card"
               layoutId="onboarding-container"
               layout="position"
-              className="relative w-full max-w-3xl pointer-events-auto"
+              className="relative my-auto w-full max-w-3xl shrink-0 pointer-events-auto"
               initial={{
                 opacity: 0,
                 transform: `translateY(${reduceMotion ? '0px' : firstCardEntrance ? '100vh' : '0px'})`
@@ -188,10 +204,10 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
               <motion.div
                 animate={{ transform: `scale(${scale})` }}
                 transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-                className="relative w-full overflow-hidden rounded-3xl border border-border bg-card text-card-foreground transition-colors duration-300"
+                className="onboarding-card relative flex h-[min(70dvh,38.5rem)] min-h-0 max-h-[calc(100dvh-1.5rem)] w-full flex-col overflow-hidden rounded-3xl border border-border bg-card text-card-foreground transition-colors duration-300 md:h-auto md:min-h-0 md:max-h-none"
                 style={{ transformOrigin: 'center' }}
               >
-          <div className="px-6 py-8 sm:px-10 sm:py-10">
+          <div ref={onboardingContentRef} className="onboarding-content min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6 sm:px-10 sm:py-10 md:flex-auto">
             <AnimatePresence mode="wait" custom={motionDirection}>
               <motion.div
                 key={step}
@@ -201,31 +217,32 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 animate="center"
                 exit="exit"
                 transition={{ duration: 0.25, ease: 'easeOut' }}
-                style={{ height: px(320, scale, 256) }}
+                className="onboarding-step-body flex flex-col justify-center"
+                style={{ minHeight: `${Math.max(onboardingContentHeight, Number.parseFloat(px(320, scale, 256)))}px` }}
               >
                 {step === 0 ? (
-                  <div className="mb-6 flex items-center gap-3">
-                    <span className="text-2xl font-semibold tracking-tight font-display">Bienvenido a</span>
+                  <div className="mb-6 flex flex-wrap items-center gap-2 sm:gap-3">
+                    <span className="text-xl font-semibold tracking-tight font-display sm:text-2xl">Bienvenido a</span>
                     <motion.div
-                      className="flex items-center gap-3"
+                      className="flex items-center gap-2 sm:gap-3"
                       animate={{ y: [0, -5, 0], rotate: [0, -1.5, 1.5, 0] }}
                       transition={{ duration: 3.4, repeat: Infinity, ease: 'easeInOut' }}
                     >
-                      <svg viewBox="0 0 512 512" width="48" height="48" className="shrink-0 rounded-xl" role="img" aria-label="Cytlex">
+                      <svg viewBox="0 0 512 512" width="40" height="40" className="shrink-0 rounded-xl sm:h-12 sm:w-12" role="img" aria-label="Cytlex">
                         <rect width="512" height="512" rx="112" fill="#ffffff" />
                         <text x="256" y="244" fill="#ec4899" fontSize="340" fontWeight="700" textAnchor="middle" dominantBaseline="central" fontFamily="'Noto Sans CJK JP','Yu Gothic UI','Yu Gothic','Meiryo','MS Gothic',sans-serif">粘</text>
                       </svg>
-                      <h2 className="text-2xl font-semibold tracking-tight font-display">Cytlex</h2>
+                      <h2 className="text-xl font-semibold tracking-tight font-display sm:text-2xl">Cytlex</h2>
                     </motion.div>
                   </div>
                 ) : (
-                  <div className={cn('mb-6', step >= 2 && 'mb-2')}>
-                    <h2 className="text-2xl font-semibold tracking-tight font-display">{STEPS[step].title}</h2>
+                  <div className={cn('onboarding-step-heading mb-6', step >= 2 && 'mb-2')}>
+                    <h2 className="onboarding-step-title text-2xl font-semibold tracking-tight font-display">{STEPS[step].title}</h2>
                   </div>
                 )}
 
                 {STEPS[step].body && (
-                  <p className="text-base text-muted-foreground leading-relaxed whitespace-pre-line">
+                  <p className={cn('onboarding-step-description text-base text-muted-foreground whitespace-pre-line', isRepository ? 'leading-normal' : 'leading-relaxed')}>
                     {STEPS[step].body.split(/(\*\*[^*]+\*\*|Cytlex)/g).map((part, i) => {
                       if (part.startsWith('**') && part.endsWith('**')) {
                         return <strong key={i}>{part.slice(2, -2)}</strong>;
@@ -287,7 +304,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                         </button>
                       ))}
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                       {THEMES.map((t) => {
                         const sw = t.swatch[resolveMode(mode)] || t.swatch.dark;
                         const selected = theme === t.id;
@@ -296,19 +313,19 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                             key={t.id}
                             onClick={() => applyTheme(t.id, mode)}
                             className={cn(
-                              'group flex items-center gap-3 rounded-xl border px-3 py-1.5 text-left transition-all',
+                              'group flex min-w-0 items-center gap-2 rounded-xl border px-2 py-2 text-left transition-all sm:gap-3 sm:px-3 sm:py-1.5',
                               selected
                                 ? 'border-primary bg-primary/5'
                                 : 'border-border hover:bg-muted/40'
                             )}
                           >
-                            <div className="h-7 w-7 rounded-full overflow-hidden shrink-0 flex">
+                            <div className="h-6 w-6 rounded-full overflow-hidden shrink-0 flex sm:h-7 sm:w-7">
                               <span className="flex-1" style={{ background: sw[0] }} />
                               <span className="flex-1" style={{ background: sw[1] }} />
                             </div>
                             <div className="min-w-0">
-                              <p className="text-sm font-medium truncate">{t.name}</p>
-                              <p className="text-xs text-muted-foreground truncate">{t.desc}</p>
+                              <p className="break-words text-xs font-medium leading-tight sm:text-sm">{t.name}</p>
+                              <p className="break-words text-[11px] leading-tight text-muted-foreground sm:text-xs">{t.desc}</p>
                             </div>
                           </button>
                         );
@@ -318,8 +335,8 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 )}
 
                 {isRepository && (
-                  <div className="mt-6 rounded-xl border border-border bg-muted/30 p-5">
-                      <div className="flex items-center gap-3">
+                  <div className="onboarding-repository-card mt-4 rounded-xl border border-border bg-muted/30 p-3 sm:mt-6 sm:p-5">
+                      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium">
                             Repositorio oficial de{' '}
@@ -338,7 +355,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                           )}
                         </div>
                         <Button
-                          className="shrink-0"
+                          className="h-9 w-full shrink-0 sm:h-10 sm:w-auto"
                           disabled={hasOfficialRepository || addingRepository}
                           onClick={() => {
                             setAddingRepository(true);
@@ -362,14 +379,14 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
             </AnimatePresence>
           </div>
 
-          <div className="flex flex-col gap-4 border-t border-border px-6 py-4 sm:grid sm:grid-cols-3 sm:items-center sm:px-10">
+          <div className="onboarding-footer relative grid grid-cols-[1fr_auto] items-center gap-x-2 gap-y-2 border-t border-border px-4 py-3 sm:grid-cols-3 sm:gap-4 sm:px-10 sm:py-4">
             <div className="flex justify-start">
-              <Button variant="outline" size="sm" onClick={finish}>
+              <Button variant="outline" size="sm" className="px-1.5 sm:px-3" onClick={finish}>
                 Saltar tutorial
               </Button>
             </div>
 
-            <div className="flex items-center justify-center gap-2">
+            <div className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-2 sm:static sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:translate-x-0 sm:translate-y-0">
               {STEPS.map((_, i) => (
                 <motion.span
                   key={i}
@@ -383,16 +400,30 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
               ))}
             </div>
 
-            <div className="flex justify-end gap-2">
+            <div className="col-start-2 row-start-1 flex justify-end gap-2 sm:col-start-3 sm:row-start-1">
               {step > 0 && (
-                <Button variant="outline" size="sm" onClick={back}>
-                  <ArrowLeft className="h-4 w-4 mr-1" />
-                  Atrás
+                <Button variant="outline" size="sm" className="w-10 px-0 md:w-auto md:px-3" aria-label="Atrás" onClick={back}>
+                  <ArrowLeft className="h-4 w-4 md:mr-1" />
+                  <span className="hidden md:inline">Atrás</span>
                 </Button>
               )}
-              <Button size="sm" className="w-28" onClick={next}>
-                {step === STEPS.length - 1 ? 'Comenzar' : 'Siguiente'}
-                {step < STEPS.length - 1 && <ArrowRight className="h-4 w-4 ml-1" />}
+              <Button
+                size="sm"
+                className="w-10 px-0 md:w-28 md:px-3"
+                aria-label={step === STEPS.length - 1 ? 'Comenzar' : 'Siguiente'}
+                onClick={next}
+              >
+                {step === STEPS.length - 1 ? (
+                  <>
+                    <span className="hidden md:inline">Comenzar</span>
+                    <CheckCheck className="h-4 w-4 md:hidden" />
+                  </>
+                ) : (
+                  <>
+                    <span className="hidden md:inline">Siguiente</span>
+                    <ArrowRight className="h-4 w-4 md:ml-1" />
+                  </>
+                )}
               </Button>
             </div>
           </div>
@@ -414,7 +445,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 opacity: { duration: 0.25, ease: 'easeOut' },
                 layout: { duration: 0.3, ease: [0.22, 1, 0.36, 1] }
               }}
-              className="pointer-events-auto fixed bottom-10 left-1/2 w-[min(92vw,40rem)]"
+              className="pointer-events-auto fixed bottom-[calc(4.5rem_+_env(safe-area-inset-bottom))] left-1/2 w-[min(92vw,40rem)] md:bottom-10"
               style={{ translate: '-50% 0' }}
             >
               <motion.div
@@ -423,7 +454,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 className="rounded-2xl border border-border bg-card text-card-foreground shadow-lg transition-colors duration-300"
                 style={{ transformOrigin: 'center bottom' }}
               >
-            <div className="px-5 py-4 space-y-3">
+            <div className="space-y-3 px-3 py-3 sm:px-5 sm:py-4">
               <div className="grid grid-cols-3 gap-2">
                 {WALKTHROUGH_VIEWS.map(({ id, label, icon: Icon }) => {
                   const selected = walkthroughView === id;
@@ -434,28 +465,28 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                       onClick={() => setWalkthroughView(id)}
                       aria-pressed={selected}
                       className={cn(
-                        'flex flex-col items-center gap-2 rounded-xl border px-3 py-3 text-center transition-all',
+                        'flex min-w-0 flex-col items-center gap-1 rounded-xl border px-1 py-2 text-center transition-all sm:gap-2 sm:px-3 sm:py-3',
                         selected
                           ? 'border-primary bg-primary/5 text-foreground'
                           : 'border-border text-muted-foreground hover:bg-muted/40'
                       )}
                     >
-                      <Icon className="h-6 w-6" />
-                      <span className="text-sm font-medium">{label}</span>
+                      <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
+                      <span className="text-xs font-medium sm:text-sm">{label}</span>
                     </button>
                   );
                 })}
               </div>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-xs text-muted-foreground sm:text-sm">
                 {WALKTHROUGH_VIEWS.find(({ id }) => id === walkthroughView)?.desc}
               </p>
-              <div className="grid grid-cols-3 items-center gap-3 pt-1">
+              <div className="relative grid grid-cols-[1fr_auto] items-center gap-x-2 gap-y-2 pt-1 sm:grid-cols-3 sm:gap-3">
                 <div className="flex justify-start">
-                  <Button variant="outline" size="sm" onClick={finish}>
+                  <Button variant="outline" size="sm" className="px-1.5 sm:px-3" onClick={finish}>
                     Saltar tutorial
                   </Button>
                 </div>
-                <div className="flex items-center justify-center gap-2">
+                <div className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-2 sm:static sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:translate-x-0 sm:translate-y-0">
                   {STEPS.map((_, i) => (
                     <motion.span
                       key={i}
@@ -468,14 +499,14 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                     />
                   ))}
                 </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={back}>
-                    <ArrowLeft className="h-4 w-4 mr-1" />
-                    Atrás
+                <div className="col-start-2 row-start-1 flex justify-end gap-2 sm:col-start-3 sm:row-start-1">
+                  <Button variant="outline" size="sm" className="w-10 px-0 md:w-auto md:px-3" aria-label="Atrás" onClick={back}>
+                    <ArrowLeft className="h-4 w-4 md:mr-1" />
+                    <span className="hidden md:inline">Atrás</span>
                   </Button>
-                  <Button size="sm" onClick={next}>
-                    Siguiente
-                    <ArrowRight className="h-4 w-4 ml-1" />
+                  <Button size="sm" className="w-10 px-0 md:w-auto md:px-3" aria-label="Siguiente" onClick={next}>
+                    <span className="hidden md:inline">Siguiente</span>
+                    <ArrowRight className="h-4 w-4 md:ml-1" />
                   </Button>
                 </div>
               </div>

@@ -1,33 +1,92 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import { BookOpen, Compass, Settings as SettingsIcon } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { SOURCE_CATALOG_HOME_EVENT } from '../lib/searchState.js';
+
+const RESET_PAGE_EVENT = 'cytlex:reset-page';
 
 const items = [
   { to: '/biblioteca', label: 'Biblioteca', icon: BookOpen },
   { to: '/explorar', label: 'Explorar', icon: Compass },
   { to: '/ajustes', label: 'Ajustes', icon: SettingsIcon }
 ];
+const ICON_EASE = [0.23, 1, 0.32, 1];
+
+function AnimatedNavIcon({ to, Icon, animate }) {
+  if (to === '/biblioteca') {
+    return (
+      <span className="relative grid h-full w-full place-items-center">
+        <Icon />
+        {animate && (
+          <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <motion.path
+              d="M21 18V5a2 2 0 0 0-2-2h-3.4A3.6 3.6 0 0 0 12 6.6V21a3 3 0 0 1 3-3h4a2 2 0 0 1 2 2Z"
+              fill="hsl(var(--sidebar-background))"
+              initial={{ transform: 'perspective(72px) rotateY(0deg)', opacity: 1 }}
+              animate={{ transform: 'perspective(72px) rotateY(-180deg)', opacity: 0 }}
+              transition={{ duration: 0.28, ease: ICON_EASE }}
+              style={{ transformBox: 'view-box', transformOrigin: '50% 50%', backfaceVisibility: 'hidden' }}
+            />
+          </svg>
+        )}
+      </span>
+    );
+  }
+
+  if (to === '/explorar') {
+    return (
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <motion.path
+          d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36z"
+          initial={animate ? { transform: 'rotate(-360deg)' } : false}
+          animate={{ transform: 'rotate(0deg)' }}
+          transition={{ duration: 0.28, ease: ICON_EASE }}
+          style={{ transformBox: 'view-box', transformOrigin: '50% 50%' }}
+        />
+      </svg>
+    );
+  }
+
+  return (
+    <motion.span
+      initial={animate ? { transform: 'rotate(-90deg)' } : false}
+      animate={{ transform: 'rotate(0deg)' }}
+      transition={{ duration: 0.24, ease: ICON_EASE }}
+      className="grid h-full w-full place-items-center"
+    >
+      <Icon />
+    </motion.span>
+  );
+}
 
 let lastExploreRoute = '/explorar?tab=mangas';
+let lastExploreListRoute = '/explorar?tab=mangas';
+let lastLibraryRoute = '/biblioteca';
+let lastLibraryListRoute = '/biblioteca';
 
 function activeSection(location) {
   if (location.pathname === '/biblioteca') return '/biblioteca';
   if (location.pathname === '/explorar' || location.pathname === '/resultados') return '/explorar';
+  if (location.pathname === '/ajustes') return '/ajustes';
   if (location.pathname.startsWith('/manga')) {
     const from = new URLSearchParams(location.search).get('from');
-    return from === 'biblioteca' ? '/biblioteca' : '/explorar';
+    if (from === 'biblioteca') return '/biblioteca';
+    if (from === 'explorar' || from === 'fuentes') return '/explorar';
   }
-  return location.pathname;
+  return '';
 }
 
-export default function BrowserMobileNav() {
+export default function BrowserMobileNav({ tutorialNavOnly = false }) {
   const location = useLocation();
+  const navigate = useNavigate();
+  const pendingQuickSearchReset = useRef(false);
   const [exploreRoute, setExploreRoute] = useState(() => {
     if (location.pathname === '/explorar' || location.pathname === '/resultados') {
       lastExploreRoute = `${location.pathname}${location.search}`;
+      lastExploreListRoute = lastExploreRoute;
     }
     return lastExploreRoute;
   });
@@ -44,13 +103,90 @@ export default function BrowserMobileNav() {
   }, [activeIndex]);
 
   useEffect(() => {
-    if (location.pathname !== '/explorar' && location.pathname !== '/resultados') return;
+    if (activeSection(location) !== '/explorar') return;
     lastExploreRoute = `${location.pathname}${location.search}`;
     setExploreRoute(lastExploreRoute);
+    if (!location.pathname.startsWith('/manga')) lastExploreListRoute = lastExploreRoute;
   }, [location.pathname, location.search]);
 
+  useEffect(() => {
+    if (activeSection(location) !== '/biblioteca') return;
+    lastLibraryRoute = `${location.pathname}${location.search}`;
+    if (!location.pathname.startsWith('/manga')) lastLibraryListRoute = lastLibraryRoute;
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!pendingQuickSearchReset.current || new URLSearchParams(location.search).has('quick')) return;
+    pendingQuickSearchReset.current = false;
+    window.dispatchEvent(new Event(RESET_PAGE_EVENT));
+  }, [location.search]);
+
+  const handleExploreClick = (event, selected) => {
+    if (!selected) return;
+    const main = document.querySelector('main');
+    const scrollToTop = () => main?.scrollTo({ top: 0, behavior: 'smooth' });
+
+    if (location.pathname.startsWith('/manga')) {
+      event.preventDefault();
+      if (main?.scrollTop > 1) {
+        scrollToTop();
+        return;
+      }
+      navigate(lastExploreListRoute);
+      return;
+    }
+
+    if (location.pathname === '/explorar' && new URLSearchParams(location.search).has('quick')) {
+      event.preventDefault();
+      pendingQuickSearchReset.current = true;
+      navigate('/explorar?tab=mangas', { replace: true });
+      return;
+    }
+
+    if (main?.querySelector('[data-source-catalog-active="true"]')) {
+      event.preventDefault();
+      if (main.scrollTop > 1) {
+        scrollToTop();
+        return;
+      }
+      window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
+      return;
+    }
+
+    if (main?.scrollTop > 1) {
+      event.preventDefault();
+      scrollToTop();
+      return;
+    }
+
+    if (main?.querySelector('[data-explore-start="true"]')) {
+      event.preventDefault();
+      return;
+    }
+
+    window.dispatchEvent(new Event(RESET_PAGE_EVENT));
+  };
+
+  const handleLibraryClick = (event, selected) => {
+    if (!selected) return;
+    event.preventDefault();
+    const main = document.querySelector('main');
+    const scrollToTop = () => main?.scrollTo({ top: 0, behavior: 'smooth' });
+
+    if (location.pathname.startsWith('/manga')) {
+      if (main?.scrollTop > 1) {
+        scrollToTop();
+        return;
+      }
+      navigate(lastLibraryListRoute);
+      return;
+    }
+
+    if (main?.scrollTop > 1) scrollToTop();
+  };
+
   return (
-    <nav className="browser-mobile-nav md:hidden" aria-label="Navegación principal">
+    <nav inert={tutorialNavOnly} className="browser-mobile-nav md:hidden" aria-label="Navegación principal">
       {activeIndex !== -1 && (
         <motion.span
           aria-hidden="true"
@@ -65,30 +201,22 @@ export default function BrowserMobileNav() {
         return (
           <Link
             key={to}
-            to={to === '/explorar' ? exploreRoute : to}
+            to={to === '/explorar' ? exploreRoute : to === '/biblioteca' ? lastLibraryRoute : to}
             aria-current={selected ? 'page' : undefined}
             className={cn('browser-mobile-nav__item', selected && 'is-active')}
-            onClick={(event) => {
-              if (!selected || location.pathname !== '/explorar') return;
-              const main = document.querySelector('main');
-              if (!main?.querySelector('[data-source-catalog-selected="true"]')) return;
-              event.preventDefault();
-              window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
-              main.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
+            onClick={to === '/biblioteca'
+              ? (event) => handleLibraryClick(event, selected)
+              : to === '/explorar'
+                ? (event) => handleExploreClick(event, selected)
+                : undefined}
           >
-            <motion.span
+            <span
               key={selected ? `active-${activeVisit}` : 'inactive'}
               aria-hidden="true"
               className="grid h-[19px] w-[19px] place-items-center"
-              initial={selected && activeVisit > 0 && !reduceMotion
-                ? { transform: 'translateY(1px) scale(0.94)', opacity: 0.8 }
-                : false}
-              animate={{ transform: 'translateY(0) scale(1)', opacity: 1 }}
-              transition={reduceMotion ? { duration: 0 } : { duration: 0.18, ease: [0.23, 1, 0.32, 1] }}
             >
-              <Icon />
-            </motion.span>
+              <AnimatedNavIcon to={to} Icon={Icon} animate={selected && activeVisit > 0 && !reduceMotion} />
+            </span>
             <span>{label}</span>
           </Link>
         );

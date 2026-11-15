@@ -1,7 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { Search, Loader2, ChevronRight, ChevronLeft, CircleHelp } from 'lucide-react';
+import { Search, Loader2, ChevronRight, ChevronLeft } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { sourceErrorMessage } from '../lib/browserHttp.js';
@@ -31,12 +30,22 @@ const TABS = [
 ];
 
 const enabledSources = (showAdultExtensions) => extensions.sources().filter(({ manifest }) =>
-  isExtensionAllowed(manifest, showAdultExtensions)
+  isExtensionAllowed(manifest, showAdultExtensions) && !isLanguageSourceDisabled(manifest)
 );
 
 const normalizeMangaTitle = (title) => String(title || '').trim().normalize('NFKC').toLocaleLowerCase();
 
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
+
+const isLanguageSourceDisabled = (manifest) => {
+  if (!Array.isArray(manifest.config?.languages) || !manifest.config.languages.length) return false;
+  try {
+    const selected = JSON.parse(localStorage.getItem(EXT_CONFIG_KEY))?.[manifest.id]?.languages;
+    return Array.isArray(selected) && selected.length === 0;
+  } catch {
+    return false;
+  }
+};
 
 const sourceLangSubtitle = (manifest) => {
   const options = Array.isArray(manifest.config?.languages) ? manifest.config.languages : null;
@@ -46,7 +55,7 @@ const sourceLangSubtitle = (manifest) => {
     : options.map((l) => l.code);
   let cur = null;
   try { cur = JSON.parse(localStorage.getItem(EXT_CONFIG_KEY))?.[manifest.id]?.languages; } catch {}
-  const codes = Array.isArray(cur) && cur.length ? cur : defaults;
+  const codes = Array.isArray(cur) ? cur : defaults;
   return codes.map((c) => options.find((l) => l.code === c)?.label || c).join(' · ');
 };
 
@@ -103,20 +112,20 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
     ? Math.floor((trackWidth - gap * (columns - 1)) / columns)
     : coverSize;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = trackRef.current;
-    if (!el) return;
+    if (!el || !active) return;
     el.scrollLeft = catalogScroll.get(r.id);
     measure();
-  }, [r.id, r.items.length]);
+  }, [r.id, r.items.length, active]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = trackRef.current;
     if (!el) return undefined;
-    const save = () => catalogScroll.set(r.id, el.scrollLeft);
+    const save = () => { if (active) catalogScroll.set(r.id, el.scrollLeft); };
     el.addEventListener('scroll', save, { passive: true });
     return () => el.removeEventListener('scroll', save);
-  }, [r.id]);
+  }, [r.id, active]);
 
   const step = (dir) => {
     const el = trackRef.current;
@@ -184,7 +193,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
             paddingBottom: `${Math.max(6, Math.round(8 * scale))}px`
           }}
         >
-          {active && visible.map((m, i) => (
+          {visible.map((m, i) => (
             <div
               key={i}
               className="shrink-0"
@@ -195,7 +204,10 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
                 sourceId={r.id}
                 from="explorar"
                 returnTo={returnTo}
-                onSelect={onMangaSelect}
+                onSelect={(manga, sourceId) => {
+                  catalogScroll.set(r.id, trackRef.current?.scrollLeft || 0);
+                  onMangaSelect?.(manga, sourceId);
+                }}
                 coverSize={cardWidth}
                 showAuthor={false}
                 savedInLibrary={isLibraryManga(m, r.id, savedMangaKeys)}
@@ -286,32 +298,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const [migrationSelection, setMigrationSelection] = useState(null);
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationError, setMigrationError] = useState('');
-  const [selectionTipOpen, setSelectionTipOpen] = useState(false);
-  const [selectionTipPosition, setSelectionTipPosition] = useState(null);
-  const selectionTipRef = useRef(null);
   const scale = useScale();
-
-  useEffect(() => {
-    if (!selectionTipOpen) return undefined;
-    const closeOnOutsidePress = (event) => {
-      if (!selectionTipRef.current?.contains(event.target)) {
-        setSelectionTipOpen(false);
-        setSelectionTipPosition(null);
-      }
-    };
-    const closeOnEscape = (event) => {
-      if (event.key === 'Escape') {
-        setSelectionTipOpen(false);
-        setSelectionTipPosition(null);
-      }
-    };
-    document.addEventListener('pointerdown', closeOnOutsidePress);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.removeEventListener('pointerdown', closeOnOutsidePress);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [selectionTipOpen]);
 
   useEffect(() => settings.subscribe((s) => {
     setShowAdultExtensions(!!s.showAdultExtensions);
@@ -360,7 +347,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const completed = results ? results.filter((r) => r.status !== 'loading') : [];
   const visibleCompleted = migrationMode
     ? completed.filter((r) => migrationSourceIds.includes(r.id))
-    : completed.filter((r) => isExtensionAllowed(r.manifest, showAdultExtensions));
+    : completed.filter((r) => isExtensionAllowed(r.manifest, showAdultExtensions) && !isLanguageSourceDisabled(r.manifest));
   const searchItems = visibleCompleted.flatMap((result) => result.items.map((manga) => ({ manga, sourceId: result.id })));
   const visibleSearchItemCount = migrationMode || !hideSavedManga
     ? searchItems.length
@@ -627,54 +614,6 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
               </button>
             );
           })}
-          {tab === 'extensiones' && (
-            <button
-              ref={selectionTipRef}
-              type="button"
-              className="group relative flex shrink-0 self-center items-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label="Información sobre selección de extensiones"
-              aria-describedby="extension-selection-tip"
-              onClick={() => {
-                if (window.innerWidth < 768) {
-                  if (selectionTipOpen) {
-                    setSelectionTipOpen(false);
-                    setSelectionTipPosition(null);
-                    return;
-                  }
-                  const rect = selectionTipRef.current?.getBoundingClientRect();
-                  const width = Math.min(224, window.innerWidth - 16);
-                  if (rect) {
-                    setSelectionTipPosition({
-                      left: Math.min(Math.max(8, rect.left), window.innerWidth - width - 8),
-                      top: rect.bottom + 8,
-                      width
-                    });
-                    setSelectionTipOpen(true);
-                  }
-                }
-              }}
-              style={{ paddingBottom: px(8, scale, 6) }}
-            >
-              <CircleHelp aria-hidden="true" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-              <span
-                id="extension-selection-tip"
-                role="tooltip"
-                className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-56 rounded-lg border border-border bg-card px-3 py-2 text-left text-xs text-card-foreground opacity-0 shadow-lg transition-opacity duration-150 md:group-hover:opacity-100 md:group-focus-visible:opacity-100"
-              >
-                Pro Tip: Puedes seleccionar varias extensiones para instalarlas o desinstalarlas juntas.
-              </span>
-              {selectionTipOpen && selectionTipPosition && createPortal(
-                <span
-                  role="tooltip"
-                  className="pointer-events-none fixed z-[100] max-w-[calc(100vw-16px)] rounded-lg border border-border bg-card px-3 py-2 text-left text-xs text-card-foreground shadow-lg"
-                  style={selectionTipPosition}
-                >
-                  Pro Tip: Puedes seleccionar varias extensiones para instalarlas o desinstalarlas juntas.
-                </span>,
-                document.body
-              )}
-            </button>
-          )}
         </div>
 
         {tab === 'extensiones' && (
@@ -709,7 +648,14 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                 placeholder="Buscar en todas las extensiones..."
                 value={q}
                 onChange={(e) => { setQ(e.target.value); lastSearch.q = e.target.value; }}
-                onKeyDown={(e) => e.key === 'Enter' && q.trim() && runSearch()}
+                enterKeyHint="search"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing && q.trim()) {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                    runSearch();
+                  }
+                }}
                 style={{
                   height: px(36, scale, 30),
                   fontSize: `${Math.round(14 * scale)}px`,
@@ -790,7 +736,16 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                     first={i === 0}
                     animate={animateSearch}
                     active={active}
-                    onMangaSelect={migrationMode ? (manga, sourceId) => { setMigrationError(''); setMigrationSelection({ manga, sourceId }); } : undefined}
+                    onMangaSelect={(manga, sourceId) => {
+                      if (migrationMode) {
+                        setMigrationError('');
+                        setMigrationSelection({ manga, sourceId });
+                        return;
+                      }
+                      const main = document.querySelector('main');
+                      if (main) scrollMemory.catalog = main.scrollTop;
+                      openMangaDetail(manga, sourceId);
+                    }}
                     returnTo={migrationMode ? migrationInline?.returnTo || `/explorar?${loc.search.replace(/^\?/, '')}` : ''}
                     savedMangaKeys={savedMangaKeys}
                     hideSavedManga={!migrationMode && hideSavedManga}

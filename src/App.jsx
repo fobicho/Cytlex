@@ -359,7 +359,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
           </main>
         </div>
       </div>
-      {!isElectronApp && !isReader && <BrowserMobileNav />}
+      {!isElectronApp && !isReader && <BrowserMobileNav tutorialNavOnly={tutorialMode} />}
       <AnimatePresence>
         {quickSearchOpen && (
           <div

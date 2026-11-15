@@ -117,11 +117,13 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
 
     const getLanguages = () => {
       const selected = languageSelections?.[sourceId]?.languages;
-      if (Array.isArray(selected) && selected.length) return selected;
+      if (Array.isArray(selected)) return selected;
       return defaultLanguages.length ? defaultLanguages : ['es', 'es-la'];
     };
 
     async function catalog({ q = '', page = 1, genre = '', year = '', status = '', type = '', sort = '', __cytlexRequestId } = {}) {
+      const languages = getLanguages();
+      if (!languages.length) return { items: [], totalPages: 1, totalText: '0' };
       const order = sort || (q ? 'relevance' : 'followedCount');
       const orderKey = order === 'title-asc' || order === 'title-desc' ? 'title' : order;
       const direction = order === 'title-asc' ? 'asc' : 'desc';
@@ -129,7 +131,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
         title: q,
         limit: pageSize,
         offset: (Math.max(1, Number(page) || 1) - 1) * pageSize,
-        'availableTranslatedLanguage[]': getLanguages(),
+        'availableTranslatedLanguage[]': languages,
         'contentRating[]': ratings,
         'includes[]': ['cover_art', 'author', 'artist'],
         'includedTags[]': genre,

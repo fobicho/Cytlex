@@ -84,35 +84,31 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
   return (
     <Card
       className={cn(
-        'hover:shadow-sm',
+        'relative hover:shadow-sm',
         confirmationOpen && 'relative z-30',
         selected && 'border-primary ring-2 ring-primary/30 shadow-md shadow-primary/10',
         updatable && 'cx-update-pulse',
         disabled && 'opacity-50'
       )}
     >
+      {onSelectionChange && (
+        <button
+          type="button"
+          onClick={() => onSelectionChange(!selected)}
+          aria-label={selectionLabel}
+          aria-pressed={selected}
+          disabled={selectionDisabled}
+          className="absolute inset-0 z-0 cursor-pointer rounded-xl bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-default"
+        />
+      )}
       <div
-        className="flex items-center"
+        className="pointer-events-none relative z-[1] flex items-center"
         style={{ padding: px(14, scale, 11), gap: px(12, scale, 9) }}
       >
-        {onSelectionChange ? (
-          <button
-            type="button"
-            onClick={() => onSelectionChange(!selected)}
-            aria-label={selectionLabel}
-            aria-pressed={selected}
-            disabled={selectionDisabled}
-            className="flex flex-1 min-w-0 items-center text-left disabled:cursor-default"
-            style={{ gap: px(12, scale, 9) }}
-          >
-            {identity}
-          </button>
-        ) : (
-          <div className="flex flex-1 min-w-0 items-center" style={{ gap: px(12, scale, 9) }}>
-            {identity}
-          </div>
-        )}
-        <div className="shrink-0">{action}</div>
+        <div className="flex flex-1 min-w-0 items-center" style={{ gap: px(12, scale, 9) }}>
+          {identity}
+        </div>
+        <div className="pointer-events-auto relative z-[1] shrink-0">{action}</div>
       </div>
     </Card>
   );
@@ -121,6 +117,17 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
 let repoCache = { url: '', available: null, updates: null };
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
 const DEFAULT_EXTENSION_REPOSITORY = 'https://fobicho.github.io/Cytlex/index.json';
+const confirmationPosition = (button) => {
+  const rect = button.getBoundingClientRect();
+  const pageZoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+  const centerX = (rect.left + rect.width / 2) / pageZoom;
+  const edge = 48 / pageZoom;
+  const maxLeft = Math.max(edge, (window.innerWidth - 48) / pageZoom);
+  return {
+    top: (rect.bottom + 6) / pageZoom,
+    left: Math.max(edge, Math.min(maxLeft, centerX))
+  };
+};
 
 const readExtConfig = () => {
   try { return JSON.parse(localStorage.getItem(EXT_CONFIG_KEY)) || {}; } catch { return {}; }
@@ -178,9 +185,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   const toggleLang = (subId, code, options) => {
     const cfg = readExtConfig();
     const defaults = options.map((l) => l.code);
-    const cur = Array.isArray(cfg[subId]?.languages) && cfg[subId].languages.length ? cfg[subId].languages : defaults;
+    const cur = Array.isArray(cfg[subId]?.languages) ? cfg[subId].languages : defaults;
     const next = cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code];
-    if (!next.length) return;
     cfg[subId] = { ...(cfg[subId] || {}), languages: next };
     writeExtConfig(cfg);
     setLangConfig({ ...cfg });
@@ -206,6 +212,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   }
   const confirmRef = useRef(null);
   const removeRef = useRef(null);
+  const confirmPopoverRef = useRef(null);
+  const removePopoverRef = useRef(null);
   const updateRef = useRef(null);
   const allRef = useRef(null);
   const bulkInstallRef = useRef(null);
@@ -214,23 +222,35 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   useEffect(() => {
     if (!confirmInstall) return;
     const onDown = (e) => {
-      if (confirmRef.current && !confirmRef.current.contains(e.target)) {
-        setConfirmInstall(null);
-      }
+      if (confirmRef.current?.contains(e.target) || confirmPopoverRef.current?.contains(e.target)) return;
+      setConfirmInstall(null);
     };
+    const closeOnLayoutChange = () => setConfirmInstall(null);
     document.addEventListener('pointerdown', onDown);
-    return () => document.removeEventListener('pointerdown', onDown);
+    document.addEventListener('scroll', closeOnLayoutChange, true);
+    window.addEventListener('resize', closeOnLayoutChange);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('scroll', closeOnLayoutChange, true);
+      window.removeEventListener('resize', closeOnLayoutChange);
+    };
   }, [confirmInstall]);
 
   useEffect(() => {
     if (!confirmRemove) return;
     const onDown = (e) => {
-      if (removeRef.current && !removeRef.current.contains(e.target)) {
-        setConfirmRemove(null);
-      }
+      if (removeRef.current?.contains(e.target) || removePopoverRef.current?.contains(e.target)) return;
+      setConfirmRemove(null);
     };
+    const closeOnLayoutChange = () => setConfirmRemove(null);
     document.addEventListener('pointerdown', onDown);
-    return () => document.removeEventListener('pointerdown', onDown);
+    document.addEventListener('scroll', closeOnLayoutChange, true);
+    window.addEventListener('resize', closeOnLayoutChange);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('scroll', closeOnLayoutChange, true);
+      window.removeEventListener('resize', closeOnLayoutChange);
+    };
   }, [confirmRemove]);
 
   useEffect(() => {
@@ -797,11 +817,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             title="No hay extensiones instaladas"
           />
         ) : installed.length > 0 ? (
-          <div className="grid min-w-0">
-          <div className="invisible col-start-1 row-start-1 pointer-events-none" aria-hidden="true">
-            <EmptyState compact face="（・_・）" title="No hay extensiones instaladas" animateFace={false} />
-          </div>
-          <div className="grid min-w-0 col-start-1 row-start-1" style={{ ...grid, alignContent: 'start' }}>
+          <div className="grid min-w-0" style={{ ...grid, alignContent: 'start' }}>
             {sortedInstalled.map(({ manifest: m }) => {
               const upd = visibleUpdates.find((u) => u.id === m.id);
               const blocked = !isExtensionAllowed(m, showAdultExtensions);
@@ -893,38 +909,16 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                           title="Desinstalar"
                           aria-label="Desinstalar"
                           disabled={busy !== ''}
-                          onClick={() => setConfirmRemove(m)}
+                          onClick={(event) => {
+                            const popoverPosition = confirmationPosition(event.currentTarget);
+                            setConfirmRemove((current) => current?.id === m.id
+                              ? null
+                              : { ...m, popoverPosition });
+                          }}
                           style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
                         >
                           <Trash2 style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                         </Button>
-                        <AnimatePresence>
-                          {confirmRemove?.id === m.id && (
-                            <motion.div
-                              key="confirm-remove"
-                              initial={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
-                              animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
-                              exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
-                              transition={{ duration: 0.14, ease: 'easeOut' }}
-                              className="absolute z-20 rounded-lg border border-border bg-card shadow-lg"
-                              style={{ top: '100%', left: '50%', marginTop: px(6, scale, 4), padding: px(8, scale, 6) }}
-                            >
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={async () => {
-                                  const id = confirmRemove.id;
-                                  setConfirmRemove(null);
-                                  await doUninstall(id);
-                                }}
-                                disabled={busy !== ''}
-                                style={{ height: px(28, scale, 24), fontSize: px(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
-                              >
-                                Desinstalar
-                              </Button>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
                       </div>
                     </div>
                     }
@@ -932,7 +926,6 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                 </div>
               );
             })}
-          </div>
           </div>
         ) : null}
       </section>
@@ -1087,11 +1080,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             title="No quedan extensiones por instalar"
           />
         ) : (
-          <div className="grid min-w-0">
-            <div className="invisible col-start-1 row-start-1 pointer-events-none" aria-hidden="true">
-              <EmptyState compact face="ヽ(・∀・)ﾉ" title="No quedan extensiones por instalar" animateFace={false} />
-            </div>
-            <div className="grid min-w-0 col-start-1 row-start-1" style={{ ...grid, alignContent: 'start' }}>
+          <div className="grid min-w-0" style={{ ...grid, alignContent: 'start' }}>
             {sortedAvailable.map((m) => (
               <div key={m.id}>
                 <ExtensionCard
@@ -1115,90 +1104,148 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                       title="Instalar"
                       aria-label="Instalar"
                       disabled={busy !== ''}
-                      onClick={() => setConfirmInstall(m)}
+                      onClick={(event) => {
+                        const popoverPosition = confirmationPosition(event.currentTarget);
+                        setConfirmInstall((current) => current?.id === m.id
+                          ? null
+                          : { ...m, popoverPosition });
+                      }}
                       style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
                     >
                       <Download style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                     </Button>
-                    <AnimatePresence>
-                      {confirmInstall?.id === m.id && (
-                        <motion.div
-                          key="confirm"
-                          initial={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
-                          animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
-                          exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
-                          transition={{ duration: 0.14, ease: 'easeOut' }}
-                          className="absolute z-20 rounded-lg border border-border bg-card shadow-lg"
-                          style={{ top: '100%', left: '50%', marginTop: px(6, scale, 4), padding: px(8, scale, 6) }}
-                        >
-                          <Button
-                            size="sm"
-                            onClick={async () => {
-                              setConfirmInstall(null);
-                              await doInstall(m);
-                            }}
-                            disabled={busy !== ''}
-                            style={{ height: px(28, scale, 24), fontSize: px(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
-                           >
-                            Instalar
-                          </Button>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
                   </div>
                   }
                 />
               </div>
             ))}
           </div>
-          </div>
         )}
       </section>
+
+      {createPortal(
+        <>
+          <AnimatePresence>
+            {confirmRemove?.popoverPosition && (
+              <motion.div
+                ref={removePopoverRef}
+                key="confirm-remove"
+                initial={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
+                exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                transition={{ duration: 0.14, ease: 'easeOut' }}
+                className="fixed z-[70] rounded-lg border border-border bg-card shadow-lg"
+                style={{ ...confirmRemove.popoverPosition, padding: px(8, scale, 6) }}
+              >
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={async () => {
+                    const id = confirmRemove.id;
+                    setConfirmRemove(null);
+                    await doUninstall(id);
+                  }}
+                  disabled={busy !== ''}
+                  style={{ height: px(28, scale, 24), fontSize: px(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                >
+                  Desinstalar
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <AnimatePresence>
+            {confirmInstall?.popoverPosition && (
+              <motion.div
+                ref={confirmPopoverRef}
+                key="confirm-install"
+                initial={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
+                exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                transition={{ duration: 0.14, ease: 'easeOut' }}
+                className="fixed z-[70] rounded-lg border border-border bg-card shadow-lg"
+                style={{ ...confirmInstall.popoverPosition, padding: px(8, scale, 6) }}
+              >
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    const { popoverPosition, ...manifest } = confirmInstall;
+                    setConfirmInstall(null);
+                    await doInstall(manifest);
+                  }}
+                  disabled={busy !== ''}
+                  style={{ height: px(28, scale, 24), fontSize: px(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                >
+                  Instalar
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </>,
+        document.body
+      )}
+
       <Dialog
         open={!!configExt}
         onClose={() => setConfigExt(null)}
         title={`Configuración de ${configExt?.name || ''}`}
-        description="Elige los idiomas que muestra cada fuente."
+        description="Selecciona qué idiomas incluir en cada fuente."
+        hideDivider
         scale={scale}
       >
-        {(configExt?.config?.sources || []).map((sub) => {
-          const defaults = Array.isArray(sub.default) && sub.default.length
-            ? sub.default
-            : (sub.languages || []).map((x) => x.code);
-          const cur = langConfig[sub.id]?.languages;
-          const active = Array.isArray(cur) && cur.length ? cur : defaults;
-          return (
-            <div key={sub.id} style={{ marginBottom: px(16, scale, 12) }}>
-              <div className="font-medium" style={{ fontSize: px(14, scale, 12), marginBottom: px(8, scale, 6) }}>
-                {sub.name}
+        <div className="space-y-3">
+          {(configExt?.config?.sources || []).map((sub) => {
+            const defaults = Array.isArray(sub.default) && sub.default.length
+              ? sub.default
+              : (sub.languages || []).map((x) => x.code);
+            const cur = langConfig[sub.id]?.languages;
+            const active = Array.isArray(cur) ? cur : defaults;
+            return (
+              <div
+                key={sub.id}
+                role="group"
+                aria-labelledby={`extension-language-group-${sub.id}`}
+                className="rounded-xl border border-border bg-background/40 p-4"
+              >
+                <div className="mb-3 flex items-baseline justify-between gap-3">
+                  <h3 id={`extension-language-group-${sub.id}`} className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
+                    {sub.name}
+                  </h3>
+                  <span className="shrink-0 text-muted-foreground" style={{ fontSize: px(12, scale, 10) }}>
+                    {active.length === 0 ? 'Desactivada' : `${active.length} seleccionado${active.length === 1 ? '' : 's'}`}
+                  </span>
+                </div>
+                <div className="flex flex-wrap" style={{ gap: px(8, scale, 6) }}>
+                  {(sub.languages || []).map((l) => (
+                    <button
+                      key={l.code}
+                      type="button"
+                      aria-pressed={active.includes(l.code)}
+                      onClick={() => toggleLang(sub.id, l.code, sub.languages)}
+                      className={cn(
+                        'inline-flex min-h-11 min-w-32 items-center justify-center gap-2 rounded-lg border px-3 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed',
+                        active.includes(l.code)
+                          ? 'border-primary/70 bg-primary/10 text-foreground'
+                          : 'border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground'
+                      )}
+                      style={{ fontSize: px(12, scale, 10) }}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          'grid h-4 w-4 shrink-0 place-items-center rounded-full border',
+                          active.includes(l.code) ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/50'
+                        )}
+                      >
+                        {active.includes(l.code) && <Check className="h-3 w-3" />}
+                      </span>
+                      {l.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap" style={{ gap: px(6, scale, 5) }}>
-                {(sub.languages || []).map((l) => (
-                  <button
-                    key={l.code}
-                    type="button"
-                    title={`Idioma ${l.label}`}
-                    aria-pressed={active.includes(l.code)}
-                    onClick={() => toggleLang(sub.id, l.code, sub.languages)}
-                    className={cn(
-                      'rounded-full border transition-colors',
-                      active.includes(l.code)
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-border text-muted-foreground hover:text-foreground'
-                    )}
-                    style={{
-                      fontSize: px(12, scale, 10),
-                      lineHeight: 1,
-                      padding: `${px(6, scale, 5)}px ${px(11, scale, 9)}px`
-                    }}
-                  >
-                    {l.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </Dialog>
       </div>
     </>

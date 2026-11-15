@@ -831,6 +831,16 @@ export default function Reader() {
   const chapterList = ch?.options?.length ? ch.options : detail?.chapters;
   const chapterOptions = chapterList?.length ? chapterList : [{ title: ch?.label || 'Capítulo', url: chapterUrl }];
   const oldestFirst = chapterOrder.get(mangaUrl);
+  const ascendingChapterOptions = chapterOptions
+    .map((option, index) => ({ option, index, number: Number.parseFloat(String(option.title || '').match(/[\d.]+/)?.[0]) }))
+    .sort((a, b) => {
+      const aMissing = Number.isNaN(a.number);
+      const bMissing = Number.isNaN(b.number);
+      if (aMissing !== bMissing) return aMissing ? 1 : -1;
+      if (!aMissing && a.number !== b.number) return a.number - b.number;
+      return a.index - b.index;
+    })
+    .map(({ option }) => option);
   const orderedChapterOptions = chapterOptions
     .map((option, index) => ({ option, index, number: Number.parseFloat(String(option.title || '').match(/[\d.]+/)?.[0]) }))
     .sort((a, b) => {
@@ -938,7 +948,7 @@ export default function Reader() {
           className="col-start-1 row-start-2 mx-auto grid w-full min-w-0 max-w-[33rem] grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-1.5 disabled:opacity-60 min-[420px]:grid-cols-[minmax(0,1.2fr)_minmax(0,1.55fr)_minmax(0,1fr)] md:col-start-2 md:row-start-1 md:w-[31rem] md:gap-2 lg:w-[33rem]"
         >
           <Dropdown
-            className="col-span-2 min-[420px]:col-span-1"
+            className="col-start-1 row-start-2 min-[420px]:col-span-1 min-[420px]:row-start-1"
             menuClassName={selectorMenuClass}
             buttonClassName={selectorClass}
             buttonStyle={selectorStyle}
@@ -967,7 +977,7 @@ export default function Reader() {
               { value: 'paginado-rtl', label: 'Paginado (DI)' }
             ]}
           />
-          <div className="flex h-[var(--reader-control-height)] min-w-0 items-center rounded-xl border border-border bg-[color:var(--reader-control-bg)]">
+          <div className="col-span-2 col-start-1 row-start-1 flex h-[var(--reader-control-height)] min-w-0 items-center rounded-xl border border-border bg-[color:var(--reader-control-bg)] min-[420px]:col-span-1 min-[420px]:col-start-2 min-[420px]:row-start-1">
             <Button
               type="button"
               size="icon"
@@ -982,13 +992,14 @@ export default function Reader() {
             </Button>
             <Dropdown
               className="min-w-0 flex-1"
+              scrollToSelectedOnOpen={false}
               menuClassName={selectorMenuClass}
               buttonClassName="rounded-none border-0 bg-transparent font-medium tabular-nums hover:bg-[color:var(--reader-control-active)] aria-expanded:bg-[color:var(--reader-control-active)] focus-visible:ring-inset"
               buttonStyle={{ ...selectorStyle, height: 'calc(var(--reader-control-height) - 2px)' }}
               value={selectedChapterUrl}
               onChange={(url) => { if (url !== selectedChapterUrl) window.location.hash = go(url); }}
               ariaLabel="Capítulo"
-              options={orderedChapterOptions.map((o) => ({
+              options={ascendingChapterOptions.map((o) => ({
                 value: o.url,
                 label: o.title,
                 buttonLabel: o.title?.replace(/^Capítulo\s+/i, 'Cap. ')
@@ -1008,6 +1019,7 @@ export default function Reader() {
             </Button>
           </div>
           <Dropdown
+            className="col-start-2 row-start-2 min-[420px]:col-start-3 min-[420px]:row-start-1"
             menuClassName={selectorMenuClass}
             buttonClassName={selectorClass}
             buttonStyle={selectorStyle}
