@@ -46,7 +46,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const data = clean(q)
       ? await json('/manga/search', { q: clean(q), limit: pageSize, ...(currentPage > 1 ? { page: currentPage } : {}) }, __cytlexRequestId)
       : await json('/manga/catalog', {
-        sortBy: sort === 'rating' ? 'rating' : sort === 'title' ? 'title' : 'views',
+        sortBy: sort === 'rating' ? 'rating' : sort === 'title' ? 'title' : sort === 'views' ? 'views' : 'lastUpdateAt',
         sortOrder: sort === 'title' ? 'asc' : 'desc',
         limit: pageSize,
         ...(currentPage > 1 ? { page: currentPage } : {})
