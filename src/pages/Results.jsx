@@ -12,7 +12,7 @@ import VirtualMangaGrid from '../components/VirtualMangaGrid.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
-import { useScale, px } from '../lib/useScale.js';
+import { useScale, px, fontPx } from '../lib/useScale.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 
 export default function Results() {
@@ -139,7 +139,7 @@ export default function Results() {
           <Button
             variant="secondary"
             onClick={() => navigate('/explorar')}
-            style={{ height: px(40, scale, 33), fontSize: px(14, scale, 12), paddingLeft: px(16, scale, 12), paddingRight: px(16, scale, 12) }}
+            style={{ height: px(40, scale, 33), fontSize: fontPx(14, scale, 12), paddingLeft: px(16, scale, 12), paddingRight: px(16, scale, 12) }}
           >
             Ir a Explorar
           </Button>
@@ -158,7 +158,7 @@ export default function Results() {
             onClick={() => navigate('/explorar')}
             style={{
               height: px(40, scale, 33),
-              fontSize: px(14, scale, 12),
+              fontSize: fontPx(14, scale, 12),
               paddingLeft: px(16, scale, 12),
               paddingRight: px(16, scale, 12)
             }}
@@ -180,16 +180,16 @@ export default function Results() {
           marginTop: px(-8, scale, -6),
           marginLeft: px(-8, scale, -6),
           marginBottom: px(4, scale, 3),
-          fontSize: px(14, scale, 12)
+          fontSize: fontPx(14, scale, 12)
         }}
       >
         <ArrowLeft className="mr-1.5" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Volver
       </Button>
 
       <div className="flex items-center" style={{ gap: px(10, scale, 8), marginBottom: `${Math.max(10, Math.round(16 * scale))}px` }}>
-        <SourceBadge m={manifest} style={{ width: px(28, scale, 22), height: px(28, scale, 22), fontSize: `${Math.round(12 * scale)}px` }} />
-        <h1 className="font-semibold" style={{ fontSize: `${Math.round(14 * scale)}px` }}>{manifest.name}</h1>
-        <span className="text-muted-foreground" style={{ fontSize: `${Math.round(12 * scale)}px` }}>· {items.length}</span>
+        <SourceBadge m={manifest} style={{ width: px(28, scale, 22), height: px(28, scale, 22), fontSize: fontPx(12, scale) }} />
+        <h1 className="font-semibold" style={{ fontSize: fontPx(14, scale) }}>{manifest.name}</h1>
+        <span className="text-muted-foreground" style={{ fontSize: fontPx(12, scale) }}>· {items.length}</span>
       </div>
 
       <motion.div

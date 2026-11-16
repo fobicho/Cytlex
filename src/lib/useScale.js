@@ -14,3 +14,7 @@ export function useScale(min = SCALE_MIN, max = SCALE_MAX) {
 export function px(value, scale, min = 1) {
   return `${Math.max(min, Math.round(value * scale))}px`;
 }
+
+export function fontPx(value, scale, min = 1) {
+  return `${Math.max(min, Math.round(value * scale * 0.9))}px`;
+}

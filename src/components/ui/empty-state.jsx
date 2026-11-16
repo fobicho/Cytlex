@@ -1,6 +1,6 @@
 import { motion, useReducedMotion } from 'framer-motion';
 import { cn } from '../../lib/utils.js';
-import { useScale, px } from '../../lib/useScale.js';
+import { useScale, px, fontPx } from '../../lib/useScale.js';
 
 const TONES = {
   neutral: 'text-muted-foreground/55',
@@ -39,7 +39,7 @@ export function EmptyState({
           aria-hidden
           className={cn('font-mono leading-none select-none', TONES[tone] || TONES.neutral)}
           style={{
-            fontSize: px(compact ? 30 : 48, scale, compact ? 22 : 32),
+            fontSize: fontPx(compact ? 30 : 48, scale, compact ? 22 : 32),
             marginBottom: px(compact ? 12 : 16, scale, compact ? 9 : 12)
           }}
           animate={reduce || !animateFace ? undefined : { y: [0, -5, 0], rotate: [0, -1.5, 1.5, 0] }}
@@ -51,7 +51,7 @@ export function EmptyState({
 
       <h3
         className="font-semibold text-foreground"
-        style={{ fontSize: px(compact ? 14 : 16, scale, compact ? 12 : 13) }}
+        style={{ fontSize: fontPx(compact ? 14 : 16, scale, compact ? 12 : 13) }}
       >
         {title}
       </h3>
@@ -60,7 +60,7 @@ export function EmptyState({
         <p
           className="text-muted-foreground w-full max-w-sm [overflow-wrap:anywhere]"
           style={{
-            fontSize: px(compact ? 12 : 14, scale, compact ? 10 : 11),
+            fontSize: fontPx(compact ? 12 : 14, scale, compact ? 10 : 11),
             marginTop: px(6, scale, 4),
             marginBottom: action ? px(24, scale, 18) : 0
           }}

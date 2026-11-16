@@ -8,7 +8,7 @@ import { Badge } from '../components/ui/badge.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
-import { useScale, px } from '../lib/useScale.js';
+import { useScale, px, fontPx } from '../lib/useScale.js';
 import { settings } from '../lib/settings.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 
@@ -100,7 +100,7 @@ export default function Tracking() {
               onClick={() => { window.location.hash = '#/ajustes'; }}
               style={{
                 height: px(40, scale, 33),
-                fontSize: px(14, scale, 12),
+                fontSize: fontPx(14, scale, 12),
                 paddingLeft: px(16, scale, 12),
                 paddingRight: px(16, scale, 12)
               }}
@@ -133,11 +133,11 @@ export default function Tracking() {
             </span>
           )}
           <div>
-            <h1 className="font-bold tracking-tight leading-tight" style={{ fontSize: `${Math.round(18 * scale)}px` }}>
+            <h1 className="font-bold tracking-tight leading-tight" style={{ fontSize: fontPx(18, scale) }}>
               Tu lista en AniList
             </h1>
             {viewer?.name && (
-              <p className="text-muted-foreground" style={{ fontSize: `${Math.round(12 * scale)}px` }}>
+              <p className="text-muted-foreground" style={{ fontSize: fontPx(12, scale) }}>
                 {viewer.name}
               </p>
             )}
@@ -223,20 +223,20 @@ export default function Tracking() {
                       src={e.cover}
                       alt=""
                       referrerPolicy="no-referrer"
-                      className="object-cover rounded-lg bg-black shrink-0"
+                      className="manga-cover-corners object-cover rounded-sm bg-black shrink-0"
                       style={{ width: px(40 * coverScale, scale, 27), height: px(56 * coverScale, scale, 38) }}
                     />
                   ) : (
                     <div
-                      className="rounded-lg bg-secondary shrink-0"
+                      className="manga-cover-corners rounded-lg bg-secondary shrink-0"
                       style={{ width: px(40 * coverScale, scale, 27), height: px(56 * coverScale, scale, 38) }}
                     />
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className="font-semibold truncate" style={{ fontSize: `${Math.round(15 * scale)}px` }}>
+                    <div className="font-semibold truncate" style={{ fontSize: fontPx(15, scale) }}>
                       {e.title}
                     </div>
-                    <div className="text-muted-foreground" style={{ fontSize: `${Math.round(12 * scale)}px` }}>
+                    <div className="text-muted-foreground" style={{ fontSize: fontPx(12, scale) }}>
                       {e.progress} {e.progress === 1 ? 'capítulo' : 'capítulos'}
                       {e.startedAt && ` · desde ${e.startedAt}`}
                     </div>

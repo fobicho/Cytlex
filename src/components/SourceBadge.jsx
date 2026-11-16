@@ -41,7 +41,7 @@ export function SourceBadge({ m, className, style }) {
   return (
     <div
       className={cn(
-        'w-7 h-7 rounded-lg bg-secondary text-secondary-foreground grid place-items-center text-xs font-bold shrink-0 overflow-hidden',
+        'source-badge w-7 h-7 rounded-lg bg-secondary text-secondary-foreground grid place-items-center text-xs font-bold shrink-0 overflow-hidden',
         className
       )}
       style={style}

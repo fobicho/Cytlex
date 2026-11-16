@@ -2,7 +2,7 @@ import { THEME_IDS, MODE_IDS } from './themes.js';
 
 const KEY = 'cytlex:settings:v1';
 export const CONTENT_WARNING_RATINGS = ['SAFE', 'MIXED', 'NSFW'];
-export const SIDEBAR_WIDTH = { default: 196, collapsed: 72 };
+export const SIDEBAR_WIDTH = { default: 184, collapsed: 72 };
 
 export function resolveMode(mode) {
   if (mode !== 'system') return mode;

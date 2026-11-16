@@ -11,7 +11,7 @@ import { Dialog } from './ui/dialog.jsx';
 import { useToast } from './Toast.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils.js';
-import { useScale, px } from '../lib/useScale.js';
+import { useScale, px, fontPx } from '../lib/useScale.js';
 
 function ExtensionCard({ m, action, updatable = false, disabled = false, scale = 1, selected = false, confirmationOpen = false, onSelectionChange, selectionLabel, selectionDisabled = false }) {
   const [imgOk, setImgOk] = useState(true);
@@ -21,11 +21,11 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
   const identity = (
     <>
       <div
-        className="rounded-xl bg-secondary text-secondary-foreground grid place-items-center font-bold shrink-0 overflow-hidden"
+        className="extension-logo-tile bg-secondary text-secondary-foreground grid place-items-center font-bold shrink-0 overflow-hidden"
         style={{
           width: `${iconSize}px`,
           height: `${iconSize}px`,
-          fontSize: px(16, scale, 13),
+          fontSize: fontPx(16, scale, 13),
           borderRadius: px(12, scale, 9)
         }}
       >
@@ -46,7 +46,7 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
           <div
             className="font-semibold truncate min-w-0"
             title={m.name}
-            style={{ fontSize: px(15, scale, 13) }}
+            style={{ fontSize: fontPx(15, scale, 13) }}
           >
             {m.name}
           </div>
@@ -62,7 +62,7 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
           {m.version && (
             <span
               className="text-muted-foreground leading-none truncate min-w-0"
-              style={{ fontSize: px(11, scale, 9) }}
+              style={{ fontSize: fontPx(11, scale, 9) }}
             >
               v{m.version}
             </span>
@@ -72,7 +72,7 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
               className="shrink-0 font-semibold text-red-600 dark:text-red-400"
               title="La extensión declara contenido MIXED o NSFW"
               aria-label="Extensión con contenido para adultos, +18"
-              style={{ fontSize: px(11, scale, 9) }}
+              style={{ fontSize: fontPx(11, scale, 9) }}
             >
               +18
             </span>
@@ -84,9 +84,9 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
   return (
     <Card
       className={cn(
-        'relative hover:shadow-sm',
+        'relative rounded-lg border-border/50 shadow-none hover:shadow-none',
         confirmationOpen && 'relative z-30',
-        selected && 'border-primary ring-2 ring-primary/30 shadow-md shadow-primary/10',
+        selected && 'border-primary bg-primary/5',
         updatable && 'cx-update-pulse',
         disabled && 'opacity-50'
       )}
@@ -98,7 +98,7 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
           aria-label={selectionLabel}
           aria-pressed={selected}
           disabled={selectionDisabled}
-          className="absolute inset-0 z-0 cursor-pointer rounded-xl bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-default"
+          className="absolute inset-0 z-0 cursor-pointer rounded-lg bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-default"
         />
       )}
       <div
@@ -117,15 +117,24 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
 let repoCache = { url: '', available: null, updates: null };
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
 const DEFAULT_EXTENSION_REPOSITORY = 'https://fobicho.github.io/Cytlex/index.json';
-const confirmationPosition = (button) => {
+const confirmationPosition = (button, panelHeight = 112) => {
   const rect = button.getBoundingClientRect();
-  const pageZoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
-  const centerX = (rect.left + rect.width / 2) / pageZoom;
-  const edge = 48 / pageZoom;
-  const maxLeft = Math.max(edge, (window.innerWidth - 48) / pageZoom);
+  const panelWidth = Math.min(288, window.innerWidth - 24);
+  const center = rect.left + rect.width / 2;
+  const minCenter = panelWidth / 2 + 12;
+  const maxCenter = window.innerWidth - panelWidth / 2 - 12;
+  const centerX = Math.max(minCenter, Math.min(maxCenter, center));
+  const bottomNav = document.querySelector('.browser-mobile-nav');
+  const bottomLimit = bottomNav && getComputedStyle(bottomNav).display !== 'none'
+    ? Math.min(window.innerHeight - 12, bottomNav.getBoundingClientRect().top - 8)
+    : window.innerHeight - 12;
+  const below = rect.bottom + 8;
+  const top = below + panelHeight <= bottomLimit
+    ? below
+    : Math.max(12, rect.top - panelHeight - 8);
   return {
-    top: (rect.bottom + 6) / pageZoom,
-    left: Math.max(edge, Math.min(maxLeft, centerX))
+    top,
+    left: centerX
   };
 };
 
@@ -218,6 +227,45 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   const allRef = useRef(null);
   const bulkInstallRef = useRef(null);
   const bulkUninstallRef = useRef(null);
+  const bulkConfirmPopoverRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const openConfirmations = [
+      [confirmRemove, setConfirmRemove, removeRef, removePopoverRef],
+      [confirmInstall, setConfirmInstall, confirmRef, confirmPopoverRef]
+    ];
+
+    for (const [confirmation, setConfirmation, triggerRef, popoverRef] of openConfirmations) {
+      if (!confirmation?.popoverPosition) continue;
+      const trigger = triggerRef.current?.querySelector('button');
+      const popover = popoverRef.current;
+      if (!trigger || !popover) continue;
+
+      const position = confirmationPosition(trigger, popover.offsetHeight);
+      setConfirmation((current) => {
+        if (!current || current.id !== confirmation.id) return current;
+        const previous = current.popoverPosition;
+        if (previous?.top === position.top && previous?.left === position.left) return current;
+        return { ...current, popoverPosition: position };
+      });
+    }
+  }, [confirmRemove, confirmInstall]);
+
+  useLayoutEffect(() => {
+    if (!confirmBulk?.popoverPosition) return;
+    const triggerRef = confirmBulk.action === 'install' ? bulkInstallRef : bulkUninstallRef;
+    const trigger = triggerRef.current?.querySelector('button');
+    const popover = bulkConfirmPopoverRef.current;
+    if (!trigger || !popover) return;
+
+    const position = confirmationPosition(trigger, popover.offsetHeight);
+    setConfirmBulk((current) => {
+      if (current?.action !== confirmBulk.action) return current;
+      const previous = current.popoverPosition;
+      if (previous?.top === position.top && previous?.left === position.left) return current;
+      return { ...current, popoverPosition: position };
+    });
+  }, [confirmBulk]);
 
   useEffect(() => {
     if (!confirmInstall) return;
@@ -277,12 +325,20 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
 
   useEffect(() => {
     if (!confirmBulk) return;
-    const ref = confirmBulk === 'install' ? bulkInstallRef : bulkUninstallRef;
+    const ref = confirmBulk.action === 'install' ? bulkInstallRef : bulkUninstallRef;
     const onDown = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setConfirmBulk(null);
+      if (ref.current?.contains(e.target) || bulkConfirmPopoverRef.current?.contains(e.target)) return;
+      setConfirmBulk(null);
     };
+    const closeOnLayoutChange = () => setConfirmBulk(null);
     document.addEventListener('pointerdown', onDown);
-    return () => document.removeEventListener('pointerdown', onDown);
+    document.addEventListener('scroll', closeOnLayoutChange, true);
+    window.addEventListener('resize', closeOnLayoutChange);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('scroll', closeOnLayoutChange, true);
+      window.removeEventListener('resize', closeOnLayoutChange);
+    };
   }, [confirmBulk]);
 
   const refresh = () => setInstalled(extensions.installed());
@@ -544,12 +600,24 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   };
 
   const handleBulkAction = (action) => {
-    if (confirmBulk !== action) {
-      setConfirmBulk(action);
+    const selectedItems = action === 'install'
+      ? sortedAvailable.filter((manifest) => selectedAvailableIds.has(manifest.id))
+      : sortedInstalled.filter(({ manifest }) => selectedInstalledIds.has(manifest.id));
+    const triggerRef = action === 'install' ? bulkInstallRef : bulkUninstallRef;
+    const trigger = triggerRef.current?.querySelector('button');
+    if (!selectedItems.length || !trigger) {
+      setConfirmBulk(null);
       return;
     }
-    setConfirmBulk(null);
-    runBulkAction(action);
+    if (confirmBulk?.action === action) {
+      setConfirmBulk(null);
+      return;
+    }
+    setConfirmBulk({
+      action,
+      count: selectedItems.length,
+      popoverPosition: confirmationPosition(trigger)
+    });
   };
 
   const grid = {
@@ -572,13 +640,13 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
               try { localStorage.setItem('cytlex:extensionsSort', next); } catch {}
             }}
             style={{
-              height: px(36, scale, 30),
-              fontSize: px(14, scale, 12),
-              paddingLeft: px(12, scale, 9),
-              paddingRight: px(12, scale, 9)
+              height: px(32, scale, 26),
+              fontSize: fontPx(14, scale, 12),
+              paddingLeft: px(8, scale, 6),
+              paddingRight: px(8, scale, 6)
             }}
           >
-            <ArrowUpDown className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+            <ArrowUpDown className="mr-2" style={{ width: px(14, scale, 11), height: px(14, scale, 11) }} />
             {sortLabel(sortBy)}
           </Button>
           <Button
@@ -589,15 +657,15 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             aria-label="Buscar actualizaciones"
             style={{
               opacity: 1,
-              height: px(36, scale, 30),
-              fontSize: px(14, scale, 12),
-              paddingLeft: px(12, scale, 9),
-              paddingRight: px(12, scale, 9)
+              height: px(32, scale, 26),
+              fontSize: fontPx(14, scale, 12),
+              paddingLeft: px(8, scale, 6),
+              paddingRight: px(8, scale, 6)
             }}
           >
             <RefreshCw
               className={cn('mr-2 max-md:mr-0', checkingUpdates && 'animate-spin')}
-              style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
+              style={{ width: px(14, scale, 11), height: px(14, scale, 11) }}
             />
             <span className="max-md:hidden">Buscar actualizaciones</span>
           </Button>
@@ -609,7 +677,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
         <Card className="border-destructive/40 hover:shadow-sm">
           <div
             className="flex items-center"
-            style={{ padding: px(16, scale, 11), gap: px(8, scale, 6), fontSize: px(14, scale, 12) }}
+            style={{ padding: px(16, scale, 11), gap: px(8, scale, 6), fontSize: fontPx(14, scale, 12) }}
           >
             <AlertTriangle
               className="text-destructive shrink-0"
@@ -622,15 +690,15 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
 
       <section>
         <div
-          className="flex flex-wrap items-center justify-between"
-          style={{ gap: px(8, scale, 6), marginBottom: px(12, scale, 9), minHeight: px(36, scale, 30) }}
+          className="relative flex items-center justify-between"
+          style={{ gap: px(8, scale, 6), marginBottom: px(12, scale, 9) }}
         >
           <div className="flex items-center" style={{ gap: px(12, scale, 8) }}>
-            <h3 className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
+            <h3 className="font-medium" style={{ fontSize: fontPx(14, scale, 12) }}>
               Instaladas
             </h3>
           </div>
-          <div className="flex min-w-0 max-w-full items-center justify-end" style={{ gap: px(8, scale, 6) }}>
+          <div className="absolute right-0 top-1/2 flex min-w-0 max-w-full -translate-y-1/2 items-center justify-end" style={{ gap: px(8, scale, 6) }}>
             <AnimatePresence initial={false}>
               {!tutorialPreview && selectedInstalledIds.size > 0 && (
                 <motion.div
@@ -648,7 +716,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                     title="Limpiar selecciones"
                     onClick={() => { setSelectedInstalledIds(new Set()); setConfirmBulk(null); }}
                     disabled={busy !== '' || updating !== ''}
-                    style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+                    style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
                     <X className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                     <span className="max-md:hidden">Limpiar selecciones</span>
@@ -671,7 +739,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                     title="Seleccionar todo"
                     onClick={() => { setSelectedInstalledIds(new Set(sortedInstalled.map(({ manifest }) => manifest.id))); setConfirmBulk(null); }}
                     disabled={busy !== '' || updating !== ''}
-                    style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+                    style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
                     <CheckSquare className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                     <span className="max-md:hidden">Seleccionar todo</span>
@@ -692,49 +760,19 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                     variant="destructive"
                     size="sm"
                     className="bg-red-600 text-white hover:bg-red-700"
-                    aria-label={confirmBulk === 'uninstall' ? 'Confirmar desinstalación' : 'Desinstalar seleccionadas'}
-                    title={confirmBulk === 'uninstall' ? 'Confirmar desinstalación' : 'Desinstalar seleccionadas'}
+                    aria-label="Desinstalar seleccionadas"
+                    title="Desinstalar seleccionadas"
                     onClick={() => handleBulkAction('uninstall')}
                     disabled={busy !== '' || updating !== ''}
                     style={{
-                      height: px(36, scale, 30),
-                      fontSize: px(14, scale, 12),
-                      paddingLeft: px(12, scale, 9),
-                      paddingRight: px(12, scale, 9)
+                      height: px(28, scale, 26),
+                      fontSize: fontPx(13, scale, 11),
+                      paddingLeft: px(10, scale, 8),
+                      paddingRight: px(10, scale, 8)
                     }}
                   >
-                    <span className="grid">
-                      <span className="invisible col-start-1 row-start-1 flex items-center" aria-hidden="true">
-                        <Trash2 className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                        <span className="max-md:hidden">Desinstalar seleccionadas</span>
-                      </span>
-                      <AnimatePresence mode="wait" initial={false}>
-                        {confirmBulk === 'uninstall' ? (
-                          <motion.span
-                            key="confirm"
-                            initial={{ opacity: 0, y: 6 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -6 }}
-                            transition={{ duration: 0.15, ease: 'easeOut' }}
-                            className="col-start-1 row-start-1 justify-self-center"
-                          >
-                            <><Check className="hidden max-md:block" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} /><span className="max-md:hidden">¿Seguro?</span></>
-                          </motion.span>
-                        ) : (
-                          <motion.span
-                            key="idle"
-                            initial={{ opacity: 0, y: 6 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -6 }}
-                            transition={{ duration: 0.15, ease: 'easeOut' }}
-                            className="col-start-1 row-start-1 flex items-center justify-self-center"
-                          >
-                            <Trash2 className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                            <span className="max-md:hidden">Desinstalar seleccionadas</span>
-                          </motion.span>
-                        )}
-                      </AnimatePresence>
-                    </span>
+                    <Trash2 className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    <span className="max-md:hidden">Desinstalar seleccionadas</span>
                   </Button>
                 </motion.div>
               )}
@@ -755,9 +793,9 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                 disabled={updating !== ''}
                 className="whitespace-nowrap"
                 style={{
-                  height: px(36, scale, 30),
+                  height: px(32, scale, 28),
                   minWidth: px(176, scale, 140),
-                  fontSize: px(14, scale, 12),
+                  fontSize: fontPx(14, scale, 12),
                   paddingLeft: px(12, scale, 9),
                   paddingRight: px(12, scale, 9)
                 }}
@@ -888,7 +926,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                                     await doUpdateOne(target.id);
                                   }}
                                   disabled={updating !== ''}
-                                  style={{ height: px(28, scale, 24), fontSize: px(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                                  style={{ height: px(28, scale, 24), fontSize: fontPx(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                                 >
                                   Actualizar
                                 </Button>
@@ -932,13 +970,13 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
 
       <section>
         <div
-          className="flex flex-wrap items-center justify-between"
-          style={{ gap: px(8, scale, 6), marginBottom: px(12, scale, 9), minHeight: px(36, scale, 30) }}
+          className="relative flex items-center justify-between"
+          style={{ gap: px(8, scale, 6), marginBottom: px(12, scale, 9) }}
         >
-          <h3 className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
+          <h3 className="font-medium" style={{ fontSize: fontPx(14, scale, 12) }}>
             Disponibles
           </h3>
-          <div className="flex min-w-0 max-w-full items-center justify-end" style={{ gap: px(8, scale, 6) }}>
+          <div className="absolute right-0 top-1/2 flex min-w-0 max-w-full -translate-y-1/2 items-center justify-end" style={{ gap: px(8, scale, 6) }}>
             <AnimatePresence initial={false}>
               {!tutorialPreview && selectedAvailableIds.size > 0 && (
                 <motion.div
@@ -956,7 +994,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                     title="Limpiar selecciones"
                     onClick={() => { setSelectedAvailableIds(new Set()); setConfirmBulk(null); }}
                     disabled={busy !== '' || loading || updating !== ''}
-                    style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+                    style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
                     <X className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                     <span className="max-md:hidden">Limpiar selecciones</span>
@@ -979,7 +1017,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                     title="Seleccionar todo"
                     onClick={() => { setSelectedAvailableIds(new Set(sortedAvailable.map((manifest) => manifest.id))); setConfirmBulk(null); }}
                     disabled={busy !== '' || loading || updating !== ''}
-                    style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+                    style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
                     <CheckSquare className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                     <span className="max-md:hidden">Seleccionar todo</span>
@@ -998,49 +1036,19 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                 >
                   <Button
                     size="sm"
-                    aria-label={confirmBulk === 'install' ? 'Confirmar instalación' : 'Instalar seleccionadas'}
-                    title={confirmBulk === 'install' ? 'Confirmar instalación' : 'Instalar seleccionadas'}
+                    aria-label="Instalar seleccionadas"
+                    title="Instalar seleccionadas"
                     onClick={() => handleBulkAction('install')}
                     disabled={busy !== '' || loading || updating !== ''}
                     style={{
-                      height: px(36, scale, 30),
-                      fontSize: px(14, scale, 12),
-                      paddingLeft: px(12, scale, 9),
-                      paddingRight: px(12, scale, 9)
+                      height: px(28, scale, 26),
+                      fontSize: fontPx(13, scale, 11),
+                      paddingLeft: px(10, scale, 8),
+                      paddingRight: px(10, scale, 8)
                     }}
                   >
-                    <span className="grid">
-                      <span className="invisible col-start-1 row-start-1 flex items-center" aria-hidden="true">
-                        <Download className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                        <span className="max-md:hidden">Instalar seleccionadas</span>
-                      </span>
-                      <AnimatePresence mode="wait" initial={false}>
-                        {confirmBulk === 'install' ? (
-                          <motion.span
-                            key="confirm"
-                            initial={{ opacity: 0, y: 6 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -6 }}
-                            transition={{ duration: 0.15, ease: 'easeOut' }}
-                            className="col-start-1 row-start-1 justify-self-center"
-                          >
-                            <><Check className="hidden max-md:block" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} /><span className="max-md:hidden">¿Seguro?</span></>
-                          </motion.span>
-                        ) : (
-                          <motion.span
-                            key="idle"
-                            initial={{ opacity: 0, y: 6 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -6 }}
-                            transition={{ duration: 0.15, ease: 'easeOut' }}
-                            className="col-start-1 row-start-1 flex items-center justify-self-center"
-                          >
-                            <Download className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                            <span className="max-md:hidden">Instalar seleccionadas</span>
-                          </motion.span>
-                        )}
-                      </AnimatePresence>
-                    </span>
+                    <Download className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    <span className="max-md:hidden">Instalar seleccionadas</span>
                   </Button>
                 </motion.div>
               )}
@@ -1062,7 +1070,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
               style={{ gap: px(12, scale, 9), padding: `${px(24, scale, 18)}px 0` }}
             >
               <Loader2 className="animate-spin" style={{ width: px(24, scale, 19), height: px(24, scale, 19) }} />
-              <p style={{ fontSize: px(14, scale, 12) }}>Cargando extensiones...</p>
+              <p style={{ fontSize: fontPx(14, scale, 12) }}>Cargando extensiones...</p>
             </div>
           ) : (
             <EmptyState
@@ -1134,22 +1142,43 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                 animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
                 exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
                 transition={{ duration: 0.14, ease: 'easeOut' }}
-                className="fixed z-[70] rounded-lg border border-border bg-card shadow-lg"
-                style={{ ...confirmRemove.popoverPosition, padding: px(8, scale, 6) }}
+                role="dialog"
+                aria-label={`Confirmar desinstalación de ${confirmRemove.name}`}
+                className="fixed z-[70] flex flex-col border border-border bg-card shadow-xl"
+                style={{ ...confirmRemove.popoverPosition, width: Math.min(288, window.innerWidth - 24), padding: px(12, scale, 10), gap: px(10, scale, 8) }}
               >
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={async () => {
-                    const id = confirmRemove.id;
-                    setConfirmRemove(null);
-                    await doUninstall(id);
-                  }}
-                  disabled={busy !== ''}
-                  style={{ height: px(28, scale, 24), fontSize: px(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
-                >
-                  Desinstalar
-                </Button>
+                <div className="min-w-0">
+                  <p className="truncate font-semibold" style={{ fontSize: fontPx(14, scale, 12) }}>¿Desinstalar {confirmRemove.name}?</p>
+                  <p className="mt-1 text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10), lineHeight: 1.4 }}>
+                    No podrás usar sus fuentes hasta volver a instalarla.
+                  </p>
+                </div>
+                <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="confirmation-cancel-button"
+                    onClick={() => setConfirmRemove(null)}
+                    style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="confirmation-action-button"
+                    aria-label="Confirmar desinstalación"
+                    onClick={async () => {
+                      const id = confirmRemove.id;
+                      setConfirmRemove(null);
+                      await doUninstall(id);
+                    }}
+                    disabled={busy !== ''}
+                    style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                  >
+                    Desinstalar
+                  </Button>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -1162,21 +1191,95 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                 animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
                 exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
                 transition={{ duration: 0.14, ease: 'easeOut' }}
-                className="fixed z-[70] rounded-lg border border-border bg-card shadow-lg"
-                style={{ ...confirmInstall.popoverPosition, padding: px(8, scale, 6) }}
+                role="dialog"
+                aria-label={`Confirmar instalación de ${confirmInstall.name}`}
+                className="fixed z-[70] flex flex-col border border-border bg-card shadow-xl"
+                style={{ ...confirmInstall.popoverPosition, width: Math.min(288, window.innerWidth - 24), padding: px(12, scale, 10), gap: px(10, scale, 8) }}
               >
-                <Button
-                  size="sm"
-                  onClick={async () => {
-                    const { popoverPosition, ...manifest } = confirmInstall;
-                    setConfirmInstall(null);
-                    await doInstall(manifest);
-                  }}
-                  disabled={busy !== ''}
-                  style={{ height: px(28, scale, 24), fontSize: px(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
-                >
-                  Instalar
-                </Button>
+                <div className="min-w-0">
+                  <p className="truncate font-semibold" style={{ fontSize: fontPx(14, scale, 12) }}>¿Instalar {confirmInstall.name}?</p>
+                  <p className="mt-1 text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10), lineHeight: 1.4 }}>
+                    Quedará disponible para buscar mangas en Explorar.
+                  </p>
+                </div>
+                <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="confirmation-cancel-button"
+                    onClick={() => setConfirmInstall(null)}
+                    style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="confirmation-action-button"
+                    aria-label="Confirmar instalación"
+                    onClick={async () => {
+                      const { popoverPosition, ...manifest } = confirmInstall;
+                      setConfirmInstall(null);
+                      await doInstall(manifest);
+                    }}
+                    disabled={busy !== ''}
+                    style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                  >
+                    Instalar
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <AnimatePresence>
+            {confirmBulk?.popoverPosition && (
+              <motion.div
+                ref={bulkConfirmPopoverRef}
+                key="confirm-bulk-action"
+                initial={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
+                exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                transition={{ duration: 0.14, ease: 'easeOut' }}
+                role="dialog"
+                aria-label={`Confirmar ${confirmBulk.action === 'install' ? 'instalación' : 'desinstalación'} de ${confirmBulk.count} ${confirmBulk.count === 1 ? 'extensión' : 'extensiones'}`}
+                className="fixed z-[70] flex flex-col border border-border bg-card shadow-xl"
+                style={{ ...confirmBulk.popoverPosition, width: Math.min(288, window.innerWidth - 24), padding: px(12, scale, 10), gap: px(10, scale, 8) }}
+              >
+                <div className="min-w-0">
+                  <p className="font-semibold" style={{ fontSize: fontPx(14, scale, 12) }}>
+                    ¿{confirmBulk.action === 'install' ? 'Instalar' : 'Desinstalar'} {confirmBulk.count} {confirmBulk.count === 1 ? 'extensión' : 'extensiones'}?
+                  </p>
+                  <p className="mt-1 text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10), lineHeight: 1.4 }}>
+                    {confirmBulk.action === 'install'
+                      ? 'Quedarán disponibles para buscar mangas en Explorar.'
+                      : 'No podrás usar sus fuentes hasta volver a instalarlas.'}
+                  </p>
+                </div>
+                <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="confirmation-cancel-button"
+                    onClick={() => setConfirmBulk(null)}
+                    style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    variant={confirmBulk.action === 'install' ? 'default' : 'destructive'}
+                    size="sm"
+                    className="confirmation-action-button"
+                    aria-label={`Confirmar ${confirmBulk.action === 'install' ? 'instalación' : 'desinstalación'} de ${confirmBulk.count} ${confirmBulk.count === 1 ? 'extensión' : 'extensiones'}`}
+                    onClick={() => {
+                      const action = confirmBulk.action;
+                      setConfirmBulk(null);
+                      runBulkAction(action);
+                    }}
+                    disabled={busy !== '' || updating !== ''}
+                    style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                  >
+                    {confirmBulk.action === 'install' ? 'Instalar' : 'Desinstalar'}
+                  </Button>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -1207,10 +1310,10 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                 className="rounded-xl border border-border bg-background/40 p-4"
               >
                 <div className="mb-3 flex items-baseline justify-between gap-3">
-                  <h3 id={`extension-language-group-${sub.id}`} className="font-medium" style={{ fontSize: px(14, scale, 12) }}>
+                  <h3 id={`extension-language-group-${sub.id}`} className="font-medium" style={{ fontSize: fontPx(14, scale, 12) }}>
                     {sub.name}
                   </h3>
-                  <span className="shrink-0 text-muted-foreground" style={{ fontSize: px(12, scale, 10) }}>
+                  <span className="shrink-0 text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10) }}>
                     {active.length === 0 ? 'Desactivada' : `${active.length} seleccionado${active.length === 1 ? '' : 's'}`}
                   </span>
                 </div>
@@ -1227,7 +1330,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                           ? 'border-primary/70 bg-primary/10 text-foreground'
                           : 'border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground'
                       )}
-                      style={{ fontSize: px(12, scale, 10) }}
+                      style={{ fontSize: fontPx(12, scale, 10) }}
                     >
                       <span
                         aria-hidden="true"

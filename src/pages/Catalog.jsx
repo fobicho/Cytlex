@@ -19,7 +19,8 @@ import { Dialog } from '../components/ui/dialog.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
-import { useScale, px } from '../lib/useScale.js';
+import { useScale, px, fontPx } from '../lib/useScale.js';
+import SubrouteTabLabel from '../components/SubrouteTabLabel.jsx';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 import { migrateSavedManga } from '../lib/mangaMigration.js';
 
@@ -28,6 +29,8 @@ const TABS = [
   { id: 'extensiones', label: 'Extensiones' },
   { id: 'fuentes', label: 'Fuentes' }
 ];
+
+const catalogScroller = () => Array.from(document.querySelectorAll('.catalog-page-scroll')).find((element) => element.offsetParent !== null) || document.querySelector('main');
 
 const enabledSources = (showAdultExtensions) => extensions.sources().filter(({ manifest }) =>
   isExtensionAllowed(manifest, showAdultExtensions) && !isLanguageSourceDisabled(manifest)
@@ -59,7 +62,7 @@ const sourceLangSubtitle = (manifest) => {
   return codes.map((c) => options.find((l) => l.code === c)?.label || c).join(' · ');
 };
 
-function SourceSection({ r, coverSize, scale = 1, first = false, animate = false, active = true, onMangaSelect, returnTo = '', savedMangaKeys, hideSavedManga = false }) {
+function SourceSection({ r, coverSize, scale = 1, animate = false, active = true, onMangaSelect, returnTo = '', savedMangaKeys, hideSavedManga = false }) {
   const trackRef = useRef(null);
   const mainRef = useRef(null);
   const [trackWidth, setTrackWidth] = useState(0);
@@ -67,7 +70,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
   const [canRight, setCanRight] = useState(false);
 
   useLayoutEffect(() => {
-    mainRef.current = document.querySelector('main');
+    mainRef.current = catalogScroller();
   }, []);
 
   useLayoutEffect(() => {
@@ -109,7 +112,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
 
   const columns = Math.max(1, Math.floor((trackWidth + gap) / (coverSize + gap)));
   const cardWidth = trackWidth > 0
-    ? Math.floor((trackWidth - gap * (columns - 1)) / columns)
+    ? (trackWidth - gap * (columns - 1)) / columns
     : coverSize;
 
   useLayoutEffect(() => {
@@ -141,10 +144,10 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
 
   return (
     <motion.section
-      className="mb-10"
+      className="mb-[var(--source-gap)] last:mb-0"
       style={{
-        marginBottom: `${Math.max(16, Math.round(24 * scale))}px`,
-        marginTop: first ? `${Math.max(8, Math.round(12 * scale))}px` : undefined
+        '--source-gap': `${Math.max(16, Math.round(24 * scale))}px`,
+        marginTop: 0
       }}
       initial={animate ? { opacity: 0, y: 8 } : false}
       animate={{ opacity: 1, y: 0 }}
@@ -156,20 +159,20 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
       >
         <SourceBadge m={r.manifest} />
         <div className="min-w-0">
-          <h3 className="font-semibold" style={{ fontSize: `${Math.round(14 * scale)}px` }}>
+          <h3 className="font-semibold" style={{ fontSize: fontPx(14, scale) }}>
             {r.manifest.name}
           </h3>
           {(() => {
             const langs = sourceLangSubtitle(r.manifest);
             if (!langs) return null;
             return (
-              <div className="text-muted-foreground truncate" style={{ fontSize: `${Math.round(11 * scale)}px` }}>
+              <div className="text-muted-foreground truncate" style={{ fontSize: fontPx(11, scale) }}>
                 {langs}
               </div>
             );
           })()}
         </div>
-        <span className="text-muted-foreground shrink-0" style={{ fontSize: `${Math.round(12 * scale)}px` }}>
+        <span className="text-muted-foreground shrink-0" style={{ fontSize: fontPx(12, scale) }}>
           · {visibleItems.length}
         </span>
       </div>
@@ -186,11 +189,10 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
         <div
           ref={trackRef}
           onScroll={measure}
-          className="flex overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           style={{
             gap: `${gap}px`,
-            scrollSnapType: 'x proximity',
-            paddingBottom: `${Math.max(6, Math.round(8 * scale))}px`
+            scrollSnapType: 'x proximity'
           }}
         >
           {visible.map((m, i) => (
@@ -220,7 +222,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
             type="button"
             onClick={() => step(-1)}
             aria-label="Ver mangas anteriores"
-            className="absolute -left-3 top-[38%] z-10 grid place-items-center rounded-full border border-border bg-background/90 text-foreground shadow-md backdrop-blur-sm transition hover:bg-background"
+            className="catalog-scroll-button absolute -left-3 top-[38%] z-10 grid place-items-center rounded-full border border-border bg-background/90 text-foreground shadow-md backdrop-blur-sm transition hover:bg-background"
             style={{
               width: `${Math.round(36 * scale)}px`,
               height: `${Math.round(36 * scale)}px`,
@@ -235,7 +237,7 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
             type="button"
             onClick={() => step(1)}
             aria-label="Ver más mangas"
-            className="absolute -right-3 top-[38%] z-10 grid place-items-center rounded-full border border-border bg-background/90 text-foreground shadow-md backdrop-blur-sm transition hover:bg-background"
+            className="catalog-scroll-button absolute -right-3 top-[38%] z-10 grid place-items-center rounded-full border border-border bg-background/90 text-foreground shadow-md backdrop-blur-sm transition hover:bg-background"
             style={{
               width: `${Math.round(36 * scale)}px`,
               height: `${Math.round(36 * scale)}px`,
@@ -245,14 +247,14 @@ function SourceSection({ r, coverSize, scale = 1, first = false, animate = false
             <ChevronRight style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
           </button>
         )}
-        {r.items.length > 1 && (r.items.length > 15 || r.hasMore) && (
+        {(visibleItems.length > 15 || (r.hasMore && canRight)) && (
           <a
             className={cn(
               buttonVariants({ variant: 'ghost', size: 'sm' }),
               'absolute -top-11 right-0 hover:bg-transparent hover:text-foreground'
             )}
             href={`#/resultados?s=${encodeURIComponent(r.id)}`}
-            style={{ top: `${Math.round(-44 * scale)}px`, fontSize: `${Math.round(14 * scale)}px` }}
+            style={{ top: `${Math.round(-44 * scale)}px`, fontSize: fontPx(14, scale) }}
           >
             Ver todos <ChevronRight className="w-4 h-4 ml-1.5" />
           </a>
@@ -287,6 +289,9 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     const t = new URLSearchParams(loc.search).get('tab');
     return t === 'mangas' || t === 'extensiones' || t === 'fuentes' ? t : sessionTab;
   });
+  const tabsRef = useRef(null);
+  const scrollAreaRef = useRef(null);
+  const [scrollbarWidth, setScrollbarWidth] = useState(0);
   const [sources, setSources] = useState(() => enabledSources(!!settings.get().showAdultExtensions));
   const [q, setQ] = useState(() => migrationMode ? migrationQuery : lastSearch.q);
   const [results, setResults] = useState(() => migrationMode
@@ -299,6 +304,17 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationError, setMigrationError] = useState('');
   const scale = useScale();
+  const isBrowserApp = typeof window !== 'undefined' && (!window.cytlex || !!migrationInline);
+
+  useLayoutEffect(() => {
+    const area = scrollAreaRef.current;
+    if (!isBrowserApp || !active || !area) return undefined;
+    const measure = () => setScrollbarWidth(area.offsetWidth - area.clientWidth);
+    const observer = new ResizeObserver(measure);
+    observer.observe(area);
+    measure();
+    return () => observer.disconnect();
+  }, [active, isBrowserApp, tab, results]);
 
   useEffect(() => settings.subscribe((s) => {
     setShowAdultExtensions(!!s.showAdultExtensions);
@@ -378,7 +394,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
       : enabledSources(adultExtensionsEnabled).filter(({ manifest }) => manifest.id !== excludedSourceId);
     if (!list.length && !excludedSourceId) return;
     if (!migrationMode) scrollMemory.catalog = 0;
-    const main = document.querySelector('main');
+    const main = catalogScroller();
     if (main) main.scrollTop = 0;
     const runId = migrationMode ? ++activeMigrationSearchRun : ++activeSearchRun;
     if (!migrationMode) {
@@ -494,8 +510,13 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     if (t === 'mangas' || t === 'extensiones' || t === 'fuentes') setTab(t);
   }, [loc.search]);
 
+  useEffect(() => {
+    const activeTab = tabsRef.current?.querySelector('[aria-current="page"]');
+    activeTab?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [tab]);
+
   useLayoutEffect(() => {
-    const main = document.querySelector('main');
+    const main = catalogScroller();
     if (main) main.scrollLeft = 0;
   }, [tab, loc.pathname]);
 
@@ -513,7 +534,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
           lastSearch.results = cached;
         }
         setResults(cached);
-        const main = document.querySelector('main');
+        const main = catalogScroller();
         if (main) main.scrollTop = scrollMemory.catalog;
         return;
       }
@@ -523,31 +544,39 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
 
   return (
     <div
-      className="min-h-full min-w-0 flex flex-col"
+      className={isBrowserApp ? 'flex h-full min-h-0 min-w-0 flex-col' : 'min-h-full min-w-0 flex flex-col'}
       data-explore-start={tab === 'extensiones' || tab === 'fuentes' || (!q.trim() && !results) ? 'true' : 'false'}
+      style={isBrowserApp ? { padding: `var(--web-page-padding, 16px) ${px(16, scale, 12)} 0` } : undefined}
     >
       <div
         className={cn(
-          '-mt-1 max-md:-mt-2 flex flex-wrap items-center mb-3',
+          'catalog-toolbar -mt-2 max-md:-mt-3 flex shrink-0 flex-wrap items-center border-b border-border/70 bg-sidebar mb-3',
           tab !== 'mangas' && 'max-md:flex-nowrap'
         )}
         style={{
-          gap: `${Math.max(16, Math.round(24 * scale))}px`,
-          marginBottom: `${Math.max(8, Math.round(12 * scale))}px`,
-          minHeight: px(36, scale, 30)
+          columnGap: `${Math.max(16, Math.round(24 * scale))}px`,
+          rowGap: 0,
+          marginBottom: isBrowserApp ? 0 : `${Math.max(8, Math.round(12 * scale))}px`,
+          minHeight: px(38, scale, 34),
+          marginTop: isBrowserApp ? 'calc(-1 * var(--web-page-padding, 0px))' : undefined,
+          marginLeft: isBrowserApp ? `-${px(16, scale, 12)}` : undefined,
+          marginRight: isBrowserApp ? `-${px(16, scale, 12)}` : undefined,
+          paddingLeft: px(16, scale, 12),
+          paddingRight: px(16, scale, 12)
         }}
       >
         <div
-          className="flex max-w-full flex-wrap items-center max-md:min-w-0 max-md:flex-1 max-md:flex-nowrap max-md:overflow-x-auto max-md:overscroll-x-contain max-md:whitespace-nowrap max-md:no-scrollbar"
-          style={{ gap: 'inherit', minHeight: px(36, scale, 30) }}
+          ref={tabsRef}
+          className="flex w-max max-w-full flex-nowrap items-center overflow-x-auto overscroll-x-contain whitespace-nowrap no-scrollbar"
+          style={{ gap: px(24, scale, 16), minHeight: px(38, scale, 34) }}
         >
           {migrationInline ? (
             <Button
               size="sm"
               variant="ghost"
-              className="-ml-2 hover:bg-transparent hover:text-foreground"
+              className="-ml-3 hover:bg-transparent hover:text-foreground"
               onClick={(e) => { e.currentTarget.blur(); migrationInline.onBack(); }}
-              style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(8, scale, 6), paddingRight: px(8, scale, 6) }}
+              style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(8, scale, 6), paddingRight: px(8, scale, 6) }}
             >
               <ChevronLeft className="mr-1" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
               Volver
@@ -560,7 +589,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                 type="button"
                 onClick={() => {
                   if (active) {
-                    const main = document.querySelector('main');
+                    const main = catalogScroller();
                     if (t.id === 'fuentes' && main?.querySelector('[data-source-catalog-selected="true"]')) {
                       window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
                     }
@@ -594,23 +623,12 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                   navigate({ pathname: loc.pathname, search: `?${params}` }, { replace: true });
                 }}
                 className={cn(
-                  'relative shrink-0 font-medium transition-colors',
-                  active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  'group relative shrink-0 p-0 transition-colors'
                 )}
-                style={{
-                  fontSize: `${Math.round(14 * scale)}px`,
-                  paddingBottom: px(8, scale, 6)
-                }}
+                aria-current={active ? 'page' : undefined}
+                style={{ fontSize: fontPx(14, scale), scrollMarginInline: px(16, scale, 12) }}
               >
-                {t.label}
-                {active && (
-                  <motion.span
-                    layoutId="catalog-underline"
-                    className="absolute left-0 right-0 bottom-0 rounded-full bg-primary"
-                    style={{ height: `${Math.max(1.5, Math.round(2 * scale))}px` }}
-                    transition={{ type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }}
-                  />
-                )}
+                <SubrouteTabLabel active={active}>{t.label}</SubrouteTabLabel>
               </button>
             );
           })}
@@ -633,18 +651,17 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
         )}
 
         {tab === 'mangas' && catalogSources.length > 0 && !migrationMode && (
-          <div className="ml-auto flex min-w-0 items-center self-center max-md:basis-full max-md:justify-end" style={{ gap: px(12, scale, 9) }}>
-            <div className="relative min-w-0" style={{ width: px(288, scale, 190) }}>
-              <Search
-                className="absolute top-1/2 -translate-y-1/2 text-muted-foreground"
-                style={{
-                  left: px(12, scale, 9),
-                  width: `${Math.round(14 * scale)}px`,
-                  height: `${Math.round(14 * scale)}px`
-                }}
-              />
+          <div
+            className="catalog-search ml-auto flex min-w-0 flex-1 items-center self-center"
+            style={{
+              flexBasis: px(360, scale, 280),
+              minWidth: `min(100%, ${px(360, scale, 280)})`,
+              gap: px(12, scale, 9)
+            }}
+          >
+            <div className="relative min-w-0 flex-1">
               <Input
-                className="bg-muted/50 border-none"
+                className="bg-card border-border/70"
                 placeholder="Buscar en todas las extensiones..."
                 value={q}
                 onChange={(e) => { setQ(e.target.value); lastSearch.q = e.target.value; }}
@@ -657,31 +674,38 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                   }
                 }}
                 style={{
-                  height: px(36, scale, 30),
-                  fontSize: `${Math.round(14 * scale)}px`,
-                  paddingLeft: px(36, scale, 30),
-                  paddingRight: px(12, scale, 9)
+                  height: px(32, scale, 28),
+                  fontSize: fontPx(14, scale),
+                  paddingLeft: px(12, scale, 9),
+                  paddingRight: px(40, scale, 34)
                 }}
               />
+              <button
+                type="button"
+                aria-label="Buscar en todas las extensiones"
+                onClick={() => runSearch()}
+                disabled={!q.trim()}
+                className="absolute inset-y-0 right-0 grid place-items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-40"
+                style={{ width: px(36, scale, 30) }}
+              >
+                <Search aria-hidden="true" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+              </button>
             </div>
-            <Button
-              size="sm"
-              onClick={() => runSearch()}
-              disabled={!q.trim()}
-              className={cn('rounded-lg disabled:opacity-40')}
-              style={{
-                height: px(36, scale, 30),
-                fontSize: `${Math.round(14 * scale)}px`,
-                paddingLeft: px(12, scale, 9),
-                paddingRight: px(12, scale, 9)
-              }}
-            >
-              Buscar
-            </Button>
           </div>
         )}
       </div>
 
+      <div
+        ref={scrollAreaRef}
+        className={isBrowserApp ? 'page-content-scroll catalog-page-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain' : ''}
+        style={isBrowserApp ? { marginRight: `-${px(16, scale, 12)}`, paddingRight: `max(0px, ${px(16, scale, 12)} - ${scrollbarWidth}px)`, paddingTop: px(12, scale, 10), paddingBottom: px(12, scale, 10) } : undefined}
+        onScroll={isBrowserApp ? (event) => {
+          const scrollArea = event.currentTarget;
+          scrollArea.classList.add('is-scrolling');
+          window.clearTimeout(scrollArea._scrollbarTimer);
+          scrollArea._scrollbarTimer = window.setTimeout(() => scrollArea.classList.remove('is-scrolling'), 700);
+        } : undefined}
+      >
       {tab === 'mangas' ? (
         catalogSources.length === 0 ? (
           <EmptyState
@@ -733,7 +757,6 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                     r={r}
                     coverSize={cs}
                     scale={scale}
-                    first={i === 0}
                     animate={animateSearch}
                     active={active}
                     onMangaSelect={(manga, sourceId) => {
@@ -742,7 +765,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                         setMigrationSelection({ manga, sourceId });
                         return;
                       }
-                      const main = document.querySelector('main');
+                      const main = catalogScroller();
                       if (main) scrollMemory.catalog = main.scrollTop;
                       openMangaDetail(manga, sourceId);
                     }}
@@ -766,6 +789,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
           hideSavedManga={hideSavedManga}
         />
       )}
+      </div>
 
       <Dialog
         open={!!migrationSelection}
@@ -779,28 +803,28 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
           <>
             <div className="flex items-center border-b border-border" style={{ gap: px(14, scale, 10), paddingBottom: px(16, scale, 12) }}>
               {migrationSelection.manga.cover ? (
-                <img src={migrationSelection.manga.cover} alt="" className="aspect-[5/7] shrink-0 rounded-lg object-cover" style={{ width: px(72, scale, 58) }} />
-              ) : <div className="aspect-[5/7] shrink-0 rounded-lg bg-muted" style={{ width: px(72, scale, 58) }} />}
+                <img src={migrationSelection.manga.cover} alt="" className="manga-cover-corners aspect-[5/7] shrink-0 rounded-sm object-cover" style={{ width: px(72, scale, 58) }} />
+              ) : <div className="manga-cover-corners aspect-[5/7] shrink-0 rounded-lg bg-muted" style={{ width: px(72, scale, 58) }} />}
               <div className="min-w-0 flex-1">
-                <div className="line-clamp-2 font-semibold" style={{ fontSize: px(17, scale, 14) }}>{migrationSelection.manga.title}</div>
-                {migrationSelection.manga.author && <div className="mt-1 truncate text-muted-foreground" style={{ fontSize: px(13, scale, 11) }}>{migrationSelection.manga.author}</div>}
+                <div className="line-clamp-2 font-semibold" style={{ fontSize: fontPx(17, scale, 14) }}>{migrationSelection.manga.title}</div>
+                {migrationSelection.manga.author && <div className="mt-1 truncate text-muted-foreground" style={{ fontSize: fontPx(13, scale, 11) }}>{migrationSelection.manga.author}</div>}
                 <div className="mt-2"><SourceBadge m={extensions.manifest(migrationSelection.sourceId)} /></div>
               </div>
             </div>
-            {migrationError && <p role="alert" className="text-destructive" style={{ marginTop: px(12, scale, 9), fontSize: px(13, scale, 11) }}>{migrationError}</p>}
+            {migrationError && <p role="alert" className="text-destructive" style={{ marginTop: px(12, scale, 9), fontSize: fontPx(13, scale, 11) }}>{migrationError}</p>}
             <div className="flex justify-end" style={{ gap: px(8, scale, 6), paddingTop: px(16, scale, 12) }}>
               <Button
                 variant="secondary"
                 disabled={migrationBusy}
                 onClick={() => openMangaDetail(migrationSelection.manga, migrationSelection.sourceId)}
-                style={{ height: px(38, scale, 31), padding: `0 ${px(12, scale, 10)}`, fontSize: px(14, scale, 12) }}
+                style={{ height: px(38, scale, 31), padding: `0 ${px(12, scale, 10)}`, fontSize: fontPx(14, scale, 12) }}
               >
                 Ver manga
               </Button>
               <Button
                 disabled={migrationBusy}
                 onClick={confirmMigration}
-                style={{ height: px(38, scale, 31), padding: `0 ${px(12, scale, 10)}`, fontSize: px(14, scale, 12) }}
+                style={{ height: px(38, scale, 31), padding: `0 ${px(12, scale, 10)}`, fontSize: fontPx(14, scale, 12) }}
               >
                 {migrationBusy ? 'Migrando…' : 'Confirmar migración'}
               </Button>

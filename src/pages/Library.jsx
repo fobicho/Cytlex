@@ -16,7 +16,8 @@ import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
-import { useScale, px } from '../lib/useScale.js';
+import { useScale, px, fontPx } from '../lib/useScale.js';
+import SubrouteTabLabel from '../components/SubrouteTabLabel.jsx';
 import { useLibraryCover } from '../lib/useLibraryCover.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 import { libraryScroll, recallCover, rememberMangaPreview } from '../lib/searchState.js';
@@ -28,6 +29,7 @@ let libraryCheckProgress = { current: 0, total: 0 };
 const libraryCheckProgressListeners = new Set();
 const UNREAD_CACHE_KEY = 'cytlex:libraryUnread:v2';
 const LIBRARY_CATEGORY_KEY = 'cytlex:libraryCategory';
+const libraryScroller = () => document.querySelector('.library-page-scroll') || document.querySelector('main');
 const libraryTitleCollator = new Intl.Collator('es', { sensitivity: 'base', numeric: true });
 const initialLibraryCategory = (categories) => {
   try {
@@ -182,6 +184,7 @@ const Library = memo(function Library({ active = true }) {
   const unreadVersions = useRef(new Map());
   const categoryTabsRef = useRef(null);
   const scale = useScale();
+  const isBrowserApp = typeof window !== 'undefined' && !window.cytlex;
 
   useEffect(() => {
     const activeTab = categoryTabsRef.current?.querySelector('[aria-current="page"]');
@@ -307,7 +310,7 @@ const Library = memo(function Library({ active = true }) {
 
   useLayoutEffect(() => {
     if (!active) return undefined;
-    const main = document.querySelector('main');
+    const main = libraryScroller();
     if (!main) return undefined;
     const restore = () => { main.scrollTop = libraryScroll.get(sel); };
     const save = () => libraryScroll.set(sel, main.scrollTop);
@@ -448,20 +451,33 @@ const Library = memo(function Library({ active = true }) {
   }, [inCategory, showUnread]);
 
   return (
-    <div className="min-h-full flex flex-col">
+    <div
+      className={isBrowserApp ? 'flex h-full min-h-0 min-w-0 flex-col' : 'min-h-full flex flex-col'}
+      style={isBrowserApp ? {
+        paddingTop: 'var(--web-page-padding, 16px)',
+        paddingLeft: px(16, scale, 12),
+        paddingRight: px(16, scale, 12),
+        paddingBottom: 0
+      } : undefined}
+    >
       <div
-        className="-mt-1 max-md:-mt-2 flex min-w-0 flex-nowrap items-center mb-3"
+        className="-mt-2 max-md:-mt-3 flex shrink-0 min-w-0 flex-nowrap items-center border-b border-border/70 bg-sidebar mb-3"
         style={{
           gap: `${Math.max(16, Math.round(24 * scale))}px`,
-          marginBottom: `${Math.max(8, Math.round(12 * scale))}px`,
-          minHeight: px(36, scale, 30)
+          marginBottom: isBrowserApp ? 0 : `${Math.max(8, Math.round(12 * scale))}px`,
+          minHeight: px(38, scale, 34),
+          marginTop: isBrowserApp ? 'calc(-1 * var(--web-page-padding, 0px))' : undefined,
+          marginLeft: isBrowserApp ? `-${px(16, scale, 12)}` : undefined,
+          marginRight: isBrowserApp ? `-${px(16, scale, 12)}` : undefined,
+          paddingLeft: px(16, scale, 12),
+          paddingRight: px(16, scale, 12)
         }}
       >
         <nav
           ref={categoryTabsRef}
           aria-label="Categorías de Biblioteca"
           className="flex min-w-0 flex-1 items-center overflow-x-auto overscroll-x-contain whitespace-nowrap no-scrollbar"
-          style={{ gap: `${Math.max(16, Math.round(24 * scale))}px`, minHeight: px(36, scale, 30) }}
+          style={{ gap: `${Math.max(16, Math.round(24 * scale))}px`, minHeight: px(38, scale, 34) }}
         >
           {cats.map((c) => {
             const active = c.id === sel;
@@ -472,23 +488,11 @@ const Library = memo(function Library({ active = true }) {
                 aria-current={active ? 'page' : undefined}
                 onClick={() => selectCategory(c.id)}
                 className={cn(
-                  'relative shrink-0 font-medium transition-colors',
-                  active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  'group relative shrink-0 p-0 transition-colors'
                 )}
-                style={{
-                  fontSize: `${Math.round(14 * scale)}px`,
-                  paddingBottom: px(8, scale, 6)
-                }}
+                style={{ fontSize: fontPx(14, scale), scrollMarginInline: px(16, scale, 12) }}
               >
-                {c.name}
-                {active && (
-                  <motion.span
-                    layoutId="cat-underline"
-                    className="absolute left-0 right-0 bottom-0 rounded-full bg-primary"
-                    style={{ height: `${Math.max(1.5, Math.round(2 * scale))}px` }}
-                    transition={{ type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }}
-                  />
-                )}
+                <SubrouteTabLabel active={active}>{c.name}</SubrouteTabLabel>
               </button>
             );
           })}
@@ -506,15 +510,15 @@ const Library = memo(function Library({ active = true }) {
               try { localStorage.setItem('cytlex:librarySort', next); } catch {}
             }}
             style={{
-              height: px(36, scale, 30),
-              fontSize: `${Math.round(14 * scale)}px`,
-              paddingLeft: px(12, scale, 9),
-              paddingRight: px(12, scale, 9)
+              height: px(32, scale, 26),
+              fontSize: fontPx(14, scale),
+              paddingLeft: px(8, scale, 6),
+              paddingRight: px(8, scale, 6)
             }}
           >
             <ArrowUpDown
               className="mr-2"
-              style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }}
+              style={{ width: `${Math.round(14 * scale)}px`, height: `${Math.round(14 * scale)}px` }}
             />
             {sortBy === 'title-asc' ? 'A-Z' : sortBy === 'title-desc' ? 'Z-A' : sortBy === 'unread-desc' ? 'Sin leer' : 'Recientes'}
           </Button>
@@ -528,21 +532,21 @@ const Library = memo(function Library({ active = true }) {
             title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
             className="rounded-md"
             style={{
-              height: px(36, scale, 30),
-              fontSize: `${Math.round(14 * scale)}px`,
-              paddingLeft: px(12, scale, 9),
-              paddingRight: px(12, scale, 9)
+              height: px(32, scale, 26),
+              fontSize: fontPx(14, scale),
+              paddingLeft: px(8, scale, 6),
+              paddingRight: px(8, scale, 6)
             }}
           >
             {checking ? (
               <RefreshCw
                 className="mr-2 animate-spin max-md:mr-0"
-                style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }}
+                style={{ width: `${Math.round(14 * scale)}px`, height: `${Math.round(14 * scale)}px` }}
               />
             ) : (
               <RefreshCw
                 className="mr-2 max-md:mr-0"
-                style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }}
+                style={{ width: `${Math.round(14 * scale)}px`, height: `${Math.round(14 * scale)}px` }}
               />
             )}
             <span className="max-md:hidden">
@@ -559,6 +563,15 @@ const Library = memo(function Library({ active = true }) {
         </div>
       </div>
 
+      <div
+        className={isBrowserApp ? 'page-content-scroll library-page-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain' : ''}
+        style={isBrowserApp ? {
+          marginRight: `-${px(16, scale, 12)}`,
+          paddingRight: px(16, scale, 12),
+          paddingTop: px(12, scale, 10),
+          paddingBottom: px(12, scale, 10)
+        } : undefined}
+      >
       {visitedCategories.map((category) => {
         const selected = category.id === sel;
         const categoryItems = category.items;
@@ -635,26 +648,26 @@ const Library = memo(function Library({ active = true }) {
                         tabIndex={linkDisabled ? -1 : undefined}
                       >
                         <span
-                          className="relative rounded-lg shrink-0 overflow-hidden bg-muted"
+                          className="manga-cover-corners relative rounded-sm shrink-0 overflow-hidden bg-muted"
                           style={{ width: px(68 * displayCoverSize / 160, scale, 56), height: px(102 * displayCoverSize / 160, scale, 82) }}
                         >
                           {cover && (
                             <CachedLibraryCover cover={cover} title={m.title} className="w-full h-full object-cover bg-black" cachedOnly={unavailable} cachedCover={validCover ? storedCoverThumbnail(m) : ''} />
                           )}
                           {unavailable && (
-                            <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 px-0.5 text-center font-semibold leading-tight text-white" style={{ fontSize: px(8, scale, 7) }}>
+                            <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 px-0.5 text-center font-semibold leading-tight text-white" style={{ fontSize: fontPx(8, scale, 7) }}>
                               <span>{sourceNotOffered ? 'Extensión no disponible' : adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}</span>
                               <span className="flex max-w-full min-w-0 items-center rounded-full bg-black/80 py-0.5 pl-0.5 pr-1 text-left" style={{ gap: px(4, scale, 3) }} title={sourceInfo.name}>
-                                <SourceBadge m={sourceInfo} className="rounded-full bg-white shadow-sm" style={{ width: px(18, scale, 16), height: px(18, scale, 16), fontSize: px(8, scale, 7) }} />
-                                <span className="min-w-0 truncate" style={{ fontSize: px(8, scale, 7) }}>{sourceInfo.name}</span>
+                                <SourceBadge m={sourceInfo} className="rounded-full bg-white shadow-sm" style={{ width: px(18, scale, 16), height: px(18, scale, 16), fontSize: fontPx(8, scale, 7) }} />
+                                <span className="min-w-0 truncate" style={{ fontSize: fontPx(8, scale, 7) }}>{sourceInfo.name}</span>
                               </span>
                             </span>
                           )}
                         </span>
                         <span className="flex-1 min-w-0">
-                          <span className="block font-semibold truncate" style={{ fontSize: px(16, scale, 13) }}>{m.title}</span>
+                          <span className="block font-semibold truncate" style={{ fontSize: fontPx(16, scale, 13) }}>{m.title}</span>
                           {showUnread && unreadCount != null && (
-                            <span className="mt-1 block truncate text-muted-foreground" style={{ fontSize: px(12, scale, 10) }}>
+                            <span className="mt-1 block truncate text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10) }}>
                               {unreadCount > 0 ? `${unreadCount} sin leer` : 'Lectura al día'}
                             </span>
                           )}
@@ -668,6 +681,7 @@ const Library = memo(function Library({ active = true }) {
           </section>
         );
       })}
+      </div>
     </div>
   );
 });

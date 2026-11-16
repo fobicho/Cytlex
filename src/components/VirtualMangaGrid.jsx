@@ -10,8 +10,8 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, re
   const [gridWidth, setGridWidth] = useState(0);
   const [cardHeight, setCardHeight] = useState(coverSize * 1.5 + 28);
   const [range, setRange] = useState({ start: 0, end: 6 });
-  const gapX = Math.max(12, Math.round(20 * scale));
-  const gapY = Math.max(16, Math.round(20 * scale));
+  const gapX = Math.max(8, Math.round(12 * scale));
+  const gapY = Math.max(12, Math.round(16 * scale));
   const columns = Math.max(1, Math.floor((gridWidth + gapX) / (coverSize + gapX)));
   const cardWidth = responsiveCards && gridWidth > 0
     ? Math.floor((gridWidth - gapX * (columns - 1)) / columns)
@@ -32,7 +32,8 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, re
     if (!active) return undefined;
     const updateRange = (measureLayout = false) => {
       frameRef.current = 0;
-      const main = document.querySelector('main');
+      const main = Array.from(document.querySelectorAll('.page-content-scroll')).find((element) => element.offsetParent !== null)
+        || document.querySelector('main');
       const grid = gridRef.current;
       if (!main || !grid) return;
       const width = grid.parentElement?.clientWidth || main.clientWidth;
@@ -43,16 +44,10 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, re
 
       if (measureLayout) {
         const firstCard = grid.querySelector('[data-virtual-card]');
-        const zoomValue = getComputedStyle(document.documentElement).zoom;
-        const parsedZoom = Number.parseFloat(zoomValue);
-        const numericZoom = zoomValue.trim().endsWith('%') || parsedZoom > 10 ? parsedZoom / 100 : parsedZoom;
-        const zoomFactor = Number.isFinite(parsedZoom)
-          ? numericZoom
-          : 1;
         const measuredRectHeight = firstCard?.firstElementChild?.getBoundingClientRect().height
           || firstCard?.getBoundingClientRect().height
           || 0;
-        const measuredHeight = measuredRectHeight / Math.max(zoomFactor, 0.01);
+        const measuredHeight = measuredRectHeight;
         if (measuredHeight) setCardHeight((current) => Math.abs(current - measuredHeight) < 1 ? current : measuredHeight);
 
         const mainRect = main.getBoundingClientRect();
@@ -80,7 +75,8 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, re
         });
       }
     };
-    const main = document.querySelector('main');
+    const main = Array.from(document.querySelectorAll('.page-content-scroll')).find((element) => element.offsetParent !== null)
+      || document.querySelector('main');
     if (!main) return undefined;
     main.addEventListener('scroll', scheduleUpdate, { passive: true });
     const observer = new ResizeObserver(() => scheduleUpdate(true));

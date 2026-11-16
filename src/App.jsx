@@ -99,7 +99,22 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   const isReader = location.pathname.startsWith('/leer');
   const isElectronApp = typeof window !== 'undefined' && !!window.cytlex;
   const isMangaPage = location.pathname.startsWith('/manga');
+  const isMigrationSearchPage = isMangaPage && new URLSearchParams(location.search).get('migrationSearch') === '1';
+  const mainRef = useRef(null);
+  const [detailScrollbarWidth, setDetailScrollbarWidth] = useState(0);
+  useLayoutEffect(() => {
+    const main = mainRef.current;
+    if (!isMangaPage || isMigrationSearchPage || !main) return undefined;
+    const measure = () => setDetailScrollbarWidth(main.offsetWidth - main.clientWidth);
+    const observer = new ResizeObserver(measure);
+    observer.observe(main);
+    const detail = main.querySelector('[data-active-detail="true"]');
+    if (detail) observer.observe(detail);
+    measure();
+    return () => observer.disconnect();
+  }, [isMangaPage, isMigrationSearchPage, location.pathname, location.search]);
   const isExplorePage = location.pathname === '/explorar';
+  const isSettingsPage = location.pathname === '/ajustes';
   const currentDetailOrigin = isMangaPage ? detailOrigin(location) : '';
   const detailActivityRefs = useRef(Object.fromEntries(DETAIL_ORIGINS.map((origin) => [origin, { current: false }])));
   DETAIL_ORIGINS.forEach((origin) => {
@@ -309,15 +324,29 @@ export default function App({ isVisible = true, tutorialMode = false }) {
         {!isReader && <div className={isElectronApp ? 'flex shrink-0' : 'hidden shrink-0 md:flex'}><Sidebar tutorialNavOnly={tutorialMode} /></div>}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <main
+            ref={mainRef}
             inert={tutorialMode}
-            className={`min-h-0 min-w-0 flex-1 overflow-y-auto [overflow-anchor:none]${isReader ? '' : ' [scrollbar-gutter:stable]'}${isElectronApp ? '' : ` browser-main${isReader ? ' browser-main--reader' : ''}`}`}
-            style={isReader ? undefined : isElectronApp
-              ? { padding: `${Math.max(16, Math.round(24 * scale))}px` }
-              : { '--web-page-padding': `${Math.max(14, Math.round(24 * scale))}px` }}
+            className={`min-h-0 min-w-0 flex-1 overflow-y-auto [overflow-anchor:none]${isMangaPage && !isMigrationSearchPage ? ' detail-main' : ''}${isElectronApp && isLibraryPage ? ' no-scrollbar' : ''}${isElectronApp && isMigrationSearchPage ? ' browser-main--subroutes' : ''}${isReader || isSettingsPage || isExplorePage || isLibraryPage || isMangaPage ? '' : ' [scrollbar-gutter:stable]'}${isElectronApp ? '' : ` browser-main${isReader ? ' browser-main--reader' : ''}${isSettingsPage ? ' browser-main--settings' : ''}${isExplorePage || isLibraryPage || isMigrationSearchPage ? ' browser-main--subroutes' : ''}`}`}
+            style={isReader ? undefined : isMigrationSearchPage
+              ? { padding: 0, overflowY: 'hidden', '--web-page-padding': `${Math.max(14, Math.round(24 * scale))}px` }
+              : isElectronApp
+              ? { padding: `${isMangaPage ? Math.max(12, Math.round(16 * scale)) : Math.max(16, Math.round(24 * scale))}px`, ...(isMangaPage ? { paddingTop: 0, paddingRight: `${Math.max(0, Math.max(12, Math.round(16 * scale)) - detailScrollbarWidth)}px`, '--detail-right-padding': `${Math.max(0, Math.max(12, Math.round(16 * scale)) - detailScrollbarWidth)}px` } : {}) }
+              : isSettingsPage || isExplorePage || isLibraryPage
+                ? {
+                    padding: 0,
+                    overflowY: 'hidden',
+                    ...(isExplorePage || isLibraryPage
+                      ? { '--web-page-padding': `${Math.max(14, Math.round(24 * scale))}px` }
+                      : {})
+                  }
+              : {
+                  '--web-page-padding': `${isMangaPage ? Math.max(12, Math.round(16 * scale)) : Math.max(14, Math.round(24 * scale))}px`,
+                  ...(isMangaPage ? { paddingTop: 0, paddingRight: `${Math.max(0, Math.max(12, Math.round(16 * scale)) - detailScrollbarWidth)}px`, '--detail-right-padding': `${Math.max(0, Math.max(12, Math.round(16 * scale)) - detailScrollbarWidth)}px` } : {}),
+                }}
           >
             <PageBoundary>
               {catalogLocation && (
-                <div className={isExplorePage ? '' : 'hidden'} aria-hidden={!isExplorePage} inert={!isExplorePage}>
+                <div className={isExplorePage ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden' : 'hidden'} aria-hidden={!isExplorePage} inert={!isExplorePage}>
                   <Catalog key={`cat-${resetTick}`} locationOverride={catalogLocation} tutorialPreview={tutorialMode} active={isExplorePage} />
                 </div>
               )}
@@ -326,7 +355,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
                 const detailLocation = active ? location : retainedDetailLocations[origin];
                 if (!detailLocation) return null;
                 return (
-                  <div key={origin} className={active ? '' : 'hidden'} aria-hidden={!active} inert={!active}>
+                  <div key={origin} data-active-detail={active ? 'true' : undefined} className={active ? (isMigrationSearchPage ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden' : '') : 'hidden'} aria-hidden={!active} inert={!active}>
                     <Detail
                       key={`${detailLocation.pathname}${detailLocation.search}`}
                       locationOverride={detailLocation}
@@ -337,7 +366,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
                 );
               })}
               {shouldMountLibrary && (
-                <div className={isLibraryPage ? '' : 'hidden'} aria-hidden={!isLibraryPage} inert={!isLibraryPage}>
+                <div className={isLibraryPage ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden' : 'hidden'} aria-hidden={!isLibraryPage} inert={!isLibraryPage}>
                   <Library key={`lib-${resetTick}`} active={isLibraryPage} />
                 </div>
               )}

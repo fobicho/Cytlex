@@ -13,7 +13,7 @@ import { Button } from './ui/button.jsx';
 import { Input } from './ui/input.jsx';
 import { Dropdown } from './ui/dropdown.jsx';
 import { cn } from '../lib/utils.js';
-import { px, useScale } from '../lib/useScale.js';
+import { px, useScale, fontPx } from '../lib/useScale.js';
 
 const STATUS_ES = {
   FINISHED: 'Finalizado',
@@ -177,7 +177,7 @@ function Calendar({ value, onChange }) {
 
       <div className="grid grid-cols-7 gap-0.5">
         {WEEKDAYS.map((d, i) => (
-          <span key={d + i} className="grid place-items-center h-7 text-muted-foreground" style={{ fontSize: px(11, scale, 9) }}>
+          <span key={d + i} className="grid place-items-center h-7 text-muted-foreground" style={{ fontSize: fontPx(11, scale, 9) }}>
             {d}
           </span>
         ))}
@@ -295,14 +295,17 @@ function DateField({ value, onChange }) {
 
 const compact = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
 
-function SearchDialog({ open, onClose, mangaTitle, onPick }) {
+function SearchDialog({ open, onClose, mangaTitle, onPick, coverScale = 1 }) {
   const scale = useScale();
   const listRef = useRef(null);
+  const scrollTimerRef = useRef(null);
   const [term, setTerm] = useState(mangaTitle || '');
   const [results, setResults] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [srcLogo, setSrcLogo] = useState(() => settings.get().trackingLogo || ANILIST_ICON);
+
+  useEffect(() => () => clearTimeout(scrollTimerRef.current), []);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -345,8 +348,12 @@ function SearchDialog({ open, onClose, mangaTitle, onPick }) {
       open={open}
       onClose={onClose}
       scale={scale}
-      className="max-w-2xl h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] flex flex-col"
+      ariaLabel="Buscar en AniList"
+      className="max-w-2xl h-[min(44rem,calc(100dvh-2rem))] max-h-[calc(100dvh-2rem)] flex flex-col"
       bodyClassName="p-4 flex-1 min-h-0 flex flex-col"
+      bodyPaddingTop={16}
+      bodyPaddingBottom={16}
+      bodyPaddingX={16}
       scrollableBody={false}
     >
       <form
@@ -356,28 +363,41 @@ function SearchDialog({ open, onClose, mangaTitle, onPick }) {
           run(term);
         }}
       >
-        <span className="w-10 h-10 rounded-lg bg-secondary text-secondary-foreground grid place-items-center font-bold shrink-0 overflow-hidden">
+        <span className="w-9 h-9 rounded-sm bg-secondary text-secondary-foreground grid place-items-center font-bold shrink-0 overflow-hidden">
           {srcLogo ? (
             <img src={srcLogo} alt="" className="w-full h-full object-cover" onError={() => setSrcLogo(null)} />
           ) : (
             'A'
           )}
         </span>
-        <Input
-          value={term}
-          onChange={(e) => setTerm(e.target.value)}
-          placeholder="Título del manga…"
-          aria-label="Buscar en AniList"
-          autoFocus
-          className="bg-muted/50 border-none"
-        />
-        <Button type="submit" disabled={busy || !term.trim()}>
-          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-        </Button>
+        <div className="relative min-w-0 flex-1">
+          <Input
+            value={term}
+            onChange={(e) => setTerm(e.target.value)}
+            placeholder="Título del manga…"
+            aria-label="Buscar en AniList"
+            autoFocus
+            className="h-9 bg-background border-border/70 pr-10"
+            style={{ fontSize: fontPx(14, scale, 12) }}
+          />
+          <button type="submit" aria-label="Buscar" disabled={busy || !term.trim()} className="absolute inset-y-0 right-0 grid w-9 place-items-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-40">
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+          </button>
+        </div>
       </form>
 
       <div className="pt-3 flex-1 min-h-0 flex flex-col">
-        <div ref={listRef} className="max-h-full min-h-0 overflow-y-auto overscroll-contain pr-3">
+        <div
+          ref={listRef}
+          className="page-content-scroll max-h-full min-h-0 overflow-y-auto overscroll-contain"
+          style={{ marginRight: `-${px(16, scale, 12)}`, paddingRight: `max(0px, ${px(16, scale, 12)} - 4px)` }}
+          onScroll={(event) => {
+            const list = event.currentTarget;
+            list.classList.add('is-scrolling');
+            clearTimeout(scrollTimerRef.current);
+            scrollTimerRef.current = setTimeout(() => list.classList.remove('is-scrolling'), 700);
+          }}
+        >
           {err && (
             <p className="flex items-center gap-2 text-sm text-destructive">
               <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -397,12 +417,12 @@ function SearchDialog({ open, onClose, mangaTitle, onPick }) {
               key={m.id}
               type="button"
               onClick={() => onPick(m)}
-              className="flex w-full items-start gap-3 rounded-xl border border-border bg-card p-2.5 mb-2 text-left transition-colors hover:bg-accent"
+              className="flex w-full items-start gap-3 rounded-md py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
             >
               {m.cover ? (
-                <img src={m.cover} alt="" referrerPolicy="no-referrer" className="object-cover rounded-lg bg-black shrink-0" style={{ width: px(48 * coverScale, scale, 32), height: px(64 * coverScale, scale, 42) }} />
+                <img src={m.cover} alt="" referrerPolicy="no-referrer" className="manga-cover-corners object-cover rounded-sm bg-black shrink-0" style={{ width: px(84 * coverScale, scale, 60), height: px(112 * coverScale, scale, 80) }} />
               ) : (
-                <div className="rounded-lg bg-secondary shrink-0" style={{ width: px(48 * coverScale, scale, 32), height: px(64 * coverScale, scale, 42) }} />
+                <div className="manga-cover-corners rounded-sm bg-secondary shrink-0" style={{ width: px(84 * coverScale, scale, 60), height: px(112 * coverScale, scale, 80) }} />
               )}
               <div className="min-w-0 flex-1">
                 <div className="font-semibold text-sm truncate">{m.title}</div>
@@ -414,13 +434,11 @@ function SearchDialog({ open, onClose, mangaTitle, onPick }) {
                 </div>
               </div>
               <div className="shrink-0 text-right">
-                {m.averageScore != null && (
-                  <div className="text-sm font-semibold" title="Puntuación media de los usuarios en AniList, de 0 a 100">
-                    {m.averageScore}
-                  </div>
-                )}
+                <div className="text-sm font-semibold" title={m.averageScore == null ? 'Sin valoración' : 'Puntuación media de los usuarios en AniList, de 0 a 100'} aria-label={m.averageScore == null ? 'Sin valoración' : `Valoración ${m.averageScore} sobre 100`}>
+                  {m.averageScore ?? '–'}
+                </div>
                 {m.popularity != null && (
-                  <div className="text-muted-foreground" style={{ fontSize: px(11, scale, 9) }} title="Personas con esta obra en su lista">
+                  <div className="text-muted-foreground" style={{ fontSize: fontPx(11, scale, 9) }} title="Personas con esta obra en su lista">
                     {compact(m.popularity)}
                   </div>
                 )}
@@ -626,8 +644,8 @@ function CharactersDialog({ open, onClose, mediaId, connected }) {
       open={open}
       onClose={onClose}
       scale={scale}
-      className="max-w-2xl max-h-[calc(100vh-3rem)] flex flex-col"
-      bodyClassName="p-5 overflow-y-auto"
+      className="max-w-2xl max-h-[min(38rem,calc(100dvh-3rem))] flex flex-col"
+      bodyClassName="p-5 min-h-0 overflow-y-auto"
       bodyPaddingTop={24}
     >
       {busy && (
@@ -666,7 +684,7 @@ function CharactersDialog({ open, onClose, mediaId, connected }) {
                 src={pickedChar.image}
                 alt=""
                 referrerPolicy="no-referrer"
-                className="w-28 h-40 object-cover rounded-xl bg-black shrink-0"
+                className="w-28 h-40 object-cover rounded-sm bg-black shrink-0"
               />
             ) : (
               <div className="w-28 h-40 rounded-xl bg-secondary shrink-0" />
@@ -712,14 +730,14 @@ function CharactersDialog({ open, onClose, mediaId, connected }) {
                     src={c.image}
                     alt=""
                     referrerPolicy="no-referrer"
-                    className="w-full aspect-[2/3] object-cover rounded-xl bg-black"
+                    className="w-full aspect-[2/3] object-cover rounded-sm bg-black"
                   />
                 ) : (
                   <div className="w-full aspect-[2/3] rounded-xl bg-secondary" />
                 )}
                 <span className="text-xs font-medium truncate">{c.name}</span>
                 {c.role && (
-                  <span className="text-muted-foreground" style={{ fontSize: px(11, scale, 9) }}>{CHAR_ROLE_ES[c.role] || c.role}</span>
+                  <span className="text-muted-foreground" style={{ fontSize: fontPx(11, scale, 9) }}>{CHAR_ROLE_ES[c.role] || c.role}</span>
                 )}
               </button>
             ))}
@@ -850,6 +868,7 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
     return (
       <SearchDialog
         open
+        coverScale={coverScale}
         onClose={onClose}
         mangaTitle={title}
         onPick={(m) => {
@@ -904,10 +923,10 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
                 src={data.cover}
                 alt=""
                 referrerPolicy="no-referrer"
-                className="w-full aspect-[5/7] object-cover rounded-xl bg-black"
+                className="manga-cover-corners w-full aspect-[5/7] object-cover rounded-sm bg-black"
               />
             ) : (
-              <div className="w-full aspect-[5/7] rounded-xl bg-secondary" />
+              <div className="manga-cover-corners w-full aspect-[5/7] rounded-xl bg-secondary" />
             )}
             {data.siteUrl && (
               <a

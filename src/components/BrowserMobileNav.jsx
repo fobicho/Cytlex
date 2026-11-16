@@ -18,7 +18,7 @@ function AnimatedNavIcon({ to, Icon, animate }) {
   if (to === '/biblioteca') {
     return (
       <span className="relative grid h-full w-full place-items-center">
-        <Icon />
+        <Icon className={cn('browser-mobile-nav__glyph', animate && 'is-entering')} />
         {animate && (
           <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <motion.path
@@ -26,7 +26,7 @@ function AnimatedNavIcon({ to, Icon, animate }) {
               fill="hsl(var(--sidebar-background))"
               initial={{ transform: 'perspective(72px) rotateY(0deg)', opacity: 1 }}
               animate={{ transform: 'perspective(72px) rotateY(-180deg)', opacity: 0 }}
-              transition={{ duration: 0.28, ease: ICON_EASE }}
+              transition={{ duration: 0.42, ease: ICON_EASE }}
               style={{ transformBox: 'view-box', transformOrigin: '50% 50%', backfaceVisibility: 'hidden' }}
             />
           </svg>
@@ -37,13 +37,13 @@ function AnimatedNavIcon({ to, Icon, animate }) {
 
   if (to === '/explorar') {
     return (
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <svg className={cn('browser-mobile-nav__glyph browser-mobile-nav__glyph--compass', animate && 'is-entering')} viewBox="0 0 24 24" width="20" height="20" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="10" />
         <motion.path
           d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36z"
           initial={animate ? { transform: 'rotate(-360deg)' } : false}
           animate={{ transform: 'rotate(0deg)' }}
-          transition={{ duration: 0.28, ease: ICON_EASE }}
+          transition={{ duration: 0.42, ease: ICON_EASE }}
           style={{ transformBox: 'view-box', transformOrigin: '50% 50%' }}
         />
       </svg>
@@ -57,7 +57,7 @@ function AnimatedNavIcon({ to, Icon, animate }) {
       transition={{ duration: 0.24, ease: ICON_EASE }}
       className="grid h-full w-full place-items-center"
     >
-      <Icon />
+      <Icon className={cn('browser-mobile-nav__glyph browser-mobile-nav__glyph--settings', animate && 'is-entering')} />
     </motion.span>
   );
 }
@@ -193,7 +193,7 @@ export default function BrowserMobileNav({ tutorialNavOnly = false }) {
           className="browser-mobile-nav__indicator"
           initial={false}
           animate={{ x: `${activeIndex * 100}%` }}
-          transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }}
+          transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 320, damping: 34, mass: 0.9 }}
         />
       )}
       {items.map(({ to, label, icon: Icon }, index) => {

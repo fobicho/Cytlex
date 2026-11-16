@@ -136,10 +136,11 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
 
   const scale = coverSize ? coverSize / 160 : uiScale;
   const px = (n, min) => Math.max(min, Math.round(n * scale));
-  const titleStyle = { fontSize: `${px(13.5, 11)}px` };
-  const subStyle = { fontSize: `${px(12, 10)}px` };
+  const fontPx = (n, min) => Math.max(min, Math.round(n * scale * 0.9));
+  const titleStyle = { fontSize: `${fontPx(13.5, 11)}px` };
+  const subStyle = { fontSize: `${fontPx(12, 10)}px` };
   const badgeStyle = {
-    fontSize: `${Math.max(9, Math.round(11 * scale))}px`,
+    fontSize: `${fontPx(11, 9)}px`,
     top: `${Math.max(8, Math.round(10 * scale))}px`,
     right: `${Math.max(8, Math.round(10 * scale))}px`,
     paddingLeft: `${Math.max(4, Math.round(6 * scale))}px`,
@@ -161,7 +162,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
         onBlur={cancelPrefetch}
         {...linkA11y}
       >
-        <div ref={libraryCover ? libraryImage.ref : coverRef} className="relative rounded-xl overflow-hidden bg-muted/50 border border-border/50 shadow-sm aspect-[2/3]" style={box}>
+        <div ref={libraryCover ? libraryImage.ref : coverRef} className="manga-cover-corners relative overflow-hidden bg-muted/50 aspect-[2/3] rounded-sm" style={box}>
           {src ? (
             <img
               ref={coverImageRef}
@@ -219,12 +220,12 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
           )}
           {unavailable && (
             <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 px-2">
-              <span className="rounded-full bg-black/80 px-2.5 py-1 font-semibold text-white" style={{ fontSize: `${px(10, 8)}px` }}>
+              <span className="rounded-full bg-black/80 px-2.5 py-1 font-semibold text-white" style={{ fontSize: `${fontPx(10, 8)}px` }}>
                 {unavailableLabel}
               </span>
               <span className="flex max-w-full min-w-0 items-center rounded-full bg-black/80 py-1 pl-1 pr-2 text-white" style={{ gap: px(6, 5) }} title={sourceInfo.name}>
-                <SourceBadge m={sourceInfo} className="border border-white/50 bg-white shadow-sm" style={{ width: px(22, 20), height: px(22, 20), borderRadius: '999px', fontSize: px(10, 8) }} />
-                <span className="min-w-0 truncate font-semibold" style={{ fontSize: px(10, 8) }}>{sourceInfo.name}</span>
+                <SourceBadge m={sourceInfo} className="border border-white/50 bg-white shadow-sm" style={{ width: px(22, 20), height: px(22, 20), borderRadius: '999px', fontSize: fontPx(10, 8) }} />
+                <span className="min-w-0 truncate font-semibold" style={{ fontSize: fontPx(10, 8) }}>{sourceInfo.name}</span>
               </span>
             </span>
           )}
@@ -238,7 +239,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
             </span>
           )}
           {savedInLibrary && !unavailable && (
-            <span className="pointer-events-none absolute bottom-2 right-2 z-10 inline-flex max-w-[calc(100%-1rem)] items-center gap-1 rounded-full border border-border bg-background/95 px-2 py-1 font-medium text-foreground shadow-sm" style={{ fontSize: `${px(11, 9)}px` }}>
+            <span className="pointer-events-none absolute bottom-2 right-2 z-10 inline-flex max-w-[calc(100%-1rem)] items-center gap-1 rounded-full border border-border bg-background/95 px-2 py-1 font-medium text-foreground shadow-sm" style={{ fontSize: `${fontPx(11, 9)}px` }}>
               <Check aria-hidden="true" style={{ width: `${px(12, 10)}px`, height: `${px(12, 10)}px` }} />
               <span className="truncate">En biblioteca</span>
             </span>

@@ -1,7 +1,7 @@
 import { MigrationSources } from '../components/MigrationSources.jsx';
 import { memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, Puzzle, Link2, ArrowRightLeft, Crosshair } from 'lucide-react';
+import { ChevronLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, Puzzle, Link2, ArrowRightLeft, Crosshair } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { isMangaCover, lib, mangaSourceUrl, storedCoverThumbnail } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
@@ -12,7 +12,7 @@ import { chapterOrder, detailScroll, recallCover, recallMangaPreview, sourceCata
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { reconcileChapterProgress } from '../lib/mangaMigration.js';
 import { cn } from '../lib/utils.js';
-import { useScale, px } from '../lib/useScale.js';
+import { useScale, px, fontPx } from '../lib/useScale.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 import { useLibraryCover } from '../lib/useLibraryCover.js';
 import { getSourceIconResult, preloadSourceIcon } from '../components/SourceBadge.jsx';
@@ -30,9 +30,20 @@ import Catalog from './Catalog.jsx';
 
 const SYNOPSIS_CONTROL_SIZE = 24;
 const SYNOPSIS_CONTROL_GAP = 4;
-const COVER_BASE = 184;
+const COVER_BASE = 160;
 const FIRST_CHAPTERS = 48;
-const CHAPTER_ACTION_HOVER = 'rounded-md hover:bg-accent hover:text-foreground transition-[opacity,background-color,color]';
+
+function DetailBackBar({ onBack, scale }) {
+  const inset = px(16, scale, 12);
+  return (
+    <div className="sticky top-0 z-20 flex shrink-0 items-center border-b border-border/70 bg-sidebar" style={{ minHeight: px(38, scale, 34), marginLeft: `-${inset}`, marginRight: 'calc(-1 * var(--detail-right-padding, 15px))', paddingLeft: inset, paddingRight: inset, marginBottom: px(12, scale, 10) }}>
+      <Button size="sm" variant="ghost" className="-ml-3 hover:bg-transparent hover:text-foreground" onClick={(event) => { event.currentTarget.blur(); onBack(); }} style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(8, scale, 6), paddingRight: px(8, scale, 6) }}>
+        <ChevronLeft className="mr-1" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Volver
+      </Button>
+    </div>
+  );
+}
+const CHAPTER_ACTION_HOVER = 'chapter-action-hover rounded-none hover:bg-transparent hover:text-foreground active:font-bold transition-[opacity,color]';
 const chapterDateFormat = new Intl.DateTimeFormat('es');
 const compareChapterGroups = new Intl.Collator('es', { sensitivity: 'base', numeric: true }).compare;
 const compareChapterDates = new Intl.Collator('es', { numeric: true }).compare;
@@ -77,10 +88,10 @@ function SourceLine({ sourceId, manifest, scale, iconFailed = false }) {
   const m = manifest || extensions.manifest(sourceId);
   const [failed, setFailed] = useState(iconFailed);
   return (
-    <span className="inline-flex max-w-full min-w-0 items-center leading-none text-muted-foreground" style={{ gap: px(6, scale, 4), fontSize: px(12, scale, 10) }}>
+    <span className="inline-flex max-w-full min-w-0 items-center leading-none text-muted-foreground" style={{ gap: px(6, scale, 4), fontSize: fontPx(12, scale, 10) }}>
       <span aria-hidden="true" className={cn('relative rounded grid place-items-center overflow-hidden shrink-0', (!m.icon || failed) && 'bg-secondary text-secondary-foreground')} style={{ width: px(20, scale, 16), height: px(20, scale, 16) }}>
         {(!m.icon || failed) && (
-          <span className="font-bold" style={{ fontSize: px(9, scale, 8) }}>{(m.name?.[0] || '?').toUpperCase()}</span>
+          <span className="font-bold" style={{ fontSize: fontPx(9, scale, 8) }}>{(m.name?.[0] || '?').toUpperCase()}</span>
         )}
         {m.icon && !failed && (
           <img
@@ -114,7 +125,7 @@ function DuplicateRow({ cover, mangaUrl, title, author, sourceId, scale, coverSc
           style={{ accentColor: 'hsl(var(--primary))', flexShrink: 0 }}
         />
       )}
-      <div ref={coverImage.ref} aria-hidden="true" className="aspect-[5/7] shrink-0 overflow-hidden rounded-lg border border-border/50 bg-muted/50" style={{ width: px(128 * coverScale, scale, 80) }}>
+      <div ref={coverImage.ref} aria-hidden="true" className="manga-cover-corners aspect-[5/7] shrink-0 overflow-hidden rounded-sm border border-border/50 bg-muted/50" style={{ width: px(128 * coverScale, scale, 80) }}>
         {coverImage.src && (
           <img
             src={browserImageUrl(coverImage.src)}
@@ -129,8 +140,8 @@ function DuplicateRow({ cover, mangaUrl, title, author, sourceId, scale, coverSc
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="font-semibold leading-snug line-clamp-2" style={{ fontSize: px(18, scale, 15) }}>{title}</div>
-        {author && <div className="text-muted-foreground truncate" style={{ marginTop: px(3, scale, 2), fontSize: px(12, scale, 10) }}>{author}</div>}
+        <div className="font-semibold leading-snug line-clamp-2" style={{ fontSize: fontPx(18, scale, 15) }}>{title}</div>
+        {author && <div className="text-muted-foreground truncate" style={{ marginTop: px(3, scale, 2), fontSize: fontPx(12, scale, 10) }}>{author}</div>}
         <div style={{ marginTop: px(6, scale, 4) }}>
           <SourceLine key={sourceId} sourceId={sourceId} scale={scale} />
         </div>
@@ -271,6 +282,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const [migration, setMigration] = useState(null);
   const [catPick, setCatPick] = useState(null);
   const catMenuRef = useRef(null);
+  const catPopupRef = useRef(null);
   const coverRef = useRef(null);
   const synRef = useRef(null);
   const metadataRef = useRef(null);
@@ -382,7 +394,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const coverImg = (alt, loadingError = false) => (
     <div
       ref={coverRef}
-      className="relative aspect-[2/3] overflow-hidden rounded-xl shrink-0 self-start bg-muted/50"
+      className="manga-cover-corners relative aspect-[2/3] overflow-hidden rounded-sm shrink-0 self-start bg-muted/50"
       style={{ width: `${coverSize}px` }}
     >
       {!visibleCover && !loadingError && (!finalCover || failedCover !== finalCover) && (
@@ -701,6 +713,21 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     };
   }, [catPick?.inline]);
 
+  useLayoutEffect(() => {
+    if (!catPick?.inline) return undefined;
+    const align = () => {
+      const popup = catPopupRef.current;
+      if (!popup) return;
+      popup.style.transform = '';
+      const bounds = popup.getBoundingClientRect();
+      const shift = Math.min(0, window.innerWidth - 12 - bounds.right);
+      popup.style.transform = shift ? `translateX(${shift}px)` : '';
+    };
+    align();
+    window.addEventListener('resize', align);
+    return () => window.removeEventListener('resize', align);
+  }, [catPick?.inline]);
+
   const saveCatPick = () => {
     if (!catPick?.inline) return;
     const { pending, selected } = catPick;
@@ -883,7 +910,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 else chapterRefs.current.delete(c.url);
               }}
               className={cn(
-                'group relative flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-2.5 hover:bg-accent/50 transition-colors',
+                'group relative flex items-center gap-2 rounded-md border border-border/50 bg-card px-3 pr-1 py-1.5 hover:bg-accent/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
                 highlightedChapter === c.url && 'cx-chapter-pulse',
                 read && 'opacity-45 hover:opacity-70'
               )}
@@ -894,14 +921,14 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               <span className="flex-1 min-w-0">
                 <span
                   className="block font-semibold truncate"
-                  style={{ fontSize: `${Math.round(15 * scale)}px` }}
+                  style={{ fontSize: fontPx(15, scale) }}
                 >
                   {c.title}
                 </span>
                 <span
                   className={cn('block text-muted-foreground', chaptersPerRow === 3 && 'truncate')}
                   style={{
-                    fontSize: `${Math.round(13 * scale)}px`,
+                    fontSize: fontPx(13, scale),
                     lineHeight: `${Math.round(20 * scale)}px`,
                     minHeight: `${Math.round(20 * scale)}px`
                   }}
@@ -913,13 +940,13 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                     : ''}
                 </span>
               </span>
-              <span className="shrink-0 grid grid-cols-[auto_auto] items-center gap-1">
+              <span className="shrink-0 grid grid-cols-[auto_auto] items-center gap-0.5">
                 <span className="relative">
                   <button
                     type="button"
                     title="Marcar todos los anteriores como leídos"
                     aria-label={`Marcar anteriores a ${c.title} como leídos`}
-                    className={cn('shrink-0 flex min-h-8 min-w-10 items-center justify-center px-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100 max-md:min-h-11 max-md:min-w-11', CHAPTER_ACTION_HOVER)}
+                    className={cn('flex size-8 shrink-0 items-center justify-center gap-0 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:size-11 max-md:opacity-100', CHAPTER_ACTION_HOVER)}
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMarkBefore({ chapter: c }); }}
                   >
                     <CheckCheck className="w-4 h-4" />
@@ -932,8 +959,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                     tabIndex={0}
                     title="Marcar como no leído"
                     aria-label={`Marcar ${c.title} como no leído`}
-                    className={cn('shrink-0 flex min-h-8 min-w-10 items-center justify-center px-1 text-primary max-md:min-h-11 max-md:min-w-11', CHAPTER_ACTION_HOVER)}
-                    style={{ fontSize: `${Math.round(13 * scale)}px` }}
+                    className={cn('flex size-8 shrink-0 items-center justify-center text-primary max-md:size-11', CHAPTER_ACTION_HOVER)}
+                    style={{ fontSize: fontPx(13, scale) }}
                     onClick={(e) => { e.preventDefault(); progress.markUnread(c.url, sourceId, mangaUrl); setProgressTick((t) => t + 1); }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markUnread(c.url, sourceId, mangaUrl); setProgressTick((t) => t + 1); }
@@ -950,8 +977,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                     tabIndex={0}
                     title="Marcar como leído"
                     aria-label={`Marcar ${c.title} como leído`}
-                    className={cn('shrink-0 flex min-h-8 min-w-10 items-center justify-center px-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100 max-md:min-h-11 max-md:min-w-11', CHAPTER_ACTION_HOVER)}
-                    style={{ fontSize: `${Math.round(13 * scale)}px` }}
+                    className={cn('flex size-8 shrink-0 items-center justify-center text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:size-11 max-md:opacity-100', CHAPTER_ACTION_HOVER)}
+                    style={{ fontSize: fontPx(13, scale) }}
                     onClick={(e) => { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0, mangaUrl); setProgressTick((t) => t + 1); }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0, mangaUrl); setProgressTick((t) => t + 1); }
@@ -1048,30 +1075,17 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   if (!d || !detailDelayElapsed || !sourceIconReady)
     return (
       <div className="min-h-full flex flex-col">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="self-start hover:bg-transparent hover:text-foreground"
-          onClick={(e) => { e.currentTarget.blur(); navigate(backTo); }}
-          style={{
-            marginTop: px(-8, scale, -6),
-            marginLeft: px(-8, scale, -6),
-            marginBottom: px(4, scale, 3),
-            fontSize: px(14, scale, 12)
-          }}
-        >
-          <ArrowLeft className="mr-1.5" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Volver
-        </Button>
+        <DetailBackBar onBack={() => navigate(backTo)} scale={scale} />
 
         <div
           className="grid grid-cols-[auto_minmax(0,1fr)]"
-          style={{ columnGap: px(24, scale, 19), rowGap: px(8, scale, 6), minHeight: `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})` }}
+          style={{ columnGap: px(16, scale, 12), rowGap: px(8, scale, 6), minHeight: `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})` }}
         >
           <div className="md:row-span-4">{coverImg(previewTitle || '', Boolean(err))}</div>
           <div className="min-w-0 self-start">
             <div ref={metadataRef} className="flow-root">
               {previewTitle ? (
-                <h1 className="font-extrabold tracking-tight text-foreground break-words" style={{ fontSize: `${Math.round(32 * scale)}px`, lineHeight: 1.1 }}>
+                <h1 className="font-bold tracking-tight text-foreground break-words" style={{ fontSize: fontPx(27, scale), lineHeight: 1.15 }}>
                   {previewTitle}
                 </h1>
               ) : (
@@ -1140,7 +1154,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     ? `linear-gradient(to bottom, #000 calc(100% - ${Math.round(fade)}px), rgba(0,0,0,0.55) calc(100% - ${Math.round(fade * 0.45)}px), transparent 100%)`
     : undefined;
   const badgeStyle = {
-    fontSize: px(12, scale, 10),
+    fontSize: fontPx(12, scale, 10),
     paddingLeft: px(10, scale, 8),
     paddingRight: px(10, scale, 8),
     paddingTop: px(2, scale, 1),
@@ -1149,35 +1163,22 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
 
   return (
     <div className="min-h-full flex flex-col">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="self-start hover:bg-transparent hover:text-foreground"
-        onClick={() => navigate(backTo)}
-        style={{
-          marginTop: px(-8, scale, -6),
-          marginLeft: px(-8, scale, -6),
-          marginBottom: px(4, scale, 3),
-          fontSize: px(14, scale, 12)
-        }}
-      >
-        <ArrowLeft className="mr-1.5" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Volver
-      </Button>
+      <DetailBackBar onBack={() => navigate(backTo)} scale={scale} />
 
       <div
         className="grid grid-cols-[auto_minmax(0,1fr)]"
-        style={{ columnGap: px(24, scale, 19), rowGap: px(8, scale, 6), minHeight: `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})` }}
+        style={{ columnGap: px(16, scale, 12), rowGap: px(8, scale, 6), minHeight: `calc(${Math.round(coverSize * 1.5)}px + ${px(14, scale, 10)})` }}
       >
         <div className="md:row-span-4">{coverImg(d.title)}</div>
         <div ref={metadataRef} className="min-w-0 flow-root self-start">
           <h1
-            className="break-words font-extrabold tracking-tight text-foreground"
-            style={{ fontSize: `${Math.round(32 * scale)}px`, lineHeight: 1.1 }}
+            className="break-words font-bold tracking-tight text-foreground"
+            style={{ fontSize: fontPx(27, scale), lineHeight: 1.15 }}
           >
             {d.title}
           </h1>
           {author && (
-            <div className="text-muted-foreground mt-1" style={{ fontSize: `${Math.round(17 * scale)}px` }}>
+            <div className="text-muted-foreground mt-1" style={{ fontSize: fontPx(15, scale) }}>
               Por {author}
             </div>
           )}
@@ -1199,7 +1200,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
 
         {(d.facts.publicacion || d.facts.periodicidad || d.facts.proximo) && (
           <div className="col-span-2 min-w-0 md:col-span-1 md:col-start-2">
-            <div className="flex flex-wrap gap-x-2 text-muted-foreground" style={{ fontSize: `${Math.round(13 * scale)}px` }}>
+            <div className="flex flex-wrap gap-x-2 text-muted-foreground" style={{ fontSize: fontPx(13, scale) }}>
               {d.facts.publicacion && <span>Publicado: {d.facts.publicacion}</span>}
               {d.facts.periodicidad && <span>Periodicidad: {d.facts.periodicidad}</span>}
               {d.facts.proximo && <span>Próximo capítulo: {d.facts.proximo}</span>}
@@ -1216,7 +1217,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 transition: animate ? 'max-height 320ms cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
                 WebkitMaskImage: synMask,
                 maskImage: synMask,
-                fontSize: `${Math.round(15 * scale)}px`
+                fontSize: fontPx(15, scale)
               }}
               className="relative text-muted-foreground leading-relaxed"
               onTransitionEnd={(event) => {
@@ -1251,9 +1252,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       <div
         className="flex flex-wrap items-center border-t border-border"
         style={{
-          gap: px(12, scale, 8),
-          marginTop: px(24, scale, 16),
-          paddingTop: px(20, scale, 14)
+          gap: px(8, scale, 6),
+          marginTop: px(16, scale, 12),
+          paddingTop: px(16, scale, 12)
         }}
       >
         {currentChapter ? (
@@ -1270,7 +1271,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               flexShrink: 0,
               paddingLeft: px(16, scale, 13),
               paddingRight: px(16, scale, 13),
-              fontSize: px(14, scale, 12)
+              fontSize: fontPx(14, scale, 12)
             }}
           >
             {currentProgress ? (
@@ -1320,7 +1321,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               flexShrink: 0,
               paddingLeft: px(16, scale, 13),
               paddingRight: px(16, scale, 13),
-              fontSize: px(14, scale, 12)
+              fontSize: fontPx(14, scale, 12)
             }}
           >
             <span className="inline-grid shrink-0">
@@ -1343,8 +1344,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           </Button>
 
           {catPick?.inline && (
-            <div className="absolute left-1/2 top-full z-40 mt-2 w-max min-w-full max-w-64 -translate-x-1/2 rounded-xl border border-border bg-card shadow-2xl" style={{ padding: px(12, scale, 9) }}>
-              <div className="flex flex-col" style={{ gap: px(6, scale, 4) }}>
+            <div ref={catPopupRef} role="group" aria-label="Categorías de la biblioteca" className="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-2rem)] rounded-[6px] border border-border/70 bg-card px-2 py-1 pb-2 shadow-lg">
+              <div className="flex max-h-[40vh] flex-col overflow-y-auto overscroll-contain">
                 {catPick.list.map((c) => {
                   const on = catPick.selected.includes(c.id);
                   return (
@@ -1360,17 +1361,16 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                       }
                       aria-pressed={on}
                       className={cn(
-                        'relative flex w-full min-w-0 items-center justify-between gap-2 rounded-lg border text-left font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                        'relative flex w-full min-w-0 items-center justify-between gap-3 rounded-md text-left font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
                         on
-                          ? 'border-primary/40 bg-primary/10 text-foreground'
-                          : 'border-border bg-card text-muted-foreground hover:bg-accent'
+                          ? 'text-foreground'
+                          : 'text-muted-foreground'
                       )}
                       style={{
-                        paddingLeft: px(10, scale, 7),
-                        paddingRight: px(10, scale, 7),
-                        paddingTop: px(6, scale, 4),
-                        paddingBottom: px(6, scale, 4),
-                        fontSize: px(12, scale, 10)
+                        paddingLeft: 0,
+                        paddingRight: 0,
+                        minHeight: px(32, scale, 27),
+                        fontSize: fontPx(13, scale, 11)
                       }}
                     >
                       <span className="min-w-0 truncate">{c.name}</span>
@@ -1381,23 +1381,23 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                   );
                 })}
               </div>
-              <div className="mt-3 w-full">
+              <div className="mt-1 pt-1">
                 <Button
                   size="sm"
                   variant={catPickRemoves ? 'destructive' : 'default'}
                   className="w-full transition-colors duration-200 active:scale-100"
-                  aria-label={catPickRemoves ? 'Eliminar manga de la biblioteca' : 'Añadir manga a la biblioteca'}
+                  aria-label={catPickRemoves ? 'Eliminar manga de la biblioteca' : fav ? 'Guardar categorías' : 'Añadir manga a la biblioteca'}
                   disabled={catPick.selected.length === 0 && !catPickRemoves}
                   style={{
                     transform: 'none',
                     height: px(32, scale, 27),
-                    fontSize: px(13, scale, 11),
+                    fontSize: fontPx(13, scale, 11),
                     paddingLeft: px(12, scale, 9),
                     paddingRight: px(12, scale, 9)
                   }}
                   onClick={saveCatPick}
                 >
-                  {catPickRemoves ? 'Eliminar' : 'Añadir'}
+                  {catPickRemoves ? 'Eliminar de biblioteca' : fav ? 'Guardar' : 'Añadir a biblioteca'}
                 </Button>
               </div>
             </div>
@@ -1421,7 +1421,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               flexShrink: 0,
               paddingLeft: px(16, scale, 13),
               paddingRight: px(16, scale, 13),
-              fontSize: px(14, scale, 12)
+              fontSize: fontPx(14, scale, 12)
             }}
           >
             <ArrowRightLeft className="mr-2 shrink-0" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
@@ -1439,7 +1439,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             flexShrink: 0,
             paddingLeft: px(16, scale, 13),
             paddingRight: px(16, scale, 13),
-            fontSize: px(14, scale, 12)
+            fontSize: fontPx(14, scale, 12)
           }}
         >
           <Link2
@@ -1467,7 +1467,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         </div>
       )}
       {chapters.length > 0 && <div className="border-t border-border pt-3" style={{ marginTop: px(20, scale, 14) }}>
-        <div className="mb-2 flex items-center gap-2">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setAsc((v) => { chapterOrder.set(mangaUrl, !v); return !v; })}
@@ -1510,7 +1510,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             }}
             style={{
               height: px(32, scale, 27),
-              fontSize: px(13, scale, 11),
+              fontSize: fontPx(13, scale, 11),
               paddingLeft: px(10, scale, 8),
               paddingRight: px(10, scale, 8),
               borderRadius: px(8, scale, 6)
@@ -1521,7 +1521,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           <Button
             size="icon"
             variant="secondary"
-            className="aspect-square shrink-0 rounded-lg p-0"
+            className="current-chapter-jump aspect-square shrink-0 rounded-lg p-0"
             title={currentChapter ? `Ir a ${currentChapter.title}` : 'No hay un capítulo actual'}
             aria-label={currentChapter ? `Ir al capítulo actual: ${currentChapter.title}` : 'No hay un capítulo actual'}
             disabled={!currentChapter}
@@ -1541,7 +1541,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           </Button>
           {chapterGroups.length > 1 && (
             <span className="flex items-center gap-2">
-              <span className="text-muted-foreground" style={{ fontSize: px(13, scale, 11) }}>
+              <span className="text-muted-foreground" style={{ fontSize: fontPx(13, scale, 11) }}>
                 Orden:
               </span>
               <Button
@@ -1552,7 +1552,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 onClick={() => setChapterSort((v) => (v === 'chapter' ? 'scanlation' : 'chapter'))}
                 style={{
                   height: px(32, scale, 27),
-                  fontSize: px(13, scale, 11),
+                  fontSize: fontPx(13, scale, 11),
                   paddingLeft: px(10, scale, 8),
                   paddingRight: px(10, scale, 8)
                 }}
@@ -1567,11 +1567,12 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               value={selectedGroup}
               onChange={changeGroupFilter}
               ariaLabel="Filtrar por scanlation"
+              buttonClassName="border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80"
               options={[
-                { value: 'all', label: `Todos (${d.chapters.length})` },
+                { value: 'all', label: `Todos los scans (${d.chapters.length})` },
                 ...chapterGroups.map((g) => ({ value: g, label: g }))
               ]}
-              style={{ width: px(230, scale, 190) }}
+              style={{ width: `min(100%, ${px(200, scale, 160)})`, maxWidth: '100%' }}
             />
           )}
         </div>
@@ -1608,14 +1609,14 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               <Button
                 size="sm"
                 variant="secondary"
-                style={{ height: px(36, scale, 30), padding: `${px(4, scale, 3)}px ${px(12, scale, 10)}px`, fontSize: px(14, scale, 12), lineHeight: px(20, scale, 17) }}
+                style={{ height: px(36, scale, 30), padding: `${px(4, scale, 3)}px ${px(12, scale, 10)}px`, fontSize: fontPx(14, scale, 12), lineHeight: px(20, scale, 17) }}
                 onClick={() => setMarkBefore(null)}
               >
                 Cancelar
               </Button>
               <Button
                 size="sm"
-                style={{ height: px(36, scale, 30), padding: `${px(4, scale, 3)}px ${px(12, scale, 10)}px`, fontSize: px(14, scale, 12), lineHeight: px(20, scale, 17) }}
+                style={{ height: px(36, scale, 30), padding: `${px(4, scale, 3)}px ${px(12, scale, 10)}px`, fontSize: fontPx(14, scale, 12), lineHeight: px(20, scale, 17) }}
                 onClick={() => {
                   progress.markMany(chaptersToMark.map((chapter) => chapter.url), sourceId, null, mangaUrl);
                   setProgressTick((t) => t + 1);
@@ -1628,7 +1629,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           ) : (
             <Button
               size="sm"
-              style={{ height: px(36, scale, 30), padding: `${px(4, scale, 3)}px ${px(12, scale, 10)}px`, fontSize: px(14, scale, 12), lineHeight: px(20, scale, 17) }}
+              style={{ height: px(36, scale, 30), padding: `${px(4, scale, 3)}px ${px(12, scale, 10)}px`, fontSize: fontPx(14, scale, 12), lineHeight: px(20, scale, 17) }}
               onClick={() => setMarkBefore(null)}
             >
               Cerrar
@@ -1676,10 +1677,10 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             </div>
             {duplicateReplaceError && <p role="alert" className="text-sm text-destructive">{duplicateReplaceError}</p>}
             <div className="flex justify-end" style={{ gap: px(8, scale, 6), paddingTop: px(12, scale, 9) }}>
-              <Button variant="secondary" disabled={replacingDuplicate} onClick={() => confirmDuplicateReplacement(dup.list[dup.selectedIndex], dup.pending)} style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: px(14, scale, 12) }}>
+              <Button variant="secondary" disabled={replacingDuplicate} onClick={() => confirmDuplicateReplacement(dup.list[dup.selectedIndex], dup.pending)} style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: fontPx(14, scale, 12) }}>
                 {replacingDuplicate ? 'Reemplazando…' : 'Reemplazar'}
               </Button>
-              <Button disabled={replacingDuplicate} onClick={() => { setDup(null); setDuplicateReplaceError(''); }} style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: px(14, scale, 12) }}>
+              <Button disabled={replacingDuplicate} onClick={() => { setDup(null); setDuplicateReplaceError(''); }} style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: fontPx(14, scale, 12) }}>
                 Cancelar
               </Button>
             </div>
@@ -1691,6 +1692,10 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         open={!!migration}
         onClose={() => setMigration(null)}
         scale={scale}
+        ariaLabel="Seleccionar fuentes para migrar"
+        bodyPaddingTop={16}
+        bodyPaddingBottom={16}
+        bodyPaddingX={16}
         dialogStyle={{ maxWidth: px(560, scale, 440) }}
       >
         {migration && (
@@ -1702,11 +1707,11 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               onChange={(targetIds) => setMigration((state) => state ? { ...state, targetIds } : state)}
               scale={scale}
             />
-            <div className="flex justify-end" style={{ gap: px(8, scale, 6), paddingTop: px(16, scale, 12) }}>
+            <div className="flex flex-wrap justify-end" style={{ gap: px(8, scale, 6), paddingTop: px(16, scale, 12) }}>
               <Button
                 variant="secondary"
                 onClick={() => setMigration(null)}
-                style={{ height: px(36, scale, 30), padding: `0 ${px(12, scale, 10)}`, fontSize: px(14, scale, 12) }}
+                style={{ height: px(36, scale, 30), padding: `0 ${px(12, scale, 10)}`, fontSize: fontPx(14, scale, 12) }}
               >
                 Cancelar
               </Button>
@@ -1723,7 +1728,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                   navigate({ pathname: loc.pathname, search: `?${params.toString()}` });
                 }}
                 disabled={!migration.targetIds.length}
-                style={{ height: px(36, scale, 30), padding: `0 ${px(12, scale, 10)}`, fontSize: px(14, scale, 12) }}
+                style={{ height: px(36, scale, 30), padding: `0 ${px(12, scale, 10)}`, fontSize: fontPx(14, scale, 12) }}
               >
                 Buscar
               </Button>

@@ -1,12 +1,12 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { useId, useLayoutEffect, useRef } from 'react';
 import { cn } from '../../lib/utils.js';
-import { useScale, px } from '../../lib/useScale.js';
+import { useScale, px, fontPx } from '../../lib/useScale.js';
 
 const activeDialogs = [];
 const FOCUSABLE_SELECTOR = '[autofocus], button:not([disabled]), a[href], input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="option"], [tabindex]:not([tabindex="-1"])';
 
-function DialogContent({ onClose, title, description, children, className, dialogStyle, hideDivider, bodyClassName, headerPaddingTop = 24, headerPaddingBottom = 12, bodyPaddingTop = 12, bodyPaddingBottom = 24, descriptionMarginTop = 4, scrollableBody = true, scale }) {
+function DialogContent({ onClose, title, ariaLabel, description, children, className, dialogStyle, hideDivider, bodyClassName, headerPaddingTop = 24, headerPaddingBottom = 12, bodyPaddingTop = 12, bodyPaddingBottom = 24, bodyPaddingX = 24, descriptionMarginTop = 4, scrollableBody = true, scale }) {
   const currentScale = useScale();
   const sc = scale ?? currentScale;
   const dialogRef = useRef(null);
@@ -115,7 +115,7 @@ function DialogContent({ onClose, title, description, children, className, dialo
         data-dialog-id={id}
         role="dialog"
         aria-modal="true"
-        aria-label={title ? undefined : 'Diálogo'}
+        aria-label={title ? undefined : ariaLabel || 'Diálogo'}
         aria-labelledby={title ? `${id}-title` : undefined}
         aria-describedby={description ? `${id}-description` : undefined}
         tabIndex={-1}
@@ -131,8 +131,8 @@ function DialogContent({ onClose, title, description, children, className, dialo
       >
         {(title || description) && (
           <div className={cn('shrink-0', !hideDivider && 'border-b border-border')} style={{ padding: `${px(headerPaddingTop, sc, headerPaddingTop * 0.75)} ${px(24, sc, 18)} ${px(headerPaddingBottom, sc, headerPaddingBottom * 0.75)}` }}>
-            {title && <h2 id={`${id}-title`} className="font-semibold tracking-tight" style={{ fontSize: px(18, sc, 15) }}>{title}</h2>}
-            {description && <p id={`${id}-description`} className="text-muted-foreground mt-1" style={{ fontSize: px(13, sc, 11), marginTop: px(descriptionMarginTop, sc, descriptionMarginTop * 0.75) }}>{description}</p>}
+            {title && <h2 id={`${id}-title`} className="font-semibold tracking-tight" style={{ fontSize: fontPx(18, sc, 15) }}>{title}</h2>}
+            {description && <p id={`${id}-description`} className="text-muted-foreground mt-1" style={{ fontSize: fontPx(13, sc, 11), marginTop: px(descriptionMarginTop, sc, descriptionMarginTop * 0.75) }}>{description}</p>}
           </div>
         )}
         <div
@@ -140,7 +140,7 @@ function DialogContent({ onClose, title, description, children, className, dialo
             scrollableBody ? 'overflow-y-auto' : 'overflow-hidden',
             bodyClassName
           )}
-          style={{ padding: `${px(bodyPaddingTop, sc, bodyPaddingTop * 0.75)} ${px(24, sc, 18)} ${px(bodyPaddingBottom, sc, bodyPaddingBottom * 0.75)}` }}
+          style={{ padding: `${px(bodyPaddingTop, sc, bodyPaddingTop * 0.75)} ${px(bodyPaddingX, sc, bodyPaddingX * 0.75)} ${px(bodyPaddingBottom, sc, bodyPaddingBottom * 0.75)}` }}
         >
           {children}
         </div>

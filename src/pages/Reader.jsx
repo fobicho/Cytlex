@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
@@ -15,7 +15,7 @@ import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
-import { useScale, px } from '../lib/useScale.js';
+import { useScale, px, fontPx } from '../lib/useScale.js';
 
 const chapterUrlKey = (value) => {
   try {
@@ -919,15 +919,17 @@ export default function Reader() {
     return <EmptyState face="¯\\_(ツ)_/¯" title="Sin capítulo seleccionado." />;
   const chapterReady = !!ch && chUrl === chapterUrl && !err;
   const verticalZoom = 1 + wheelZoom / 100;
+  const detailInset = Math.max(12, Math.round(16 * scale));
+  const readerBackOffsetY = Math.round((Number.parseFloat(px(38, scale, 34)) - Number.parseFloat(px(36, scale, 30))) / 2 - 4);
   const selectorStyle = { height: 'var(--reader-control-height)', gap: 4, paddingInline: '14px' };
   const selectorClass = 'rounded-xl bg-[color:var(--reader-control-bg)] font-medium tabular-nums hover:bg-[color:var(--reader-control-active)] aria-expanded:bg-[color:var(--reader-control-active)]';
   const selectorMenuClass = 'inset-x-0 top-full w-full rounded-xl shadow-lg';
-  const chapterArrowClass = 'h-full w-7 shrink-0 rounded-none bg-[color:var(--reader-arrow-bg)] text-foreground transition-colors hover:bg-[color:var(--reader-control-hover)] disabled:opacity-30 focus-visible:z-10 focus-visible:ring-inset active:scale-100 sm:w-9';
+  const chapterArrowClass = 'h-full w-7 shrink-0 rounded-none bg-[color:var(--reader-arrow-bg)] text-foreground transition-colors hover:bg-[color:var(--reader-control-hover)] disabled:opacity-30 focus-visible:z-10 focus-visible:ring-inset active:scale-100';
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <header
-        className="relative z-20 grid shrink-0 grid-cols-1 items-center gap-x-3 gap-y-1 border-b border-border bg-card px-2 py-1 [--reader-control-height:2.5rem] md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-3 md:[--reader-control-height:2.25rem]"
+        className="relative z-20 grid shrink-0 grid-cols-1 items-center gap-x-3 gap-y-0 border-b border-border bg-card px-2 py-1 [--reader-control-height:2.5rem] md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-3 md:[--reader-control-height:2.25rem]"
         style={{
           '--reader-control-bg': 'color-mix(in srgb, hsl(var(--secondary)), hsl(var(--card)) 25%)',
           '--reader-control-active': 'color-mix(in srgb, hsl(var(--secondary)), hsl(var(--primary)) 8%)',
@@ -935,17 +937,36 @@ export default function Reader() {
           '--reader-control-hover': 'color-mix(in srgb, var(--reader-control-active), black 13%)',
         }}
       >
-        <div className="col-start-1 row-start-1 flex min-w-0 items-center gap-1.5">
-          <Button variant="ghost" size="icon" className="h-[var(--reader-control-height)] w-10 shrink-0 sm:w-9" title="Volver" aria-label="Volver" onClick={goBack}>
-            <ArrowLeft className="h-4 w-4" />
+        <h1
+          className="reader-back-title relative col-start-1 row-start-1 min-w-0"
+          title={mangaTitle}
+          style={{ '--reader-detail-inset': `${detailInset}px`, top: `${readerBackOffsetY}px` }}
+        >
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-3 min-w-0 max-w-full justify-start hover:bg-transparent hover:text-foreground"
+            title="Volver al detalle"
+            aria-label={`Volver al detalle de ${mangaTitle}`}
+            onClick={goBack}
+            style={{
+              height: px(36, scale, 30),
+              fontSize: fontPx(14, scale, 12),
+              paddingLeft: px(8, scale, 6),
+              paddingRight: px(8, scale, 6)
+            }}
+          >
+            <span className="flex min-w-0 items-center gap-1">
+              <ChevronLeft className="shrink-0" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+              <span className="min-w-0 truncate font-display font-semibold tracking-tight">{mangaTitle}</span>
+            </span>
           </Button>
-          <h1 className="min-w-0 truncate font-display text-sm font-semibold tracking-tight" title={mangaTitle}>{mangaTitle}</h1>
-        </div>
+        </h1>
 
         <fieldset
           aria-label="Controles de lectura"
           disabled={!chapterReady}
-          className="col-start-1 row-start-2 mx-auto grid w-full min-w-0 max-w-[33rem] grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-1.5 disabled:opacity-60 min-[420px]:grid-cols-[minmax(0,1.2fr)_minmax(0,1.55fr)_minmax(0,1fr)] md:col-start-2 md:row-start-1 md:w-[31rem] md:gap-2 lg:w-[33rem]"
+          className="col-start-1 row-start-2 mx-auto grid w-full min-w-0 max-w-[31rem] grid-cols-2 gap-1.5 disabled:opacity-60 min-[420px]:grid-cols-[minmax(0,1.2fr)_minmax(0,1.55fr)_minmax(0,1fr)] md:col-start-2 md:row-start-1 md:w-[31rem] md:gap-2"
         >
           <Dropdown
             className="col-start-1 row-start-2 min-[420px]:col-span-1 min-[420px]:row-start-1"
@@ -1228,7 +1249,7 @@ export default function Reader() {
             paddingRight: px(16, scale, 11),
             paddingTop: px(8, scale, 6),
             paddingBottom: px(8, scale, 6),
-            fontSize: px(14, scale, 12)
+            fontSize: fontPx(14, scale, 12)
           }}
         >
           {toast}

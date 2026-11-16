@@ -16,7 +16,7 @@ import { Card } from './ui/card.jsx';
 import { Dropdown } from './ui/dropdown.jsx';
 import { EmptyState } from './ui/empty-state.jsx';
 import { Input } from './ui/input.jsx';
-import { useScale, px } from '../lib/useScale.js';
+import { useScale, px, fontPx } from '../lib/useScale.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 
 const CATALOG_BATCH_SIZE = 20;
@@ -202,13 +202,12 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       const panel = filterPanelRef.current;
       if (!trigger || !panel) return;
       const rect = trigger.getBoundingClientRect();
-      const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
-      const viewportWidth = window.innerWidth / zoom;
-      const viewportHeight = window.innerHeight / zoom;
-      const triggerTop = rect.top / zoom;
-      const triggerBottom = rect.bottom / zoom;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const triggerTop = rect.top;
+      const triggerBottom = rect.bottom;
       const width = Math.min(parseFloat(filterPanelWidth), viewportWidth - 32);
-      const left = Math.max(16, Math.min(rect.left / zoom, viewportWidth - width - 16));
+      const left = Math.max(16, Math.min(rect.left, viewportWidth - width - 16));
       const body = filterBodyRef.current;
       const overflow = body ? body.scrollHeight - body.clientHeight : 0;
       const desiredHeight = Math.min(panel.offsetHeight + overflow, viewportHeight - 32);
@@ -485,14 +484,14 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
 
   useLayoutEffect(() => {
     if (!active || restoring || loading || pendingScrollTop.current == null || !sourceId) return;
-    const main = document.querySelector('main');
+    const main = document.querySelector('.catalog-page-scroll') || document.querySelector('main');
     if (!main) return;
     main.scrollTop = pendingScrollTop.current;
     pendingScrollTop.current = null;
   }, [active, sourceId, restoring, loading, items]);
 
   useEffect(() => {
-    const main = document.querySelector('main');
+    const main = document.querySelector('.catalog-page-scroll') || document.querySelector('main');
     if (!active || !sourceId || !main) return undefined;
     const save = () => sourceCatalogState.saveScroll(main.scrollTop);
     save();
@@ -557,7 +556,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       return direction ? { ...item, label: direction } : item;
     });
     return (
-      <div key={filter.id} className={`flex min-w-0 flex-col text-muted-foreground ${isZonaTmo && filter.id === 'author' ? 'col-span-2' : ''}`} style={{ gap: px(5, scale, 4), fontSize: px(12, scale, 10) }}>
+      <div key={filter.id} className={`flex min-w-0 flex-col text-muted-foreground ${isZonaTmo && filter.id === 'author' ? 'col-span-2' : ''}`} style={{ gap: px(5, scale, 4), fontSize: fontPx(12, scale, 10) }}>
         <span className="font-medium leading-tight">{filter.label}</span>
         {filter.type === 'text' ? (
           <Input
@@ -565,7 +564,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
             value={filterValues[filter.id] ?? filter.defaultValue ?? ''}
             onChange={(event) => setFilterValues((current) => ({ ...current, [filter.id]: event.target.value }))}
             placeholder={filter.placeholder || filter.label}
-            style={{ height: px(36, scale, 30), fontSize: px(13, scale, 11) }}
+            style={{ height: px(36, scale, 30), fontSize: fontPx(13, scale, 11) }}
           />
         ) : (
           <Dropdown
@@ -597,7 +596,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         aria-label={activeFilterCount ? `Filtros, ${activeFilterCount} seleccionados` : 'Filtros'}
         aria-expanded={filtersOpen}
         aria-controls="source-filters"
-        style={{ width: px(96, scale, 88), height: px(36, scale, 30), fontSize: px(14, scale, 12) }}
+        style={{ width: px(96, scale, 88), height: px(36, scale, 30), fontSize: fontPx(14, scale, 12) }}
       >
         <Filter className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
         Filtros{activeFilterCount > 0 && <span className="ml-1 tabular-nums">{activeFilterCount}</span>}
@@ -637,13 +636,13 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
               try { localStorage.setItem('cytlex:sourcesSort', next); } catch {}
             }}
             style={{
-              height: px(36, scale, 30),
-              fontSize: px(14, scale, 12),
-              paddingLeft: px(12, scale, 9),
-              paddingRight: px(12, scale, 9)
+              height: px(32, scale, 26),
+              fontSize: fontPx(14, scale, 12),
+              paddingLeft: px(8, scale, 6),
+              paddingRight: px(8, scale, 6)
             }}
           >
-            <ArrowUpDown className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+            <ArrowUpDown className="mr-2" style={{ width: px(14, scale, 11), height: px(14, scale, 11) }} />
             {sourceSort === 'title-desc' ? 'Z-A' : sourceSort === 'added' ? 'Adición' : 'A-Z'}
           </Button>,
           toolbarTarget
@@ -653,21 +652,21 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${px(240, scale, 200)}, 1fr))`, gap: px(12, scale, 9) }}
         >
           {sortedSources.map(({ manifest }) => (
-            <Card key={manifest.id} className="group hover:shadow-sm">
+            <Card key={manifest.id} className="group rounded-lg border-border/50 shadow-none hover:shadow-none">
               <button
                 type="button"
                 onClick={() => {
                   sourceCatalogState.clear();
                   setSourceId(manifest.id);
                 }}
-                className="flex w-full items-center rounded-xl text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                className="flex w-full items-center rounded-lg text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 style={{ minHeight: px(68, scale, 56), padding: px(14, scale, 11), gap: px(12, scale, 9) }}
                 aria-label={`Abrir catálogo de ${manifest.name}`}
               >
                 <SourceBadge m={manifest} style={{ width: px(40, scale, 32), height: px(40, scale, 32), borderRadius: px(12, scale, 9) }} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold text-foreground" style={{ fontSize: px(15, scale, 13) }}>{manifest.name}</span>
-                  {manifest.version && <span className="mt-0.5 block text-muted-foreground" style={{ fontSize: px(11, scale, 9) }}>v{manifest.version}</span>}
+                  <span className="block truncate font-semibold text-foreground" style={{ fontSize: fontPx(15, scale, 13) }}>{manifest.name}</span>
+                  {manifest.version && <span className="mt-0.5 block text-muted-foreground" style={{ fontSize: fontPx(11, scale, 9) }}>v{manifest.version}</span>}
                 </span>
               </button>
             </Card>
@@ -686,7 +685,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
               <ArrowLeft style={{ width: px(18, scale, 15), height: px(18, scale, 15) }} />
             </Button>
             <SourceBadge m={selected.manifest} style={{ width: px(30, scale, 24), height: px(30, scale, 24) }} />
-            <h2 className="min-w-0 flex-1 truncate font-semibold" style={{ fontSize: px(16, scale, 13) }}>{selected.manifest.name}</h2>
+            <h2 className="min-w-0 flex-1 truncate font-semibold" style={{ fontSize: fontPx(16, scale, 13) }}>{selected.manifest.name}</h2>
             {sourceId === 'leercapitulo' && (
               <div className="ml-auto flex shrink-0 items-center" style={{ gap: px(8, scale, 6) }}>
                 <Button
@@ -700,7 +699,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                   }}
                   disabled={loading}
                   title={`Orden actual: ${leercapituloSort.toUpperCase()}. Cambiar a ${leercapituloSort === 'az' ? 'Z-A' : 'A-Z'}`}
-                  style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+                  style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
                 >
                   <ArrowUpDown className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                   {leercapituloSort === 'az' ? 'A-Z' : 'Z-A'}
@@ -714,7 +713,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                     placeholder="Género"
                     menuMaxHeight={288}
                     buttonClassName="rounded-md border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80"
-                    buttonStyle={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+                    buttonStyle={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
                     style={{ width: px(190, scale, 160) }}
                     onChange={(genre) => {
                       setFilterValues((current) => ({ ...current, genre }));
@@ -803,10 +802,10 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                     placeholder={`Buscar en ${selected.manifest.name}…`}
                     aria-label={`Buscar mangas en ${selected.manifest.name}`}
                     className="bg-muted/50 border-none"
-                    style={{ height: px(36, scale, 30), fontSize: px(14, scale, 12), paddingLeft: px(36, scale, 30), paddingRight: px(12, scale, 9) }}
+                    style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(36, scale, 30), paddingRight: px(12, scale, 9) }}
                   />
                 </div>
-                <Button type="submit" disabled={loading || !query.trim()} style={{ width: px(96, scale, 88), height: px(36, scale, 30), fontSize: px(14, scale, 12) }}>
+                <Button type="submit" disabled={loading || !query.trim()} style={{ width: px(96, scale, 88), height: px(36, scale, 30), fontSize: fontPx(14, scale, 12) }}>
                   <Search className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
                   Buscar
                 </Button>
@@ -824,7 +823,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           ) : loading ? (
             <div className="flex items-center justify-center text-muted-foreground" style={{ gap: px(10, scale, 8), padding: `${px(44, scale, 32)} 0` }}>
               <Loader2 className="animate-spin" style={{ width: px(20, scale, 16), height: px(20, scale, 16) }} />
-              <span style={{ fontSize: px(14, scale, 12) }}>Cargando mangas…</span>
+              <span style={{ fontSize: fontPx(14, scale, 12) }}>Cargando mangas…</span>
             </div>
           ) : visibleItems.length || (hideSavedManga && hasMore) ? (
             <>
@@ -853,7 +852,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
               {hasMore && (
                 <div className="flex flex-col items-center" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 8) }}>
                   {error?.append && <p role="status" className="max-w-full text-center text-sm text-muted-foreground [overflow-wrap:anywhere]">{sourceErrorMessage(error.cause, selected.manifest.name, 'No se pudo cargar más mangas.')}</p>}
-                  <Button variant="secondary" onClick={() => loadCatalog(sourceId, loadedParams, true)} disabled={loadingMore} style={{ height: px(40, scale, 33), fontSize: px(14, scale, 12), paddingLeft: px(16, scale, 12), paddingRight: px(16, scale, 12), gap: px(8, scale, 6) }}>
+                  <Button variant="secondary" onClick={() => loadCatalog(sourceId, loadedParams, true)} disabled={loadingMore} style={{ height: px(40, scale, 33), fontSize: fontPx(14, scale, 12), paddingLeft: px(16, scale, 12), paddingRight: px(16, scale, 12), gap: px(8, scale, 6) }}>
                     {loadingMore && <Loader2 className="animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />}
                     {loadingMore ? 'Cargando…' : error?.append ? 'Reintentar' : 'Cargar más mangas'}
                   </Button>

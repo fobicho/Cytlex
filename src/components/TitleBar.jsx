@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Minus, Square, Copy, X } from 'lucide-react';
 import { appWindow } from '../lib/appWindow.js';
 import { cn } from '../lib/utils.js';
-import { px, useScale } from '../lib/useScale.js';
+import { px, useScale, fontPx } from '../lib/useScale.js';
 
 const DRAG = { WebkitAppRegion: 'drag' };
 const NO_DRAG = { WebkitAppRegion: 'no-drag' };
@@ -25,7 +25,7 @@ export default function TitleBar() {
       className="flex items-stretch h-9 shrink-0 bg-sidebar border-b border-border select-none"
     >
       <div className="flex items-center gap-2 px-4">
-        <div className="w-5 h-5 rounded-md bg-white grid place-items-center font-bold text-pink-500 leading-none select-none" style={{ fontSize: px(13, scale, 11) }}>
+        <div className="w-5 h-5 rounded-md bg-white grid place-items-center font-bold text-pink-500 leading-none select-none" style={{ fontSize: fontPx(13, scale, 11) }}>
           粘
         </div>
         <span className="font-display text-xs font-semibold tracking-tight text-sidebar-foreground">Cytlex</span>

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
-import { px, useScale } from '../../lib/useScale.js';
+import { px, useScale, fontPx } from '../../lib/useScale.js';
 import { Input } from './input.jsx';
 
 const searchText = (value) => String(value).normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase();
@@ -50,11 +50,10 @@ export function Dropdown({
     }
     const gap = 4;
     const viewportPadding = 8;
-    const zoom = portal ? Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1 : 1;
-    const desiredHeight = parseFloat(px(menuMaxHeight, sc, 200)) * zoom;
+    const desiredHeight = parseFloat(px(menuMaxHeight, sc, 200));
     const below = Math.max(0, viewportBottom - r.bottom - gap - viewportPadding);
     const above = Math.max(0, r.top - viewportTop - gap - viewportPadding);
-    const naturalHeight = menuRef.current ? menuRef.current.scrollHeight * zoom : desiredHeight;
+    const naturalHeight = menuRef.current ? menuRef.current.scrollHeight : desiredHeight;
     const openAbove = below < Math.min(desiredHeight, naturalHeight) && above > below;
     const availableHeight = openAbove ? above : below;
     const maxHeight = Math.min(desiredHeight, availableHeight);
@@ -64,7 +63,7 @@ export function Dropdown({
     const top = openAbove
       ? Math.max(viewportTop + viewportPadding, r.top - gap - height)
       : Math.max(viewportTop + viewportPadding, Math.min(r.bottom + gap, viewportBottom - viewportPadding - height));
-    setPos({ top: top / zoom, left: left / zoom, width: width / zoom, maxHeight: maxHeight / zoom });
+    setPos({ top, left, width, maxHeight });
   };
 
   useLayoutEffect(() => {
@@ -125,11 +124,11 @@ export function Dropdown({
       style={{
         ...(portal && pos ? { top: pos.top, left: pos.left, maxHeight: `${pos.maxHeight}px`, ...(menuWidth ? { width: pos.width, minWidth: pos.width } : { minWidth: pos.width }) } : null),
         ...(portal ? null : { marginTop: px(4, sc, 3), maxHeight: px(menuMaxHeight, sc, 200) }),
-        fontSize: px(14, sc, 12)
+        fontSize: fontPx(14, sc, 12)
       }}
       className={cn(
         portal ? 'fixed z-[60]' : 'absolute z-40',
-        'min-w-full overflow-hidden rounded-lg border border-border bg-card shadow-2xl',
+        'min-w-full overflow-hidden rounded-[6px] border border-border bg-card shadow-2xl',
         menuClassName
       )}
       data-scrollable
@@ -182,7 +181,7 @@ export function Dropdown({
                 paddingRight: px(10, sc, 8),
                 paddingTop: px(6, sc, 4),
                 paddingBottom: px(6, sc, 4),
-                fontSize: px(14, sc, 12)
+                fontSize: fontPx(14, sc, 12)
               }}
             >
               {o.label}
@@ -213,7 +212,7 @@ export function Dropdown({
           width: '100%',
           paddingLeft: px(12, sc, 10),
           paddingRight: px(10, sc, 8),
-          fontSize: px(14, sc, 12),
+          fontSize: fontPx(14, sc, 12),
           ...buttonStyle
         }}
       >

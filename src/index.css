@@ -4,6 +4,7 @@
 
 @layer base {
   :root {
+    --ui-rem-size: 90%;
     font-size: var(--ui-rem-size, 16px);
     --background: 240 10% 3.9%;
     --foreground: 0 0% 98%;
@@ -571,7 +572,6 @@
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    zoom: 90%;
   }
 
   body {
@@ -593,8 +593,14 @@
   }
 
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 4px;
+    height: 4px;
+  }
+
+  ::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
   }
 
   ::-webkit-scrollbar-track {
@@ -618,8 +624,17 @@
     scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
   }
 
+  .settings-section-scroll::-webkit-scrollbar {
+    width: 4px;
+  }
+
   .settings-section-scroll::-webkit-scrollbar-track {
-    margin-block: 8px;
+    margin-block: 0;
+    background-color: transparent;
+  }
+
+  .settings-section-scroll.is-scrolling::-webkit-scrollbar-track {
+    background-color: transparent;
   }
 
   .settings-section-scroll::-webkit-scrollbar-thumb {
@@ -637,8 +652,8 @@
 }
 
 .app-shell {
-  height: 111.111vh;
-  height: 111.111dvh;
+  height: 100vh;
+  height: 100dvh;
 }
 
 .app-shell--web:not(:has(.browser-main--reader)) {
@@ -653,6 +668,159 @@
   padding: 0;
 }
 
+.reader-back-title {
+  left: calc(var(--reader-detail-inset, 16px) - 0.5rem);
+}
+
+@media (min-width: 768px) {
+  .reader-back-title {
+    left: calc(var(--reader-detail-inset, 16px) - 0.75rem);
+  }
+}
+
+.detail-main::-webkit-scrollbar-track {
+  margin-top: 36px;
+}
+
+.browser-main--settings {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.browser-main--subroutes {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.catalog-toolbar {
+  container-type: inline-size;
+}
+
+.catalog-search {
+  margin-bottom: 4px;
+}
+
+@container (min-width: 650px) {
+  .catalog-search {
+    max-width: 360px;
+    margin-bottom: 0;
+  }
+}
+
+.page-content-scroll {
+  scrollbar-color: transparent transparent;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+
+.page-content-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.page-content-scroll::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 9999px;
+  transition: background-color 180ms ease;
+}
+
+.page-content-scroll.is-scrolling {
+  scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
+}
+
+.page-content-scroll::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+.page-content-scroll.is-scrolling::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.4);
+}
+
+.page-content-scroll.is-scrolling::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+@supports selector(::-webkit-scrollbar) {
+  .page-content-scroll,
+  .page-content-scroll.is-scrolling,
+  .settings-section-scroll,
+  .settings-section-scroll.is-scrolling {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+}
+
+.library-page-scroll.page-content-scroll {
+  scrollbar-width: none;
+}
+
+.library-page-scroll.page-content-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+:where(
+  [class*="rounded-"]:not([class~="rounded-full"]):not(.current-chapter-jump):not(.source-badge):not(.manga-cover-corners),
+  .rounded:not(.current-chapter-jump):not(.source-badge):not(.manga-cover-corners)
+) {
+  border-radius: 0 !important;
+}
+
+:where(
+  button:not([role="switch"]):not(.current-chapter-jump),
+  input:not([type="radio"]),
+  select,
+  textarea
+) {
+  border-radius: 0 !important;
+}
+
+button[aria-label*="orden" i],
+button[title*="orden" i],
+button[aria-label*="actualiz" i],
+button[title*="actualiz" i],
+button[aria-label*="instal" i],
+button[title*="instal" i],
+button[aria-label*="seleccion" i],
+button[title*="seleccion" i],
+button[aria-label*="marcar" i],
+button[title*="marcar" i],
+button[aria-label*="filtros" i],
+button[title*="filtros" i],
+[aria-label="Filtros de búsqueda"] button {
+  border-radius: 6px !important;
+}
+
+button.confirmation-cancel-button,
+button.confirmation-action-button {
+  border-radius: 0 !important;
+}
+
+button.chapter-action-hover {
+  border-radius: 0 !important;
+}
+
+.chapter-action-hover:active svg {
+  stroke-width: 2.5;
+}
+
+[aria-label="Filtros de búsqueda"] input,
+[aria-label="Filtros de búsqueda"] select,
+[aria-label="Filtros de búsqueda"] textarea {
+  border-radius: 6px !important;
+}
+
+.manga-cover-corners,
+img.manga-cover-corners {
+  border-radius: 4px !important;
+}
+
+.category-count {
+  border-radius: 6px !important;
+}
+
 .browser-mobile-nav {
   --nav-padding-x: 8px;
   position: fixed;
@@ -660,8 +828,8 @@
   inset: auto 0 0;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  min-height: calc(60px + env(safe-area-inset-bottom));
-  padding: 4px var(--nav-padding-x) calc(4px + env(safe-area-inset-bottom));
+  min-height: calc(56px + env(safe-area-inset-bottom));
+  padding: 2px var(--nav-padding-x) calc(2px + env(safe-area-inset-bottom));
   border-top: 1px solid hsl(var(--border));
   background: hsl(var(--sidebar-background));
 }
@@ -675,7 +843,7 @@
   align-items: center;
   justify-content: center;
   gap: 3px;
-  border-radius: 10px;
+  border-radius: 0;
   color: hsl(var(--sidebar-foreground));
   font-size: 11px;
   -webkit-tap-highlight-color: transparent;
@@ -687,7 +855,27 @@
 }
 
 .browser-mobile-nav__item.is-active {
-  color: hsl(var(--sidebar-accent-foreground));
+  color: hsl(var(--primary));
+  font-weight: 600;
+}
+
+.browser-mobile-nav__glyph {
+  fill: currentColor;
+  fill-opacity: 0;
+  transition: fill-opacity 180ms ease;
+}
+
+.browser-mobile-nav__item.is-active .browser-mobile-nav__glyph {
+  fill-opacity: 0.22;
+}
+
+.browser-mobile-nav__item.is-active .browser-mobile-nav__glyph.is-entering {
+  transition-delay: 420ms;
+}
+
+.browser-mobile-nav__glyph--compass circle,
+.browser-mobile-nav__glyph--settings circle {
+  fill: hsl(var(--sidebar-background));
 }
 
 .browser-mobile-nav__indicator {
@@ -710,7 +898,7 @@
 
 @media (max-width: 767px) {
   .app-shell--web:not(:has(.browser-main--reader)) {
-    padding-bottom: calc(60px + env(safe-area-inset-bottom));
+    padding-bottom: calc(56px + env(safe-area-inset-bottom));
   }
 
   .browser-main {
@@ -850,4 +1038,3 @@
   transition-duration: 220ms;
   transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
-

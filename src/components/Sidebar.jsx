@@ -6,7 +6,7 @@ import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
 import { SOURCE_CATALOG_HOME_EVENT } from '../lib/searchState.js';
 import { settings, SIDEBAR_WIDTH } from '../lib/settings.js';
-import { useScale } from '../lib/useScale.js';
+import { useScale, px, fontPx } from '../lib/useScale.js';
 
 const navItems = [
   { to: '/biblioteca', icon: BookOpen, label: 'Biblioteca' },
@@ -17,6 +17,11 @@ const navItems = [
 const EASE = [0.25, 0.1, 0.25, 1];
 const DURATION = 0.3;
 const SIDEBAR_SCALE_MIN = 0.72;
+const activeScroller = () => {
+  const main = document.querySelector('main');
+  return Array.from(main?.querySelectorAll('.library-page-scroll, .catalog-page-scroll') || [])
+    .find((element) => element.offsetParent !== null) || main;
+};
 
 let lastLibraryRoute = '/biblioteca';
 let lastExploreRoute = '/explorar?tab=mangas';
@@ -40,6 +45,11 @@ export default function Sidebar({ tutorialNavOnly = false }) {
   const navigate = useNavigate();
   const pendingQuickSearchReset = useRef(false);
   const scale = useScale(SIDEBAR_SCALE_MIN);
+  const navIconCenter = Math.max(6, Math.round(12 * scale))
+    + Math.max(6, Math.round(8 * scale))
+    + Math.max(20, Math.round(32 * scale)) / 2;
+  const logoSize = Math.max(16, Math.round(20 * scale));
+  const logoOffset = navIconCenter - logoSize / 2;
 
   useEffect(() => settings.subscribe((s) => {
     setCollapsed(s.sidebarCollapsed);
@@ -71,9 +81,16 @@ export default function Sidebar({ tutorialNavOnly = false }) {
       initial={false}
       animate={{ width: Math.round((collapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.default) * scale) }}
       transition={{ duration: DURATION, ease: EASE }}
-      className="relative z-20 h-full flex flex-col border-r border-border bg-sidebar overflow-visible"
+      className="relative z-20 h-full flex flex-col border-r border-sidebar-border/70 bg-sidebar overflow-visible"
     >
+      <div className="flex shrink-0 items-center overflow-hidden" style={{ minHeight: px(38, scale, 34), paddingLeft: logoOffset, paddingRight: px(20, scale, 16) }}>
+        <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
+          <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="" className="shrink-0 rounded-md" style={{ width: logoSize, height: logoSize }} />
+          <span className={cn('whitespace-nowrap font-display font-semibold tracking-tight text-foreground transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')} style={{ fontSize: fontPx(14, scale) }}>Cytlex</span>
+        </div>
+      </div>
       <nav
+        aria-label="Navegación principal"
         inert={tutorialNavOnly}
         className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col"
         style={{
@@ -91,6 +108,8 @@ export default function Sidebar({ tutorialNavOnly = false }) {
           return (
             <NavLink
               key={item.to}
+              aria-current={isActive ? 'page' : undefined}
+              className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
               to={tutorialNavOnly && item.to === '/explorar'
                 ? '/explorar?tab=mangas'
                 : tutorialNavOnly && item.to === '/ajustes'
@@ -102,7 +121,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                   if (location.pathname.startsWith('/manga')
                     && (item.to === '/biblioteca' || item.to === '/explorar')) {
                     event.preventDefault();
-                    const main = document.querySelector('main');
+                    const main = activeScroller();
                     if (main?.scrollTop > 1) {
                       main.scrollTo({ top: 0, behavior: 'smooth' });
                       return;
@@ -120,8 +139,8 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                     return;
                   }
                   if (item.to === '/explorar' || item.to === '/biblioteca') {
-                    const main = document.querySelector('main');
-                    if (item.to === '/explorar' && main?.querySelector('[data-source-catalog-active="true"]')) {
+                    const main = activeScroller();
+                    if (item.to === '/explorar' && main?.querySelector('[data-source-catalog-selected="true"]')) {
                       event.preventDefault();
                       if (main.scrollTop > 1) {
                         main.scrollTo({ top: 0, behavior: 'smooth' });
@@ -135,7 +154,9 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                       event.preventDefault();
                       return;
                     }
-                    if (item.to === '/explorar' && main?.querySelector('[data-explore-start="true"]')) {
+                    const exploreStart = main?.closest('[data-explore-start="true"]')
+                      || main?.querySelector('[data-explore-start="true"]');
+                    if (item.to === '/explorar' && exploreStart) {
                       event.preventDefault();
                       return;
                     }
@@ -147,21 +168,27 @@ export default function Sidebar({ tutorialNavOnly = false }) {
             >
               <div
                 className={cn(
-                  'flex items-center rounded-lg font-medium transition-[gap,color,background-color,border-color,text-decoration-color,fill,stroke] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
+                  'relative flex items-center rounded-md transition-[gap,color,background-color,border-color] duration-200',
                   isActive
-                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                    : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/50'
+                    ? 'bg-primary/10 font-semibold text-primary ring-1 ring-inset ring-primary/25'
+                    : 'font-medium text-sidebar-foreground hover:text-foreground hover:bg-sidebar-accent/50'
                 )}
                 style={{
                   gap: collapsed ? 0 : `${Math.max(7, Math.round(12 * scale))}px`,
                   paddingTop: `${Math.max(7, Math.round(10 * scale))}px`,
                   paddingBottom: `${Math.max(7, Math.round(10 * scale))}px`,
-                    paddingLeft: `${Math.max(6, Math.round(8 * scale))}px`,
+                  paddingLeft: `${Math.max(6, Math.round(8 * scale))}px`,
                   paddingRight: '0px',
                   justifyContent: 'flex-start',
-                  fontSize: `${Math.max(11, Math.round(14 * scale))}px`
+                  fontSize: fontPx(14, scale, 11)
                 }}
               >
+                {isActive && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-primary"
+                  />
+                )}
                 <div
                   className="shrink-0 grid place-items-center"
                   style={{
@@ -195,7 +222,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
 
         <div
           inert={tutorialNavOnly}
-          className="shrink-0 rounded-lg border border-primary/40 bg-primary/5"
+          className="shrink-0"
           style={{
             marginTop: 'auto',
             padding: '0px'
@@ -213,7 +240,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
             className={cn(
               'w-full flex items-center rounded-md font-medium',
               'transition-[gap,color,background-color,border-color,text-decoration-color,fill,stroke] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
-              'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/50'
+              'border border-sidebar-border/70 bg-card text-foreground hover:bg-sidebar-accent/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
             )}
             style={{
               justifyContent: 'flex-start',
@@ -222,7 +249,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
               paddingBottom: `${Math.max(7, Math.round(10 * scale))}px`,
               paddingLeft: `${Math.max(6, Math.round(8 * scale))}px`,
               paddingRight: `${Math.max(6, Math.round(8 * scale))}px`,
-              fontSize: `${Math.max(11, Math.round(14 * scale))}px`
+              fontSize: fontPx(14, scale, 11)
             }}
           >
             <div
@@ -264,17 +291,22 @@ export default function Sidebar({ tutorialNavOnly = false }) {
 
       <div
         inert={tutorialNavOnly}
-        className="shrink-0 border-t border-border"
-        style={{ padding: `${Math.max(8, Math.round(12 * scale))}px` }}
+        className="shrink-0"
+        style={{ padding: `0 ${Math.max(6, Math.round(12 * scale))}px ${Math.max(6, Math.round(12 * scale))}px` }}
       >
         <motion.button
           whileHover={{ scale: 1.04 }}
           whileTap={{ scale: 0.94 }}
           onClick={toggle}
           aria-label={collapsed ? 'Expandir menu lateral' : 'Colapsar menu lateral'}
+          aria-expanded={!collapsed}
           title={collapsed ? 'Expandir' : 'Colapsar'}
-          className="flex items-center justify-center w-full rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          style={{ paddingTop: `${Math.max(6, Math.round(8 * scale))}px`, paddingBottom: `${Math.max(6, Math.round(8 * scale))}px` }}
+          className="mx-auto grid shrink-0 place-items-center border border-sidebar-border/70 bg-sidebar-accent/30 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          style={{
+            width: `${Math.max(36, Math.round(40 * scale))}px`,
+            height: `${Math.max(36, Math.round(40 * scale))}px`,
+            padding: 0
+          }}
         >
           <motion.span
             className="flex items-center justify-center"
@@ -282,7 +314,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
             transition={{ type: 'spring', stiffness: 380, damping: 26, mass: 0.7 }}
           >
             <ChevronsRight
-              style={{ width: `${Math.max(11, Math.round(16 * scale))}px`, height: `${Math.max(11, Math.round(16 * scale))}px` }}
+              style={{ width: `${Math.max(15, Math.round(18 * scale))}px`, height: `${Math.max(15, Math.round(18 * scale))}px` }}
             />
           </motion.span>
         </motion.button>
