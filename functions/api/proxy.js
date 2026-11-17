@@ -2,6 +2,7 @@ const ALLOWED_HOSTS = new Set([
   'api.anilist.co',
   'api.mangadex.org',
   'b78sk.komiwa.net',
+  'blogger.googleusercontent.com',
   'd33y4i2dmzjqjh.cloudfront.net',
   'fobicho.github.io',
   'images.mangalect.org',
