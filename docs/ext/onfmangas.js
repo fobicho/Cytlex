@@ -306,15 +306,26 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
 
   function decodeReaderPageResponse(response, chapterUrl) {
     const list = decodePageList(response);
-    if (!list) return [];
+    if (!list) return { pages: [], fallbacks: [] };
     const entries = Array.isArray(list) ? list : [list];
-    return [...new Set(entries.map((page) => imageUrl(page)).map((value) => {
-      if (!value.trim()) return '';
+    const resolveUrl = (value) => {
+      if (typeof value !== 'string' || !value.trim()) return '';
       try {
         const resolved = new URL(value.trim(), chapterUrl);
         return ['http:', 'https:'].includes(resolved.protocol) ? resolved.href : '';
       } catch { return ''; }
-    }).filter(Boolean))];
+    };
+    const pages = [];
+    const fallbacks = [];
+    for (const entry of entries) {
+      const src = resolveUrl(imageUrl(entry));
+      if (!src || pages.includes(src)) continue;
+      pages.push(src);
+      fallbacks.push(resolveUrl(entry && typeof entry === 'object'
+        ? entry.fallback || entry.fallbackUrl || entry.fallback_url || ''
+        : ''));
+    }
+    return { pages, fallbacks };
   }
 
   function findReaderAccess(html, outer) {
@@ -434,13 +445,14 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       html = await fetchText(url, undefined, { onfCookie, onfReferer: url });
     }
     const responsePages = decodeReaderPageResponse(html, url);
-    if (responsePages.length) {
+    if (responsePages.pages.length) {
       return {
         label: '',
         mangaUrl: '',
         imageReferer: url,
         imageCookie: onfCookie,
-        pages: responsePages,
+        pages: responsePages.pages,
+        pageFallbacks: responsePages.fallbacks,
         options: [],
         prev: null,
         next: null
@@ -448,6 +460,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     }
     const outer = parse(html);
     let pages = decodePageImages(html, outer, url);
+    let pageFallbacks = [];
     const access = findReaderAccess(html, outer);
     let readerPagesInfo = typeof fetchPostText === 'function' ? 'sin acceso del lector' : 'solicitud POST no disponible';
     if (typeof fetchPostText === 'function' && access) {
@@ -464,8 +477,11 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
           onfReferer: url
         });
         const completePages = decodeReaderPageResponse(response, url);
-        readerPagesInfo = `${completePages.length} paneles recibidos`;
-        if (completePages.length >= pages.length) pages = completePages;
+        readerPagesInfo = `${completePages.pages.length} paneles recibidos`;
+        if (completePages.pages.length >= pages.length) {
+          pages = completePages.pages;
+          pageFallbacks = completePages.fallbacks;
+        }
       } catch (error) {
         readerPagesInfo = `falló (${String(error?.message || error).slice(0, 140)})`;
         // Keep any image URLs embedded in the chapter if the page-list endpoint is temporarily unavailable.
@@ -502,6 +518,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       imageReferer: url,
       imageCookie: onfCookie,
       pages: [...new Set(pages)],
+      pageFallbacks,
       options: [],
       prev: null,
       next: null

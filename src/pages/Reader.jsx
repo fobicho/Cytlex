@@ -58,6 +58,19 @@ function pageBounds(stage) {
   };
 }
 
+async function imageSize(blob) {
+  if (typeof createImageBitmap !== 'function') return null;
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(blob);
+    return { area: bitmap.width * bitmap.height, small: bitmap.width <= 256 && bitmap.height <= 256 };
+  } catch {
+    return null;
+  } finally {
+    bitmap?.close();
+  }
+}
+
 function clampPagePan(pan, start, end, viewportStart, viewportEnd) {
   const min = viewportEnd - end;
   const max = viewportStart - start;
@@ -611,6 +624,8 @@ export default function Reader() {
       const candidates = usePreload && fallback && fallback !== src ? [src, fallback] : [src];
       let accessRejected = false;
       let failure;
+      let bestImage = null;
+      let bestArea = -1;
       for (const candidate of candidates) {
         const isOnfImage = usePreload && !!onfChapterUrl && candidate.startsWith('https://onfmangas.com/');
         const controller = new AbortController();
@@ -620,8 +635,15 @@ export default function Reader() {
           const image = await fetchImageBlob(candidate, controller.signal, imageReferer, imageCookie);
           if (cancelled) return false;
           if (image) {
-            saveResult(src, URL.createObjectURL(image));
-            return true;
+            const size = candidates.length > 1 ? await imageSize(image) : null;
+            if (size === null || !size.small) {
+              saveResult(src, URL.createObjectURL(image));
+              return true;
+            }
+            if (size.area > bestArea) {
+              bestImage = image;
+              bestArea = size.area;
+            }
           }
         } catch (error) {
           if (cancelled) return false;
@@ -637,6 +659,10 @@ export default function Reader() {
           controllers.delete(controller);
         }
         if (cancelled) return false;
+      }
+      if (bestImage) {
+        saveResult(src, URL.createObjectURL(bestImage));
+        return true;
       }
       if (accessRejected) onfAccessRejected = true;
       if (usePreload) saveResult(src, { failure, accessRejected });
