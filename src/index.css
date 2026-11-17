@@ -702,14 +702,9 @@
   container-type: inline-size;
 }
 
-.catalog-search {
-  margin-bottom: 4px;
-}
-
 @container (min-width: 650px) {
   .catalog-search {
     max-width: 360px;
-    margin-bottom: 0;
   }
 }
 
@@ -764,14 +759,14 @@
 }
 
 :where(
-  [class*="rounded-"]:not([class~="rounded-full"]):not(.current-chapter-jump):not(.source-badge):not(.manga-cover-corners),
-  .rounded:not(.current-chapter-jump):not(.source-badge):not(.manga-cover-corners)
+  [class*="rounded-"]:not([class~="rounded-full"]):not(.current-chapter-jump):not(.chapter-per-row):not(.source-badge):not(.manga-cover-corners),
+  .rounded:not(.current-chapter-jump):not(.chapter-per-row):not(.source-badge):not(.manga-cover-corners)
 ) {
   border-radius: 0 !important;
 }
 
 :where(
-  button:not([role="switch"]):not(.current-chapter-jump),
+  button:not([role="switch"]):not(.current-chapter-jump):not(.chapter-per-row),
   input:not([type="radio"]),
   select,
   textarea

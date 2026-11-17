@@ -555,7 +555,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
           tab !== 'mangas' && 'max-md:flex-nowrap'
         )}
         style={{
-          columnGap: `${Math.max(16, Math.round(24 * scale))}px`,
+          columnGap: tab === 'mangas' ? px(32, scale, 24) : `${Math.max(16, Math.round(24 * scale))}px`,
           rowGap: 0,
           marginBottom: isBrowserApp ? 0 : `${Math.max(8, Math.round(12 * scale))}px`,
           minHeight: px(38, scale, 34),
@@ -657,6 +657,8 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
             style={{
               flexBasis: px(360, scale, 280),
               minWidth: `min(100%, ${px(360, scale, 280)})`,
+              marginTop: px(3, scale, 3),
+              marginBottom: px(3, scale, 3),
               gap: px(12, scale, 9)
             }}
           >

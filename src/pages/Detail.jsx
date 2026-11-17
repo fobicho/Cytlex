@@ -1500,7 +1500,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             size="sm"
             variant="secondary"
             title="Capítulos por fila"
-            className="hidden rounded-lg md:inline-flex"
+            className="chapter-per-row hidden rounded-lg md:inline-flex"
             onClick={() => {
               const order = [1, 2, 3];
               const next = order[(order.indexOf(chaptersPerRow) + 1) % order.length];

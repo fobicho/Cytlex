@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown, Settings as SettingsIcon, X, Check, CheckSquare } from 'lucide-react';
-import { extensions, isAdultExtension, isExtensionAllowed, isNewer, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed, isNewer, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
 import { extUpdates } from '../lib/extUpdates.js';
 import { settings } from '../lib/settings.js';
 import { Card } from './ui/card.jsx';
@@ -16,7 +16,9 @@ import { useScale, px, fontPx } from '../lib/useScale.js';
 function ExtensionCard({ m, action, updatable = false, disabled = false, scale = 1, selected = false, confirmationOpen = false, onSelectionChange, selectionLabel, selectionDisabled = false }) {
   const [imgOk, setImgOk] = useState(true);
   const showImg = m.icon && imgOk;
-  const hasAdultContent = isAdultExtension(m);
+  const declaredRating = String(m.contentWarning || '').trim().toUpperCase();
+  const hasAdultContent = ['MIXED', 'NSFW'].includes(declaredRating);
+  const contentRating = hasAdultContent ? declaredRating : 'SAFE';
   const iconSize = Number(px(40, scale, 32).replace('px', ''));
   const identity = (
     <>
@@ -67,16 +69,17 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
               v{m.version}
             </span>
           )}
-          {hasAdultContent && (
-            <span
-              className="shrink-0 font-semibold text-red-600 dark:text-red-400"
-              title="La extensión declara contenido MIXED o NSFW"
-              aria-label="Extensión con contenido para adultos, +18"
-              style={{ fontSize: fontPx(11, scale, 9) }}
-            >
-              +18
-            </span>
-          )}
+          <span
+            className={cn(
+              'shrink-0 font-semibold',
+              hasAdultContent ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'
+            )}
+            title={`Clasificación de contenido: ${contentRating}`}
+            aria-label={hasAdultContent ? `+18 ${contentRating}` : 'SAFE'}
+            style={{ fontSize: fontPx(11, scale, 9) }}
+          >
+            {hasAdultContent ? `+18 ${contentRating}` : 'SAFE'}
+          </span>
         </div>
       </div>
     </>
