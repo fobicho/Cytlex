@@ -424,6 +424,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     }
     const outer = parse(html);
     let pages = decodePageImages(html, outer, url);
+    let readerPagesInfo = typeof fetchPostText === 'function' ? 'sin acceso del lector' : 'solicitud POST no disponible';
     if (typeof fetchPostText === 'function') {
       const access = findReaderAccess(html, outer);
       if (access) {
@@ -439,8 +440,10 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
             onfReferer: url
           });
           const completePages = decodeReaderPageResponse(response, url);
+          readerPagesInfo = `${completePages.length} paneles recibidos`;
           if (completePages.length >= pages.length) pages = completePages;
-        } catch {
+        } catch (error) {
+          readerPagesInfo = `falló (${String(error?.message || error).slice(0, 140)})`;
           // Keep any image URLs embedded in the chapter if the page-list endpoint is temporarily unavailable.
         }
       }
@@ -460,7 +463,8 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       const blocked = !!challengePhrase || challengeTitle || (challengeMarkup && !looksLikeOnfChapter);
       const viewer = outer.querySelector('#viewerContainer');
       const pagePayload = viewer?.getAttribute('data-reader-pages') || '';
-      const readerInfo = `#viewerContainer ${viewer ? 'presente' : 'ausente'}, data-reader-pages ${pagePayload ? `${pagePayload.length} caracteres` : 'vacío'}, imágenes HTML: ${outer.querySelectorAll('img').length}`;
+      const readerAccess = viewer?.getAttribute('data-reader-access')?.trim() || '';
+      const readerInfo = `#viewerContainer ${viewer ? 'presente' : 'ausente'}, data-reader-access ${readerAccess ? `${readerAccess.length} caracteres` : 'vacío'}, data-reader-pages ${pagePayload ? `${pagePayload.length} caracteres` : 'vacío'}, reader_pages.php: ${readerPagesInfo}, imágenes HTML: ${outer.querySelectorAll('img').length}`;
       const responseInfo = [
         challengePhrase?.[0] || (challengeTitle ? 'título de verificación' : challengeMarkup && !looksLikeOnfChapter ? 'marcas de desafío anti-bot' : ''),
         responseTitle && `título: «${responseTitle}»`,
