@@ -38,6 +38,7 @@ export function browserImageUrl(url, referer = '') {
       || hostname === 'olympusxyz.com' || hostname.endsWith('.olympusxyz.com')
       || hostname === 'ntr-files.online' || hostname.endsWith('.ntr-files.online')
       || hostname === 'www.leercapitulo.co' || hostname === 'leercapitulo.co' || hostname.endsWith('.t34798ndc.com')
+      || hostname === 'www.yupmanga.com' || hostname === 'yupmanga.com'
       || hostname === 'zonatmo.org' || hostname.endsWith('.zonatmo.org');
     if (hostname === 'intomanga.com' || hostname.endsWith('.intomanga.com') || onfCdn || mangaDexImage || sourceImage || (hostname === 'onfmangas.com' && referer)) {
       const proxy = new URL(proxyUrl(url));

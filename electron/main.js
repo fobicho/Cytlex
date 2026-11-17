@@ -154,7 +154,8 @@ const REFERER_RULES = [
   { hosts: ['zonatmo.org'], referer: 'https://zonatmo.org/' },
   { hosts: ['ntr-files.online'], referer: 'https://manga-oni.com/' },
   { hosts: ['inmanga.com', 'intomanga.com', 'pack-yak.intomanga.com'], referer: 'https://inmanga.com/' },
-  { hosts: ['images.komiwa.net', 'media.mangavault.lat', 'cdnlxd.xyz'], referer: 'https://www.komiwa.net/' }
+  { hosts: ['images.komiwa.net', 'media.mangavault.lat', 'cdnlxd.xyz'], referer: 'https://www.komiwa.net/' },
+  { hosts: ['yupmanga.com'], referer: 'https://www.yupmanga.com/' }
 ];
 
 const ALLOWED_PROTOCOLS = ['http:', 'https:'];
@@ -734,6 +735,23 @@ ipcMain.handle('http:get', async (_e, url, requestId, options = {}) => {
     } : {}),
     Referer: refererFor(parsed.toString())
   };
+  const requestedHeaders = options?.headers && typeof options.headers === 'object' ? options.headers : {};
+  for (const [name, value] of Object.entries(requestedHeaders)) {
+    const normalized = name.toLowerCase();
+    if (['accept', 'accept-language', 'x-requested-with'].includes(normalized)
+      && typeof value === 'string' && value.length <= 512 && !/[\r\n]/.test(value)) {
+      headers[normalized.replace(/(^|-)([a-z])/g, (_match, separator, letter) => `${separator}${letter.toUpperCase()}`)] = value;
+    }
+  }
+  if (!onf) {
+    const requestedReferer = Object.entries(requestedHeaders).find(([name]) => name.toLowerCase() === 'referer')?.[1];
+    if (typeof requestedReferer === 'string') {
+      try {
+        const referer = validateUrl(requestedReferer);
+        if (referer.origin === parsed.origin) headers.Referer = referer.href;
+      } catch {}
+    }
+  }
   const onfRequestCookie = onf ? mergeOnfCookies(onfCookieJar.get(parsed.origin), options?.onfCookie) : '';
   if (onfRequestCookie) headers.Cookie = onfRequestCookie;
   if (onf && typeof options?.onfReferer === 'string') {

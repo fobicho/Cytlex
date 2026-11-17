@@ -22,6 +22,8 @@ const ALLOWED_HOSTS = new Set([
   'uploads.mangadex.org',
   'www.leercapitulo.co',
   'www.komiwa.net',
+  'www.yupmanga.com',
+  'yupmanga.com',
   'zonatmo.org'
 ]);
 
@@ -194,6 +196,9 @@ function forwardedHeaders(request, target) {
   }
   if (target.hostname === 'images.mangalect.org' || target.hostname === 'mangalect.org') {
     headers.set('referer', 'https://mangalect.org/');
+  }
+  if (target.hostname === 'www.yupmanga.com' || target.hostname === 'yupmanga.com') {
+    headers.set('referer', 'https://www.yupmanga.com/');
   }
   if (target.hostname === 'imagesolymp.xyz' || target.hostname === 'olympusxyz.com' || target.hostname.endsWith('.olympusxyz.com')) {
     headers.set('referer', 'https://olympusxyz.com/');
