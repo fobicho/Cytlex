@@ -156,6 +156,18 @@ function onfReferer(request) {
   return 'https://onfmangas.com/';
 }
 
+function yupmangaReferer(request) {
+  const value = request.headers.get('x-cytlex-upstream-referer')
+    || new URL(request.url).searchParams.get('referer');
+  if (value) {
+    try {
+      const referer = new URL(value);
+      if (referer.origin === 'https://www.yupmanga.com' && referer.pathname === '/reader_v2.php') return referer.href;
+    } catch {}
+  }
+  return 'https://www.yupmanga.com/';
+}
+
 function forwardedHeaders(request, target) {
   const headers = new Headers();
   const isMangaDexApi = target.hostname === 'api.mangadex.org';
@@ -198,7 +210,7 @@ function forwardedHeaders(request, target) {
     headers.set('referer', 'https://mangalect.org/');
   }
   if (target.hostname === 'www.yupmanga.com' || target.hostname === 'yupmanga.com') {
-    headers.set('referer', 'https://www.yupmanga.com/');
+    headers.set('referer', yupmangaReferer(request));
   }
   if (target.hostname === 'imagesolymp.xyz' || target.hostname === 'olympusxyz.com' || target.hostname.endsWith('.olympusxyz.com')) {
     headers.set('referer', 'https://olympusxyz.com/');
@@ -283,9 +295,9 @@ async function fetchTarget(initialTarget, method, headers, body, signal) {
       await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
     }
 
-    if (![301, 302, 303, 307, 308].includes(response.status)) return { upstream: response };
+    if (![301, 302, 303, 307, 308].includes(response.status)) return { upstream: response, finalUrl: target.href };
     const location = response.headers.get('location');
-    if (!location) return { upstream: response };
+    if (!location) return { upstream: response, finalUrl: target.href };
     if (redirects === REDIRECT_LIMIT) return { proxyError: errorResponse('Too many redirects', 508) };
 
     const nextTarget = validateTarget(new URL(location, target).href);
@@ -327,7 +339,7 @@ export async function onRequest(context) {
   const signal = AbortSignal.any([request.signal, deadline.signal]);
   let streaming = false;
   try {
-    const { upstream, proxyError } = await fetchTarget(target, method, forwardedHeaders(request, target), body, signal);
+    const { upstream, proxyError, finalUrl } = await fetchTarget(target, method, forwardedHeaders(request, target), body, signal);
     if (proxyError) return proxyError;
 
     let responseBody = null;
@@ -349,6 +361,7 @@ export async function onRequest(context) {
       'cache-control': 'no-store',
       'x-cytlex-proxy': '1'
     });
+    if (finalUrl) headers.set('x-cytlex-final-url', finalUrl);
     if (!upstream.ok) headers.set('x-cytlex-error-origin', 'source');
     for (const name of ['content-type', 'last-modified', 'accept-ranges', 'retry-after']) {
       const value = upstream.headers.get(name);

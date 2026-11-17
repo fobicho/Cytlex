@@ -23,8 +23,9 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     return request;
   }
 
-  function get(url, requestId, referer = `${base}/`, extraHeaders = {}) {
+  function get(url, requestId, referer = `${base}/`, extraHeaders = {}, options = {}) {
     return scheduleRequest(() => fetchText(url, requestId, {
+      ...options,
       headers: {
         Accept: 'text/html,application/json;q=0.9,*/*;q=0.8',
         Referer: referer,
@@ -42,6 +43,24 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       headers: {
         Accept: 'application/json, text/plain, */*',
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'X-Requested-With': 'XMLHttpRequest',
+        Origin: base,
+        Referer: referer
+      }
+    }, requestId));
+  }
+
+  function postMultipart(path, values, requestId, referer) {
+    const boundary = `----CytlexForm${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+    const body = Object.entries(values).map(([name, value]) => (
+      `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${String(value)}\r\n`
+    )).join('') + `--${boundary}--\r\n`;
+    return scheduleRequest(() => fetchPostText({
+      url: `${base}${path}`,
+      body,
+      headers: {
+        Accept: 'application/json, text/plain, */*',
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
         'X-Requested-With': 'XMLHttpRequest',
         Origin: base,
         Referer: referer
@@ -107,10 +126,16 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
 
     const target = new URL(query ? '/search.php' : sort === 'rating' || sort === 'views' ? '/top' : '/', base);
     if (query) target.searchParams.set('q', query);
-    target.searchParams.set('page', String(currentPage));
+    if (query || target.pathname === '/') target.searchParams.set('page', String(currentPage));
     const html = await get(target.href, __cytlexRequestId);
     const doc = parse(html);
-    const items = [...doc.querySelectorAll('div.comic-card')]
+    const rateLimitMessage = clean(doc.querySelector('main > div.container > div[class^="bg-red"] p')?.textContent);
+    if (rateLimitMessage) throw new Error(rateLimitMessage);
+    if (/cloudflare|attention required|challenge-platform/i.test(html)) {
+      throw new Error('YupManga respondió con una verificación de Cloudflare.');
+    }
+    const grid = doc.querySelector('div.grid:has(div.comic-card)');
+    const items = [...(grid?.querySelectorAll('div.comic-card') || [])]
       .map(seriesFromCard)
       .filter(Boolean)
       .filter((item, index, list) => list.findIndex((other) => other.url === item.url) === index);
@@ -148,7 +173,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       endpoint.search = new URLSearchParams({
         series_id: seriesId,
         page: String(page),
-        order: 'oldest_first'
+        order: 'newest_first'
       }).toString();
       const raw = await get(endpoint.href, requestId, seriesUrl, { 'X-Requested-With': 'XMLHttpRequest' });
       const data = parseJson(raw, 'cargar capítulos');
@@ -156,7 +181,13 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       chapters.push(...pageChapters);
       const current = Number(data?.currentPage) || page;
       const total = Number(data?.totalPages) || current;
-      if (current >= total || pageChapters.length === 0) break;
+      if (current >= total) break;
+      if (pageChapters.length === 0) {
+        throw new Error(`YupManga no devolvió capítulos en la página ${page}, aunque indicó que había más.`);
+      }
+      if (page === chapterPageLimit) {
+        throw new Error(`YupManga tiene más de ${chapterPageLimit} páginas de capítulos; no se cargó la lista completa.`);
+      }
     }
     const unique = [...new Map(chapters.map((item) => [item.url, item])).values()]
       .sort((a, b) => a.chapterNumber - b.chapterNumber);
@@ -307,24 +338,26 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     }
   }
 
-  async function completeInterstitial(html, readerUrl, chapterId, requestId) {
+  async function completeInterstitial(html, interstitialUrl, requestId) {
     const ticketMatch = String(html).match(/adTicket\s*=\s*(\{[^}]*\})/);
     if (!ticketMatch) return false;
     let ticket;
     try { ticket = JSON.parse(ticketMatch[1]); } catch { return false; }
     if (!ticket?.chapter || !ticket?.nonce) return false;
-    const countdown = Number(String(html).match(/let\s+countdown\s*=\s*(\d+)/)?.[1]) || 8;
-    await delay(Math.min(countdown, 30) * 1000);
+    const countdownValue = String(html).match(/let\s+countdown\s*=\s*(\d+)/)?.[1];
+    const countdown = countdownValue == null ? 8 : Number(countdownValue);
+    await delay(Math.max(0, countdown) * 1000);
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        await postForm('/ajax/complete_ad_interstitial.php', {
+        await postMultipart('/ajax/complete_ad_interstitial.php', {
           identifier: 'chapter_entrance',
           chapter: ticket.chapter,
           nonce: ticket.nonce
-        }, requestId, readerUrl);
+        }, requestId, interstitialUrl);
         return true;
       } catch (error) {
-        if (error?.status !== 409 || attempt === 2) throw error;
+        const status = Number(error?.status || String(error?.message || error).match(/\bHTTP\s+(\d{3})\b/i)?.[1]);
+        if (status !== 409 || attempt === 2) throw error;
         await delay(1500);
       }
     }
@@ -360,7 +393,8 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
         answer
       }, requestId, seriesUrl), 'abrir el capítulo');
     } catch (error) {
-      if (error?.status === 429) throw new Error('YupManga alcanzó el límite de lecturas para visitantes. Inténtalo más tarde.');
+      const status = Number(error?.status || String(error?.message || error).match(/\bHTTP\s+(\d{3})\b/i)?.[1]);
+      if (status === 429) throw new Error('YupManga alcanzó el límite de lecturas para visitantes. Inténtalo más tarde.');
       throw error;
     }
     if (!access?.success || !access.token || !access.chapter_id) {
@@ -370,10 +404,14 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const reader = new URL('/reader_v2.php', base);
     reader.search = new URLSearchParams({ chapter: access.chapter_id, token: access.token, page: '1' }).toString();
     const readerUrl = reader.href;
-    let readerHtml = await get(readerUrl, requestId, seriesUrl);
-    if (/adTicket\s*=/.test(readerHtml)) {
-      await completeInterstitial(readerHtml, readerUrl, access.chapter_id, requestId);
-      readerHtml = await get(readerUrl, requestId, seriesUrl);
+    let readerResult = await get(readerUrl, requestId, seriesUrl, {}, { includeUrl: true });
+    let readerHtml = readerResult?.text ?? readerResult;
+    const interstitialUrl = readerResult?.url || readerUrl;
+    if (/\/box-modal\.php(?:[?#]|$)/i.test(interstitialUrl) || /adTicket\s*=/.test(readerHtml)) {
+      const completed = await completeInterstitial(readerHtml, interstitialUrl, requestId);
+      if (!completed) throw new Error('YupManga mostró la espera del capítulo, pero no entregó el pase para continuar.');
+      readerResult = await get(readerUrl, requestId, interstitialUrl, {}, { includeUrl: true });
+      readerHtml = readerResult?.text ?? readerResult;
     }
     if (/cloudflare|attention required|challenge-platform/i.test(readerHtml) && !/totalPages\s*[:=]/i.test(readerHtml)) {
       throw new Error('YupManga respondió con una verificación de Cloudflare al abrir el capítulo.');

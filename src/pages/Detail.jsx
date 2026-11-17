@@ -66,6 +66,7 @@ const chapterNum = (chapter) => {
 };
 const chapterButtonTitle = (chapter) => {
   const title = String(chapter?.title || '').trim();
+  if (/^(?:tomo|volumen|volume)\b/i.test(title)) return title;
   const explicitNumber = chapter?.number ?? chapter?.chapterNumber;
   const match = title.match(/(?:cap[ií]tulo|chapter)\s*#?\s*(-?\d+(?:[.,]\d+)?)/i)
     || title.match(/-?\d+(?:[.,]\d+)?/);

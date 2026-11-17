@@ -354,7 +354,7 @@ async function requestPublic(url, options = {}, redirects = 0, maxBytes = null) 
       body: rewrite ? null : options.body
     }, redirects + 1, maxBytes);
   }
-  return maxBytes == null ? response : { response, body: result.body };
+  return maxBytes == null ? response : { response, body: result.body, finalUrl: parsed.href };
 }
 
 function readResponse(response, maxBytes) {
@@ -792,7 +792,8 @@ ipcMain.handle('http:get', async (_e, url, requestId, options = {}) => {
     res.resume();
     throw new Error(`HTTP ${res.statusCode} al pedir ${parsed.toString()}${retryAfter ? ` (Retry-After: ${retryAfter})` : ''}`);
   }
-  return body.toString('utf8');
+  const text = body.toString('utf8');
+  return options.includeUrl ? { text, url: result.finalUrl || parsed.href } : text;
 });
 
 ipcMain.handle('http:head', async (_e, url) => {
@@ -839,7 +840,9 @@ ipcMain.handle('http:post', async (_e, payload = {}, requestId) => {
     timeout: HTTP_GET_TIMEOUT_MS,
     requestId
   });
-  if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`HTTP ${res.statusCode} al pedir ${urlStr}`);
+  if (res.statusCode < 200 || res.statusCode >= 300) {
+    throw Object.assign(new Error(`HTTP ${res.statusCode} al pedir ${urlStr}`), { status: res.statusCode });
+  }
   const response = (await readResponse(res, HTTP_BODY_MAX_BYTES)).toString('utf8');
   return payload.responseType === 'text' ? response : JSON.parse(response);
 });
@@ -867,6 +870,14 @@ ipcMain.handle('image:fetch', async (_e, url, requestedReferer, requestedCookie)
       try {
         const candidate = validateUrl(requestedReferer);
         if (candidate.origin === 'https://www.komiwa.net' && candidate.pathname.startsWith('/chapter/')) {
+          imageReferer = candidate.href;
+        }
+      } catch {}
+    }
+    if ((host === 'www.yupmanga.com' || host === 'yupmanga.com') && typeof requestedReferer === 'string') {
+      try {
+        const candidate = validateUrl(requestedReferer);
+        if (candidate.origin === 'https://www.yupmanga.com' && candidate.pathname === '/reader_v2.php') {
           imageReferer = candidate.href;
         }
       } catch {}

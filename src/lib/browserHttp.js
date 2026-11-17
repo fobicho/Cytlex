@@ -160,7 +160,12 @@ export function sourceErrorMessage(error, name, fallback = '') {
 export async function httpGet(url, requestId, options = {}) {
   const bridge = electronBridge();
   if (bridge?.httpGet) return bridge.httpGet(url, requestId, options);
-  return (await browserRequest(url, options)).text();
+  const { includeUrl, ...requestOptions } = options;
+  const response = await browserRequest(url, requestOptions);
+  const text = await response.text();
+  if (!includeUrl) return text;
+  const finalUrl = response.headers.get('x-cytlex-final-url') || response.url || url;
+  return { text, url: finalUrl };
 }
 
 export async function httpHead(url) {
@@ -231,6 +236,20 @@ async function readImageBlob(response) {
   return mime ? blob.slice(0, blob.size, mime) : null;
 }
 
+function imageRequestOptions(url, signal, referer, onfCookie) {
+  let isYupManga = false;
+  try {
+    const { hostname } = new URL(url);
+    isYupManga = hostname === 'www.yupmanga.com' || hostname === 'yupmanga.com';
+  } catch {}
+  return {
+    signal,
+    onfReferer: referer,
+    onfCookie,
+    ...(isYupManga && referer ? { headers: { Referer: referer } } : {})
+  };
+}
+
 export async function fetchImageBlob(url, signal, referer = '', onfCookie = '') {
   const bridge = electronBridge();
   if (bridge?.fetchImage) {
@@ -241,7 +260,7 @@ export async function fetchImageBlob(url, signal, referer = '', onfCookie = '') 
     const mime = imageMimeFromBytes(bytes, image.mime);
     return mime ? new Blob([bytes], { type: mime }) : null;
   }
-  return readImageBlob(await browserRequest(url, { signal, onfReferer: referer, onfCookie }));
+  return readImageBlob(await browserRequest(url, imageRequestOptions(url, signal, referer, onfCookie)));
 }
 
 function imageFromBase64(image) {
@@ -261,7 +280,7 @@ export async function fetchImage(url, signal, referer = '', onfCookie = '') {
     const image = await bridge.fetchImage(url, referer, onfCookie);
     return signal?.aborted ? null : imageFromBase64(image);
   }
-  const response = await browserRequest(url, { signal, onfReferer: referer, onfCookie });
+  const response = await browserRequest(url, imageRequestOptions(url, signal, referer, onfCookie));
   const blob = await response.blob();
   return validImageResult(new Uint8Array(await blob.arrayBuffer()), blob.type || response.headers.get('content-type') || '');
 }
