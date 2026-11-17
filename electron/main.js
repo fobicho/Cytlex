@@ -843,7 +843,8 @@ ipcMain.handle('image:fetch', async (_e, url, requestedReferer, requestedCookie)
         }
       } catch {}
     }
-    if ((host === 'media.mangavault.lat' || host === 'cdnlxd.xyz' || host.endsWith('.cdnlxd.xyz'))
+    if ((host === 'media.mangavault.lat' || host === 'cdnlxd.xyz' || host.endsWith('.cdnlxd.xyz')
+      || host === 't34798ndc.com' || host.endsWith('.t34798ndc.com'))
       && typeof requestedReferer === 'string') {
       try {
         const candidate = validateUrl(requestedReferer);

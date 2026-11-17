@@ -160,9 +160,17 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const doc = parse(html);
     const serializedHtml = String(html || '')
       .replace(/\\+u002f/gi, '/')
-      .replace(/\\+\//g, '/');
-    const embeddedUrls = [...serializedHtml.matchAll(/https?:\/\/[^\s"'<>\\]+/gi)]
-      .map(([url]) => url);
+      .replace(/\\+\//g, '/')
+      .replace(/\\+"/g, '"');
+    const imageSigsMatch = serializedHtml.match(/"imageSigs"\s*:\s*(\{[^{}]*\})/);
+    let embeddedUrls = [];
+    if (imageSigsMatch) {
+      try { embeddedUrls = Object.keys(JSON.parse(imageSigsMatch[1])); } catch {}
+    }
+    if (!embeddedUrls.length) {
+      embeddedUrls = [...serializedHtml.matchAll(/https?:\/\/[^\s"'<>\\]+/gi)]
+        .map(([imageUrl]) => imageUrl);
+    }
     const imageElements = [...doc.querySelectorAll('img[src], img[data-src], img[data-lazy-src], img[data-original]')]
       .map((image) => abs(image.getAttribute('data-src') || image.getAttribute('data-lazy-src')
         || image.getAttribute('data-original') || image.getAttribute('src'), referer));
@@ -170,9 +178,12 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       .map((src) => abs(src, referer))
       .filter((src) => {
         if (!src) return false;
-        const host = new URL(src).hostname.toLowerCase();
+        const imageUrl = new URL(src);
+        const host = imageUrl.hostname.toLowerCase();
+        if (host === 'images.komiwa.net' && imageUrl.pathname.startsWith('/komiwa-images/covers/')) return false;
         return host === 'media.mangavault.lat' || host === 'images.komiwa.net'
-          || host === 'cdnlxd.xyz' || host.endsWith('.cdnlxd.xyz');
+          || host === 'cdnlxd.xyz' || host.endsWith('.cdnlxd.xyz')
+          || host === 't34798ndc.com' || host.endsWith('.t34798ndc.com');
       })
       .filter((src, index, list) => list.indexOf(src) === index);
     if (!pages.length) throw new Error('Komiwa no entregó páginas legibles para este capítulo.');

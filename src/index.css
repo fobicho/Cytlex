@@ -1015,6 +1015,7 @@ img.manga-cover-corners {
 
 .sidebar-ribbon-segment {
   gap: 0.75rem;
+  padding-right: 0.75rem;
 }
 
 .sidebar-ribbon-separator {
