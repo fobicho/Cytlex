@@ -12,6 +12,50 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     try { return new URL(value, base).href; } catch { return ''; }
   };
 
+  function encryptedChapterPages(html) {
+    const source = String(html || '');
+    const key = source.match(/--rk:\s*\\?"([^"\\]+)\\?"/)?.[1];
+    if (!key) return [];
+
+    const stream = [...source.matchAll(/self\.__next_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)/g)]
+      .map(([, chunk]) => {
+        try { return JSON.parse(chunk); } catch { return ''; }
+      })
+      .join('');
+    const reference = stream.match(/"__r"\s*:\s*"\$(\d+)"/)?.[1];
+    if (!reference) return [];
+
+    const row = stream.match(new RegExp(`(?:^|\\n)${reference}:T([0-9a-f]+),`, 'i'));
+    if (!row) return [];
+    const length = Number.parseInt(row[1], 16);
+    const start = row.index + row[0].length;
+    const encoded = stream.slice(start, start + length);
+    if (!length || encoded.length !== length || !/^[A-Za-z0-9_-]+$/.test(encoded) || length % 4 === 1) return [];
+
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const bytes = [];
+    for (let offset = 0; offset < encoded.length; offset += 4) {
+      const a = alphabet.indexOf(encoded[offset]);
+      const b = alphabet.indexOf(encoded[offset + 1]);
+      const c = offset + 2 < encoded.length ? alphabet.indexOf(encoded[offset + 2]) : -1;
+      const d = offset + 3 < encoded.length ? alphabet.indexOf(encoded[offset + 3]) : -1;
+      bytes.push((a << 2) | (b >> 4));
+      if (c >= 0) bytes.push(((b & 15) << 4) | (c >> 2));
+      if (d >= 0) bytes.push(((c & 3) << 6) | d);
+    }
+
+    const keyBytes = new TextEncoder().encode(key);
+    for (let index = 0; index < bytes.length; index++) {
+      bytes[index] ^= keyBytes[index % keyBytes.length] ^ (255 & index);
+    }
+    try {
+      const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(bytes)));
+      return Array.isArray(payload.p) ? payload.p : [];
+    } catch {
+      return [];
+    }
+  }
+
   async function json(path, body, requestId) {
     const raw = await fetchPostText({
       url: `${api}${path}`,
@@ -162,9 +206,9 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       .replace(/\\+u002f/gi, '/')
       .replace(/\\+\//g, '/')
       .replace(/\\+"/g, '"');
+    let embeddedUrls = encryptedChapterPages(html);
     const imageSigsMatch = serializedHtml.match(/"imageSigs"\s*:\s*(\{[^{}]*\})/);
-    let embeddedUrls = [];
-    if (imageSigsMatch) {
+    if (!embeddedUrls.length && imageSigsMatch) {
       try { embeddedUrls = Object.keys(JSON.parse(imageSigsMatch[1])); } catch {}
     }
     if (!embeddedUrls.length) {
