@@ -145,15 +145,15 @@
     }
   },
   {
-    "id": "yupmanga",
-    "name": "YupManga",
+    "id": "lectorxd",
+    "name": "LectorXD",
     "lang": "es",
-    "version": "1.0.1",
+    "version": "1.0.0",
     "type": "module",
     "contentWarning": "MIXED",
-    "main": "ext/yupmanga.js",
-    "baseUrl": "https://www.yupmanga.com",
-    "icon": "https://www.google.com/s2/favicons?domain=yupmanga.com&sz=128",
-    "desc": "Manga y manhwa en español."
+    "main": "ext/lectorxd.js",
+    "baseUrl": "https://lectorxd.com",
+    "icon": "https://www.google.com/s2/favicons?domain=lectorxd.com&sz=128",
+    "desc": "Manga, manhwa, manhua y doujinshi en español."
   }
 ]

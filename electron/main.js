@@ -154,8 +154,7 @@ const REFERER_RULES = [
   { hosts: ['zonatmo.org'], referer: 'https://zonatmo.org/' },
   { hosts: ['ntr-files.online'], referer: 'https://manga-oni.com/' },
   { hosts: ['inmanga.com', 'intomanga.com', 'pack-yak.intomanga.com'], referer: 'https://inmanga.com/' },
-  { hosts: ['images.komiwa.net', 'media.mangavault.lat', 'cdnlxd.xyz'], referer: 'https://www.komiwa.net/' },
-  { hosts: ['yupmanga.com'], referer: 'https://www.yupmanga.com/' }
+  { hosts: ['images.komiwa.net', 'media.mangavault.lat', 'cdnlxd.xyz'], referer: 'https://www.komiwa.net/' }
 ];
 
 const ALLOWED_PROTOCOLS = ['http:', 'https:'];
@@ -855,7 +854,9 @@ ipcMain.handle('image:fetch', async (_e, url, requestedReferer, requestedCookie)
     const host = parsed.hostname.toLowerCase();
     const mangaDexImage = host === 'uploads.mangadex.org';
     const onfImage = parsed.origin === 'https://onfmangas.com' && parsed.pathname.startsWith('/reader_image.php/');
+    const cdnlxdImage = host === 'cdnlxd.xyz' || host.endsWith('.cdnlxd.xyz');
     let imageReferer = refererFor(urlStr);
+    if (cdnlxdImage && parsed.pathname.startsWith('/manga/covers/')) imageReferer = 'https://lectorxd.com/';
     if ((host === 'd33y4i2dmzjqjh.cloudfront.net' || onfImage) && typeof requestedReferer === 'string') {
       try {
         const candidate = validateUrl(requestedReferer);
@@ -864,20 +865,18 @@ ipcMain.handle('image:fetch', async (_e, url, requestedReferer, requestedCookie)
         }
       } catch {}
     }
-    if ((host === 'media.mangavault.lat' || host === 'cdnlxd.xyz' || host.endsWith('.cdnlxd.xyz')
+    if ((host === 'media.mangavault.lat' || cdnlxdImage
       || host === 't34798ndc.com' || host.endsWith('.t34798ndc.com'))
       && typeof requestedReferer === 'string') {
       try {
         const candidate = validateUrl(requestedReferer);
         if (candidate.origin === 'https://www.komiwa.net' && candidate.pathname.startsWith('/chapter/')) {
           imageReferer = candidate.href;
-        }
-      } catch {}
-    }
-    if ((host === 'www.yupmanga.com' || host === 'yupmanga.com') && typeof requestedReferer === 'string') {
-      try {
-        const candidate = validateUrl(requestedReferer);
-        if (candidate.origin === 'https://www.yupmanga.com' && candidate.pathname === '/reader_v2.php') {
+        } else if (
+          cdnlxdImage
+          && ['https://lectorxd.com', 'https://www.lectorxd.com'].includes(candidate.origin)
+          && /^\/(?:manga|manhwa|manhua|doujinshi|one-shot)\/[^/]+\/leer\/[^/]+\/?$/.test(candidate.pathname)
+        ) {
           imageReferer = candidate.href;
         }
       } catch {}

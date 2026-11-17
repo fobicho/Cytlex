@@ -20,11 +20,13 @@ Se publica con GitHub Pages desde la carpeta `docs/`, así que cualquier commit 
 | `zonatmo` | ZonaTMO | module |
 | `mangaoni` | MangaOni | module |
 | `inmanga` | InManga | module |
+| `lectorxd` | LectorXD | module |
 
 MangaLect, ONF y Olympus se escribieron a partir del catálogo de
 [Keiyoushi](https://github.com/keiyoushi/extensions), que publica en Kotlin para
 Mihon. Como Cytlex es Electron, el código no sirve tal cual y hubo que reescribir
-cada fuente. ZonaTMO, MangaOni e InManga van directas contra sus webs.
+cada fuente. LectorXD también sigue el flujo de páginas HTML y datos Astro de su
+extensión de Keiyoushi. ZonaTMO, MangaOni e InManga van directas contra sus webs.
 
 ## Añadir una fuente
 

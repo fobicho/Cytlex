@@ -38,7 +38,6 @@ export function browserImageUrl(url, referer = '') {
       || hostname === 'olympusxyz.com' || hostname.endsWith('.olympusxyz.com')
       || hostname === 'ntr-files.online' || hostname.endsWith('.ntr-files.online')
       || hostname === 'www.leercapitulo.co' || hostname === 'leercapitulo.co' || hostname.endsWith('.t34798ndc.com')
-      || hostname === 'www.yupmanga.com' || hostname === 'yupmanga.com'
       || hostname === 'zonatmo.org' || hostname.endsWith('.zonatmo.org');
     if (hostname === 'intomanga.com' || hostname.endsWith('.intomanga.com') || onfCdn || mangaDexImage || sourceImage || (hostname === 'onfmangas.com' && referer)) {
       const proxy = new URL(proxyUrl(url));
@@ -78,6 +77,8 @@ async function browserRequest(url, options = {}) {
   const { onfCookie = '', onfReferer = '', ...fetchOptions } = options;
   const requestHeaders = new Headers(fetchOptions.headers || {});
   const isOnf = target.origin === 'https://onfmangas.com';
+  const isCdnlxdImage = target.hostname === 'cdnlxd.xyz' || target.hostname.endsWith('.cdnlxd.xyz');
+  const proxyReferer = isOnf || isCdnlxdImage ? onfReferer : '';
   const requestCookie = isOnf ? mergeCookiePairs(onfCookieJar, onfCookie) : '';
   if (isOnf && requestCookie) requestHeaders.set('x-cytlex-onf-cookie', requestCookie);
   let response;
@@ -90,7 +91,7 @@ async function browserRequest(url, options = {}) {
     response = await fetch(url, directOptions);
   } else {
     try {
-      let proxied = await fetch(proxyUrl(url, isOnf ? onfReferer : ''), proxyRequestOptions(url, requestOptions, requestCookie));
+      let proxied = await fetch(proxyUrl(url, proxyReferer), proxyRequestOptions(url, requestOptions, requestCookie));
       const proxyIsLive = proxied.headers.get('x-cytlex-proxy') === '1';
       proxyDeniedTarget = proxied.headers.get('x-cytlex-proxy-denied') === '1';
       usedProxy = proxyIsLive && !proxyDeniedTarget;
@@ -101,7 +102,7 @@ async function browserRequest(url, options = {}) {
         if (receivedCookie) onfCookieJar = nextCookie;
         if (nextCookie && nextCookie !== requestCookie && (fetchOptions.method || 'GET').toUpperCase() === 'GET') {
           try { await proxied.body?.cancel(); } catch {}
-          proxied = await fetch(proxyUrl(url, onfReferer), proxyRequestOptions(url, requestOptions, nextCookie));
+          proxied = await fetch(proxyUrl(url, proxyReferer), proxyRequestOptions(url, requestOptions, nextCookie));
           const refreshedCookie = proxied.headers.get('x-cytlex-onf-cookie') || '';
           if (refreshedCookie) onfCookieJar = mergeCookiePairs(nextCookie, refreshedCookie);
           response = proxied;
@@ -236,20 +237,6 @@ async function readImageBlob(response) {
   return mime ? blob.slice(0, blob.size, mime) : null;
 }
 
-function imageRequestOptions(url, signal, referer, onfCookie) {
-  let isYupManga = false;
-  try {
-    const { hostname } = new URL(url);
-    isYupManga = hostname === 'www.yupmanga.com' || hostname === 'yupmanga.com';
-  } catch {}
-  return {
-    signal,
-    onfReferer: referer,
-    onfCookie,
-    ...(isYupManga && referer ? { headers: { Referer: referer } } : {})
-  };
-}
-
 export async function fetchImageBlob(url, signal, referer = '', onfCookie = '') {
   const bridge = electronBridge();
   if (bridge?.fetchImage) {
@@ -260,7 +247,7 @@ export async function fetchImageBlob(url, signal, referer = '', onfCookie = '') 
     const mime = imageMimeFromBytes(bytes, image.mime);
     return mime ? new Blob([bytes], { type: mime }) : null;
   }
-  return readImageBlob(await browserRequest(url, imageRequestOptions(url, signal, referer, onfCookie)));
+  return readImageBlob(await browserRequest(url, { signal, onfReferer: referer, onfCookie }));
 }
 
 function imageFromBase64(image) {
@@ -280,7 +267,7 @@ export async function fetchImage(url, signal, referer = '', onfCookie = '') {
     const image = await bridge.fetchImage(url, referer, onfCookie);
     return signal?.aborted ? null : imageFromBase64(image);
   }
-  const response = await browserRequest(url, imageRequestOptions(url, signal, referer, onfCookie));
+  const response = await browserRequest(url, { signal, onfReferer: referer, onfCookie });
   const blob = await response.blob();
   return validImageResult(new Uint8Array(await blob.arrayBuffer()), blob.type || response.headers.get('content-type') || '');
 }

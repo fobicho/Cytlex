@@ -9,7 +9,7 @@ const KEY = 'cytlex:extensions:v1';
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
 const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
 export const SOURCE_CONFIG_CHANGE_EVENT = 'cytlex:source-config-changed';
-export const isRetiredExtension = (id) => id === 'plottwistnofansub';
+export const isRetiredExtension = (id) => id === 'plottwistnofansub' || id === 'yupmanga';
 export const isUnavailableMangaSource = (id) => isRetiredExtension(id) || isUnresolvedMihonSource(id);
 const keepInstalledExtension = (record) => record?.manifest?.type !== 'builtin'
   && !isUnavailableMangaSource(record?.manifest?.id);
@@ -353,7 +353,11 @@ export const extensions = {
     return out;
   },
   manifest(id) {
-    if (isRetiredExtension(id)) return { id, name: 'Plot Twist No Fansub', contentWarning: 'MIXED' };
+    if (isRetiredExtension(id)) return {
+      id,
+      name: id === 'yupmanga' ? 'YupManga' : 'Plot Twist No Fansub',
+      contentWarning: 'MIXED'
+    };
     const rec = findRecord(id);
     if (!rec) {
       const fallback = defaultExtensionIndex.find((manifest) => manifest.id === id

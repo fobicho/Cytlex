@@ -10,6 +10,7 @@ const ALLOWED_HOSTS = new Set([
   'inmanga.com',
   'intomanga.com',
   'jumpg-assets.tokyo-cdn.com',
+  'lectorxd.com',
   'manga-oni.com',
   'media.mangavault.lat',
   'mangalect.org',
@@ -22,8 +23,7 @@ const ALLOWED_HOSTS = new Set([
   'uploads.mangadex.org',
   'www.leercapitulo.co',
   'www.komiwa.net',
-  'www.yupmanga.com',
-  'yupmanga.com',
+  'www.lectorxd.com',
   'zonatmo.org'
 ]);
 
@@ -156,16 +156,19 @@ function onfReferer(request) {
   return 'https://onfmangas.com/';
 }
 
-function yupmangaReferer(request) {
-  const value = request.headers.get('x-cytlex-upstream-referer')
-    || new URL(request.url).searchParams.get('referer');
+function cdnlxdReferer(request, target) {
+  const value = new URL(request.url).searchParams.get('referer');
   if (value) {
     try {
       const referer = new URL(value);
-      if (referer.origin === 'https://www.yupmanga.com' && referer.pathname === '/reader_v2.php') return referer.href;
+      if (referer.origin === 'https://www.komiwa.net' && referer.pathname.startsWith('/chapter/')) return referer.href;
+      if (
+        ['https://lectorxd.com', 'https://www.lectorxd.com'].includes(referer.origin)
+        && /^\/(?:manga|manhwa|manhua|doujinshi|one-shot)\/[^/]+\/leer\/[^/]+\/?$/.test(referer.pathname)
+      ) return referer.href;
     } catch {}
   }
-  return 'https://www.yupmanga.com/';
+  return target.pathname.startsWith('/manga/covers/') ? 'https://lectorxd.com/' : 'https://www.komiwa.net/';
 }
 
 function forwardedHeaders(request, target) {
@@ -209,8 +212,11 @@ function forwardedHeaders(request, target) {
   if (target.hostname === 'images.mangalect.org' || target.hostname === 'mangalect.org') {
     headers.set('referer', 'https://mangalect.org/');
   }
-  if (target.hostname === 'www.yupmanga.com' || target.hostname === 'yupmanga.com') {
-    headers.set('referer', yupmangaReferer(request));
+  if (target.hostname === 'cdnlxd.xyz' || target.hostname.endsWith('.cdnlxd.xyz')) {
+    headers.set('referer', cdnlxdReferer(request, target));
+  }
+  if (target.hostname === 'lectorxd.com' || target.hostname === 'www.lectorxd.com') {
+    if (!headers.has('referer')) headers.set('referer', 'https://lectorxd.com/');
   }
   if (target.hostname === 'imagesolymp.xyz' || target.hostname === 'olympusxyz.com' || target.hostname.endsWith('.olympusxyz.com')) {
     headers.set('referer', 'https://olympusxyz.com/');
