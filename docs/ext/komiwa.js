@@ -22,7 +22,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
         try { return JSON.parse(chunk); } catch { return ''; }
       })
       .join('');
-    const reference = stream.match(/"__r"\s*:\s*"\$(\d+)"/)?.[1];
+    const reference = stream.match(/"__r"\s*:\s*"\$([0-9a-z]+)"/)?.[1];
     if (!reference) return [];
 
     const row = stream.match(new RegExp(`(?:^|\\n)${reference}:T([0-9a-f]+),`, 'i'));
