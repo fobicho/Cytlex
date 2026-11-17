@@ -319,6 +319,11 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
 
   function findReaderAccess(html, outer) {
     const tokenPattern = /^[A-Za-z0-9_-]{128,}$/;
+    const readerTicket = html.match(
+      /(?:window\.)?onfReaderPagesPromise\s*=\s*[\s\S]{0,12000}?\)\s*\(\s*["']([A-Za-z0-9_-]{128,4096})["']\s*\)\s*:\s*Promise\.resolve\b/i
+    );
+    if (readerTicket) return readerTicket[1];
+
     const readerAccessNodes = [
       outer.querySelector('#viewerContainer[data-reader-access]'),
       ...outer.querySelectorAll('[data-reader-access]')
@@ -443,29 +448,27 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     }
     const outer = parse(html);
     let pages = decodePageImages(html, outer, url);
+    const access = findReaderAccess(html, outer);
     let readerPagesInfo = typeof fetchPostText === 'function' ? 'sin acceso del lector' : 'solicitud POST no disponible';
-    if (typeof fetchPostText === 'function') {
-      const access = findReaderAccess(html, outer);
-      if (access) {
-        try {
-          const response = await fetchPostText({
-            url: `${base}/reader_pages.php`,
-            body: { access },
-            headers: {
-              Accept: 'application/json',
-              'Content-Type': 'application/json',
-              'X-Requested-With': 'XMLHttpRequest'
-            },
-            onfCookie,
-            onfReferer: url
-          });
-          const completePages = decodeReaderPageResponse(response, url);
-          readerPagesInfo = `${completePages.length} paneles recibidos`;
-          if (completePages.length >= pages.length) pages = completePages;
-        } catch (error) {
-          readerPagesInfo = `falló (${String(error?.message || error).slice(0, 140)})`;
-          // Keep any image URLs embedded in the chapter if the page-list endpoint is temporarily unavailable.
-        }
+    if (typeof fetchPostText === 'function' && access) {
+      try {
+        const response = await fetchPostText({
+          url: `${base}/reader_pages.php`,
+          body: { access },
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          onfCookie,
+          onfReferer: url
+        });
+        const completePages = decodeReaderPageResponse(response, url);
+        readerPagesInfo = `${completePages.length} paneles recibidos`;
+        if (completePages.length >= pages.length) pages = completePages;
+      } catch (error) {
+        readerPagesInfo = `falló (${String(error?.message || error).slice(0, 140)})`;
+        // Keep any image URLs embedded in the chapter if the page-list endpoint is temporarily unavailable.
       }
     }
     if (!pages.length) {
@@ -483,8 +486,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       const blocked = !!challengePhrase || challengeTitle || (challengeMarkup && !looksLikeOnfChapter);
       const viewer = outer.querySelector('#viewerContainer');
       const pagePayload = viewer?.getAttribute('data-reader-pages') || '';
-      const readerAccess = viewer?.getAttribute('data-reader-access')?.trim() || '';
-      const readerInfo = `#viewerContainer ${viewer ? 'presente' : 'ausente'}, data-reader-access ${readerAccess ? `${readerAccess.length} caracteres` : 'vacío'}, data-reader-pages ${pagePayload ? `${pagePayload.length} caracteres` : 'vacío'}, reader_pages.php: ${readerPagesInfo}, imágenes HTML: ${outer.querySelectorAll('img').length}`;
+      const readerInfo = `#viewerContainer ${viewer ? 'presente' : 'ausente'}, access ${access ? `${access.length} caracteres` : 'no detectado'}, data-reader-pages ${pagePayload ? `${pagePayload.length} caracteres` : 'vacío'}, reader_pages.php: ${readerPagesInfo}, imágenes HTML: ${outer.querySelectorAll('img').length}`;
       const responseInfo = [
         challengePhrase?.[0] || (challengeTitle ? 'título de verificación' : challengeMarkup && !looksLikeOnfChapter ? 'marcas de desafío anti-bot' : ''),
         responseTitle && `título: «${responseTitle}»`,
