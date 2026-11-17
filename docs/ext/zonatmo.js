@@ -112,8 +112,8 @@ export default function createSource({ fetchText, parse }) {
   async function detail(mangaUrl) {
     const doc = parse(await fetchText(abs(mangaUrl)));
 
-    const h1 = doc.querySelector('h1.element-title');
-    const title = ((h1?.firstChild?.textContent || '') || '').replace(/\s+/g, ' ').trim();
+    const h1 = doc.querySelector('h1.zt-hd__title, h1.element-title');
+    const title = (h1?.firstChild?.textContent || h1?.textContent || '').replace(/\s+/g, ' ').trim();
 
     const genres = [];
     const genreHeading = [...doc.querySelectorAll('h5.element-subtitle')]

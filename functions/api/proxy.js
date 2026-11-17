@@ -21,6 +21,7 @@ const ALLOWED_HOSTS = new Set([
   'onfmangas.com',
   'panel.olympusxyz.com',
   'pack-yak.intomanga.com',
+  's.imgfi.com',
   'uploads.mangadex.org',
   'www.leercapitulo.co',
   'www.komiwa.net',
@@ -157,12 +158,23 @@ function onfReferer(request) {
   return 'https://onfmangas.com/';
 }
 
+function komiwaChapterReferer(request) {
+  const value = new URL(request.url).searchParams.get('referer');
+  if (!value) return '';
+  try {
+    const referer = new URL(value);
+    if (referer.origin === 'https://www.komiwa.net' && referer.pathname.startsWith('/chapter/')) return referer.href;
+  } catch {}
+  return '';
+}
+
 function cdnlxdReferer(request, target) {
+  const komiwaReferer = komiwaChapterReferer(request);
+  if (komiwaReferer) return komiwaReferer;
   const value = new URL(request.url).searchParams.get('referer');
   if (value) {
     try {
       const referer = new URL(value);
-      if (referer.origin === 'https://www.komiwa.net' && referer.pathname.startsWith('/chapter/')) return referer.href;
       if (
         ['https://lectorxd.com', 'https://www.lectorxd.com'].includes(referer.origin)
         && /^\/(?:manga|manhwa|manhua|doujinshi|one-shot)\/[^/]+\/leer\/[^/]+\/?$/.test(referer.pathname)
@@ -170,6 +182,14 @@ function cdnlxdReferer(request, target) {
     } catch {}
   }
   return target.pathname.startsWith('/manga/covers/') ? 'https://lectorxd.com/' : 'https://www.komiwa.net/';
+}
+
+function t34798Referer(request) {
+  return komiwaChapterReferer(request) || 'https://www.leercapitulo.co/';
+}
+
+function komiwaImageReferer(request) {
+  return komiwaChapterReferer(request) || 'https://www.komiwa.net/';
 }
 
 function forwardedHeaders(request, target) {
@@ -213,6 +233,9 @@ function forwardedHeaders(request, target) {
   if (target.hostname === 'images.mangalect.org' || target.hostname === 'mangalect.org') {
     headers.set('referer', 'https://mangalect.org/');
   }
+  if (target.hostname === 'images.komiwa.net' || target.hostname === 's.imgfi.com' || target.hostname === 'media.mangavault.lat') {
+    headers.set('referer', komiwaImageReferer(request));
+  }
   if (target.hostname === 'cdnlxd.xyz' || target.hostname.endsWith('.cdnlxd.xyz')) {
     headers.set('referer', cdnlxdReferer(request, target));
   }
@@ -225,8 +248,11 @@ function forwardedHeaders(request, target) {
   if (target.hostname === 'ntr-files.online' || target.hostname.endsWith('.ntr-files.online')) {
     headers.set('referer', 'https://manga-oni.com/');
   }
-  if (target.hostname === 'www.leercapitulo.co' || target.hostname === 'leercapitulo.co' || target.hostname.endsWith('.t34798ndc.com')) {
+  if (target.hostname === 'www.leercapitulo.co' || target.hostname === 'leercapitulo.co') {
     headers.set('referer', 'https://www.leercapitulo.co/');
+  }
+  if (target.hostname === 't34798ndc.com' || target.hostname.endsWith('.t34798ndc.com')) {
+    headers.set('referer', t34798Referer(request));
   }
   if (target.hostname === 'zonatmo.org' || target.hostname.endsWith('.zonatmo.org')) {
     headers.set('referer', 'https://zonatmo.org/');

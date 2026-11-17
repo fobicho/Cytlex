@@ -271,7 +271,7 @@ function ReaderPanel({ id, src, displaySrc = '', preloadFailed, preloadError, so
           }
           setStatus('error');
         }}
-        className={cn(imageClassName, loading === 'lazy' && 'transition-opacity duration-150', status === 'loaded' ? 'opacity-100' : 'opacity-0')}
+        className={cn('select-none', imageClassName, loading === 'lazy' && 'transition-opacity duration-150', status === 'loaded' ? 'opacity-100' : 'opacity-0')}
       />}
     </div>
   );
@@ -927,7 +927,7 @@ export default function Reader() {
   const chapterArrowClass = 'h-full w-7 shrink-0 rounded-none bg-[color:var(--reader-arrow-bg)] text-foreground transition-colors hover:bg-[color:var(--reader-control-hover)] disabled:opacity-30 focus-visible:z-10 focus-visible:ring-inset active:scale-100';
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <header
         className="relative z-20 grid shrink-0 grid-cols-1 items-center gap-x-3 gap-y-0 border-b border-border bg-card px-2 py-1 [--reader-control-height:2.5rem] md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-3 md:py-0 md:[--reader-control-height:var(--reader-control-height-desktop)]"
         style={{
@@ -1176,7 +1176,7 @@ export default function Reader() {
         >
           <div
             ref={zoomContentRef}
-            className="relative flex h-full w-full items-center justify-center"
+            className="absolute inset-0 flex items-center justify-center"
             style={{
               transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${1 + wheelZoom / 100})`,
               transition: dragging || instantZoomReset ? 'none' : 'transform 140ms ease-out',
@@ -1199,7 +1199,7 @@ export default function Reader() {
                        alt={`Página ${idx + 1}`}
                        onContextMenu={(e, url) => openPanelMenu(e, url, `Página ${idx + 1}`)}
                        wrapperClassName="grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] h-full min-h-0 min-w-0 flex-1"
-                       imageClassName={cn('block h-full w-auto max-w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
+                       imageClassName={cn('block max-h-full max-w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                      />
                    );
                  });
@@ -1213,7 +1213,7 @@ export default function Reader() {
                 alt={`Página ${page + 1}`}
                 onContextMenu={(e, url) => openPanelMenu(e, url, `Página ${page + 1}`)}
                 wrapperClassName="grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] h-full min-h-0 w-full"
-                imageClassName={cn('block h-full w-auto max-w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
+                imageClassName={cn('block max-h-full max-w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                />
            )}
           </div>

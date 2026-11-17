@@ -154,7 +154,7 @@ const REFERER_RULES = [
   { hosts: ['zonatmo.org'], referer: 'https://zonatmo.org/' },
   { hosts: ['ntr-files.online'], referer: 'https://manga-oni.com/' },
   { hosts: ['inmanga.com', 'intomanga.com', 'pack-yak.intomanga.com'], referer: 'https://inmanga.com/' },
-  { hosts: ['images.komiwa.net', 'media.mangavault.lat', 'cdnlxd.xyz'], referer: 'https://www.komiwa.net/' }
+  { hosts: ['images.komiwa.net', 'media.mangavault.lat', 'cdnlxd.xyz', 's.imgfi.com'], referer: 'https://www.komiwa.net/' }
 ];
 
 const ALLOWED_PROTOCOLS = ['http:', 'https:'];

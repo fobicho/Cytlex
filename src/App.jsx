@@ -327,7 +327,9 @@ export default function App({ isVisible = true, tutorialMode = false }) {
             ref={mainRef}
             inert={tutorialMode}
             className={`min-h-0 min-w-0 flex-1 overflow-y-auto [overflow-anchor:none]${isMangaPage && !isMigrationSearchPage ? ' detail-main [scrollbar-gutter:stable]' : ''}${isElectronApp && isLibraryPage ? ' no-scrollbar' : ''}${isElectronApp && isMigrationSearchPage ? ' browser-main--subroutes' : ''}${isReader || isSettingsPage || isExplorePage || isLibraryPage || isMangaPage ? '' : ' [scrollbar-gutter:stable]'}${isElectronApp ? '' : ` browser-main${isReader ? ' browser-main--reader' : ''}${isSettingsPage ? ' browser-main--settings' : ''}${isExplorePage || isLibraryPage || isMigrationSearchPage ? ' browser-main--subroutes' : ''}`}`}
-            style={isReader ? undefined : isMigrationSearchPage
+            style={isReader
+              ? { display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+              : isMigrationSearchPage
               ? { padding: 0, overflowY: 'hidden', '--web-page-padding': `${Math.max(14, Math.round(24 * scale))}px` }
               : isElectronApp
               ? { padding: `${isMangaPage ? Math.max(12, Math.round(16 * scale)) : Math.max(16, Math.round(24 * scale))}px`, ...(isMangaPage ? { paddingTop: 0, paddingRight: `${Math.max(0, Math.max(12, Math.round(16 * scale)) - detailScrollbarWidth)}px`, '--detail-right-padding': `${Math.max(0, Math.max(12, Math.round(16 * scale)) - detailScrollbarWidth)}px` } : {}) }

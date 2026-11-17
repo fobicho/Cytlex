@@ -685,7 +685,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       {selected && (
         <>
           <div className="flex min-w-0 items-center" style={{ gap: px(10, scale, 8), minHeight: px(36, scale, 30) }}>
-            <Button type="button" variant="ghost" size="icon" onClick={() => { sourceCatalogState.clear(); setSourceId(''); }} title="Volver a Fuentes" aria-label="Volver a Fuentes" style={{ width: px(34, scale, 28), height: px(34, scale, 28) }}>
+            <Button type="button" variant="ghost" size="icon" className="hover:bg-transparent hover:text-foreground" onClick={() => { sourceCatalogState.clear(); setSourceId(''); }} title="Volver a Fuentes" aria-label="Volver a Fuentes" style={{ width: px(34, scale, 28), height: px(34, scale, 28) }}>
               <ArrowLeft style={{ width: px(18, scale, 15), height: px(18, scale, 15) }} />
             </Button>
             <SourceBadge m={selected.manifest} style={{ width: px(30, scale, 24), height: px(30, scale, 24) }} />

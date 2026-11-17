@@ -32,7 +32,7 @@ export function browserImageUrl(url, referer = '') {
     const onfCdn = hostname === 'd33y4i2dmzjqjh.cloudfront.net';
     const mangaDexImage = hostname === 'uploads.mangadex.org' || hostname.endsWith('.mangadex.network');
     const sourceImage = hostname === 'images.mangalect.org' || hostname === 'mangalect.org'
-      || hostname === 'images.komiwa.net' || hostname === 'blogger.googleusercontent.com' || hostname === 'media.mangavault.lat'
+      || hostname === 'images.komiwa.net' || hostname === 'blogger.googleusercontent.com' || hostname === 's.imgfi.com' || hostname === 'media.mangavault.lat'
       || hostname === 'cdnlxd.xyz' || hostname.endsWith('.cdnlxd.xyz')
       || hostname === 'imagesolymp.xyz' || hostname === 'media.imagesolymp.xyz'
       || hostname === 'olympusxyz.com' || hostname.endsWith('.olympusxyz.com')
@@ -78,7 +78,9 @@ async function browserRequest(url, options = {}) {
   const requestHeaders = new Headers(fetchOptions.headers || {});
   const isOnf = target.origin === 'https://onfmangas.com';
   const isCdnlxdImage = target.hostname === 'cdnlxd.xyz' || target.hostname.endsWith('.cdnlxd.xyz');
-  const proxyReferer = isOnf || isCdnlxdImage ? onfReferer : '';
+  const isKomiwaImage = ['images.komiwa.net', 's.imgfi.com', 'media.mangavault.lat'].includes(target.hostname);
+  const isT34798Image = target.hostname === 't34798ndc.com' || target.hostname.endsWith('.t34798ndc.com');
+  const proxyReferer = isOnf || isCdnlxdImage || isKomiwaImage || isT34798Image ? onfReferer : '';
   const requestCookie = isOnf ? mergeCookiePairs(onfCookieJar, onfCookie) : '';
   if (isOnf && requestCookie) requestHeaders.set('x-cytlex-onf-cookie', requestCookie);
   let response;
@@ -239,15 +241,22 @@ async function readImageBlob(response) {
 
 export async function fetchImageBlob(url, signal, referer = '', onfCookie = '') {
   const bridge = electronBridge();
-  if (bridge?.fetchImage) {
-    const image = await bridge.fetchImage(url, referer, onfCookie);
-    if (signal?.aborted || !image?.base64) return null;
-    const binary = atob(image.base64);
-    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-    const mime = imageMimeFromBytes(bytes, image.mime);
-    return mime ? new Blob([bytes], { type: mime }) : null;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      if (bridge?.fetchImage) {
+        const image = await bridge.fetchImage(url, referer, onfCookie);
+        if (signal?.aborted || !image?.base64) return null;
+        const binary = atob(image.base64);
+        const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+        const mime = imageMimeFromBytes(bytes, image.mime);
+        return mime ? new Blob([bytes], { type: mime }) : null;
+      }
+      return readImageBlob(await browserRequest(url, { signal, onfReferer: referer, onfCookie }));
+    } catch (error) {
+      if (signal?.aborted || error?.status || attempt >= 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+    }
   }
-  return readImageBlob(await browserRequest(url, { signal, onfReferer: referer, onfCookie }));
 }
 
 function imageFromBase64(image) {

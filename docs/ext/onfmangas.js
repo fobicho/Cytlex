@@ -351,14 +351,22 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
   }
 
   function decodeChapters(html) {
-    const m = html.match(/_hex\s*=\s*"([0-9a-fA-F]+)"/);
-    if (!m) return [];
     let list;
-    try {
-      const decoded = decodeURIComponent(m[1].replace(/(..)/g, '%$1'));
-      list = JSON.parse(decoded);
-    } catch {
-      return [];
+
+    const currentData = html.match(/\b(?:const|let|var)\s+chaptersData\s*=\s*(\[[\s\S]*?\])\s*;\s*(?:const|let|var)\s+MANGA_ID\b/);
+    if (currentData) {
+      try { list = JSON.parse(currentData[1]); } catch {}
+    }
+
+    if (!Array.isArray(list)) {
+      const legacyData = html.match(/_hex\s*=\s*"([0-9a-fA-F]+)"/);
+      if (!legacyData) return [];
+      try {
+        const decoded = decodeURIComponent(legacyData[1].replace(/(..)/g, '%$1'));
+        list = JSON.parse(decoded);
+      } catch {
+        return [];
+      }
     }
     if (!Array.isArray(list)) return [];
     return list
