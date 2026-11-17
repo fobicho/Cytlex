@@ -23,15 +23,11 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     return result.data;
   }
 
-  async function fetchCatalogData(body, requestId) {
-    try {
-      return await json('/manga/catalog', body, requestId);
-    } catch (error) {
-      if (body.sortBy !== 'lastUpdateAt' || error?.requestOrigin !== 'source' || Number(error?.status) !== 500) {
-        throw error;
-      }
-      return json('/manga/catalog', { ...body, sortBy: 'views' }, requestId);
-    }
+  async function getJson(path, requestId) {
+    const raw = await fetchText(`${api}${path}`, requestId);
+    const result = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!result?.success || !result.data) throw new Error('Komiwa devolvió una respuesta no válida.');
+    return result.data;
   }
 
   const rememberManga = (item) => {
@@ -54,20 +50,27 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
 
   async function catalog({ q = '', page = 1, sort = '', __cytlexRequestId } = {}) {
     const currentPage = Math.max(1, Number(page) || 1);
-    const data = clean(q)
-      ? await json('/manga/search', { q: clean(q), limit: pageSize, ...(currentPage > 1 ? { page: currentPage } : {}) }, __cytlexRequestId)
-      : await fetchCatalogData({
+    const query = clean(q);
+    const recentFeed = !query && !['rating', 'title', 'views'].includes(sort);
+    const data = query
+      ? await json('/manga/search', { q: query, limit: pageSize, ...(currentPage > 1 ? { page: currentPage } : {}) }, __cytlexRequestId)
+      : recentFeed
+        ? await getJson(`/manga/recent-chapters?page=${currentPage}&limit=${pageSize}`, __cytlexRequestId)
+        : await json('/manga/catalog', {
         sortBy: sort === 'rating' ? 'rating' : sort === 'title' ? 'title' : sort === 'views' ? 'views' : 'lastUpdateAt',
         sortOrder: sort === 'title' ? 'asc' : 'desc',
         limit: pageSize,
         ...(currentPage > 1 ? { page: currentPage } : {})
       }, __cytlexRequestId);
-    const items = (data.items || []).map(mangaResult).filter((item) => item.title && item.url);
+    const items = [...new Map((data.items || [])
+      .map((item) => mangaResult(item.manga ? { ...item.manga, lastChapter: item.number } : item))
+      .filter((item) => item.title && item.url)
+      .map((item) => [item.url, item])).values()];
     const total = Number(data.total) || 0;
     return {
       items,
       totalPages: data.hasMore ? currentPage + 1 : Math.max(1, currentPage),
-      totalText: total ? String(total) : ''
+      totalText: total && !recentFeed ? String(total) : ''
     };
   }
 
