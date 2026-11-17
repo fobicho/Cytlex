@@ -319,23 +319,29 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
 
   function findReaderAccess(html, outer) {
     const tokenPattern = /^[A-Za-z0-9_-]{128,}$/;
-    const readerAccess = outer.querySelector('#viewerContainer[data-reader-access]')
-      ?.getAttribute('data-reader-access')?.trim();
-    if (readerAccess && readerAccess.length <= 4096 && !/[\s\u0000-\u001f]/.test(readerAccess)) return readerAccess;
+    const readerAccessNodes = [
+      outer.querySelector('#viewerContainer[data-reader-access]'),
+      ...outer.querySelectorAll('[data-reader-access]')
+    ].filter(Boolean);
+    for (const node of new Set(readerAccessNodes)) {
+      const readerAccess = node.getAttribute('data-reader-access')?.trim();
+      if (readerAccess && readerAccess.length <= 4096 && !/[\s\u0000-\u001f]/.test(readerAccess)) return readerAccess;
+    }
 
     const candidates = [];
     for (const node of outer.querySelectorAll('[name="access"], [data-access], #access')) {
       candidates.push(node.getAttribute('value'), node.getAttribute('data-access'), node.getAttribute('content'));
     }
     const patterns = [
-      /(?:["']?access["']?)\s*:\s*["']([A-Za-z0-9_-]{128,})["']/i,
-      /(?:["']?access["']?)\s*=\s*["']([A-Za-z0-9_-]{128,})["']/i
+      /(?:["']?(?:reader[-_]?access|access)["']?)\s*:\s*["']([A-Za-z0-9_-]{128,})["']/i,
+      /(?:["']?(?:reader[-_]?access|access)["']?)\s*=\s*["']([A-Za-z0-9_-]{128,})["']/i
     ];
     for (const pattern of patterns) {
       const match = html.match(pattern);
       if (match) candidates.push(match[1]);
     }
-    return candidates.find((candidate) => typeof candidate === 'string' && tokenPattern.test(candidate)) || '';
+    return candidates.find((candidate) => typeof candidate === 'string'
+      && candidate.length <= 4096 && tokenPattern.test(candidate)) || '';
   }
 
   function mapCards(doc) {
@@ -422,6 +428,19 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       if (!onfCookie) throw new Error('ONF solicitó una verificación anti-bot, pero Cytlex no pudo obtener la cookie de acceso. Inténtalo de nuevo más tarde.');
       html = await fetchText(url, undefined, { onfCookie, onfReferer: url });
     }
+    const responsePages = decodeReaderPageResponse(html, url);
+    if (responsePages.length) {
+      return {
+        label: '',
+        mangaUrl: '',
+        imageReferer: url,
+        imageCookie: onfCookie,
+        pages: responsePages,
+        options: [],
+        prev: null,
+        next: null
+      };
+    }
     const outer = parse(html);
     let pages = decodePageImages(html, outer, url);
     let readerPagesInfo = typeof fetchPostText === 'function' ? 'sin acceso del lector' : 'solicitud POST no disponible';
@@ -433,6 +452,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
             url: `${base}/reader_pages.php`,
             body: { access },
             headers: {
+              Accept: 'application/json',
               'Content-Type': 'application/json',
               'X-Requested-With': 'XMLHttpRequest'
             },

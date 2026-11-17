@@ -759,11 +759,6 @@ ipcMain.handle('http:get', async (_e, url, requestId, options = {}) => {
       if (referer.origin === parsed.origin && referer.pathname.startsWith('/lector/')) headers.Referer = referer.href;
     } catch {}
   }
-  if (onf && typeof options?.onfCookie === 'string'
-    && options.onfCookie.length <= 2048
-    && /^[A-Za-z0-9!#$%&'*+.^_`|~-]+=[A-Za-z0-9!#$%&'()*+,.\/:=?@_`|~-]{1,2048}$/.test(options.onfCookie)) {
-    headers.Cookie = options.onfCookie;
-  }
   let result = await requestPublic(parsed.toString(), {
     method: 'GET',
     headers,
