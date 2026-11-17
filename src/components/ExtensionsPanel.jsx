@@ -177,7 +177,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   const [confirmUpdate, setConfirmUpdate] = useState(null);
   const [updates, setUpdates] = useState(() => (cacheHit ? repoCache.updates || [] : []));
   const [updating, setUpdating] = useState('');
-  const [confirmAll, setConfirmAll] = useState(false);
+  const [confirmAll, setConfirmAll] = useState(null);
   const [selectedInstalledIds, setSelectedInstalledIds] = useState(() => new Set());
   const [selectedAvailableIds, setSelectedAvailableIds] = useState(() => new Set());
   const [confirmBulk, setConfirmBulk] = useState(null);
@@ -230,6 +230,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   const updateRef = useRef(null);
   const updatePopoverRef = useRef(null);
   const allRef = useRef(null);
+  const allPopoverRef = useRef(null);
   const bulkInstallRef = useRef(null);
   const bulkUninstallRef = useRef(null);
   const bulkConfirmPopoverRef = useRef(null);
@@ -272,6 +273,21 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
       return { ...current, popoverPosition: position };
     });
   }, [confirmBulk]);
+
+  useLayoutEffect(() => {
+    if (!confirmAll?.popoverPosition) return;
+    const trigger = allRef.current;
+    const popover = allPopoverRef.current;
+    if (!trigger || !popover) return;
+
+    const position = confirmationPosition(trigger, popover.offsetHeight);
+    setConfirmAll((current) => {
+      if (!current) return current;
+      const previous = current.popoverPosition;
+      if (previous?.top === position.top && previous?.left === position.left) return current;
+      return { ...current, popoverPosition: position };
+    });
+  }, [confirmAll]);
 
   useEffect(() => {
     if (!confirmInstall) return;
@@ -327,12 +343,25 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   useEffect(() => {
     if (!confirmAll) return;
     const onDown = (e) => {
-      if (allRef.current && !allRef.current.contains(e.target)) {
-        setConfirmAll(false);
-      }
+      if (allRef.current?.contains(e.target) || allPopoverRef.current?.contains(e.target)) return;
+      setConfirmAll(null);
+    };
+    const closeOnLayoutChange = () => setConfirmAll(null);
+    const onKeyDown = (e) => {
+      if (e.key !== 'Escape') return;
+      setConfirmAll(null);
+      allRef.current?.focus();
     };
     document.addEventListener('pointerdown', onDown);
-    return () => document.removeEventListener('pointerdown', onDown);
+    document.addEventListener('scroll', closeOnLayoutChange, true);
+    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', closeOnLayoutChange);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('scroll', closeOnLayoutChange, true);
+      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', closeOnLayoutChange);
+    };
   }, [confirmAll]);
 
   useEffect(() => {
@@ -644,6 +673,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
           <Button
             variant="secondary"
             size="sm"
+            className="extensions-square-button"
             title="Ordenar extensiones"
             aria-label={`Ordenar extensiones: ${sortLabel(sortBy)}`}
             onClick={() => {
@@ -658,12 +688,13 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
               paddingRight: px(8, scale, 6)
             }}
           >
-            <ArrowUpDown className="mr-2" style={{ width: px(14, scale, 11), height: px(14, scale, 11) }} />
-            {sortLabel(sortBy)}
+            <ArrowUpDown className="extensions-button-icon mr-2" style={{ width: px(14, scale, 11), height: px(14, scale, 11) }} />
+            <span className="extensions-button-label">{sortLabel(sortBy)}</span>
           </Button>
           <Button
             variant="secondary"
             size="sm"
+            className="extensions-square-button"
             onClick={searchUpdates}
             title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
             aria-label="Buscar actualizaciones"
@@ -676,10 +707,10 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
             }}
           >
             <RefreshCw
-              className={cn('mr-2 max-md:mr-0', checkingUpdates && 'animate-spin')}
+              className={cn('extensions-button-icon mr-2', checkingUpdates && 'animate-spin')}
               style={{ width: px(14, scale, 11), height: px(14, scale, 11) }}
             />
-            <span className="max-md:hidden">Buscar actualizaciones</span>
+            <span className="extensions-button-label">Buscar actualizaciones</span>
           </Button>
         </>,
         toolbarTarget
@@ -724,14 +755,15 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                   <Button
                     variant="secondary"
                     size="sm"
+                    className="extensions-square-button"
                     aria-label="Limpiar selecciones"
                     title="Limpiar selecciones"
                     onClick={() => { setSelectedInstalledIds(new Set()); setConfirmBulk(null); }}
                     disabled={busy !== '' || updating !== ''}
                     style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
-                    <X className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="max-md:hidden">Limpiar selecciones</span>
+                    <X className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    <span className="extensions-button-label">Limpiar selecciones</span>
                   </Button>
                 </motion.div>
               )}
@@ -747,14 +779,15 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                   <Button
                     variant="secondary"
                     size="sm"
+                    className="extensions-square-button"
                     aria-label="Seleccionar todo"
                     title="Seleccionar todo"
                     onClick={() => { setSelectedInstalledIds(new Set(sortedInstalled.map(({ manifest }) => manifest.id))); setConfirmBulk(null); }}
                     disabled={busy !== '' || updating !== ''}
                     style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
-                    <CheckSquare className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="max-md:hidden">Seleccionar todo</span>
+                    <CheckSquare className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    <span className="extensions-button-label">Seleccionar todo</span>
                   </Button>
                 </motion.div>
               )}
@@ -771,7 +804,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                   <Button
                     variant="destructive"
                     size="sm"
-                    className="bg-red-600 text-white hover:bg-red-700"
+                    className="extensions-square-button bg-red-600 text-white hover:bg-red-700"
                     aria-label="Desinstalar seleccionadas"
                     title="Desinstalar seleccionadas"
                     onClick={() => handleBulkAction('uninstall')}
@@ -783,8 +816,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                       paddingRight: px(10, scale, 8)
                     }}
                   >
-                    <Trash2 className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="max-md:hidden">Desinstalar seleccionadas</span>
+                    <Trash2 className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    <span className="extensions-button-label">Desinstalar seleccionadas</span>
                   </Button>
                 </motion.div>
               )}
@@ -794,16 +827,18 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                 ref={allRef}
                 variant="secondary"
                 size="sm"
-                onClick={async () => {
-                  if (!confirmAll) {
-                    setConfirmAll(true);
-                    return;
-                  }
-                  setConfirmAll(false);
-                  await doUpdateAll();
+                aria-haspopup="dialog"
+                aria-expanded={!!confirmAll}
+                aria-controls={confirmAll ? 'confirm-update-all' : undefined}
+                aria-label={updating === 'all' ? 'Actualizando extensiones' : 'Actualizar todo'}
+                className="extensions-square-button whitespace-nowrap"
+                onClick={(event) => {
+                  const popoverPosition = confirmationPosition(event.currentTarget);
+                  setConfirmAll((current) => current
+                    ? null
+                    : { popoverPosition });
                 }}
                 disabled={updating !== ''}
-                className="whitespace-nowrap"
                 style={{
                   height: px(32, scale, 28),
                   minWidth: px(176, scale, 140),
@@ -823,20 +858,10 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                       className="flex items-center"
                     >
                       <Loader2
-                        className="mr-2 animate-spin"
+                        className="extensions-button-icon mr-2 animate-spin"
                         style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
                       />
-                      Actualizando...
-                    </motion.span>
-                  ) : confirmAll ? (
-                    <motion.span
-                      key="confirm"
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -6 }}
-                      transition={{ duration: 0.15, ease: 'easeOut' }}
-                    >
-                      ¿Seguro?
+                      <span className="extensions-button-label">Actualizando...</span>
                     </motion.span>
                   ) : (
                     <motion.span
@@ -848,11 +873,11 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                       className="flex items-center"
                     >
                       <ArrowUpCircle
-                        className="mr-2"
+                        className="extensions-button-icon mr-2"
                         style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
                       />
-                      Actualizar todo
-                      <span className="opacity-70 ml-2">{visibleUpdates.length}</span>
+                      <span className="extensions-button-label">Actualizar todo</span>
+                      <span className="extensions-update-count opacity-70 ml-2">{visibleUpdates.length}</span>
                     </motion.span>
                   )}
                 </AnimatePresence>
@@ -981,14 +1006,15 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                   <Button
                     variant="secondary"
                     size="sm"
+                    className="extensions-square-button"
                     aria-label="Limpiar selecciones"
                     title="Limpiar selecciones"
                     onClick={() => { setSelectedAvailableIds(new Set()); setConfirmBulk(null); }}
                     disabled={busy !== '' || loading || updating !== ''}
                     style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
-                    <X className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="max-md:hidden">Limpiar selecciones</span>
+                    <X className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    <span className="extensions-button-label">Limpiar selecciones</span>
                   </Button>
                 </motion.div>
               )}
@@ -1004,14 +1030,15 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                   <Button
                     variant="secondary"
                     size="sm"
+                    className="extensions-square-button"
                     aria-label="Seleccionar todo"
                     title="Seleccionar todo"
                     onClick={() => { setSelectedAvailableIds(new Set(sortedAvailable.map((manifest) => manifest.id))); setConfirmBulk(null); }}
                     disabled={busy !== '' || loading || updating !== ''}
                     style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
-                    <CheckSquare className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="max-md:hidden">Seleccionar todo</span>
+                    <CheckSquare className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    <span className="extensions-button-label">Seleccionar todo</span>
                   </Button>
                 </motion.div>
               )}
@@ -1027,6 +1054,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                 >
                   <Button
                     size="sm"
+                    className="extensions-square-button"
                     aria-label="Instalar seleccionadas"
                     title="Instalar seleccionadas"
                     onClick={() => handleBulkAction('install')}
@@ -1038,8 +1066,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                       paddingRight: px(10, scale, 8)
                     }}
                   >
-                    <Download className="mr-2 max-md:mr-0" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="max-md:hidden">Instalar seleccionadas</span>
+                    <Download className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    <span className="extensions-button-label">Instalar seleccionadas</span>
                   </Button>
                 </motion.div>
               )}
@@ -1124,6 +1152,60 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
 
       {createPortal(
         <>
+          <AnimatePresence>
+            {confirmAll?.popoverPosition && (
+              <motion.div
+                ref={allPopoverRef}
+                id="confirm-update-all"
+                key="confirm-update-all"
+                initial={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
+                exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                transition={{ duration: 0.14, ease: 'easeOut' }}
+                role="dialog"
+                aria-label="Confirmar actualización de todas las extensiones"
+                aria-describedby="confirm-update-all-description"
+                className="fixed z-[70] flex flex-col border border-border bg-card shadow-xl"
+                style={{ ...confirmAll.popoverPosition, width: Math.min(288, window.innerWidth - 24), padding: px(12, scale, 10), gap: px(10, scale, 8) }}
+              >
+                <div className="min-w-0">
+                  <p className="font-semibold" style={{ fontSize: fontPx(14, scale, 12) }}>
+                    ¿Actualizar todas las extensiones?
+                  </p>
+                  <p id="confirm-update-all-description" className="mt-1 text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10), lineHeight: 1.4 }}>
+                    {visibleUpdates.length} {visibleUpdates.length === 1 ? 'actualización disponible' : 'actualizaciones disponibles'}.
+                  </p>
+                </div>
+                <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="confirmation-cancel-button"
+                    onClick={() => {
+                      setConfirmAll(null);
+                      allRef.current?.focus();
+                    }}
+                    style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="confirmation-action-button"
+                    aria-label="Confirmar actualización de todas las extensiones"
+                    onClick={async () => {
+                      setConfirmAll(null);
+                      await doUpdateAll();
+                    }}
+                    disabled={updating !== ''}
+                    style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                  >
+                    Actualizar
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
           <AnimatePresence>
             {confirmUpdate?.popoverPosition && confirmUpdate !== 'all' && (
               <motion.div

@@ -790,6 +790,25 @@ button[title*="filtros" i],
   border-radius: 6px !important;
 }
 
+button.extensions-square-button {
+  border-radius: 0 !important;
+}
+
+@media (max-width: 939.98px) {
+  button.extensions-square-button {
+    min-width: 0 !important;
+    padding-inline: 6px !important;
+  }
+
+  .extensions-button-label {
+    display: none;
+  }
+
+  .extensions-button-icon {
+    margin-inline-end: 0 !important;
+  }
+}
+
 button.confirmation-cancel-button,
 button.confirmation-action-button {
   border-radius: 0 !important;

@@ -319,6 +319,10 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
 
   function findReaderAccess(html, outer) {
     const tokenPattern = /^[A-Za-z0-9_-]{128,}$/;
+    const readerAccess = outer.querySelector('#viewerContainer[data-reader-access]')
+      ?.getAttribute('data-reader-access')?.trim();
+    if (readerAccess && readerAccess.length <= 4096 && !/[\s\u0000-\u001f]/.test(readerAccess)) return readerAccess;
+
     const candidates = [];
     for (const node of outer.querySelectorAll('[name="access"], [data-access], #access')) {
       candidates.push(node.getAttribute('value'), node.getAttribute('data-access'), node.getAttribute('content'));
