@@ -180,7 +180,10 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
         if (!src) return false;
         const imageUrl = new URL(src);
         const host = imageUrl.hostname.toLowerCase();
-        if (host === 'images.komiwa.net' && imageUrl.pathname.startsWith('/komiwa-images/covers/')) return false;
+        if (host === 'images.komiwa.net' && (
+          imageUrl.pathname.startsWith('/komiwa-images/covers/')
+          || imageUrl.pathname.startsWith('/komiwa-images/_mihon/')
+        )) return false;
         return host === 'media.mangavault.lat' || host === 'images.komiwa.net'
           || host === 'cdnlxd.xyz' || host.endsWith('.cdnlxd.xyz')
           || host === 't34798ndc.com' || host.endsWith('.t34798ndc.com');

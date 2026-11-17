@@ -87,7 +87,7 @@
     "id": "komiwa",
     "name": "Komiwa",
     "lang": "es",
-    "version": "1.0.7",
+    "version": "1.0.8",
     "type": "module",
     "contentWarning": "MIXED",
     "main": "ext/komiwa.js",
