@@ -1,12 +1,13 @@
-import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon, Check, CheckCheck, LoaderCircle } from 'lucide-react';
 import { THEMES, MODES } from '../lib/themes.js';
 import { resolveMode, settings } from '../lib/settings.js';
 import { cn } from '../lib/utils.js';
-import { px, useScale } from '../lib/useScale.js';
+import { useScale } from '../lib/useScale.js';
 import { Button } from './ui/button.jsx';
+import { GENTLE_FLOAT_MOTION, GENTLE_FLOAT_TRANSITION } from './ui/empty-state.jsx';
 
 const STEPS = [
   {
@@ -51,8 +52,6 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const [walkthroughView, setWalkthroughView] = useState('biblioteca');
   const [repoUrl, setRepoUrl] = useState(() => (settings.get().extIndexUrl || '').trim());
   const [addingRepository, setAddingRepository] = useState(false);
-  const onboardingContentRef = useRef(null);
-  const [onboardingContentHeight, setOnboardingContentHeight] = useState(0);
   const previousStep = useRef(step);
   const hasMounted = useRef(false);
   const scale = useScale();
@@ -73,20 +72,6 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   useEffect(() => {
     document.body.classList.add('tutorial-open');
     return () => document.body.classList.remove('tutorial-open');
-  }, []);
-
-  useLayoutEffect(() => {
-    const element = onboardingContentRef.current;
-    if (!element) return undefined;
-    const updateHeight = () => {
-      const styles = window.getComputedStyle(element);
-      const verticalPadding = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
-      setOnboardingContentHeight(Math.max(0, element.clientHeight - verticalPadding));
-    };
-    updateHeight();
-    const observer = new ResizeObserver(updateHeight);
-    observer.observe(element);
-    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -175,7 +160,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
 
   return (
     <motion.div
-      className={`fixed inset-0 z-[60] p-3 sm:p-4 transition-colors duration-300 ${step === 1 ? 'pointer-events-none bg-transparent' : 'pointer-events-auto bg-background flex flex-col items-center overflow-y-auto'}`}
+      className={`fixed inset-0 z-[60] p-3 sm:p-4 transition-colors duration-300 ${step === 1 ? 'pointer-events-none bg-transparent' : 'pointer-events-auto bg-background flex flex-col items-center overflow-hidden'}`}
       initial={{ y: '0%' }}
       animate={{ y: exiting ? '-100%' : '0%' }}
       transition={{ duration: exiting ? 0.8 : 0, ease: exiting ? [0.76, 0, 0.24, 1] : 'linear' }}
@@ -204,10 +189,10 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
               <motion.div
                 animate={{ transform: `scale(${scale})` }}
                 transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-                className="onboarding-card relative flex h-[min(70dvh,38.5rem)] min-h-0 max-h-[calc(100dvh-1.5rem)] w-full flex-col overflow-hidden rounded-3xl border border-border bg-card text-card-foreground transition-colors duration-300 md:h-auto md:min-h-0 md:max-h-none"
+                className="onboarding-card relative flex h-[min(85dvh,32rem)] min-h-0 max-h-[calc(100dvh-1.5rem)] w-full flex-col overflow-hidden rounded-3xl border border-border bg-card text-card-foreground transition-colors duration-300 min-[480px]:h-[min(85dvh,26rem)] md:h-[min(85dvh,28rem)]"
                 style={{ transformOrigin: 'center' }}
               >
-          <div ref={onboardingContentRef} className="onboarding-content min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6 sm:px-10 sm:py-10 md:flex-auto">
+          <div className="onboarding-content min-h-0 flex-1 overflow-x-hidden overflow-y-hidden px-6 py-6 md:px-10 md:pt-6 md:pb-10">
             <AnimatePresence mode="wait" custom={motionDirection}>
               <motion.div
                 key={step}
@@ -217,16 +202,15 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 animate="center"
                 exit="exit"
                 transition={{ duration: 0.25, ease: 'easeOut' }}
-                className="onboarding-step-body flex flex-col justify-center"
-                style={{ minHeight: `${Math.max(onboardingContentHeight, Number.parseFloat(px(320, scale, 256)))}px` }}
+                className="onboarding-step-body flex flex-col"
               >
                 {step === 0 ? (
                   <div className="mb-6 flex flex-wrap items-center gap-2 sm:gap-3">
                     <span className="text-xl font-semibold tracking-tight font-display sm:text-2xl">Bienvenido a</span>
                     <motion.div
                       className="flex items-center gap-2 sm:gap-3"
-                      animate={{ y: [0, -5, 0], rotate: [0, -1.5, 1.5, 0] }}
-                      transition={{ duration: 3.4, repeat: Infinity, ease: 'easeInOut' }}
+                      animate={reduceMotion ? undefined : GENTLE_FLOAT_MOTION}
+                      transition={reduceMotion ? undefined : GENTLE_FLOAT_TRANSITION}
                     >
                       <svg viewBox="0 0 512 512" width="40" height="40" className="shrink-0 rounded-xl sm:h-12 sm:w-12" role="img" aria-label="Cytlex">
                         <rect width="512" height="512" rx="112" fill="#ffffff" />
@@ -236,7 +220,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                     </motion.div>
                   </div>
                 ) : (
-                  <div className={cn('onboarding-step-heading mb-6', step >= 2 && 'mb-2')}>
+                  <div className={cn('onboarding-step-heading mt-2 mb-6', step >= 2 && 'mb-2')}>
                     <h2 className="onboarding-step-title text-2xl font-semibold tracking-tight font-display">{STEPS[step].title}</h2>
                   </div>
                 )}
@@ -304,7 +288,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                         </button>
                       ))}
                     </div>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <div className="grid grid-cols-2 gap-3 min-[480px]:grid-cols-3">
                       {THEMES.map((t) => {
                         const sw = t.swatch[resolveMode(mode)] || t.swatch.dark;
                         const selected = theme === t.id;

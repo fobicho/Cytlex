@@ -929,8 +929,10 @@ export default function Reader() {
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <header
-        className="relative z-20 grid shrink-0 grid-cols-1 items-center gap-x-3 gap-y-0 border-b border-border bg-card px-2 py-1 [--reader-control-height:2.5rem] md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-3 md:[--reader-control-height:2.25rem]"
+        className="relative z-20 grid shrink-0 grid-cols-1 items-center gap-x-3 gap-y-0 border-b border-border bg-card px-2 py-1 [--reader-control-height:2.5rem] md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-3 md:py-0 md:[--reader-control-height:var(--reader-control-height-desktop)]"
         style={{
+          '--reader-control-height-desktop': px(34, scale, 28),
+          minHeight: px(38, scale, 34),
           '--reader-control-bg': 'color-mix(in srgb, hsl(var(--secondary)), hsl(var(--card)) 25%)',
           '--reader-control-active': 'color-mix(in srgb, hsl(var(--secondary)), hsl(var(--primary)) 8%)',
           '--reader-arrow-bg': 'color-mix(in srgb, var(--reader-control-active), black 8%)',
@@ -940,7 +942,7 @@ export default function Reader() {
         <h1
           className="reader-back-title relative col-start-1 row-start-1 min-w-0"
           title={mangaTitle}
-          style={{ '--reader-detail-inset': `${detailInset}px`, top: `${readerBackOffsetY}px` }}
+          style={{ '--reader-detail-inset': `${detailInset}px`, '--reader-back-offset-y': `${readerBackOffsetY}px` }}
         >
           <Button
             variant="ghost"

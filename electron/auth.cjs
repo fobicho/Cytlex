@@ -46,8 +46,19 @@ function valid() {
   return s;
 }
 
-function login(parent) {
+function callbackUri(value) {
+  try {
+    const url = new URL(value || REDIRECT_URI);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return REDIRECT_URI;
+    return url.toString();
+  } catch {
+    return REDIRECT_URI;
+  }
+}
+
+function login(parent, redirectUri) {
   return new Promise((resolve, reject) => {
+    const expectedRedirect = callbackUri(redirectUri);
     const win = new BrowserWindow({
       width: 520,
       height: 700,
@@ -74,7 +85,14 @@ function login(parent) {
     win.loadURL(auth.toString());
 
     const onNavigate = (event, url) => {
-      if (!url.startsWith(REDIRECT_URI)) return;
+      let destination;
+      try {
+        const parsed = new URL(url);
+        destination = `${parsed.origin}${parsed.pathname}${parsed.search}`;
+      } catch {
+        return;
+      }
+      if (destination !== expectedRedirect) return;
       event.preventDefault();
 
       const params = new URLSearchParams(new URL(url).hash.replace(/^#/, ''));
@@ -101,9 +119,9 @@ function login(parent) {
 }
 
 function register() {
-  ipcMain.handle('auth:login', async (e) => {
+  ipcMain.handle('auth:login', async (e, { redirectUri } = {}) => {
     const host = BrowserWindow.fromWebContents(e.sender);
-    const r = await login(host);
+    const r = await login(host, redirectUri);
     // Cerrar la ventana es una decisión del usuario, no un fallo.
     if (r?.cancelled) return { connected: false, cancelled: true };
     return r;

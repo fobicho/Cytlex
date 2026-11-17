@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { BookOpen, Compass, Settings as SettingsIcon, ChevronsRight } from 'lucide-react';
 import { RESET_PAGE_EVENT } from '../App.jsx';
@@ -45,11 +45,26 @@ export default function Sidebar({ tutorialNavOnly = false }) {
   const navigate = useNavigate();
   const pendingQuickSearchReset = useRef(false);
   const scale = useScale(SIDEBAR_SCALE_MIN);
+  const reduceMotion = useReducedMotion();
   const navIconCenter = Math.max(6, Math.round(12 * scale))
     + Math.max(6, Math.round(8 * scale))
     + Math.max(20, Math.round(32 * scale)) / 2;
-  const logoSize = Math.max(16, Math.round(20 * scale));
+  const logoSize = Math.max(18, Math.round(24 * scale));
   const logoOffset = navIconCenter - logoSize / 2;
+  const renderBrand = (key) => (
+    <span key={key} className="sidebar-ribbon-brand flex shrink-0 items-center" style={{ gap: px(8, scale, 6) }}>
+      <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="" className="shrink-0 rounded-md" style={{ width: logoSize, height: logoSize }} />
+      <span className="whitespace-nowrap font-display font-bold tracking-tight text-foreground" style={{ fontSize: fontPx(14, scale) }}>Cytlex</span>
+    </span>
+  );
+  const renderRibbonSegment = (copyIndex) => (
+    <span key={copyIndex} className="sidebar-ribbon-segment flex shrink-0 items-center">
+      {renderBrand(`${copyIndex}-a`)}
+      <span className="sidebar-ribbon-separator" aria-hidden="true">·</span>
+      {renderBrand(`${copyIndex}-b`)}
+      <span className="sidebar-ribbon-separator" aria-hidden="true">·</span>
+    </span>
+  );
 
   useEffect(() => settings.subscribe((s) => {
     setCollapsed(s.sidebarCollapsed);
@@ -83,11 +98,23 @@ export default function Sidebar({ tutorialNavOnly = false }) {
       transition={{ duration: DURATION, ease: EASE }}
       className="relative z-20 h-full flex flex-col border-r border-sidebar-border/70 bg-sidebar overflow-visible"
     >
-      <div className="flex shrink-0 items-center overflow-hidden" style={{ minHeight: px(38, scale, 34), paddingLeft: logoOffset, paddingRight: px(20, scale, 16) }}>
-        <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
-          <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="" className="shrink-0 rounded-md" style={{ width: logoSize, height: logoSize }} />
-          <span className={cn('whitespace-nowrap font-display font-semibold tracking-tight text-foreground transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')} style={{ fontSize: fontPx(14, scale) }}>Cytlex</span>
-        </div>
+      <div className="relative flex shrink-0 items-center overflow-hidden border-b border-border/70" style={{ minHeight: px(38, scale, 34) }}>
+        {collapsed ? (
+          <div className="flex items-center" style={{ paddingLeft: logoOffset, gap: px(8, scale, 6) }}>
+            <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="" className="shrink-0 rounded-md" style={{ width: logoSize, height: logoSize }} />
+            <span aria-hidden="true" className="whitespace-nowrap font-display font-bold tracking-tight opacity-0" style={{ fontSize: fontPx(14, scale) }}>Cytlex</span>
+          </div>
+        ) : reduceMotion ? (
+          <span role="img" aria-label="Cytlex" className="flex items-center" style={{ paddingLeft: logoOffset }}>
+            {renderBrand('static')}
+          </span>
+        ) : (
+          <div className="sidebar-ribbon-viewport" style={{ paddingLeft: logoOffset }}>
+            <div className="sidebar-ribbon-track" role="img" aria-label="Cytlex">
+              {[0, 1].map(renderRibbonSegment)}
+            </div>
+          </div>
+        )}
       </div>
       <nav
         aria-label="Navegación principal"

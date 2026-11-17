@@ -8,6 +8,7 @@ import defaultExtensionIndex from '../../docs/index.json';
 const KEY = 'cytlex:extensions:v1';
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
 const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
+export const SOURCE_CONFIG_CHANGE_EVENT = 'cytlex:source-config-changed';
 export const isRetiredExtension = (id) => id === 'plottwistnofansub';
 export const isUnavailableMangaSource = (id) => isRetiredExtension(id) || isUnresolvedMihonSource(id);
 const keepInstalledExtension = (record) => record?.manifest?.type !== 'builtin'
@@ -54,6 +55,18 @@ export function isExtensionAllowed(source, showAdultExtensions) {
   return settings.get().adultContentRatings.includes(rating);
 }
 
+export function isSourceConfigured(source) {
+  const manifest = source?.manifest || source;
+  const languages = manifest?.config?.languages || manifest?.languages;
+  if (!Array.isArray(languages) || !languages.length) return true;
+  try {
+    const selected = JSON.parse(localStorage.getItem(EXT_CONFIG_KEY))?.[manifest.id]?.languages;
+    return !Array.isArray(selected) || selected.length > 0;
+  } catch {
+    return true;
+  }
+}
+
 const read = () => {
   if (recordsCache) return recordsCache;
   let list = [];
@@ -91,6 +104,12 @@ const channel = 'cytlex-extension';
 const pending = new Map();
 let nextId = 0;
 let source = null;
+const errorDetails = (error) => ({
+  status: error?.status,
+  requestOrigin: error?.requestOrigin,
+  reason: error?.reason
+});
+const restoreError = (message, details) => Object.assign(new Error(String(message || 'Error')), details || {});
 const callHost = (method, args) => new Promise((resolve, reject) => {
   const id = 'host-' + (++nextId);
   pending.set(id, { resolve, reject });
@@ -111,7 +130,7 @@ addEventListener('message', async (event) => {
     const item = pending.get(message.id);
     if (!item) return;
     pending.delete(message.id);
-    if (message.error) item.reject(new Error(message.error));
+    if (message.error) item.reject(restoreError(message.error, message.errorData));
     else item.resolve(message.value);
     return;
   }
@@ -149,13 +168,31 @@ addEventListener('message', async (event) => {
       const result = await value.apply(owner, message.args || []);
       parent.postMessage({ channel, kind: 'result', id: message.id, value: result }, '*');
     } catch (error) {
-      parent.postMessage({ channel, kind: 'result', id: message.id, error: String(error?.message || error) }, '*');
+      parent.postMessage({
+        channel,
+        kind: 'result',
+        id: message.id,
+        error: String(error?.message || error),
+        errorData: errorDetails(error)
+      }, '*');
     }
   }
 });`;
 
 const moduleDisposers = new Map();
 const moduleLoads = new Map();
+
+function extensionErrorDetails(error) {
+  return {
+    status: error?.status,
+    requestOrigin: error?.requestOrigin,
+    reason: error?.reason
+  };
+}
+
+function restoreExtensionError(message, details) {
+  return Object.assign(new Error(String(message || 'Error')), details || {});
+}
 
 async function loadModule(code, manifest) {
   const iframe = document.createElement('iframe');
@@ -206,7 +243,7 @@ async function loadModule(code, manifest) {
       const item = pending.get(message.id);
       if (!item) return;
       pending.delete(message.id);
-      if (message.error) item.reject(new Error(message.error));
+      if (message.error) item.reject(restoreExtensionError(message.error, message.errorData));
       else item.resolve(message.value);
       return;
     }
@@ -223,7 +260,14 @@ async function loadModule(code, manifest) {
         return action(...(message.args || []));
       }).then(
         (value) => { if (!disposed) post({ kind: 'host-result', id: message.id, value }); },
-        (error) => { if (!disposed) post({ kind: 'host-result', id: message.id, error: String(error?.message || error) }); }
+        (error) => {
+          if (!disposed) post({
+            kind: 'host-result',
+            id: message.id,
+            error: String(error?.message || error),
+            errorData: extensionErrorDetails(error)
+          });
+        }
       );
     }
   };

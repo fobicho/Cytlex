@@ -670,11 +670,13 @@
 
 .reader-back-title {
   left: calc(var(--reader-detail-inset, 16px) - 0.5rem);
+  top: var(--reader-back-offset-y, 0px);
 }
 
 @media (min-width: 768px) {
   .reader-back-title {
     left: calc(var(--reader-detail-inset, 16px) - 0.75rem);
+    top: 0;
   }
 }
 
@@ -995,6 +997,39 @@ img.manga-cover-corners {
   animation: cx-update-pulse 1.2s ease-in-out 1;
 }
 
+.sidebar-ribbon-viewport {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sidebar-ribbon-track {
+  display: flex;
+  width: max-content;
+  align-items: center;
+  flex: none;
+  animation: cx-sidebar-ribbon 12s linear infinite;
+  will-change: transform;
+}
+
+.sidebar-ribbon-segment {
+  gap: 0.75rem;
+}
+
+.sidebar-ribbon-separator {
+  flex: none;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+@keyframes cx-sidebar-ribbon {
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cx-update-pulse {
     animation: none;
@@ -1004,6 +1039,10 @@ img.manga-cover-corners {
   .cx-chapter-pulse {
     animation: none;
     border-color: hsl(var(--primary));
+  }
+
+  .sidebar-ribbon-track {
+    animation: none;
   }
 }
 

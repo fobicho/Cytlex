@@ -8,7 +8,7 @@ import { SourceBadge } from './SourceBadge.jsx';
 import { api } from '../lib/api.js';
 import { sourceErrorMessage } from '../lib/browserHttp.js';
 import { isLibraryManga } from '../lib/library.js';
-import { extensions } from '../lib/extensions.js';
+import { extensions, isSourceConfigured } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
 import { SOURCE_CATALOG_HOME_EVENT, rememberMangaPreview, sourceCatalogState } from '../lib/searchState.js';
 import { Button } from './ui/button.jsx';
@@ -261,6 +261,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     };
   }, [filtersOpen]);
   const allSources = extensions.sources();
+  const configuredSources = allSources.filter(({ manifest }) => isSourceConfigured(manifest));
   const sortedSources = useMemo(() => [...sources].sort((a, b) => {
     if (sourceSort === 'added') return (a.installedAt || 0) - (b.installedAt || 0);
     const order = String(a.manifest.name || '').localeCompare(String(b.manifest.name || ''), 'es', { sensitivity: 'base', numeric: true });
@@ -605,12 +606,15 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   );
 
   if (!sources.length) {
-    const hidden = allSources.length > 0 && !settings.get().showAdultExtensions;
+    const hidden = configuredSources.length > 0 && !settings.get().showAdultExtensions;
+    const noneConfigured = allSources.length > 0 && !configuredSources.length;
     return (
       <EmptyState
         face={hidden ? '（・_・;）' : '(；ω；)'}
-        title={hidden ? 'No hay fuentes visibles' : 'No hay fuentes instaladas'}
-        description={hidden ? 'Activa «Mostrar extensiones +18» en Ajustes > Extensiones para verlas.' : undefined}
+        title={hidden ? 'No hay fuentes visibles' : noneConfigured ? 'No hay fuentes disponibles' : 'No hay fuentes instaladas'}
+        description={hidden
+          ? 'Activa «Mostrar extensiones +18» en Ajustes > Extensiones para verlas.'
+          : noneConfigured ? 'Activa al menos un idioma en la configuración de sus extensiones.' : undefined}
       />
     );
   }

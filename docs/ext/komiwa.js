@@ -23,6 +23,17 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     return result.data;
   }
 
+  async function fetchCatalogData(body, requestId) {
+    try {
+      return await json('/manga/catalog', body, requestId);
+    } catch (error) {
+      if (body.sortBy !== 'lastUpdateAt' || error?.requestOrigin !== 'source' || Number(error?.status) !== 500) {
+        throw error;
+      }
+      return json('/manga/catalog', { ...body, sortBy: 'views' }, requestId);
+    }
+  }
+
   const rememberManga = (item) => {
     if (!item?.id || !item.slug) return;
     mangaCache.set(item.slug, item);
@@ -45,7 +56,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const currentPage = Math.max(1, Number(page) || 1);
     const data = clean(q)
       ? await json('/manga/search', { q: clean(q), limit: pageSize, ...(currentPage > 1 ? { page: currentPage } : {}) }, __cytlexRequestId)
-      : await json('/manga/catalog', {
+      : await fetchCatalogData({
         sortBy: sort === 'rating' ? 'rating' : sort === 'title' ? 'title' : sort === 'views' ? 'views' : 'lastUpdateAt',
         sortOrder: sort === 'title' ? 'asc' : 'desc',
         limit: pageSize,

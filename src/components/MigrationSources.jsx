@@ -18,7 +18,7 @@ function ExtensionChoice({ manifest, current, checked, onChange, scale }) {
         aria-label={current ? `${manifest.name}, fuente actual` : `Buscar en ${manifest.name}`}
         style={{ accentColor: 'hsl(var(--primary))', width: px(16, scale, 13), height: px(16, scale, 13), flexShrink: 0 }}
       />
-      <span className="grid shrink-0 place-items-center overflow-hidden rounded-md bg-secondary text-secondary-foreground font-semibold" style={{ width: px(36, scale, 30), height: px(36, scale, 30), fontSize: fontPx(14, scale, 12) }}>
+      <span className="grid shrink-0 place-items-center overflow-hidden bg-secondary text-secondary-foreground font-semibold" style={{ width: px(36, scale, 30), height: px(36, scale, 30), borderRadius: px(12, scale, 9), fontSize: fontPx(14, scale, 12) }}>
         {manifest.icon && !logoUnavailable
           ? <img src={manifest.icon} alt="" className="h-full w-full object-cover" onError={() => setLogoUnavailable(true)} />
           : (manifest.name?.[0] || '?').toUpperCase()}

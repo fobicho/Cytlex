@@ -326,7 +326,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
           <main
             ref={mainRef}
             inert={tutorialMode}
-            className={`min-h-0 min-w-0 flex-1 overflow-y-auto [overflow-anchor:none]${isMangaPage && !isMigrationSearchPage ? ' detail-main' : ''}${isElectronApp && isLibraryPage ? ' no-scrollbar' : ''}${isElectronApp && isMigrationSearchPage ? ' browser-main--subroutes' : ''}${isReader || isSettingsPage || isExplorePage || isLibraryPage || isMangaPage ? '' : ' [scrollbar-gutter:stable]'}${isElectronApp ? '' : ` browser-main${isReader ? ' browser-main--reader' : ''}${isSettingsPage ? ' browser-main--settings' : ''}${isExplorePage || isLibraryPage || isMigrationSearchPage ? ' browser-main--subroutes' : ''}`}`}
+            className={`min-h-0 min-w-0 flex-1 overflow-y-auto [overflow-anchor:none]${isMangaPage && !isMigrationSearchPage ? ' detail-main [scrollbar-gutter:stable]' : ''}${isElectronApp && isLibraryPage ? ' no-scrollbar' : ''}${isElectronApp && isMigrationSearchPage ? ' browser-main--subroutes' : ''}${isReader || isSettingsPage || isExplorePage || isLibraryPage || isMangaPage ? '' : ' [scrollbar-gutter:stable]'}${isElectronApp ? '' : ` browser-main${isReader ? ' browser-main--reader' : ''}${isSettingsPage ? ' browser-main--settings' : ''}${isExplorePage || isLibraryPage || isMigrationSearchPage ? ' browser-main--subroutes' : ''}`}`}
             style={isReader ? undefined : isMigrationSearchPage
               ? { padding: 0, overflowY: 'hidden', '--web-page-padding': `${Math.max(14, Math.round(24 * scale))}px` }
               : isElectronApp

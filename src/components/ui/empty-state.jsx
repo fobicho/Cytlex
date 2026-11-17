@@ -9,6 +9,9 @@ const TONES = {
   error: 'text-destructive/55'
 };
 
+export const GENTLE_FLOAT_MOTION = { y: [0, -5, 0], rotate: [0, -1.5, 1.5, 0] };
+export const GENTLE_FLOAT_TRANSITION = { duration: 3.4, repeat: Infinity, ease: 'easeInOut' };
+
 export function EmptyState({
   face,
   title,
@@ -42,8 +45,8 @@ export function EmptyState({
             fontSize: fontPx(compact ? 30 : 48, scale, compact ? 22 : 32),
             marginBottom: px(compact ? 12 : 16, scale, compact ? 9 : 12)
           }}
-          animate={reduce || !animateFace ? undefined : { y: [0, -5, 0], rotate: [0, -1.5, 1.5, 0] }}
-          transition={animateFace ? { duration: 3.4, repeat: Infinity, ease: 'easeInOut' } : undefined}
+          animate={reduce || !animateFace ? undefined : GENTLE_FLOAT_MOTION}
+          transition={animateFace ? GENTLE_FLOAT_TRANSITION : undefined}
         >
           {face}
         </motion.div>

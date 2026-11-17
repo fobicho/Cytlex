@@ -6,7 +6,7 @@ import { api } from '../lib/api.js';
 import { isMangaCover, lib, mangaSourceUrl, storedCoverThumbnail } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
 import { reconcileMihonProgress } from '../lib/mihonProgress.js';
-import { extensions, isExtensionAllowed, isUnavailableMangaSource } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaSource } from '../lib/extensions.js';
 import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover, recallMangaPreview, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
@@ -87,12 +87,13 @@ const byNumber = (a, b, direction = 1) => {
 function SourceLine({ sourceId, manifest, scale, iconFailed = false }) {
   const m = manifest || extensions.manifest(sourceId);
   const [failed, setFailed] = useState(iconFailed);
+  const [loaded, setLoaded] = useState(false);
   return (
     <span className="inline-flex max-w-full min-w-0 items-center leading-none text-muted-foreground" style={{ gap: px(6, scale, 4), fontSize: fontPx(12, scale, 10) }}>
-      <span aria-hidden="true" className={cn('relative rounded grid place-items-center overflow-hidden shrink-0', (!m.icon || failed) && 'bg-secondary text-secondary-foreground')} style={{ width: px(20, scale, 16), height: px(20, scale, 16) }}>
-        {(!m.icon || failed) && (
-          <span className="font-bold" style={{ fontSize: fontPx(9, scale, 8) }}>{(m.name?.[0] || '?').toUpperCase()}</span>
-        )}
+      <span aria-hidden="true" className="relative grid place-items-center overflow-hidden shrink-0 bg-secondary text-secondary-foreground" style={{ width: px(20, scale, 16), height: px(20, scale, 16), borderRadius: px(12, scale, 9) }}>
+        <span className={cn('font-bold', loaded && !failed && m.icon && 'opacity-0')} style={{ fontSize: fontPx(9, scale, 8) }}>
+          {(m.name?.[0] || '?').toUpperCase()}
+        </span>
         {m.icon && !failed && (
           <img
             src={m.icon}
@@ -101,6 +102,7 @@ function SourceLine({ sourceId, manifest, scale, iconFailed = false }) {
             fetchPriority="high"
             decoding="sync"
             className="absolute inset-0 w-full h-full object-cover"
+            onLoad={() => setLoaded(true)}
             onError={() => setFailed(true)}
           />
         )}
@@ -308,6 +310,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const coverSize = Math.round(COVER_BASE * scale);
   const installedExtensions = extensions.sources()
     .map(({ manifest }) => manifest)
+    .filter(isSourceConfigured)
     .filter((manifest, index, sources) => sources.findIndex((source) => source.id === manifest.id) === index);
   const migrationTargets = installedExtensions.filter((manifest) => manifest.id !== sourceId);
 

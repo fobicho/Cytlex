@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { sourceErrorMessage } from '../lib/browserHttp.js';
 import { isLibraryManga, lib, libraryIdentityKey, libraryKey } from '../lib/library.js';
-import { extensions, isExtensionAllowed, isUnavailableMangaSource } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaSource, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { settings } from '../lib/settings.js';
 import { lastSearch, scrollMemory, rememberMangaPreview, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
@@ -33,22 +33,12 @@ const TABS = [
 const catalogScroller = () => Array.from(document.querySelectorAll('.catalog-page-scroll')).find((element) => element.offsetParent !== null) || document.querySelector('main');
 
 const enabledSources = (showAdultExtensions) => extensions.sources().filter(({ manifest }) =>
-  isExtensionAllowed(manifest, showAdultExtensions) && !isLanguageSourceDisabled(manifest)
+  isExtensionAllowed(manifest, showAdultExtensions) && isSourceConfigured(manifest)
 );
 
 const normalizeMangaTitle = (title) => String(title || '').trim().normalize('NFKC').toLocaleLowerCase();
 
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
-
-const isLanguageSourceDisabled = (manifest) => {
-  if (!Array.isArray(manifest.config?.languages) || !manifest.config.languages.length) return false;
-  try {
-    const selected = JSON.parse(localStorage.getItem(EXT_CONFIG_KEY))?.[manifest.id]?.languages;
-    return Array.isArray(selected) && selected.length === 0;
-  } catch {
-    return false;
-  }
-};
 
 const sourceLangSubtitle = (manifest) => {
   const options = Array.isArray(manifest.config?.languages) ? manifest.config.languages : null;
@@ -357,13 +347,13 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   }, [tab]);
 
   const catalogSources = migrationMode
-    ? extensions.sources().filter(({ manifest }) => migrationSourceIds.includes(manifest.id))
+    ? extensions.sources().filter(({ manifest }) => migrationSourceIds.includes(manifest.id) && isSourceConfigured(manifest))
     : sources;
   const searching = !!results && results.some((r) => r.status === 'loading');
   const completed = results ? results.filter((r) => r.status !== 'loading') : [];
   const visibleCompleted = migrationMode
-    ? completed.filter((r) => migrationSourceIds.includes(r.id))
-    : completed.filter((r) => isExtensionAllowed(r.manifest, showAdultExtensions) && !isLanguageSourceDisabled(r.manifest));
+    ? completed.filter((r) => migrationSourceIds.includes(r.id) && isSourceConfigured(r.manifest))
+    : completed.filter((r) => isExtensionAllowed(r.manifest, showAdultExtensions) && isSourceConfigured(r.manifest));
   const searchItems = visibleCompleted.flatMap((result) => result.items.map((manga) => ({ manga, sourceId: result.id })));
   const visibleSearchItemCount = migrationMode || !hideSavedManga
     ? searchItems.length
@@ -390,7 +380,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     const adultExtensionsEnabled = !!settings.get().showAdultExtensions;
     const migrationSources = new Set(migrationSourceIds);
     const list = migrationMode
-      ? extensions.sources().filter(({ manifest }) => migrationSources.has(manifest.id))
+      ? extensions.sources().filter(({ manifest }) => migrationSources.has(manifest.id) && isSourceConfigured(manifest))
       : enabledSources(adultExtensionsEnabled).filter(({ manifest }) => manifest.id !== excludedSourceId);
     if (!list.length && !excludedSourceId) return;
     if (!migrationMode) scrollMemory.catalog = 0;
@@ -451,6 +441,17 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
       }
     });
   };
+
+  useEffect(() => {
+    const onSourceConfigChange = () => {
+      setSources(enabledSources(!!settings.get().showAdultExtensions));
+      if (!active) return;
+      if (migrationMode) runSearch();
+      else if (tab === 'mangas' && lastSearch.q) runSearch(lastSearch.q);
+    };
+    window.addEventListener(SOURCE_CONFIG_CHANGE_EVENT, onSourceConfigChange);
+    return () => window.removeEventListener(SOURCE_CONFIG_CHANGE_EVENT, onSourceConfigChange);
+  }, [active, migrationMode, tab, migrationSearchKey]);
 
   const openMangaDetail = (manga, sourceId) => {
     const params = new URLSearchParams({ u: manga.url, s: sourceId, from: migrationInline?.origin || 'explorar' });

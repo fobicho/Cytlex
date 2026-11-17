@@ -6,7 +6,7 @@ import { Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Tags, Trash2, 
 import { CONTENT_WARNING_RATINGS, resolveMode, settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
 import { anilist } from '../lib/anilist.js';
-import { session } from '../lib/session.js';
+import { consumeBrowserAuthError, consumeBrowserSettingsSection, session } from '../lib/session.js';
 import { tracking } from '../lib/tracking.js';
 import { MODES, THEMES } from '../lib/themes.js';
 import { notifyHours } from '../lib/notify.js';
@@ -193,7 +193,10 @@ let sessionSeccion = '';
 export default function Settings({ tutorialPreview = false }) {
   const location = useLocation();
   const [s, setS] = useState(settings.get());
-  const [section, setSection] = useState(() => SECTIONS.some(({ id }) => id === sessionSeccion) ? sessionSeccion : 'apariencia');
+  const [section, setSection] = useState(() => {
+    const restoredSection = consumeBrowserSettingsSection() || sessionSeccion;
+    return SECTIONS.some(({ id }) => id === restoredSection) ? restoredSection : 'apariencia';
+  });
   const [libraryUnreadTipOpen, setLibraryUnreadTipOpen] = useState(false);
   const libraryUnreadTipRef = useRef(null);
   const [chaptersPerRowTipOpen, setChaptersPerRowTipOpen] = useState(false);
@@ -205,7 +208,7 @@ export default function Settings({ tutorialPreview = false }) {
   const [authState, setAuthState] = useState({ connected: false });
   const [authViewer, setAuthViewer] = useState(null);
   const [authBusy, setAuthBusy] = useState(false);
-  const [authErr, setAuthErr] = useState('');
+  const [authErr, setAuthErr] = useState(() => consumeBrowserAuthError());
   const [connectHintFor, setConnectHintFor] = useState(null);
   const connectHintRef = useRef(null);
   const { toast, dismiss } = useToast();
@@ -274,13 +277,23 @@ export default function Settings({ tutorialPreview = false }) {
   }, [libraryUnreadTipOpen, chaptersPerRowTipOpen]);
 
   useEffect(() => {
-    const activeTab = sectionNavRef.current?.querySelector('[aria-current="page"]');
-    activeTab?.scrollIntoView({
-      behavior: reduceMotion ? 'auto' : 'smooth',
-      block: 'nearest',
-      inline: 'nearest'
-    });
-  }, [section, reduceMotion]);
+    const nav = sectionNavRef.current;
+    const activeTab = nav?.querySelector('[aria-current="page"]');
+    if (!nav || !activeTab) return;
+
+    const navBounds = nav.getBoundingClientRect();
+    const tabBounds = activeTab.getBoundingClientRect();
+    const safeInset = px(16, scale, 12);
+    const leftEdge = navBounds.left + safeInset;
+    const rightEdge = navBounds.right - safeInset;
+    const scrollOptions = { behavior: reduceMotion ? 'auto' : 'smooth' };
+
+    if (tabBounds.left < leftEdge) {
+      nav.scrollBy({ ...scrollOptions, left: tabBounds.left - leftEdge });
+    } else if (tabBounds.right > rightEdge) {
+      nav.scrollBy({ ...scrollOptions, left: tabBounds.right - rightEdge });
+    }
+  }, [section, reduceMotion, scale]);
 
   const resetWebData = async () => {
     setWebDataResetBusy(true);
@@ -377,17 +390,21 @@ export default function Settings({ tutorialPreview = false }) {
   const connect = async () => {
     setAuthBusy(true);
     setAuthErr('');
+    let redirecting = false;
     try {
-      const r = await session.login();
+      const r = await session.login(section);
+      redirecting = !!r?.redirecting;
       if (!r?.cancelled) {
+        if (redirecting) return;
         setAuthState({ connected: true });
         setAuthViewer(await session.viewer());
         setConnectHintFor(null);
       }
     } catch (e) {
       setAuthErr(String(e?.message || e));
+    } finally {
+      if (!redirecting) setAuthBusy(false);
     }
-    setAuthBusy(false);
   };
 
   const set = (patch) => setS(settings.set(patch));
@@ -1685,10 +1702,10 @@ export default function Settings({ tutorialPreview = false }) {
             initial={false}
             exit={{ height: 0, opacity: 0, marginBottom: 0 }}
             transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
-            style={{ overflow: 'hidden', marginBottom: px(20, scale, 15) }}
+            style={{ overflow: 'hidden', marginBottom: 0 }}
           >
             <div
-              className="relative grid grid-cols-[auto_minmax(0,1fr)] items-start rounded-xl border border-primary/25 bg-primary/5 md:flex md:items-center"
+              className="relative grid grid-cols-[auto_minmax(0,1fr)] items-start border-b border-border/70 bg-primary/5 md:flex md:items-center"
               style={{ gap: px(12, scale, 9), padding: px(16, scale, 12), paddingRight: px(48, scale, 38) }}
             >
               <div className="contents md:flex md:min-w-0 md:flex-1 md:items-center" style={{ gap: px(12, scale, 9) }}>
@@ -1749,7 +1766,7 @@ export default function Settings({ tutorialPreview = false }) {
         ref={sectionNavRef}
         className={cn(
           'flex w-full min-w-0 shrink-0 items-center overflow-x-auto overscroll-x-contain whitespace-nowrap border-b border-border/70 bg-sidebar no-scrollbar',
-          !isBrowserApp && '-mt-2 max-md:-mt-3'
+          !isBrowserApp && !showDonate && '-mt-2 max-md:-mt-3'
         )}
         aria-label="Secciones de ajustes"
         style={{

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown, Settings as SettingsIcon, X, Check, CheckSquare } from 'lucide-react';
-import { extensions, isAdultExtension, isExtensionAllowed, isNewer } from '../lib/extensions.js';
+import { extensions, isAdultExtension, isExtensionAllowed, isNewer, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
 import { extUpdates } from '../lib/extUpdates.js';
 import { settings } from '../lib/settings.js';
 import { Card } from './ui/card.jsx';
@@ -200,6 +200,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     writeExtConfig(cfg);
     setLangConfig({ ...cfg });
     extensions.invalidate(subId);
+    window.dispatchEvent(new Event(SOURCE_CONFIG_CHANGE_EVENT));
   };
   const visibleAvailable = available?.filter((manifest) => isExtensionAllowed(manifest, showAdultExtensions));
   const installedById = new Map(installed.map((record) => [record.manifest.id, record.manifest]));

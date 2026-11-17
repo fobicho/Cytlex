@@ -7,8 +7,10 @@ import Onboarding from './components/Onboarding.jsx';
 import { ToastProvider } from './components/Toast.jsx';
 import { migrateLegacyStorage } from './lib/migrate.js';
 import { resolveMode, settings } from './lib/settings.js';
+import { consumeBrowserOAuthCallback } from './lib/session.js';
 import './index.css';
 
+consumeBrowserOAuthCallback();
 migrateLegacyStorage();
 
 const boot = settings.get();
