@@ -1102,7 +1102,7 @@ export default function Settings({ tutorialPreview = false }) {
     }
 
     content = (
-      <div className="w-full max-w-4xl">
+      <div className="w-full">
         {cats.length > 0 ? (
           <div className="overflow-hidden border border-border bg-card">
             {cats.map((c, i) => (

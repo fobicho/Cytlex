@@ -17,6 +17,16 @@ export default function createSource({ fetchText, parse }) {
     return parse(html);
   }
 
+  function requestError(error, resource) {
+    const message = String(error?.message || error || '');
+    if (!/\bHTTP 403\b/.test(message)) return error;
+    return Object.assign(new Error(`LectorXD respondió con una verificación de Cloudflare (HTTP 403) al solicitar ${resource}.`), {
+      status: error?.status || 403,
+      requestOrigin: error?.requestOrigin || 'source',
+      reason: 'cloudflare'
+    });
+  }
+
   function imageUrl(image, context) {
     for (const attribute of ['data-src', 'data-lazy-src', 'data-original', 'src']) {
       const url = abs(image?.getAttribute(attribute), context);
@@ -42,10 +52,7 @@ export default function createSource({ fetchText, parse }) {
     try {
       html = await fetchText(url.href, __cytlexRequestId);
     } catch (error) {
-      if (/\bHTTP 403\b/.test(String(error?.message || error))) {
-        throw new Error('LectorXD rechazó la solicitud (HTTP 403).');
-      }
-      throw error;
+      throw requestError(error, 'el catálogo');
     }
     const doc = document(html);
     const items = [...doc.querySelectorAll('.manga-grid a[href]')]
@@ -135,10 +142,7 @@ export default function createSource({ fetchText, parse }) {
     try {
       html = await fetchText(url, requestId);
     } catch (error) {
-      if (/\bHTTP 403\b/.test(String(error?.message || error))) {
-        throw new Error('LectorXD rechazó la ficha (HTTP 403).');
-      }
-      throw error;
+      throw requestError(error, 'la ficha y sus capítulos');
     }
     const doc = document(html);
     const route = new URL(url).pathname.split('/').filter(Boolean).map(decode);

@@ -140,6 +140,12 @@ export function sourceErrorMessage(error, name, fallback = '') {
   const status = error?.status || message.match(/\bHTTP (\d{3})\b/)?.[1];
   const code = status ? ` (HTTP ${status})` : '';
   const sourceName = name || 'La fuente';
+  if (error?.reason === 'cloudflare') {
+    return `${sourceName} respondió con una verificación de Cloudflare${code}. Cytlex no pudo obtener el contenido.`;
+  }
+  if (String(sourceName).toLowerCase() === 'lectorxd' && Number(status) === 403) {
+    return 'LectorXD respondió con una verificación de Cloudflare (HTTP 403). Cytlex no pudo obtener los capítulos.';
+  }
   if (error?.requestOrigin === 'cytlex') {
     if (status === 403) return 'Cytlex bloqueó la solicitud porque la dirección no está permitida (HTTP 403).';
     if (status === 508) return 'Cytlex detuvo la solicitud por demasiadas redirecciones (HTTP 508).';

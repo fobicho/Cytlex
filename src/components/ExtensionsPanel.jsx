@@ -914,6 +914,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                         <Button
                           variant="ghost"
                           size="icon"
+                          className="active:scale-100 hover:bg-transparent hover:text-foreground"
                           title={`Configuración de ${m.name}`}
                           aria-label={`Configuración de ${m.name}`}
                           onClick={() => setConfigExt(m)}
@@ -931,7 +932,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="hover:bg-transparent hover:text-foreground"
+                            className="active:scale-100 hover:bg-transparent hover:text-foreground"
                             title={`Actualizar a la v${upd.to}`}
                             aria-label={`Actualizar ${m.name}`}
                             disabled={updating !== ''}
@@ -959,7 +960,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="text-destructive hover:bg-transparent hover:text-destructive"
+                          className="active:scale-100 text-destructive hover:bg-transparent hover:text-destructive"
                           title="Desinstalar"
                           aria-label="Desinstalar"
                           disabled={busy !== ''}
@@ -1127,7 +1128,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="hover:bg-transparent hover:text-foreground"
+                      className="active:scale-100 hover:bg-transparent hover:text-foreground"
                       title="Instalar"
                       aria-label="Instalar"
                       disabled={busy !== ''}
