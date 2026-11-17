@@ -25,7 +25,7 @@ const ALLOWED_HOSTS = new Set([
   'zonatmo.org'
 ]);
 
-const ALLOWED_SUFFIXES = ['t34798ndc.com', 'mangadex.network', 'ntr-files.online'];
+const ALLOWED_SUFFIXES = ['t34798ndc.com', 'mangadex.network', 'ntr-files.online', 'cdnlxd.xyz'];
 const REDIRECT_LIMIT = 5;
 const UPSTREAM_RETRIES = 2;
 const PROXY_RESPONSE_MAX_BYTES = 50 * 1024 * 1024;

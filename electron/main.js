@@ -154,7 +154,7 @@ const REFERER_RULES = [
   { hosts: ['zonatmo.org'], referer: 'https://zonatmo.org/' },
   { hosts: ['ntr-files.online'], referer: 'https://manga-oni.com/' },
   { hosts: ['inmanga.com', 'intomanga.com', 'pack-yak.intomanga.com'], referer: 'https://inmanga.com/' },
-  { hosts: ['images.komiwa.net', 'media.mangavault.lat'], referer: 'https://www.komiwa.net/' }
+  { hosts: ['images.komiwa.net', 'media.mangavault.lat', 'cdnlxd.xyz'], referer: 'https://www.komiwa.net/' }
 ];
 
 const ALLOWED_PROTOCOLS = ['http:', 'https:'];
@@ -843,7 +843,8 @@ ipcMain.handle('image:fetch', async (_e, url, requestedReferer, requestedCookie)
         }
       } catch {}
     }
-    if (host === 'media.mangavault.lat' && typeof requestedReferer === 'string') {
+    if ((host === 'media.mangavault.lat' || host === 'cdnlxd.xyz' || host.endsWith('.cdnlxd.xyz'))
+      && typeof requestedReferer === 'string') {
       try {
         const candidate = validateUrl(requestedReferer);
         if (candidate.origin === 'https://www.komiwa.net' && candidate.pathname.startsWith('/chapter/')) {

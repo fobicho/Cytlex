@@ -161,7 +161,12 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const pages = [...doc.querySelectorAll('img[src], img[data-src], img[data-lazy-src], img[data-original]')]
       .map((image) => abs(image.getAttribute('data-src') || image.getAttribute('data-lazy-src')
         || image.getAttribute('data-original') || image.getAttribute('src'), referer))
-      .filter((src) => src && /(?:media\.mangavault\.lat|images\.komiwa\.net)/i.test(new URL(src).hostname))
+      .filter((src) => {
+        if (!src) return false;
+        const host = new URL(src).hostname.toLowerCase();
+        return host === 'media.mangavault.lat' || host === 'images.komiwa.net'
+          || host === 'cdnlxd.xyz' || host.endsWith('.cdnlxd.xyz');
+      })
       .filter((src, index, list) => list.indexOf(src) === index);
     if (!pages.length) throw new Error('Komiwa no entregó páginas legibles para este capítulo.');
 
