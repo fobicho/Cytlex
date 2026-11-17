@@ -158,9 +158,16 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const referer = `${site}/chapter/${encodeURIComponent(chapterId)}`;
     const html = await fetchText(referer, undefined, { headers: { Referer: `${site}/` } });
     const doc = parse(html);
-    const pages = [...doc.querySelectorAll('img[src], img[data-src], img[data-lazy-src], img[data-original]')]
+    const serializedHtml = String(html || '')
+      .replace(/\\+u002f/gi, '/')
+      .replace(/\\+\//g, '/');
+    const embeddedUrls = [...serializedHtml.matchAll(/https?:\/\/[^\s"'<>\\]+/gi)]
+      .map(([url]) => url);
+    const imageElements = [...doc.querySelectorAll('img[src], img[data-src], img[data-lazy-src], img[data-original]')]
       .map((image) => abs(image.getAttribute('data-src') || image.getAttribute('data-lazy-src')
-        || image.getAttribute('data-original') || image.getAttribute('src'), referer))
+        || image.getAttribute('data-original') || image.getAttribute('src'), referer));
+    const pages = [...imageElements, ...embeddedUrls]
+      .map((src) => abs(src, referer))
       .filter((src) => {
         if (!src) return false;
         const host = new URL(src).hostname.toLowerCase();
