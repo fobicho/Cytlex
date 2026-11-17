@@ -88,6 +88,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const chaptersData = await fetchText(`${api}/manga/${encodeURIComponent(manga.id)}/chapters?page=1&limit=${chapterLimit}&sort=desc`);
     const chapterResponse = JSON.parse(chaptersData);
     const listed = chapterResponse?.data?.chapters || [];
+    const mangaTitle = clean(manga.title).toLocaleLowerCase('es');
     const chapters = listed
       .filter((item) => item?.id)
       .sort((a, b) => {
@@ -96,12 +97,17 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
         if (Number.isFinite(aNumber) && Number.isFinite(bNumber) && aNumber !== bNumber) return aNumber - bNumber;
         return String(a.number).localeCompare(String(b.number), 'es', { numeric: true });
       })
-      .map((item) => ({
-        title: clean(item.title) || `Capítulo ${clean(item.number)}`,
-        url: `${site}/chapter/${encodeURIComponent(item.id)}?manga=${encodeURIComponent(manga.id)}&slug=${encodeURIComponent(slug)}`,
-        date: clean(item.publishedAt || item.createdAt),
-        group: clean(typeof item.group === 'string' ? item.group : item.group?.name)
-      }));
+      .map((item) => {
+        const title = clean(item.title);
+        return {
+          title: !title || title.toLocaleLowerCase('es') === mangaTitle
+            ? `Capítulo ${clean(item.number)}`
+            : title,
+          url: `${site}/chapter/${encodeURIComponent(item.id)}?manga=${encodeURIComponent(manga.id)}&slug=${encodeURIComponent(slug)}`,
+          date: clean(item.publishedAt || item.createdAt),
+          group: clean(typeof item.group === 'string' ? item.group : item.group?.name)
+        };
+      });
     const chapterOptions = chapters.map(({ title, url: chapterUrl }) => ({ title, url: chapterUrl }));
     for (const item of listed) chapterCache.set(item.id, { manga, chapterOptions });
 

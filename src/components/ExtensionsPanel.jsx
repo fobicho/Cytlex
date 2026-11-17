@@ -225,6 +225,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   const confirmPopoverRef = useRef(null);
   const removePopoverRef = useRef(null);
   const updateRef = useRef(null);
+  const updatePopoverRef = useRef(null);
   const allRef = useRef(null);
   const bulkInstallRef = useRef(null);
   const bulkUninstallRef = useRef(null);
@@ -233,7 +234,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   useLayoutEffect(() => {
     const openConfirmations = [
       [confirmRemove, setConfirmRemove, removeRef, removePopoverRef],
-      [confirmInstall, setConfirmInstall, confirmRef, confirmPopoverRef]
+      [confirmInstall, setConfirmInstall, confirmRef, confirmPopoverRef],
+      [confirmUpdate === 'all' ? null : confirmUpdate, setConfirmUpdate, updateRef, updatePopoverRef]
     ];
 
     for (const [confirmation, setConfirmation, triggerRef, popoverRef] of openConfirmations) {
@@ -250,7 +252,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
         return { ...current, popoverPosition: position };
       });
     }
-  }, [confirmRemove, confirmInstall]);
+  }, [confirmRemove, confirmInstall, confirmUpdate]);
 
   useLayoutEffect(() => {
     if (!confirmBulk?.popoverPosition) return;
@@ -305,12 +307,18 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   useEffect(() => {
     if (!confirmUpdate || confirmUpdate === 'all') return;
     const onDown = (e) => {
-      if (updateRef.current && !updateRef.current.contains(e.target)) {
-        setConfirmUpdate(null);
-      }
+      if (updateRef.current?.contains(e.target) || updatePopoverRef.current?.contains(e.target)) return;
+      setConfirmUpdate(null);
     };
+    const closeOnLayoutChange = () => setConfirmUpdate(null);
     document.addEventListener('pointerdown', onDown);
-    return () => document.removeEventListener('pointerdown', onDown);
+    document.addEventListener('scroll', closeOnLayoutChange, true);
+    window.addEventListener('resize', closeOnLayoutChange);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('scroll', closeOnLayoutChange, true);
+      window.removeEventListener('resize', closeOnLayoutChange);
+    };
   }, [confirmUpdate]);
 
   useEffect(() => {
@@ -899,7 +907,12 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                             title={`Actualizar a la v${upd.to}`}
                             aria-label={`Actualizar ${m.name}`}
                             disabled={updating !== ''}
-                            onClick={() => setConfirmUpdate(upd)}
+                            onClick={(event) => {
+                              const popoverPosition = confirmationPosition(event.currentTarget);
+                              setConfirmUpdate((current) => current?.id === upd.id
+                                ? null
+                                : { ...upd, popoverPosition });
+                            }}
                             style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
                           >
                             {updating === m.id ? (
@@ -908,32 +921,6 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                               <Download style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                             )}
                           </Button>
-                          <AnimatePresence>
-                            {confirmUpdate && confirmUpdate !== 'all' && confirmUpdate.id === m.id && (
-                              <motion.div
-                                key="confirm-update"
-                                initial={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
-                                animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
-                                exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
-                                transition={{ duration: 0.14, ease: 'easeOut' }}
-                                className="absolute z-20 rounded-lg border border-border bg-card shadow-lg"
-                                style={{ top: '100%', left: '50%', marginTop: px(6, scale, 4), padding: px(8, scale, 6) }}
-                              >
-                                <Button
-                                  size="sm"
-                                  onClick={async () => {
-                                    const target = confirmUpdate;
-                                    setConfirmUpdate(null);
-                                    await doUpdateOne(target.id);
-                                  }}
-                                  disabled={updating !== ''}
-                                  style={{ height: px(28, scale, 24), fontSize: fontPx(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
-                                >
-                                  Actualizar
-                                </Button>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
                         </div>
                       )}
                       <div
@@ -1134,6 +1121,54 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
 
       {createPortal(
         <>
+          <AnimatePresence>
+            {confirmUpdate?.popoverPosition && confirmUpdate !== 'all' && (
+              <motion.div
+                ref={updatePopoverRef}
+                key="confirm-update"
+                initial={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, x: '-50%', scale: 1 }}
+                exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
+                transition={{ duration: 0.14, ease: 'easeOut' }}
+                role="dialog"
+                aria-label={`Confirmar actualización de ${confirmUpdate.name}`}
+                className="fixed z-[70] flex flex-col border border-border bg-card shadow-xl"
+                style={{ ...confirmUpdate.popoverPosition, width: Math.min(288, window.innerWidth - 24), padding: px(12, scale, 10), gap: px(10, scale, 8) }}
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-semibold" style={{ fontSize: fontPx(14, scale, 12) }}>¿Actualizar {confirmUpdate.name}?</p>
+                  <p className="mt-1 text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10), lineHeight: 1.4 }}>
+                    Se instalará la versión v{confirmUpdate.to} (actualmente v{confirmUpdate.from}).
+                  </p>
+                </div>
+                <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="confirmation-cancel-button"
+                    onClick={() => setConfirmUpdate(null)}
+                    style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="confirmation-action-button"
+                    aria-label="Confirmar actualización"
+                    onClick={async () => {
+                      const id = confirmUpdate.id;
+                      setConfirmUpdate(null);
+                      await doUpdateOne(id);
+                    }}
+                    disabled={updating !== ''}
+                    style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
+                  >
+                    Actualizar
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
           <AnimatePresence>
             {confirmRemove?.popoverPosition && (
               <motion.div
