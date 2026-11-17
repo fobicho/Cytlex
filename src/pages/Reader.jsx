@@ -1199,7 +1199,7 @@ export default function Reader() {
                        alt={`Página ${idx + 1}`}
                        onContextMenu={(e, url) => openPanelMenu(e, url, `Página ${idx + 1}`)}
                        wrapperClassName="grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] h-full min-h-0 min-w-0 flex-1"
-                       imageClassName={cn('block h-full w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
+                       imageClassName={cn('block h-full w-auto max-w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                      />
                    );
                  });
@@ -1213,7 +1213,7 @@ export default function Reader() {
                 alt={`Página ${page + 1}`}
                 onContextMenu={(e, url) => openPanelMenu(e, url, `Página ${page + 1}`)}
                 wrapperClassName="grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] h-full min-h-0 w-full"
-                imageClassName={cn('block h-full w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
+                imageClassName={cn('block h-full w-auto max-w-full object-contain', wheelZoom > 0 && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
                />
            )}
           </div>

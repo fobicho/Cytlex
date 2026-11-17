@@ -11,7 +11,7 @@ export default function createSource({ fetchText, parse }) {
   };
 
   function document(html) {
-    if (/Just a moment\.\.\.|challenge-platform|cf-chl-/i.test(String(html || ''))) {
+    if (/Just a moment\.\.\.|cf-chl-/i.test(String(html || ''))) {
       throw new Error('LectorXD mostró una verificación de Cloudflare.');
     }
     return parse(html);
