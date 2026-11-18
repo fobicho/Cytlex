@@ -389,6 +389,10 @@ async function fetchBatchItem(item, request) {
   if (!target) {
     return { status: 403, text: JSON.stringify({ error: 'Target is not allowed' }), proxyDenied: true, errorOrigin: 'cytlex' };
   }
+  const method = String(item?.method || 'GET').toUpperCase();
+  if (!['GET', 'POST'].includes(method) || (method === 'POST' && typeof item?.body !== 'string')) {
+    return { status: 400, text: JSON.stringify({ error: 'Invalid batch request' }), errorOrigin: 'cytlex' };
+  }
 
   const requestHeaders = new Headers();
   let headerBytes = 0;
@@ -402,6 +406,9 @@ async function fetchBatchItem(item, request) {
   for (const name of ['accept', 'user-agent', 'accept-language']) {
     if (!requestHeaders.has(name) && request.headers.has(name)) requestHeaders.set(name, request.headers.get(name));
   }
+  if (target.hostname === 'onfmangas.com' && typeof item.onfCookie === 'string') {
+    requestHeaders.set('x-cytlex-onf-cookie', item.onfCookie.slice(0, 4096));
+  }
 
   const metadataUrl = new URL(request.url);
   metadataUrl.searchParams.delete('url');
@@ -410,7 +417,7 @@ async function fetchBatchItem(item, request) {
   if (typeof item.referer === 'string' && item.referer.length <= 2048) {
     metadataUrl.searchParams.set('referer', item.referer);
   }
-  const metadataRequest = new Request(metadataUrl, { headers: requestHeaders });
+  const metadataRequest = new Request(metadataUrl, { method, headers: requestHeaders });
 
   const deadline = new AbortController();
   const timeout = setTimeout(() => deadline.abort(), 12000);
@@ -418,7 +425,13 @@ async function fetchBatchItem(item, request) {
   let streaming = false;
   let responseTooLarge = false;
   try {
-    const { upstream, proxyError, finalUrl } = await fetchTarget(target, 'GET', forwardedHeaders(metadataRequest, target), undefined, signal);
+    const { upstream, proxyError, finalUrl } = await fetchTarget(
+      target,
+      method,
+      forwardedHeaders(metadataRequest, target),
+      method === 'POST' ? item.body : undefined,
+      signal
+    );
     if (proxyError) {
       return {
         status: proxyError.status,
@@ -444,13 +457,17 @@ async function fetchBatchItem(item, request) {
     ) : null;
     streaming = Boolean(responseBody);
     const text = responseBody ? await new Response(responseBody).text() : '';
+    const onfCookie = target.hostname === 'onfmangas.com'
+      ? responseOnfCookies(upstream).join('; ').slice(0, 4096)
+      : '';
     return {
       status: upstream.status,
       text,
       url: finalUrl || target.href,
       contentType: upstream.headers.get('content-type') || '',
       retryAfter: upstream.headers.get('retry-after') || '',
-      errorOrigin: upstream.ok ? '' : 'source'
+      errorOrigin: upstream.ok ? '' : 'source',
+      ...(onfCookie ? { onfCookie } : {})
     };
   } catch (error) {
     if (responseTooLarge) return { fallback: true };

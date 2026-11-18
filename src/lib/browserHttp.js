@@ -2,7 +2,7 @@ const electronBridge = () => (typeof window !== 'undefined' ? window.cytlex : nu
 let onfCookieJar = '';
 const HTTP_GET_CACHE_TTL_MS = 20 * 1000;
 const HTTP_GET_CACHE_MAX = 160;
-const HTTP_GET_BATCH_WINDOW_MS = 30;
+const HTTP_GET_BATCH_WINDOW_MS = 100;
 const HTTP_GET_BATCH_MAX = 12;
 const PROXY_IMAGE_BATCH_WINDOW_MS = 30;
 const PROXY_IMAGE_BATCH_MAX = 4;
@@ -120,10 +120,21 @@ function assertProxyResponse(response, target, url, usedProxy, proxyDeniedTarget
 
 function batchDescriptor({ url, options }) {
   const target = new URL(url);
+  const method = (options.method || 'GET').toUpperCase();
   const requestHeaders = new Headers(options.headers || {});
   const forwarded = proxyRequestOptions(url, { ...options, headers: requestHeaders }).headers;
   const headers = Object.fromEntries([...forwarded].filter(([name]) => batchHeaderNames.has(name)));
-  return { url: target.href, referer: proxyRefererFor(target, options.onfReferer), headers };
+  const onfCookie = target.hostname === 'onfmangas.com'
+    ? mergeCookiePairs(onfCookieJar, options.onfCookie)
+    : '';
+  return {
+    url: target.href,
+    method,
+    ...(method === 'POST' ? { body: options.body } : {}),
+    referer: proxyRefererFor(target, options.onfReferer),
+    headers,
+    ...(onfCookie ? { onfCookie } : {})
+  };
 }
 
 function responseFromBatchResult(result) {
@@ -136,6 +147,7 @@ function responseFromBatchResult(result) {
   if (result.errorOrigin) headers.set('x-cytlex-error-origin', result.errorOrigin);
   if (result.upstreamError) headers.set('x-cytlex-upstream-error', result.upstreamError);
   if (result.proxyDenied) headers.set('x-cytlex-proxy-denied', '1');
+  if (result.onfCookie) headers.set('x-cytlex-onf-cookie', result.onfCookie);
   return new Response([204, 205, 304].includes(status) ? null : result.text || '', { status, headers });
 }
 
@@ -176,6 +188,8 @@ async function runProxyBatch(entries) {
       const target = new URL(entry.url);
       const usedProxy = proxied.headers.get('x-cytlex-proxy') === '1';
       const denied = proxied.headers.get('x-cytlex-proxy-denied') === '1';
+      const receivedCookie = proxied.headers.get('x-cytlex-onf-cookie') || '';
+      if (receivedCookie) onfCookieJar = mergeCookiePairs(onfCookieJar, receivedCookie);
       try { entry.resolve(assertProxyResponse(proxied, target, entry.url, usedProxy, denied)); }
       catch (error) { entry.reject(error); }
     }));
@@ -191,15 +205,16 @@ function flushProxyGetQueue() {
   if (httpGetBatchQueue.length) httpGetBatchTimer = setTimeout(flushProxyGetQueue, HTTP_GET_BATCH_WINDOW_MS);
 }
 
-function scheduleProxyGet(url, options) {
+function scheduleProxyRequest(url, options) {
   const target = new URL(url);
   const configuredProxy = import.meta.env.VITE_CYTLEX_PROXY_URL;
   const proxyEndpoint = new URL(configuredProxy || '/api/proxy', window.location.href);
   const method = (options.method || 'GET').toUpperCase();
-  const supportedOptions = new Set(['headers', 'onfReferer']);
-  if (target.origin === window.location.origin || proxyEndpoint.origin !== window.location.origin || method !== 'GET' || options.signal
+  const supportedOptions = new Set(['headers', 'onfReferer', 'onfCookie', 'method', 'body']);
+  if (target.origin === window.location.origin || proxyEndpoint.origin !== window.location.origin || !['GET', 'POST'].includes(method) || options.signal
+    || (method === 'POST' && typeof options.body !== 'string')
     || Object.keys(options).some((key) => !supportedOptions.has(key))
-    || target.hostname === 'onfmangas.com' || target.hostname.endsWith('.onfmangas.com')) {
+    || target.hostname.endsWith('.onfmangas.com')) {
     return browserRequest(url, options);
   }
 
@@ -208,7 +223,8 @@ function scheduleProxyGet(url, options) {
     if (httpGetBatchQueue.length >= HTTP_GET_BATCH_MAX) {
       clearTimeout(httpGetBatchTimer);
       httpGetBatchTimer = setTimeout(flushProxyGetQueue, 0);
-    } else if (!httpGetBatchTimer) {
+    } else {
+      clearTimeout(httpGetBatchTimer);
       httpGetBatchTimer = setTimeout(flushProxyGetQueue, HTTP_GET_BATCH_WINDOW_MS);
     }
   });
@@ -540,7 +556,7 @@ export async function httpGet(url, requestId, options = {}) {
     && !target.hostname.endsWith('.onfmangas.com');
 
   if (!canCache) {
-    const response = await scheduleProxyGet(url, requestOptions);
+    const response = await scheduleProxyRequest(url, requestOptions);
     const text = await response.text();
     if (!includeUrl) return text;
     const finalUrl = response.headers.get('x-cytlex-final-url') || response.url || url;
@@ -560,7 +576,7 @@ export async function httpGet(url, requestId, options = {}) {
   let request = httpGetRequests.get(key);
   if (!request) {
     request = (async () => {
-      const response = await scheduleProxyGet(url, requestOptions);
+      const response = await scheduleProxyRequest(url, requestOptions);
       const text = await response.text();
       const finalUrl = response.headers.get('x-cytlex-final-url') || response.url || url;
       const entry = { at: Date.now(), text, url: finalUrl };
@@ -594,7 +610,7 @@ export async function httpHead(url) {
 export async function httpPost(payload, requestId) {
   const bridge = electronBridge();
   if (bridge?.httpPost) return bridge.httpPost(payload, requestId);
-  const response = await browserRequest(payload.url, {
+  const response = await scheduleProxyRequest(payload.url, {
     method: 'POST',
     onfReferer: payload.onfReferer,
     onfCookie: payload.onfCookie,

@@ -418,45 +418,48 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     else lastSearch.results = initialResults;
     setResults(initialResults);
 
-    list.forEach(async (s) => {
-      try {
-        const params = { q: searchQuery, genre: '', page: 1 };
-        const r = await api.catalog(params, s.manifest.id);
-        const items = (r.items || []).filter((m) =>
-          (!migrationMode || isUnavailableMangaSource(migrationFromSource) || normalizeMangaTitle(m.title) === normalizeMangaTitle(migrationQuery)) &&
-          (s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim())
-        ).slice(0, MAX_SEARCH_RESULTS);
-        const visibleCovers = window.cytlex?.fetchImage
-          ? await Promise.all(items.slice(0, 10).map(async (m) => [
-              m.url,
-              await preloadSearchCover(m.cover)
-            ]))
-          : [];
-        const cachedCovers = new Map(visibleCovers.filter(([, cover]) => cover));
-        const loadedItems = items.map((m) => cachedCovers.has(m.url)
-          ? { ...m, coverCached: cachedCovers.get(m.url) }
-          : m);
-        items.forEach((m) => rememberMangaPreview(m, s.manifest.id));
-        if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
-        updateResults((prev) =>
-          prev ? prev.map((x) => (x.id === s.manifest.id
-            ? {
-                ...x,
-                status: 'done',
-                items: loadedItems,
-                page: 1,
-                totalPages: r.totalPages || 1,
-                hasMore: items.length < MAX_SEARCH_RESULTS && (r.hasMore ?? (r.totalPages > 1)),
-                totalText: r.totalText || ''
-              }
-            : x)) : prev
-        );
-      } catch (e) {
-        console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);
-        if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
-        const errorMessage = sourceErrorMessage(e, s.manifest.name);
-        updateResults((prev) => (prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'error', errorMessage } : x)) : prev));
-      }
+    void Promise.allSettled(list.map(({ manifest }) => extensions.source(manifest.id))).then(() => {
+      if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+      list.forEach(async (s) => {
+        try {
+          const params = { q: searchQuery, genre: '', page: 1 };
+          const r = await api.catalog(params, s.manifest.id);
+          const items = (r.items || []).filter((m) =>
+            (!migrationMode || isUnavailableMangaSource(migrationFromSource) || normalizeMangaTitle(m.title) === normalizeMangaTitle(migrationQuery)) &&
+            (s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim())
+          ).slice(0, MAX_SEARCH_RESULTS);
+          const visibleCovers = window.cytlex?.fetchImage
+            ? await Promise.all(items.slice(0, 10).map(async (m) => [
+                m.url,
+                await preloadSearchCover(m.cover)
+              ]))
+            : [];
+          const cachedCovers = new Map(visibleCovers.filter(([, cover]) => cover));
+          const loadedItems = items.map((m) => cachedCovers.has(m.url)
+            ? { ...m, coverCached: cachedCovers.get(m.url) }
+            : m);
+          items.forEach((m) => rememberMangaPreview(m, s.manifest.id));
+          if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+          updateResults((prev) =>
+            prev ? prev.map((x) => (x.id === s.manifest.id
+              ? {
+                  ...x,
+                  status: 'done',
+                  items: loadedItems,
+                  page: 1,
+                  totalPages: r.totalPages || 1,
+                  hasMore: items.length < MAX_SEARCH_RESULTS && (r.hasMore ?? (r.totalPages > 1)),
+                  totalText: r.totalText || ''
+                }
+              : x)) : prev
+          );
+        } catch (e) {
+          console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);
+          if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+          const errorMessage = sourceErrorMessage(e, s.manifest.name);
+          updateResults((prev) => (prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'error', errorMessage } : x)) : prev));
+        }
+      });
     });
   };
 
