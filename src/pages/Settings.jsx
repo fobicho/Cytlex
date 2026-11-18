@@ -1341,23 +1341,10 @@ export default function Settings({ tutorialPreview = false }) {
         />
         <Row
           scale={scale}
-          title="Avisar de actualizaciones de extensiones"
-          desc="Avisa de novedades en tus extensiones instaladas cada vez que se ingresa"
-          right={
-            <Switch
-              scale={scale}
-              on={s.extUpdateNotify}
-              onChange={(v) => set({ extUpdateNotify: v })}
-              label="Avisar de actualizaciones de extensiones"
-            />
-          }
-        />
-        <Row
-          scale={scale}
           title="Comprobar cada"
-          desc="Elige cada cuántas horas quieres que se revisen las novedades"
+          desc="Elige cada cuántas horas se revisará la biblioteca"
           right={
-             <div className={cn('flex items-center', !s.notifyEnabled && !s.extUpdateNotify && 'pointer-events-none opacity-50')} aria-disabled={!s.notifyEnabled && !s.extUpdateNotify}>
+             <div className={cn('flex items-center', !s.notifyEnabled && 'pointer-events-none opacity-50')} aria-disabled={!s.notifyEnabled}>
               <Dropdown
                 scale={scale}
                 style={{ width: px(132, scale, 108) }}
@@ -1379,14 +1366,14 @@ export default function Settings({ tutorialPreview = false }) {
           last
           title="Notificaciones en segundo plano"
           desc={
-            s.notifyEnabled || s.extUpdateNotify
-              ? 'Comprueba si hay novedades aún con Cytlex cerrado'
-              : 'Activa algún aviso anterior para poder comprobar actualizaciones con Cytlex cerrado'
+            s.notifyEnabled
+              ? 'Comprueba capítulos nuevos aún con Cytlex cerrado'
+              : 'Activa el aviso de capítulos nuevos para comprobarlos con Cytlex cerrado'
           }
           right={
             <div
-              className={cn('flex items-center', !s.notifyEnabled && !s.extUpdateNotify && 'pointer-events-none opacity-50')}
-              aria-disabled={!s.notifyEnabled && !s.extUpdateNotify}
+              className={cn('flex items-center', !s.notifyEnabled && 'pointer-events-none opacity-50')}
+              aria-disabled={!s.notifyEnabled}
             >
               <Switch
                 scale={scale}

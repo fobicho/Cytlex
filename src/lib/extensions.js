@@ -7,6 +7,8 @@ import defaultExtensionIndex from '../../docs/index.json';
 
 const KEY = 'cytlex:extensions:v1';
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
+const REPO_INDEX_CACHE_KEY = 'cytlex:repo-index-cache:v1';
+const REPO_INDEX_CACHE_TTL_MS = 10 * 60 * 1000;
 const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
 export const SOURCE_CONFIG_CHANGE_EVENT = 'cytlex:source-config-changed';
 export const isRetiredExtension = (id) => id === 'plottwistnofansub' || id === 'yupmanga';
@@ -20,6 +22,7 @@ const keepInstalledExtension = (record) => record?.manifest?.type !== 'builtin'
   && !isUnavailableMangaSource(record?.manifest?.id)
   && isExtensionInstallable(record?.manifest);
 let recordsCache = null;
+const repoIndexRequests = new Map();
 
 function freshIndexUrl(indexUrl) {
   const url = new URL(indexUrl);
@@ -402,40 +405,45 @@ export const extensions = {
     return '';
   },
 
-  async repoIndex(indexUrl) {
-    const text = await ctx().fetchText(freshIndexUrl(indexUrl));
-    return parseRepositoryIndex(text, indexUrl);
+  async repoIndex(indexUrl, { refresh = false } = {}) {
+    const url = String(indexUrl || '').trim();
+    if (!refresh) {
+      try {
+        const cached = JSON.parse(localStorage.getItem(REPO_INDEX_CACHE_KEY));
+        const age = Date.now() - cached?.at;
+        if (cached?.url === url && Array.isArray(cached.repo) && age >= 0 && age < REPO_INDEX_CACHE_TTL_MS) {
+          return cached.repo;
+        }
+      } catch {}
+    }
+
+    let request = repoIndexRequests.get(url);
+    if (!request) {
+      request = (async () => {
+        const text = await ctx().fetchText(freshIndexUrl(url));
+        const repo = parseRepositoryIndex(text, url);
+        try { localStorage.setItem(REPO_INDEX_CACHE_KEY, JSON.stringify({ url, at: Date.now(), repo })); } catch {}
+        return repo;
+      })();
+      repoIndexRequests.set(url, request);
+    }
+    try {
+      return await request;
+    } finally {
+      if (repoIndexRequests.get(url) === request) repoIndexRequests.delete(url);
+    }
   },
 
   async checkUpdates(indexUrl) {
     const repo = await extensions.repoIndex(indexUrl);
     const installed = read();
-    await Promise.all(installed.map(async (r) => {
-        const remote = repo.find((m) => m.id === r.manifest.id);
-        if (!remote || !remote.version) return;
+    for (const r of installed) {
+      const remote = repo.find((m) => m.id === r.manifest.id);
+      if (!remote || !remote.version) continue;
 
-        let local = r.installedVersion || r.manifest.version || '0';
-        if (!r.installedVersion && remote.type === 'module' && local === remote.version && remote.main) {
-          try {
-            const mainUrl = /^https?:/i.test(remote.main)
-              ? remote.main
-              : new URL(remote.main, indexUrl).href;
-            const remoteCode = await ctx().fetchText(freshIndexUrl(mainUrl));
-            if (remoteCode === r.code) {
-              r.installedVersion = remote.version;
-              local = remote.version;
-            } else {
-              local = '0';
-            }
-          } catch {
-            local = '0';
-          }
-          r.installedVersion = local;
-          r.manifest = { ...r.manifest, version: local };
-        } else if (!r.installedVersion) {
-          r.installedVersion = local;
-        }
-      }));
+      const local = r.installedVersion || r.manifest.version || '0';
+      if (!r.installedVersion) r.installedVersion = local;
+    }
 
     write(installed);
     return installed.flatMap((r) => {
@@ -487,8 +495,7 @@ export const extensions = {
   async sync(indexUrl) {
     let repo = [];
     try {
-      const text = await ctx().fetchText(freshIndexUrl(indexUrl));
-      repo = parseRepositoryIndex(text, indexUrl);
+      repo = await extensions.repoIndex(indexUrl);
     } catch {}
 
     const byId = new Map(repo.map((m) => [m.id, m]));
@@ -516,8 +523,7 @@ export const extensions = {
     const installedIds = new Set(extensions.installed().map((e) => e.manifest.id));
     let repo = [];
     try {
-      const text = await ctx().fetchText(freshIndexUrl(indexUrl));
-      repo = parseRepositoryIndex(text, indexUrl);
+      repo = await extensions.repoIndex(indexUrl);
     } catch (e) {
       console.warn('[Cytlex] no se pudo leer el repositorio de extensiones:', e?.message || e);
     }

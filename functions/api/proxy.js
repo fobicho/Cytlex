@@ -35,8 +35,10 @@ const ALLOWED_SUFFIXES = ['t34798ndc.com', 'mangadex.network', 'ntr-files.online
 const REDIRECT_LIMIT = 5;
 const UPSTREAM_RETRIES = 2;
 const PROXY_RESPONSE_MAX_BYTES = 50 * 1024 * 1024;
-const PROXY_BATCH_MAX_REQUESTS = 12;
+const PROXY_BATCH_MAX_REQUESTS = 24;
 const PROXY_BATCH_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
+const PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES = 8 * 1024 * 1024;
+const PROXY_BATCH_CONCURRENCY = 6;
 const PROXY_IMAGE_BATCH_MAX_REQUESTS = 40;
 const PROXY_IMAGE_BATCH_ITEM_MAX_BYTES = 4 * 1024 * 1024;
 const PROXY_IMAGE_BATCH_TOTAL_MAX_BYTES = 80 * 1024 * 1024;
@@ -484,6 +486,18 @@ async function fetchBatchItem(item, request) {
   }
 }
 
+async function mapConcurrent(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await mapper(items[index]);
+    }
+  }));
+  return results;
+}
+
 async function handleBatchRequest(request) {
   const contentLength = Number(request.headers.get('content-length')) || 0;
   if (contentLength > 1_000_000) return errorResponse('Request body is too large', 413);
@@ -501,7 +515,17 @@ async function handleBatchRequest(request) {
     return errorResponse('Invalid batch size', 400);
   }
 
-  const results = await Promise.all(payload.requests.map((item) => fetchBatchItem(item, request)));
+  const results = await mapConcurrent(payload.requests, PROXY_BATCH_CONCURRENCY, (item) => fetchBatchItem(item, request));
+  const encoder = new TextEncoder();
+  const resultSizes = results.map((result) => encoder.encode(result?.text || '').byteLength);
+  let totalResponseBytes = resultSizes.reduce((total, size) => total + size, 0);
+  const largestFirst = resultSizes.map((size, index) => ({ size, index })).sort((a, b) => b.size - a.size);
+  for (const { size, index } of largestFirst) {
+    if (totalResponseBytes <= PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES) break;
+    if (!size) continue;
+    results[index] = { fallback: true };
+    totalResponseBytes -= size;
+  }
   return Response.json({ results }, {
     headers: { 'cache-control': 'no-store', 'x-cytlex-proxy-batch': '1' }
   });

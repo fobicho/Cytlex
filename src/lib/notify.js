@@ -1,7 +1,6 @@
 import { api } from './api.js';
 import { lib } from './library.js';
 import { settings } from './settings.js';
-import { extUpdates } from './extUpdates.js';
 import { chapterIndex } from './chapterIndex.js';
 
 const key = (url, sourceId) => `${sourceId}|${url}`;
@@ -15,29 +14,6 @@ async function finishIfBackground() {
     const bg = await window.cytlex.isBackground();
     if (bg) window.cytlex.exitBackground();
   } catch {}
-}
-
-async function avisarExtensiones() {
-  if (!settings.get().extUpdateNotify) return false;
-  const nuevos = await extUpdates.check();
-  if (!nuevos.length) return false;
-
-  const titulo =
-    nuevos.length === 1
-      ? `Nueva actualización para ${nuevos[0].name} disponible`
-      : `${nuevos.length} extensiones tienen actualización`;
-  const cuerpo =
-    nuevos.length === 1
-      ? `Ya puedes instalar la versión ${nuevos[0].to}.`
-      : 'Ya puedes instalarlas desde Extensiones.';
-
-  const enviado = await window.cytlex.notify({
-    title: titulo,
-    body: cuerpo,
-    tipo: 'extensiones'
-  });
-  if (enviado) extUpdates.markSeen(nuevos);
-  return !!enviado;
 }
 
 async function countChapters(manga) {
@@ -168,24 +144,16 @@ export function startNotifier() {
   const run = async ({ silent = false, notifyFound = !silent } = {}) => {
     const cfg = settings.get();
     const quiereLib = cfg.notifyEnabled;
-    const quiereExt = cfg.extUpdateNotify;
-    if (!quiereLib && !quiereExt) {
+    if (!quiereLib) {
       if (!silent) finishIfBackground();
       return;
     }
-    if (quiereLib) await checkLibrary({ silent, notifyFound }).catch(() => {});
-    const avisado = quiereExt ? await avisarExtensiones().catch(() => false) : false;
-    if (!silent) {
-      if (!avisado) {
-        finishIfBackground();
-        return;
-      }
-      setTimeout(finishIfBackground, 4 * 60 * 1000);
-    }
+    await checkLibrary({ silent, notifyFound }).catch(() => {});
+    if (!silent) finishIfBackground();
   };
 
   let id = null;
-  const wanted = () => settings.get().notifyEnabled || settings.get().extUpdateNotify;
+  const wanted = () => settings.get().notifyEnabled;
 
   const arm = () => {
     if (id) clearTimeout(id);

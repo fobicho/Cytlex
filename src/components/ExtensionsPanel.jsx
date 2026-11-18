@@ -168,7 +168,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [installed, setInstalled] = useState(() => extensions.installed());
   const [available, setAvailable] = useState(() => (cacheHit ? repoCache.available : null));
-  const [loading, setLoading] = useState(() => !cacheHit);
+  const [loading, setLoading] = useState(false);
+  const [hasCheckedRepository, setHasCheckedRepository] = useState(cacheHit);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState('');
   const [checkingUpdates, setCheckingUpdates] = useState(manualExtensionCheckInFlight);
@@ -386,18 +387,6 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
 
   const refresh = () => setInstalled(extensions.installed());
 
-  const checkUpdates = async (url = repoUrl) => {
-    if (!url) {
-      setUpdates([]);
-      return;
-    }
-    try {
-      setUpdates(await extensions.checkUpdates(url));
-    } catch {
-      setUpdates([]);
-    }
-  };
-
   const searchUpdates = async () => {
     if (manualExtensionCheckInFlight || remainingExtensionCheckCooldown() > 0) return;
     if (!repoUrl) {
@@ -407,12 +396,17 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     manualExtensionCheckInFlight = true;
     setCheckingUpdates(true);
     setErr('');
+    setLoading(true);
     try {
+      await extensions.repoIndex(repoUrl, { refresh: true });
+      await extensions.sync(repoUrl);
+      refresh();
       const [found] = await Promise.all([
         extensions.checkUpdates(repoUrl),
         loadAvailable(repoUrl)
       ]);
       setUpdates(found);
+      setHasCheckedRepository(true);
       if (!found.length) {
         toast({ title: 'No hay actualizaciones pendientes', description: 'Tus extensiones están al día.', variant: 'info' });
       } else {
@@ -427,6 +421,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     } catch (error) {
       toast({ title: 'No se pudieron buscar actualizaciones', description: String(error?.message || error), variant: 'error' });
     } finally {
+      setLoading(false);
       manualExtensionCheckInFlight = false;
       manualExtensionCheckCooldownUntil = Date.now() + 3_000;
       setCheckingUpdates(false);
@@ -464,18 +459,16 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     refresh();
     if (!repoUrl) {
       setAvailable([]);
+      setUpdates([]);
+      setHasCheckedRepository(false);
       setLoading(false);
       return;
     }
-    setLoading(true);
-    (async () => {
-      if (!tutorialPreview) {
-        try { await extensions.sync(repoUrl); } catch {}
-        refresh();
-        await checkUpdates();
-      }
-      await loadAvailable();
-    })();
+    const cached = repoCache.url === repoUrl && repoCache.available !== null;
+    setAvailable(cached ? repoCache.available : null);
+    setUpdates(cached ? repoCache.updates || [] : []);
+    setHasCheckedRepository(cached);
+    setLoading(false);
   }, [repoUrl, tutorialPreview]);
 
   useEffect(() => {
@@ -483,16 +476,6 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
       repoCache = { url: repoUrl, available, updates };
     }
   }, [repoUrl, available, updates]);
-
-  useEffect(() => {
-    const onGo = () => {
-      if (!repoUrl) return;
-      checkUpdates();
-      loadAvailable();
-    };
-    window.addEventListener('cytlex:go-extensions', onGo);
-    return () => window.removeEventListener('cytlex:go-extensions', onGo);
-  }, [repoUrl]);
 
   useEffect(() => settings.subscribe((s) => {
     const nextRepo = (s.extIndexUrl || '').trim();
@@ -514,7 +497,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     try {
       const r = await extensions.updateAll(repoUrl, [id]);
       refresh();
-      await checkUpdates();
+      setUpdates((current) => current.filter((update) => update.id !== id));
       if (r.ok) {
         extUpdates.clear();
         toast({ title: 'Extensión actualizada', variant: 'success' });
@@ -533,7 +516,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     try {
       const r = await extensions.updateAll(repoUrl, visibleUpdates.map((update) => update.id));
       refresh();
-      await checkUpdates();
+      const updatedIds = new Set(visibleUpdates.map((update) => update.id));
+      setUpdates((current) => current.filter((update) => !updatedIds.has(update.id)));
       if (r.fallos.length) {
         toast({
           title: 'Actualización parcial',
@@ -575,7 +559,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     try {
       await extensions.uninstall(id);
       refresh();
-      await loadAvailable();
+      if (hasCheckedRepository) await loadAvailable();
     } catch (e) {
       setErr(String(e?.message || e));
     }
@@ -605,14 +589,25 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     setErr('');
     const succeeded = [];
     const failed = [];
-    for (const item of selectedItems) {
-      const id = item.id;
-      try {
-        if (isInstall) await extensions.install(item, repoUrl);
-        else await extensions.uninstall(id);
-        succeeded.push(id);
-      } catch {
-        failed.push(id);
+    if (isInstall) {
+      const results = await Promise.all(selectedItems.map(async (item) => {
+        try {
+          await extensions.install(item, repoUrl);
+          return { id: item.id, ok: true };
+        } catch {
+          return { id: item.id, ok: false };
+        }
+      }));
+      succeeded.push(...results.filter((result) => result.ok).map(({ id }) => id));
+      failed.push(...results.filter((result) => !result.ok).map(({ id }) => id));
+    } else {
+      for (const item of selectedItems) {
+        try {
+          await extensions.uninstall(item.id);
+          succeeded.push(item.id);
+        } catch {
+          failed.push(item.id);
+        }
       }
     }
 
@@ -624,7 +619,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
       setSelectedAvailableIds(new Set(failed));
     } else {
       refresh();
-      await loadAvailable();
+      if (hasCheckedRepository) await loadAvailable();
       setSelectedInstalledIds(new Set(failed));
     }
 
@@ -1094,13 +1089,19 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
               <Loader2 className="animate-spin" style={{ width: px(24, scale, 19), height: px(24, scale, 19) }} />
               <p style={{ fontSize: fontPx(14, scale, 12) }}>Cargando extensiones...</p>
             </div>
+          ) : !hasCheckedRepository ? (
+            <EmptyState
+              compact
+              face="（・_・）"
+              tone="prompt"
+              title="Pulsa «Buscar actualizaciones» para cargar el catálogo"
+            />
           ) : (
             <EmptyState
               compact
               face="（・_・;）"
               tone="error"
               title="No se pudieron cargar las extensiones"
-              action={<Button size="sm" onClick={loadAvailable}>Reintentar</Button>}
             />
           )
         ) : sortedAvailable.length === 0 ? (

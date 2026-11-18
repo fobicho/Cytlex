@@ -14,11 +14,10 @@ import { resolveMode, settings } from './lib/settings.js';
 import { extensions } from './lib/extensions.js';
 import { lastSearch, resultsScroll, catalogScroll, sourceCatalogState } from './lib/searchState.js';
 import { startNotifier, onNotifyClick, checkLibrary } from './lib/notify.js';
-import { announceExtUpdates } from './lib/extUpdates.js';
 import { useToast } from './components/Toast.jsx';
 import { appWindow } from './lib/appWindow.js';
 import { px, useScale } from './lib/useScale.js';
-import { ArrowUpCircle, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { Input } from './components/ui/input.jsx';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 
@@ -79,7 +78,6 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   const [theme, setTheme] = useState(() => settings.get().theme);
   const [mode, setMode] = useState(() => resolveMode(settings.get().mode));
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [extensionMetadataRevision, setExtensionMetadataRevision] = useState(0);
   const scale = useScale();
   const [resetTick, setResetTick] = useState(0);
   const [retainedDetailLocations, setRetainedDetailLocations] = useState({});
@@ -169,12 +167,6 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   useResetPage(resetPage);
 
   useEffect(() => {
-    const indexUrl = (settings.get().extIndexUrl || '').trim();
-    if (!indexUrl || !extensions.installed().length) return;
-    extensions.sync(indexUrl).then(() => setExtensionMetadataRevision((revision) => revision + 1)).catch(() => {});
-  }, []);
-
-  useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     document.documentElement.setAttribute('data-mode', mode);
   }, [theme, mode]);
@@ -213,26 +205,6 @@ export default function App({ isVisible = true, tutorialMode = false }) {
     return () => { cancelled = true; };
   }, [isVisible, toast]);
 
-  useEffect(() => {
-    const t = setTimeout(() => {
-      if (!settings.get().extUpdateNotify) return;
-      announceExtUpdates(({ updates, count }) => {
-        if (!settings.get().extUpdateNotify) return;
-        const description = count === 1
-          ? `Ya puedes instalar la versión ${updates[0].to}.`
-          : `${updates.slice(0, 3).map((update) => `${update.name} ${update.to}`).join(' · ')}${count > 3 ? ` y ${count - 3} más` : ''}`;
-        toast({
-          icon: ArrowUpCircle,
-          title: count === 1 ? `${updates[0].name} tiene una actualización` : `${count} extensiones tienen actualizaciones`,
-          description,
-          variant: 'info',
-          duration: 9000,
-          action: { label: 'Ver extensiones', onClick: goToExtensions }
-        });
-      });
-    }, 2600);
-    return () => clearTimeout(t);
-  }, []);
 
   useEffect(
     () =>
@@ -318,7 +290,7 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   };
 
   return (
-    <div className={`app-shell flex flex-col overflow-hidden${isElectronApp ? '' : ' app-shell--web'}`} data-extension-metadata-revision={extensionMetadataRevision}>
+    <div className={`app-shell flex flex-col overflow-hidden${isElectronApp ? '' : ' app-shell--web'}`}>
       {isElectronApp && !isFullscreen && <div inert={tutorialMode}><TitleBar /></div>}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {!isReader && <div className={isElectronApp ? 'flex shrink-0' : 'hidden shrink-0 md:flex'}><Sidebar tutorialNavOnly={tutorialMode} /></div>}
