@@ -9,7 +9,6 @@ import { isMangaCover, lib, mangaSourceUrl, storedCoverThumbnail } from '../lib/
 import { discardLibraryCover, getLibraryCover, preloadLibraryCover, preloadSearchCover, requiresImageProxy, restoreLibraryCover } from '../lib/covers.js';
 import { rememberMangaPreview, sourceCatalogState } from '../lib/searchState.js';
 import { SourceBadge, preloadSourceIcon } from './SourceBadge.jsx';
-import { browserImageUrl } from '../lib/browserHttp.js';
 import { useLibraryCover } from '../lib/useLibraryCover.js';
 
 const prefetched = new Set();
@@ -168,7 +167,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
               ref={coverImageRef}
               loading="lazy"
               decoding="async"
-              src={browserImageUrl(src)}
+              src={src}
               alt={m.title}
               referrerPolicy={hasElectronImageProxy ? 'no-referrer' : undefined}
               onLoad={() => {
@@ -192,7 +191,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
                   return;
                 }
                 failedCoverUrls.current.add(src);
-                const local = await preloadLibraryCover(src);
+                const local = await preloadLibraryCover(src, { web: true });
                 if (local) {
                   setCoverState({ key: preferredCover, src: local });
                   return;

@@ -162,9 +162,10 @@ function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFa
   const retrying = useRef(false);
   const imageRef = useRef(null);
   const browserSrc = browserImageUrl(src, imageReferer);
-  const usePreload = forcePreload || browserSrc !== src;
+  const directWebImage = !window.cytlex?.fetchImage && !forcePreload;
+  const usePreload = forcePreload || (!directWebImage && browserSrc !== src);
   const imageSrc = usePreload ? displaySrc : srcOverride || (!usingFallback && !displaySrcFailed ? cachedDisplaySrc : '')
-    || (usingFallback ? browserImageUrl(fallbackSrc, imageReferer) : browserSrc);
+    || (usingFallback ? (directWebImage ? fallbackSrc : browserImageUrl(fallbackSrc, imageReferer)) : (directWebImage ? src : browserSrc));
 
   useEffect(() => () => {
     imageFallback.current?.abort();
@@ -283,29 +284,36 @@ function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFa
             setStatus('loading');
             return;
           }
-          if (!usingFallback && fallbackSrc && fallbackSrc !== src) {
+          if (!directWebImage && !usingFallback && fallbackSrc && fallbackSrc !== src) {
             autoRetried.current = false;
             setUsingFallback(true);
             setAttempt(0);
             setStatus('loading');
             return;
           }
-          if (!usingFallback && !srcOverride && !imageFallback.current) {
+          if ((!usingFallback || directWebImage) && !srcOverride && !imageFallback.current) {
             const controller = new AbortController();
             imageFallback.current = controller;
             setStatus('loading');
             autoRetried.current = false;
-            fetchImage(src, controller.signal, imageReferer, imageCookie).then((img) => {
+            const targetSrc = usingFallback ? fallbackSrc : src;
+            fetchImage(targetSrc, controller.signal, imageReferer, imageCookie).then((img) => {
               if (controller.signal.aborted) return;
               if (img?.base64) {
-                setSrcOverride(`data:${imageMimeFor(img.mime, src, img.base64)};base64,${img.base64}`);
+                setSrcOverride(`data:${imageMimeFor(img.mime, targetSrc, img.base64)};base64,${img.base64}`);
                 setAttempt((n) => n + 1);
                 setStatus('loading');
+              } else if (!usingFallback && fallbackSrc && fallbackSrc !== src) {
+                setUsingFallback(true);
               } else {
                 setStatus('error');
               }
             }).catch((error) => {
               if (!controller.signal.aborted) {
+                if (!usingFallback && fallbackSrc && fallbackSrc !== src) {
+                  setUsingFallback(true);
+                  return;
+                }
                 setImageError(sourceErrorMessage(error, sourceName));
                 setStatus('error');
               }
@@ -636,7 +644,8 @@ export default function Reader() {
     if (!pageSources?.length || chUrl !== chapterUrl) return;
     const start = Math.min(Math.max(pageRef.current.page, 0), pageSources.length - 1);
     const orderedPages = [...pageSources.slice(start), ...pageSources.slice(0, start)];
-    const queue = [...new Set(orderedPages)].filter((src) => src && !preloadedPagesRef.current.has(src));
+    const queue = [...new Set(orderedPages)].filter((src) => src && !preloadedPagesRef.current.has(src)
+      && (window.cytlex?.fetchImage || pageTransforms?.[pageSources.indexOf(src)]));
     if (!queue.length) return;
     let cancelled = false;
     const controllers = new Set();
@@ -761,7 +770,7 @@ export default function Reader() {
       imageCookie,
       onRetry: sourceId.startsWith('mangadex') || sourceId === 'onfmangas'
         ? retryChapterImages
-        : forcePreload || browserImageUrl(src, imageReferer) !== src
+        : forcePreload || (window.cytlex?.fetchImage && browserImageUrl(src, imageReferer) !== src)
           ? () => retryPreloadedPageRef.current?.(src)
           : undefined
     };

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { browserImageUrl } from './browserHttp.js';
-import { discardLibraryCover, getLibraryCover, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy, restoreLibraryCover } from './covers.js';
+import { discardLibraryCover, getLibraryCover, markLibraryCoverLoaded, preloadLibraryCover, restoreLibraryCover } from './covers.js';
 
 export function useLibraryCover(cover, { enabled = true, cachedOnly = false, cachedCover = '' } = {}) {
   const ref = useRef(null);
@@ -21,9 +21,8 @@ export function useLibraryCover(cover, { enabled = true, cachedOnly = false, cac
       let url = cached !== rejected ? cached : '';
       if (!url && !cachedOnly && rejected !== cover) {
         const electron = Boolean(window.cytlex?.fetchImage);
-        const needsProxy = browserImageUrl(cover) !== cover || (electron && requiresImageProxy(cover));
-        if (needsProxy || electron) url = await preloadLibraryCover(cover, { web: true });
-        if (!url && !needsProxy) url = cover;
+        if (electron) url = await preloadLibraryCover(cover, { web: true });
+        if (!url && !electron) url = cover;
       }
       if (alive) setLoaded({ cover, cachedOnly, src: url === rejected ? '' : url });
     };
@@ -42,8 +41,15 @@ export function useLibraryCover(cover, { enabled = true, cachedOnly = false, cac
     return () => { alive = false; observer.disconnect(); };
   }, [cachedOnly, cover, enabled, local, rejected, remote]);
 
-  const onError = () => {
+  const onError = async () => {
     if (src && src === getLibraryCover(cover)) discardLibraryCover(cover, src);
+    if (!cachedOnly && src === cover && !window.cytlex?.fetchImage && browserImageUrl(cover) !== cover) {
+      const local = await preloadLibraryCover(cover, { web: true });
+      if (local) {
+        setLoaded({ cover, cachedOnly, src: local });
+        return;
+      }
+    }
     setFailed({ cover, src });
   };
 

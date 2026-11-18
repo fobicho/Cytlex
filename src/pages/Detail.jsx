@@ -25,7 +25,7 @@ import { Dropdown } from '../components/ui/dropdown.jsx';
 import AniListPanel from '../components/AniListPanel.jsx';
 import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
-import { browserImageUrl, sourceErrorMessage } from '../lib/browserHttp.js';
+import { sourceErrorMessage } from '../lib/browserHttp.js';
 import Catalog from './Catalog.jsx';
 
 const SYNOPSIS_CONTROL_SIZE = 24;
@@ -61,8 +61,8 @@ function formatChapterDate(value) {
 
 const norm = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
 const chapterNum = (chapter) => {
-  const match = String(chapter?.title || '').match(/[\d.]+/);
-  return match ? parseFloat(match[0]) : NaN;
+  const match = String(chapter?.title || '').match(/-?\d+(?:[.,]\d+)?/);
+  return match ? Number(match[0].replace(',', '.')) : NaN;
 };
 const chapterButtonTitle = (chapter) => {
   const title = String(chapter?.title || '').trim();
@@ -131,7 +131,7 @@ function DuplicateRow({ cover, mangaUrl, title, author, sourceId, scale, coverSc
       <div ref={coverImage.ref} aria-hidden="true" className="manga-cover-corners aspect-[5/7] shrink-0 overflow-hidden rounded-sm border border-border/50 bg-muted/50" style={{ width: px(128 * coverScale, scale, 80) }}>
         {coverImage.src && (
           <img
-            src={browserImageUrl(coverImage.src)}
+            src={coverImage.src}
             alt=""
             loading="lazy"
             decoding="async"
@@ -363,14 +363,12 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     setFailedCover('');
   }, [coverSrc]);
   const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
-  const sourceCover = browserImageUrl(finalCover);
-  const proxyCover = sourceCover !== finalCover
-    || (requiresImageProxy(finalCover) && !!window.cytlex?.fetchImage);
+  const sourceCover = finalCover;
+  const proxyCover = requiresImageProxy(finalCover) && !!window.cytlex?.fetchImage;
   const cachedCover = getLibraryCover(finalCover) || getSearchCover(finalCover);
   const warmCover = getLibraryCover(knownCover) || getSearchCover(knownCover)
     || (/^(data:|blob:)/i.test(knownCover) || hasLibraryCoverLoaded(knownCover) ? knownCover : '');
   const visibleCover = [displayedCover, preview?.image, cachedCover, warmCover]
-    .map((candidate) => candidate && browserImageUrl(candidate))
     .find((candidate) => candidate && !failedPreviews.has(candidate));
   const incomingCover = proxyCover
     ? cachedCover || (resolvedCover?.key === finalCover ? resolvedCover.src : '')
@@ -432,7 +430,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             if (coverKeyRef.current !== coverKey) return;
             setFailedPreviews((failed) => new Set([...failed, incomingCover]));
             if (!proxyCover && /^https?:\/\//i.test(finalCover || '')) {
-              const local = await preloadLibraryCover(finalCover);
+              const local = await preloadLibraryCover(finalCover, { web: true });
               if (coverKeyRef.current !== coverKey) return;
               if (local) {
                 setDisplayedCover(local);

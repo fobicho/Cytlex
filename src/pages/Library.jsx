@@ -465,7 +465,7 @@ const Library = memo(function Library({ active = true }) {
         style={{
           gap: `${Math.max(16, Math.round(24 * scale))}px`,
           marginBottom: isBrowserApp ? 0 : `${Math.max(8, Math.round(12 * scale))}px`,
-          minHeight: px(38, scale, 34),
+          height: px(38, scale, 34),
           marginTop: isBrowserApp ? 'calc(-1 * var(--web-page-padding, 0px))' : undefined,
           marginLeft: isBrowserApp ? `-${px(16, scale, 12)}` : undefined,
           marginRight: isBrowserApp ? `-${px(16, scale, 12)}` : undefined,
@@ -477,7 +477,7 @@ const Library = memo(function Library({ active = true }) {
           ref={categoryTabsRef}
           aria-label="Categorías de Biblioteca"
           className="flex min-w-0 flex-1 items-center overflow-x-auto overscroll-x-contain whitespace-nowrap no-scrollbar"
-          style={{ gap: `${Math.max(16, Math.round(24 * scale))}px`, minHeight: px(38, scale, 34) }}
+          style={{ gap: `${Math.max(16, Math.round(24 * scale))}px`, height: px(38, scale, 34) }}
         >
           {cats.map((c) => {
             const active = c.id === sel;

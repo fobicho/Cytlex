@@ -280,6 +280,9 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     return t === 'mangas' || t === 'extensiones' || t === 'fuentes' ? t : sessionTab;
   });
   const tabsRef = useRef(null);
+  const toolbarRef = useRef(null);
+  const searchRef = useRef(null);
+  const [searchWrapped, setSearchWrapped] = useState(false);
   const scrollAreaRef = useRef(null);
   const [scrollbarWidth, setScrollbarWidth] = useState(0);
   const [sources, setSources] = useState(() => enabledSources(!!settings.get().showAdultExtensions));
@@ -349,6 +352,19 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const catalogSources = migrationMode
     ? extensions.sources().filter(({ manifest }) => migrationSourceIds.includes(manifest.id) && isSourceConfigured(manifest))
     : sources;
+  useLayoutEffect(() => {
+    const toolbar = toolbarRef.current;
+    const tabs = tabsRef.current;
+    const search = searchRef.current;
+    if (!toolbar || !tabs || !search) return undefined;
+    const measure = () => setSearchWrapped(search.getBoundingClientRect().top >= tabs.getBoundingClientRect().bottom - 1);
+    const observer = new ResizeObserver(measure);
+    observer.observe(toolbar);
+    observer.observe(tabs);
+    observer.observe(search);
+    measure();
+    return () => observer.disconnect();
+  }, [tab, catalogSources.length, migrationMode, active]);
   const searching = !!results && results.some((r) => r.status === 'loading');
   const completed = results ? results.filter((r) => r.status !== 'loading') : [];
   const visibleCompleted = migrationMode
@@ -550,26 +566,38 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
       style={isBrowserApp ? { padding: `var(--web-page-padding, 16px) ${px(16, scale, 12)} 0` } : undefined}
     >
       <div
+        ref={toolbarRef}
         className={cn(
-          'catalog-toolbar -mt-2 max-md:-mt-3 flex shrink-0 flex-wrap items-center border-b border-border/70 bg-sidebar mb-3',
+          'catalog-toolbar -mt-2 max-md:-mt-3 shrink-0 items-center border-b border-border/70 bg-sidebar mb-3',
+          'flex flex-wrap',
           tab !== 'mangas' && 'max-md:flex-nowrap'
         )}
         style={{
-          columnGap: tab === 'mangas' ? px(32, scale, 24) : `${Math.max(16, Math.round(24 * scale))}px`,
+          columnGap: `${Math.max(16, Math.round(24 * scale))}px`,
           rowGap: 0,
+          alignContent: 'flex-start',
           marginBottom: isBrowserApp ? 0 : `${Math.max(8, Math.round(12 * scale))}px`,
           minHeight: px(38, scale, 34),
+          height: tab !== 'mangas' ? px(38, scale, 34) : undefined,
           marginTop: isBrowserApp ? 'calc(-1 * var(--web-page-padding, 0px))' : undefined,
           marginLeft: isBrowserApp ? `-${px(16, scale, 12)}` : undefined,
           marginRight: isBrowserApp ? `-${px(16, scale, 12)}` : undefined,
           paddingLeft: px(16, scale, 12),
-          paddingRight: px(16, scale, 12)
+          paddingRight: px(16, scale, 12),
+          paddingBottom: tab === 'mangas' && searchWrapped && catalogSources.length > 0 && !migrationMode ? px(3, scale, 3) : 0
         }}
       >
         <div
           ref={tabsRef}
-          className="flex w-max max-w-full flex-nowrap items-center overflow-x-auto overscroll-x-contain whitespace-nowrap no-scrollbar"
-          style={{ gap: px(24, scale, 16), minHeight: px(38, scale, 34) }}
+          className={cn(
+            'flex w-max max-w-full flex-nowrap items-center overflow-x-auto overscroll-x-contain whitespace-nowrap no-scrollbar',
+            tab === 'mangas' && 'shrink-0'
+          )}
+          style={{
+            gap: px(24, scale, 16),
+            height: tab === 'mangas' ? `calc(${px(38, scale, 34)} - 1px)` : undefined,
+            minHeight: tab === 'mangas' ? undefined : px(38, scale, 34)
+          }}
         >
           {migrationInline ? (
             <Button
@@ -653,12 +681,12 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
 
         {tab === 'mangas' && catalogSources.length > 0 && !migrationMode && (
           <div
+            ref={searchRef}
             className="catalog-search ml-auto flex min-w-0 flex-1 items-center self-center"
             style={{
-              flexBasis: px(360, scale, 280),
-              minWidth: `min(100%, ${px(360, scale, 280)})`,
-              marginTop: px(3, scale, 3),
-              marginBottom: px(3, scale, 3),
+              flexBasis: px(280, scale, 240),
+              minWidth: `min(100%, ${px(280, scale, 240)})`,
+              height: px(32, scale, 28),
               gap: px(12, scale, 9)
             }}
           >
