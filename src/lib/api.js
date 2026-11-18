@@ -32,12 +32,16 @@ const DETAIL_TIMEOUT_MS = 16000;
 const DETAIL_NOT_FOUND_TTL_MS = 60 * 1000;
 const CHAPTER_TTL_MS = 2 * 60 * 1000;
 const CHAPTER_CACHE_MAX = 40;
+const CATALOG_TTL_MS = 30 * 1000;
+const CATALOG_CACHE_MAX = 80;
 
 const detailCache = new Map();
 const detailRequests = new Map();
 const detailNotFound = new Map();
 const chapterCache = new Map();
 const chapterRequests = new Map();
+const catalogCache = new Map();
+const catalogRequests = new Map();
 const catalogFiltersCache = new Map();
 const isMangaDex = (sourceId) => sourceId === 'mangadex' || sourceId === 'mangadex-en';
 const sourceCacheKey = (sourceId) => {
@@ -50,6 +54,11 @@ const sourceCacheKey = (sourceId) => {
 };
 const detailKey = (url, sourceId) => `${sourceCacheKey(sourceId)}|${mangaSourceUrl(url, sourceId)}`;
 const chapterKey = (url, sourceId) => `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}|${url}`;
+const catalogKey = (args, sourceId) => {
+  const params = Object.fromEntries(Object.entries(args || {}).filter(([key]) => key !== '__cytlexRequestId'));
+  const orderedParams = Object.fromEntries(Object.entries(params).sort(([a], [b]) => a.localeCompare(b)));
+  return JSON.stringify([sourceCacheKey(sourceId), orderedParams]);
+};
 const titleKey = (value) => String(value || '').normalize('NFKC').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 
 async function withDetailDeadline(request) {
@@ -175,20 +184,47 @@ export const api = {
 
   async catalog(args, sourceId) {
     const src = await resolveSource(sourceId);
-    if (!isMangaDex(sourceId)) return src.catalog(args);
-
-    const { q = '', page = 1, genre = '', year = '', status = '', type = '', sort = '' } = args || {};
-    const key = JSON.stringify([sourceCacheKey(sourceId), q, page, genre, year, status, type, sort]);
-    try {
-      const result = await src.catalog(args);
-      if (Array.isArray(result?.items)) void writeSourceCache('searches', key, result, 30);
-      return result;
-    } catch (error) {
-      if (/\b(?:ENOTFOUND|HTTP (?:429|50[234]))\b/.test(String(error?.message || error))) {
-        const entry = await readSourceCache('searches', key);
-        if (entry?.value.items.length && Date.now() - entry.at <= 7 * 24 * 60 * 60 * 1000) return entry.value;
+    const browser = !bridge()?.httpGet;
+    const key = browser ? catalogKey(args, sourceId) : '';
+    if (browser) {
+      const hit = catalogCache.get(key);
+      if (hit && Date.now() - hit.at <= CATALOG_TTL_MS) {
+        catalogCache.delete(key);
+        catalogCache.set(key, hit);
+        return hit.value;
       }
-      throw error;
+      if (hit) catalogCache.delete(key);
+      if (catalogRequests.has(key)) return catalogRequests.get(key);
+    }
+
+    const request = (async () => {
+      if (!isMangaDex(sourceId)) return src.catalog(args);
+
+      const { q = '', page = 1, genre = '', year = '', status = '', type = '', sort = '' } = args || {};
+      const searchKey = JSON.stringify([sourceCacheKey(sourceId), q, page, genre, year, status, type, sort]);
+      try {
+        const result = await src.catalog(args);
+        if (Array.isArray(result?.items)) void writeSourceCache('searches', searchKey, result, 30);
+        return result;
+      } catch (error) {
+        if (/\b(?:ENOTFOUND|HTTP (?:429|50[234]))\b/.test(String(error?.message || error))) {
+          const entry = await readSourceCache('searches', searchKey);
+          if (entry?.value.items.length && Date.now() - entry.at <= 7 * 24 * 60 * 60 * 1000) return entry.value;
+        }
+        throw error;
+      }
+    })();
+
+    if (browser) catalogRequests.set(key, request);
+    try {
+      const result = await request;
+      if (browser && Array.isArray(result?.items)) {
+        catalogCache.set(key, { at: Date.now(), value: result });
+        while (catalogCache.size > CATALOG_CACHE_MAX) catalogCache.delete(catalogCache.keys().next().value);
+      }
+      return result;
+    } finally {
+      if (browser && catalogRequests.get(key) === request) catalogRequests.delete(key);
     }
   },
 

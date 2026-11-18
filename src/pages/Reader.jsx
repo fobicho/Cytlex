@@ -10,7 +10,7 @@ import { tracking } from '../lib/tracking.js';
 import { chapterOrder, detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
-import { browserImageUrl, fetchImage, fetchImageBlob, sourceErrorMessage } from '../lib/browserHttp.js';
+import { browserImageUrl, fetchImage, fetchImageBlob, fetchImageBlobBatch, sourceErrorMessage } from '../lib/browserHttp.js';
 import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
@@ -161,16 +161,76 @@ function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFa
   const autoRetried = useRef(false);
   const retrying = useRef(false);
   const imageRef = useRef(null);
+  const panelRef = useRef(null);
+  const proxyObjectUrl = useRef('');
+  const [proxyDisplaySrc, setProxyDisplaySrc] = useState('');
   const browserSrc = browserImageUrl(src, imageReferer);
   const directWebImage = !window.cytlex?.fetchImage && !forcePreload;
-  const usePreload = forcePreload || (!directWebImage && browserSrc !== src);
-  const imageSrc = usePreload ? displaySrc : srcOverride || (!usingFallback && !displaySrcFailed ? cachedDisplaySrc : '')
+  const browserProxyImage = !window.cytlex?.fetchImage && browserSrc !== src;
+  const usePreload = forcePreload || browserProxyImage || (!directWebImage && browserSrc !== src);
+  const imageSrc = usePreload ? (displaySrc || proxyDisplaySrc) : srcOverride || (!usingFallback && !displaySrcFailed ? cachedDisplaySrc : '')
     || (usingFallback ? (directWebImage ? fallbackSrc : browserImageUrl(fallbackSrc, imageReferer)) : (directWebImage ? src : browserSrc));
 
   useEffect(() => () => {
     imageFallback.current?.abort();
     imageFallback.current = null;
   }, []);
+
+  useEffect(() => {
+    if (!browserProxyImage || forcePreload || displaySrc) return undefined;
+    const controller = new AbortController();
+    let alive = true;
+    const load = async () => {
+      setProxyDisplaySrc('');
+      setImageError('');
+      setStatus('loading');
+      let failure;
+      const candidates = fallbackSrc && fallbackSrc !== src ? [src, fallbackSrc] : [src];
+      for (const candidate of candidates) {
+        try {
+          const blob = await fetchImageBlob(candidate, controller.signal, imageReferer, imageCookie);
+          if (!blob) throw new Error('La fuente no devolvió una imagen válida.');
+          if (!alive || controller.signal.aborted) return;
+          const objectUrl = URL.createObjectURL(blob);
+          proxyObjectUrl.current = objectUrl;
+          setUsingFallback(candidate !== src);
+          setProxyDisplaySrc(objectUrl);
+          return;
+        } catch (error) {
+          if (!alive || controller.signal.aborted) return;
+          failure ||= error;
+        }
+      }
+      if (alive && !controller.signal.aborted) {
+        setImageError(sourceErrorMessage(failure, sourceName));
+        setStatus('error');
+      }
+    };
+    const target = panelRef.current;
+    if (loading === 'lazy' && target && 'IntersectionObserver' in window) {
+      const observer = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          load();
+        }
+      }, { root: document.getElementById('reader-vertical-scroll'), rootMargin: '600px 0px' });
+      observer.observe(target);
+      return () => {
+        alive = false;
+        observer.disconnect();
+        controller.abort();
+        if (proxyObjectUrl.current) URL.revokeObjectURL(proxyObjectUrl.current);
+        proxyObjectUrl.current = '';
+      };
+    }
+    load();
+    return () => {
+      alive = false;
+      controller.abort();
+      if (proxyObjectUrl.current) URL.revokeObjectURL(proxyObjectUrl.current);
+      proxyObjectUrl.current = '';
+    };
+  }, [attempt, browserProxyImage, displaySrc, fallbackSrc, forcePreload, imageCookie, imageReferer, loading, sourceName, src]);
 
   const finishImageLoad = useCallback(() => {
     imageFallback.current?.abort();
@@ -220,7 +280,7 @@ function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFa
   }, [attempt, cachedDisplaySrc, loading, src, status, usePreload, usingFallback]);
 
   return (
-    <div id={id} className={cn('relative grid place-items-center', wrapperClassName)} style={status === 'loaded' ? undefined : placeholderStyle}>
+    <div ref={panelRef} id={id} className={cn('relative grid place-items-center', wrapperClassName)} style={status === 'loaded' ? undefined : placeholderStyle}>
       {status === 'loading' && (
         <div role="status" aria-label={`Cargando ${alt.toLowerCase()}`} className="absolute inset-0 grid place-items-center text-muted-foreground">
           <Loader2 className="h-6 w-6 animate-spin" />
@@ -642,6 +702,97 @@ export default function Reader() {
     : '';
   useEffect(() => {
     if (!pageSources?.length || chUrl !== chapterUrl) return;
+    if (!window.cytlex?.fetchImage) {
+      let cancelled = false;
+      const controller = new AbortController();
+      const results = new Map();
+      const saveResult = (src, value) => {
+        const previous = results.get(src);
+        if (typeof previous === 'string') URL.revokeObjectURL(previous);
+        results.set(src, value);
+        preloadedPagesRef.current.set(src, value);
+      };
+      const loadOne = async (src) => {
+        const index = pageSources.indexOf(src);
+        const transform = pageTransforms?.[index];
+        const fallback = pageFallbacks?.[index];
+        let failure;
+        for (const candidate of fallback && fallback !== src ? [src, fallback] : [src]) {
+          try {
+            const blob = await fetchImageBlob(candidate, controller.signal, imageReferer, imageCookie);
+            if (!blob || cancelled || controller.signal.aborted) return false;
+            const image = transform === 'scramble-4x4' ? await unscramble4x4(blob) : blob;
+            if (cancelled || controller.signal.aborted) return false;
+            saveResult(src, URL.createObjectURL(image));
+            setPreloadRevision((revision) => revision + 1);
+            return true;
+          } catch (error) {
+            if (cancelled || controller.signal.aborted) return false;
+            failure = error;
+          }
+        }
+        if (!cancelled) {
+          saveResult(src, {
+            failure,
+            accessRejected: sourceId === 'onfmangas' && src.startsWith('https://onfmangas.com/') && failure?.status === 403
+          });
+          setPreloadRevision((revision) => revision + 1);
+        }
+        return false;
+      };
+      retryPreloadedPageRef.current = loadOne;
+
+      const batchedPages = [];
+      const seen = new Set();
+      pageSources.forEach((src, index) => {
+        if (!src || seen.has(src) || browserImageUrl(src, imageReferer) === src) return;
+        seen.add(src);
+        batchedPages.push({ src, index, url: src, referer: imageReferer, cookie: imageCookie });
+      });
+      const directTransformPages = pageSources.filter((src, index) =>
+        src && pageTransforms?.[index] && browserImageUrl(src, imageReferer) === src
+      );
+
+      if (batchedPages.length) {
+        void fetchImageBlobBatch(batchedPages, controller.signal).then(async (outcomes) => {
+          await Promise.all(batchedPages.map(async ({ src, index }, resultIndex) => {
+            if (cancelled || controller.signal.aborted) return;
+            let { blob, error: failure } = outcomes[resultIndex];
+            if (cancelled || controller.signal.aborted) return;
+            if (blob) {
+              try {
+                const image = pageTransforms?.[index] === 'scramble-4x4' ? await unscramble4x4(blob) : blob;
+                if (!cancelled && !controller.signal.aborted) saveResult(src, URL.createObjectURL(image));
+              } catch (error) {
+                saveResult(src, { failure: error });
+              }
+            } else {
+              saveResult(src, {
+                failure,
+                accessRejected: sourceId === 'onfmangas' && src.startsWith('https://onfmangas.com/') && failure?.status === 403
+              });
+            }
+          }));
+          if (!cancelled) setPreloadRevision((revision) => revision + 1);
+        }).catch((error) => {
+          if (cancelled || controller.signal.aborted) return;
+          for (const { src } of batchedPages) saveResult(src, { failure: error });
+          setPreloadRevision((revision) => revision + 1);
+        });
+      }
+      for (const src of directTransformPages) void loadOne(src);
+
+      return () => {
+        cancelled = true;
+        retryPreloadedPageRef.current = null;
+        controller.abort();
+        for (const [src, objectUrl] of results) {
+          if (preloadedPagesRef.current.get(src) === objectUrl) preloadedPagesRef.current.delete(src);
+          if (typeof objectUrl === 'string') URL.revokeObjectURL(objectUrl);
+        }
+      };
+    }
+
     const start = Math.min(Math.max(pageRef.current.page, 0), pageSources.length - 1);
     const orderedPages = [...pageSources.slice(start), ...pageSources.slice(0, start)];
     const queue = [...new Set(orderedPages)].filter((src) => src && !preloadedPagesRef.current.has(src)
@@ -756,7 +907,8 @@ export default function Reader() {
 
   const panelImageProps = (src, index) => {
     const result = preloadedPagesRef.current.get(src);
-    const forcePreload = !!pageTransforms?.[index];
+    const forcePreload = !!pageTransforms?.[index]
+      || (!window.cytlex?.fetchImage && browserImageUrl(src, imageReferer) !== src);
     return {
       forcePreload,
       displaySrc: typeof result === 'string' ? result : '',
@@ -770,7 +922,7 @@ export default function Reader() {
       imageCookie,
       onRetry: sourceId.startsWith('mangadex') || sourceId === 'onfmangas'
         ? retryChapterImages
-        : forcePreload || (window.cytlex?.fetchImage && browserImageUrl(src, imageReferer) !== src)
+        : forcePreload || browserImageUrl(src, imageReferer) !== src
           ? () => retryPreloadedPageRef.current?.(src)
           : undefined
     };
@@ -1155,7 +1307,7 @@ export default function Reader() {
           <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
         </div>
       ) : mode === 'vertical' ? (
-        <div ref={verticalScrollerRef} className="min-h-0 flex-1 overflow-auto overscroll-contain [overflow-anchor:none] md:p-3">
+        <div id="reader-vertical-scroll" ref={verticalScrollerRef} className="min-h-0 flex-1 overflow-auto overscroll-contain [overflow-anchor:none] md:p-3">
           <div
             className="mx-auto w-[var(--vertical-mobile-width)] md:w-[var(--vertical-desktop-width)]"
             onDoubleClick={toggleVerticalZoomAtPointer}

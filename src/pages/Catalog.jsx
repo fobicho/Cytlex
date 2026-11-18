@@ -426,10 +426,12 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
           (!migrationMode || isUnavailableMangaSource(migrationFromSource) || normalizeMangaTitle(m.title) === normalizeMangaTitle(migrationQuery)) &&
           (s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim())
         ).slice(0, MAX_SEARCH_RESULTS);
-        const visibleCovers = await Promise.all(items.slice(0, 10).map(async (m) => [
-          m.url,
-          await preloadSearchCover(m.cover)
-        ]));
+        const visibleCovers = window.cytlex?.fetchImage
+          ? await Promise.all(items.slice(0, 10).map(async (m) => [
+              m.url,
+              await preloadSearchCover(m.cover)
+            ]))
+          : [];
         const cachedCovers = new Map(visibleCovers.filter(([, cover]) => cover));
         const loadedItems = items.map((m) => cachedCovers.has(m.url)
           ? { ...m, coverCached: cachedCovers.get(m.url) }

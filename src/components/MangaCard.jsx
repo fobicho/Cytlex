@@ -108,7 +108,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
   }, [libraryCover, remoteCover, preferredCover, proxyCover, unavailable, unavailableCachedCover]);
 
   const schedulePrefetch = () => {
-    if (unavailable || from === 'biblioteca') return;
+    if (!window.cytlex?.httpGet || unavailable || from === 'biblioteca') return;
     clearTimeout(hoverTimer.current);
     hoverTimer.current = setTimeout(() => prefetch(m.url, sourceId), 180);
   };

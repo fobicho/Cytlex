@@ -183,6 +183,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       return ['title-asc', 'title-desc', 'added'].includes(stored) ? stored : 'title-asc';
     } catch { return 'title-asc'; }
   });
+  const cs = useResponsiveCoverSize(coverSize);
   const [toolbarTarget, setToolbarTarget] = useState(null);
   const initialRestore = useRef(restore);
   const pendingScrollTop = useRef(restore?.scrollTop ?? null);
@@ -619,7 +620,6 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     );
   }
 
-  const cs = useResponsiveCoverSize(coverSize);
   const visibleItems = hideSavedManga
     ? items.filter((manga) => !isLibraryManga(manga, sourceId, savedMangaKeys))
     : items;

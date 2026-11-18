@@ -35,7 +35,18 @@ const ALLOWED_SUFFIXES = ['t34798ndc.com', 'mangadex.network', 'ntr-files.online
 const REDIRECT_LIMIT = 5;
 const UPSTREAM_RETRIES = 2;
 const PROXY_RESPONSE_MAX_BYTES = 50 * 1024 * 1024;
+const PROXY_BATCH_MAX_REQUESTS = 12;
+const PROXY_BATCH_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
+const PROXY_IMAGE_BATCH_MAX_REQUESTS = 40;
+const PROXY_IMAGE_BATCH_ITEM_MAX_BYTES = 4 * 1024 * 1024;
+const PROXY_IMAGE_BATCH_TOTAL_MAX_BYTES = 80 * 1024 * 1024;
+const PROXY_IMAGE_BATCH_MAX_SUBREQUESTS = 50;
+const PROXY_IMAGE_BATCH_CONCURRENCY = 6;
 const ONF_COOKIE_PAIR = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+=[^;\r\n]{1,2048}$/;
+const PROXY_BATCH_HEADERS = new Set([
+  'accept', 'content-type', 'x-requested-with', 'user-agent', 'accept-language',
+  'x-cytlex-upstream-origin', 'x-cytlex-upstream-referer'
+]);
 
 function limitResponseBody(body, maxBytes, onFinish, abortUpstream) {
   const reader = body.getReader();
@@ -314,7 +325,7 @@ function isDnsFailure(error) {
   return ['ENOTFOUND', 'EAI_AGAIN'].includes(error?.cause?.code || error?.code);
 }
 
-async function fetchTarget(initialTarget, method, headers, body, signal) {
+async function fetchTarget(initialTarget, method, headers, body, signal, options = {}) {
   let target = initialTarget;
   let currentMethod = method;
   let currentBody = body;
@@ -324,9 +335,13 @@ async function fetchTarget(initialTarget, method, headers, body, signal) {
   for (let redirects = 0; redirects <= REDIRECT_LIMIT; redirects += 1) {
     let response;
     const mangaDexApi = target.hostname === 'api.mangadex.org';
-    const retries = mangaDexApi ? 1 : target.hostname === 'd33y4i2dmzjqjh.cloudfront.net' ? 4 : UPSTREAM_RETRIES;
+    const retries = options.retries ?? (mangaDexApi ? 1 : target.hostname === 'd33y4i2dmzjqjh.cloudfront.net' ? 4 : UPSTREAM_RETRIES);
     for (let attempt = 0; ; attempt += 1) {
       signal.throwIfAborted();
+      if (options.subrequestBudget) {
+        if (redirects === 0 && attempt === 0) options.subrequestBudget.takeInitial();
+        else options.subrequestBudget.takeAdditional();
+      }
       const firstMangaRequest = attempt === 0 && currentMethod === 'GET'
         && target.hostname === 'www.leercapitulo.co' && target.pathname.startsWith('/manga/');
       const attemptSignal = firstMangaRequest ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : signal;
@@ -369,11 +384,333 @@ async function fetchTarget(initialTarget, method, headers, body, signal) {
   }
 }
 
+async function fetchBatchItem(item, request) {
+  const target = validateTarget(item?.url);
+  if (!target) {
+    return { status: 403, text: JSON.stringify({ error: 'Target is not allowed' }), proxyDenied: true, errorOrigin: 'cytlex' };
+  }
+
+  const requestHeaders = new Headers();
+  let headerBytes = 0;
+  for (const [name, value] of Object.entries(item.headers || {})) {
+    const key = name.toLowerCase();
+    if (!PROXY_BATCH_HEADERS.has(key) || typeof value !== 'string' || value.length > 4096) continue;
+    headerBytes += key.length + value.length;
+    if (headerBytes > 12_000) return { status: 400, text: JSON.stringify({ error: 'Request headers are too large' }), errorOrigin: 'cytlex' };
+    requestHeaders.set(key, value);
+  }
+  for (const name of ['accept', 'user-agent', 'accept-language']) {
+    if (!requestHeaders.has(name) && request.headers.has(name)) requestHeaders.set(name, request.headers.get(name));
+  }
+
+  const metadataUrl = new URL(request.url);
+  metadataUrl.searchParams.delete('url');
+  metadataUrl.searchParams.delete('batch');
+  metadataUrl.searchParams.delete('referer');
+  if (typeof item.referer === 'string' && item.referer.length <= 2048) {
+    metadataUrl.searchParams.set('referer', item.referer);
+  }
+  const metadataRequest = new Request(metadataUrl, { headers: requestHeaders });
+
+  const deadline = new AbortController();
+  const timeout = setTimeout(() => deadline.abort(), 12000);
+  const signal = AbortSignal.any([request.signal, deadline.signal]);
+  let streaming = false;
+  let responseTooLarge = false;
+  try {
+    const { upstream, proxyError, finalUrl } = await fetchTarget(target, 'GET', forwardedHeaders(metadataRequest, target), undefined, signal);
+    if (proxyError) {
+      return {
+        status: proxyError.status,
+        text: await proxyError.text(),
+        url: finalUrl || target.href,
+        errorOrigin: proxyError.headers.get('x-cytlex-error-origin') || 'cytlex',
+        upstreamError: proxyError.headers.get('x-cytlex-upstream-error') || '',
+        proxyDenied: proxyError.headers.get('x-cytlex-proxy-denied') === '1'
+      };
+    }
+
+    const contentLength = Number(upstream.headers.get('content-length'));
+    if (Number.isFinite(contentLength) && contentLength > PROXY_BATCH_RESPONSE_MAX_BYTES) {
+      await upstream.body?.cancel();
+      return { fallback: true };
+    }
+
+    const responseBody = upstream.body ? limitResponseBody(
+      upstream.body,
+      PROXY_BATCH_RESPONSE_MAX_BYTES,
+      () => clearTimeout(timeout),
+      () => { responseTooLarge = true; deadline.abort(); }
+    ) : null;
+    streaming = Boolean(responseBody);
+    const text = responseBody ? await new Response(responseBody).text() : '';
+    return {
+      status: upstream.status,
+      text,
+      url: finalUrl || target.href,
+      contentType: upstream.headers.get('content-type') || '',
+      retryAfter: upstream.headers.get('retry-after') || '',
+      errorOrigin: upstream.ok ? '' : 'source'
+    };
+  } catch (error) {
+    if (responseTooLarge) return { fallback: true };
+    const timedOut = deadline.signal.aborted && !request.signal.aborted;
+    return {
+      status: timedOut ? 504 : 502,
+      text: JSON.stringify({ error: timedOut ? 'The source took too long to respond' : 'The source could not be reached' }),
+      url: target.href,
+      errorOrigin: 'connection',
+      upstreamError: timedOut ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable'
+    };
+  } finally {
+    if (!streaming) clearTimeout(timeout);
+  }
+}
+
+async function handleBatchRequest(request) {
+  const contentLength = Number(request.headers.get('content-length')) || 0;
+  if (contentLength > 1_000_000) return errorResponse('Request body is too large', 413);
+
+  let payload;
+  try {
+    const body = await request.arrayBuffer();
+    if (body.byteLength > 1_000_000) return errorResponse('Request body is too large', 413);
+    payload = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return errorResponse('Invalid batch payload', 400);
+  }
+
+  if (!Array.isArray(payload?.requests) || payload.requests.length < 2 || payload.requests.length > PROXY_BATCH_MAX_REQUESTS) {
+    return errorResponse('Invalid batch size', 400);
+  }
+
+  const results = await Promise.all(payload.requests.map((item) => fetchBatchItem(item, request)));
+  return Response.json({ results }, {
+    headers: { 'cache-control': 'no-store', 'x-cytlex-proxy-batch': '1' }
+  });
+}
+
+function createImageSubrequestBudget(total) {
+  let used = 0;
+  let pendingInitial = total;
+  return {
+    takeInitial() {
+      pendingInitial -= 1;
+      if (used >= PROXY_IMAGE_BATCH_MAX_SUBREQUESTS) throw new Error('Image batch subrequest limit reached');
+      used += 1;
+    },
+    takeAdditional() {
+      if (used >= PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - pendingInitial) {
+        throw new Error('Image batch subrequest limit reached');
+      }
+      used += 1;
+    }
+  };
+}
+
+function createImageByteBudget() {
+  let used = 0;
+  return {
+    reserve(bytes) {
+      if (used + bytes > PROXY_IMAGE_BATCH_TOTAL_MAX_BYTES) return false;
+      used += bytes;
+      return true;
+    }
+  };
+}
+
+async function fetchImageBatchItem(item, request, subrequestBudget, byteBudget) {
+  const target = validateTarget(item?.url);
+  if (!target) return { status: 403, proxyDenied: true, errorOrigin: 'cytlex' };
+
+  const metadataUrl = new URL(request.url);
+  metadataUrl.searchParams.delete('url');
+  metadataUrl.searchParams.delete('batch');
+  metadataUrl.searchParams.delete('referer');
+  if (typeof item.referer === 'string' && item.referer.length <= 2048) {
+    metadataUrl.searchParams.set('referer', item.referer);
+  }
+  const metadataHeaders = new Headers({
+    accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+    ...(request.headers.get('user-agent') ? { 'user-agent': request.headers.get('user-agent') } : {}),
+    ...(request.headers.get('accept-language') ? { 'accept-language': request.headers.get('accept-language') } : {})
+  });
+  if (target.hostname === 'onfmangas.com' && typeof item.onfCookie === 'string') {
+    metadataHeaders.set('x-cytlex-onf-cookie', item.onfCookie.slice(0, 4096));
+  }
+  const metadataRequest = new Request(metadataUrl, { headers: metadataHeaders });
+
+  const deadline = new AbortController();
+  const timeout = setTimeout(() => deadline.abort(), 12000);
+  const signal = AbortSignal.any([request.signal, deadline.signal]);
+  let streaming = false;
+  let responseTooLarge = false;
+  try {
+    const { upstream, proxyError, finalUrl } = await fetchTarget(
+      target,
+      'GET',
+      forwardedHeaders(metadataRequest, target),
+      undefined,
+      signal,
+      { subrequestBudget, retries: 0 }
+    );
+    if (proxyError) {
+      await proxyError.body?.cancel();
+      return {
+        status: proxyError.status,
+        url: finalUrl || target.href,
+        errorOrigin: proxyError.headers.get('x-cytlex-error-origin') || 'cytlex',
+        upstreamError: proxyError.headers.get('x-cytlex-upstream-error') || '',
+        proxyDenied: proxyError.headers.get('x-cytlex-proxy-denied') === '1'
+      };
+    }
+
+    const contentType = upstream.headers.get('content-type') || '';
+    const result = {
+      status: upstream.status,
+      url: finalUrl || target.href,
+      contentType,
+      retryAfter: upstream.headers.get('retry-after') || '',
+      onfCookie: target.hostname === 'onfmangas.com' ? responseOnfCookies(upstream).join('; ').slice(0, 4096) : '',
+      errorOrigin: upstream.ok ? '' : 'source'
+    };
+    if (!upstream.ok) {
+      await upstream.body?.cancel();
+      return result;
+    }
+
+    const contentLength = Number(upstream.headers.get('content-length'));
+    if (Number.isFinite(contentLength) && contentLength > PROXY_IMAGE_BATCH_ITEM_MAX_BYTES) {
+      await upstream.body?.cancel();
+      return { status: 413, errorOrigin: 'cytlex', upstreamError: 'response-too-large' };
+    }
+
+    if (!upstream.body) return { ...result, body: new Blob() };
+    const body = limitResponseBody(
+      upstream.body,
+      PROXY_IMAGE_BATCH_ITEM_MAX_BYTES,
+      () => clearTimeout(timeout),
+      () => { responseTooLarge = true; deadline.abort(); }
+    );
+    streaming = true;
+    const image = await new Response(body).blob();
+    if (!byteBudget.reserve(image.size)) {
+      return { status: 413, errorOrigin: 'cytlex', upstreamError: 'batch-response-too-large' };
+    }
+    return { ...result, body: image };
+  } catch (error) {
+    if (responseTooLarge) return { status: 413, errorOrigin: 'cytlex', upstreamError: 'response-too-large' };
+    const timedOut = deadline.signal.aborted && !request.signal.aborted;
+    return {
+      status: timedOut ? 504 : 502,
+      url: target.href,
+      errorOrigin: 'connection',
+      upstreamError: timedOut ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : error?.message?.includes('subrequest limit') ? 'subrequest-limit' : 'unreachable'
+    };
+  } finally {
+    if (!streaming) clearTimeout(timeout);
+  }
+}
+
+async function handleImageBatchRequest(request) {
+  const contentLength = Number(request.headers.get('content-length')) || 0;
+  if (contentLength > 1_000_000) return errorResponse('Request body is too large', 413);
+
+  let payload;
+  try {
+    const body = await request.arrayBuffer();
+    if (body.byteLength > 1_000_000) return errorResponse('Request body is too large', 413);
+    payload = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return errorResponse('Invalid image batch payload', 400);
+  }
+  if (!Array.isArray(payload?.images) || payload.images.length < 1 || payload.images.length > PROXY_IMAGE_BATCH_MAX_REQUESTS) {
+    return errorResponse('Invalid image batch size', 400);
+  }
+
+  const subrequestBudget = createImageSubrequestBudget(payload.images.length);
+  const byteBudget = createImageByteBudget();
+  const results = new Array(payload.images.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, payload.images.length) }, async () => {
+    while (next < payload.images.length) {
+      const index = next;
+      next += 1;
+      results[index] = await fetchImageBatchItem(payload.images[index], request, subrequestBudget, byteBudget);
+    }
+  }));
+  let offset = 0;
+  const responseResults = results.map((result) => {
+    const body = result.body;
+    const metadata = { ...result, body: undefined, offset, length: body?.size || 0 };
+    offset += metadata.length;
+    return metadata;
+  });
+  const metadataBytes = new TextEncoder().encode(JSON.stringify({ results: responseResults }));
+  if (metadataBytes.byteLength > 512_000) return errorResponse('Image batch metadata is too large', 502);
+  const prefix = new Uint8Array(4);
+  new DataView(prefix.buffer).setUint32(0, metadataBytes.length);
+  let streamStage = 0;
+  let resultIndex = 0;
+  let bodyReader = null;
+  const body = new ReadableStream({
+    async pull(controller) {
+      try {
+        if (streamStage === 0) {
+          streamStage = 1;
+          controller.enqueue(prefix);
+          return;
+        }
+        if (streamStage === 1) {
+          streamStage = 2;
+          controller.enqueue(metadataBytes);
+          return;
+        }
+        while (resultIndex < results.length) {
+          const result = results[resultIndex];
+          if (!result.body?.size) {
+            resultIndex += 1;
+            continue;
+          }
+          if (!bodyReader) bodyReader = result.body.stream().getReader();
+          const { done, value } = await bodyReader.read();
+          if (done) {
+            bodyReader = null;
+            resultIndex += 1;
+            continue;
+          }
+          controller.enqueue(value);
+          return;
+        }
+        controller.close();
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      if (bodyReader) await bodyReader.cancel(reason);
+    }
+  });
+  return new Response(body, {
+    headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.image-batch', 'x-cytlex-image-batch': '1' }
+  });
+}
+
 export async function onRequest(context) {
   const { request } = context;
   const method = request.method.toUpperCase();
   if (!['GET', 'HEAD', 'POST'].includes(method)) {
     return errorResponse('Method not allowed', 405);
+  }
+
+  const batchMode = new URL(request.url).searchParams.get('batch');
+  if (batchMode === 'images') {
+    if (method !== 'POST') return errorResponse('Method not allowed', 405);
+    return handleImageBatchRequest(request);
+  }
+  if (batchMode === '1') {
+    if (method !== 'POST') return errorResponse('Method not allowed', 405);
+    return handleBatchRequest(request);
   }
 
   const target = validateTarget(new URL(request.url).searchParams.get('url'));
