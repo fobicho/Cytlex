@@ -73,6 +73,7 @@ export default function createSource({ fetchText, parse }) {
     const prefix = `${manga.origin}${manga.pathname.replace(/\/+$/, '')}/capitulo-`;
     const seen = new Set();
     return [...doc.querySelectorAll('a[href*="/capitulo-"]')]
+      .filter((anchor) => anchor.id !== 'btn-leer' && !/^leer desde el cap[ií]tulo\b/i.test(text(anchor)))
       .map((anchor) => {
         const url = absolute(anchor.getAttribute('href'));
         if (!url || !url.startsWith(prefix) || seen.has(url)) return null;
