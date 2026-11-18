@@ -144,6 +144,7 @@ function createWindow(startBounds = null, startMaximized = false) {
 }
 
 const REFERER_RULES = [
+  { hosts: ['cdn.achymanga.online'], referer: 'https://achymanga.online/' },
   { hosts: ['mangadex.org', 'mangadex.network'], referer: 'https://mangadex.org/' },
   { hosts: ['t34798ndc.com'], referer: 'https://www.leercapitulo.co/' },
   { hosts: ['leercapitulo.co'], referer: 'https://www.leercapitulo.co/' },
@@ -849,6 +850,7 @@ ipcMain.handle('image:fetch', async (_e, url, requestedReferer, requestedCookie)
     const host = parsed.hostname.toLowerCase();
     const mangaDexImage = host === 'uploads.mangadex.org';
     const onfImage = parsed.origin === 'https://onfmangas.com' && parsed.pathname.startsWith('/reader_image.php/');
+    const achyImage = host === 'cdn.achymanga.online';
     const cdnlxdImage = host === 'cdnlxd.xyz' || host.endsWith('.cdnlxd.xyz');
     let imageReferer = refererFor(urlStr);
     if (cdnlxdImage && parsed.pathname.startsWith('/manga/covers/')) imageReferer = 'https://lectorxd.com/';
@@ -856,6 +858,14 @@ ipcMain.handle('image:fetch', async (_e, url, requestedReferer, requestedCookie)
       try {
         const candidate = validateUrl(requestedReferer);
         if (candidate.origin === 'https://onfmangas.com' && candidate.pathname.startsWith('/lector/')) {
+          imageReferer = candidate.href;
+        }
+      } catch {}
+    }
+    if (achyImage && typeof requestedReferer === 'string') {
+      try {
+        const candidate = validateUrl(requestedReferer);
+        if (candidate.origin === 'https://achymanga.online' && /^\/manga\/[^/]+\/[^/]+\/capitulo-[^/]+\/?$/.test(candidate.pathname)) {
           imageReferer = candidate.href;
         }
       } catch {}

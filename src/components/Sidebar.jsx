@@ -267,7 +267,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
             className={cn(
               'w-full flex items-center rounded-md font-medium',
               'transition-[gap,color,background-color,border-color,text-decoration-color,fill,stroke] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
-              'cx-update-pulse border border-border/50 bg-card text-foreground hover:bg-card hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+              'border border-sidebar-border/70 bg-sidebar-accent/30 text-sidebar-foreground hover:border-sidebar-border hover:bg-sidebar-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
             )}
             style={{
               justifyContent: 'flex-start',
@@ -328,7 +328,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
           aria-label={collapsed ? 'Expandir menu lateral' : 'Colapsar menu lateral'}
           aria-expanded={!collapsed}
           title={collapsed ? 'Expandir' : 'Colapsar'}
-          className="mx-auto grid shrink-0 place-items-center border border-sidebar-border/70 bg-sidebar-accent/30 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          className="mx-auto grid shrink-0 place-items-center bg-transparent text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
           style={{
             width: `${Math.max(36, Math.round(40 * scale))}px`,
             height: `${Math.max(36, Math.round(40 * scale))}px`,

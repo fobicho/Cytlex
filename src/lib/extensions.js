@@ -11,8 +11,14 @@ const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
 export const SOURCE_CONFIG_CHANGE_EVENT = 'cytlex:source-config-changed';
 export const isRetiredExtension = (id) => id === 'plottwistnofansub' || id === 'yupmanga';
 export const isUnavailableMangaSource = (id) => isRetiredExtension(id) || isUnresolvedMihonSource(id);
+const NON_INSTALLABLE_EXTENSION_IDS = new Set(defaultExtensionIndex.filter((manifest) => manifest.installable === false).map((manifest) => manifest.id));
+export const isExtensionInstallable = (source) => {
+  const manifest = source?.manifest || source;
+  return manifest?.installable !== false && !NON_INSTALLABLE_EXTENSION_IDS.has(manifest?.id);
+};
 const keepInstalledExtension = (record) => record?.manifest?.type !== 'builtin'
-  && !isUnavailableMangaSource(record?.manifest?.id);
+  && !isUnavailableMangaSource(record?.manifest?.id)
+  && isExtensionInstallable(record?.manifest);
 let recordsCache = null;
 
 function freshIndexUrl(indexUrl) {
@@ -73,6 +79,13 @@ const read = () => {
   try { list = JSON.parse(localStorage.getItem(KEY)) || []; } catch { list = []; }
   recordsCache = list.filter(keepInstalledExtension);
   if (recordsCache.length !== list.length) {
+    for (const record of list.filter((entry) => entry?.manifest?.id && !isExtensionInstallable(entry.manifest))) {
+      const id = record.manifest.id;
+      clearModule(id);
+      for (const sourceId of [id, ...(subSources(record.manifest)?.map((source) => source.id) || [])]) {
+        chapterIndex.dropSource(sourceId);
+      }
+    }
     try { localStorage.setItem(KEY, JSON.stringify(recordsCache)); } catch {}
   }
   return recordsCache;
@@ -513,6 +526,7 @@ export const extensions = {
 
   async install(manifest, indexUrl) {
     if (isRetiredExtension(manifest.id)) throw new Error('Esta extensión fue retirada.');
+    if (!isExtensionInstallable(manifest)) throw new Error('Esta extensión está desactivada temporalmente.');
     let code = null;
     if (manifest.type === 'module') {
       if (!manifest.main) throw new Error('La extensión no define "main"');

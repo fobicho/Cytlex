@@ -32,6 +32,7 @@ export function browserImageUrl(url, referer = '') {
     const onfCdn = hostname === 'd33y4i2dmzjqjh.cloudfront.net';
     const mangaDexImage = hostname === 'uploads.mangadex.org' || hostname.endsWith('.mangadex.network');
     const sourceImage = hostname === 'images.mangalect.org' || hostname === 'mangalect.org'
+      || hostname === 'cdn.achymanga.online'
       || hostname === 'images.komiwa.net' || hostname === 'blogger.googleusercontent.com' || hostname === 's.imgfi.com' || hostname === 'media.mangavault.lat'
       || hostname === 'cdnlxd.xyz' || hostname.endsWith('.cdnlxd.xyz')
       || hostname === 'imagesolymp.xyz' || hostname === 'media.imagesolymp.xyz'
@@ -80,7 +81,10 @@ async function browserRequest(url, options = {}) {
   const isCdnlxdImage = target.hostname === 'cdnlxd.xyz' || target.hostname.endsWith('.cdnlxd.xyz');
   const isKomiwaImage = ['images.komiwa.net', 's.imgfi.com', 'media.mangavault.lat'].includes(target.hostname);
   const isT34798Image = target.hostname === 't34798ndc.com' || target.hostname.endsWith('.t34798ndc.com');
-  const proxyReferer = isOnf || isCdnlxdImage || isKomiwaImage || isT34798Image ? onfReferer : '';
+  const isAchyImage = target.hostname === 'cdn.achymanga.online';
+  const proxyReferer = isOnf || isCdnlxdImage || isKomiwaImage || isT34798Image || isAchyImage
+    ? onfReferer || (isAchyImage ? 'https://achymanga.online/' : '')
+    : '';
   const requestCookie = isOnf ? mergeCookiePairs(onfCookieJar, onfCookie) : '';
   if (isOnf && requestCookie) requestHeaders.set('x-cytlex-onf-cookie', requestCookie);
   let response;

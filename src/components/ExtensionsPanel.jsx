@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown, Settings as SettingsIcon, X, Check, CheckSquare } from 'lucide-react';
-import { extensions, isExtensionAllowed, isNewer, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed, isExtensionInstallable, isNewer, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
 import { extUpdates } from '../lib/extUpdates.js';
 import { settings } from '../lib/settings.js';
 import { Card } from './ui/card.jsx';
@@ -91,7 +91,8 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
         confirmationOpen && 'relative z-30',
         selected && 'border-primary bg-primary/5',
         updatable && 'cx-update-pulse',
-        disabled && 'opacity-50'
+        disabled && 'opacity-50',
+        !isExtensionInstallable(m) && 'opacity-80'
       )}
     >
       {onSelectionChange && (
@@ -205,7 +206,8 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     extensions.invalidate(subId);
     window.dispatchEvent(new Event(SOURCE_CONFIG_CHANGE_EVENT));
   };
-  const visibleAvailable = available?.filter((manifest) => isExtensionAllowed(manifest, showAdultExtensions));
+  const visibleAvailable = available?.filter((manifest) => !isExtensionInstallable(manifest)
+    || isExtensionAllowed(manifest, showAdultExtensions));
   const installedById = new Map(installed.map((record) => [record.manifest.id, record.manifest]));
   const visibleUpdates = updates.filter((update) => {
     const manifest = installedById.get(update.id);
@@ -502,7 +504,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     setSelectedInstalledIds((current) => new Set([...current].filter((id) => installedIds.has(id))));
   }, [installed]);
   useEffect(() => {
-    const availableIds = new Set((visibleAvailable || []).map((manifest) => manifest.id));
+    const availableIds = new Set((visibleAvailable || []).filter(isExtensionInstallable).map((manifest) => manifest.id));
     setSelectedAvailableIds((current) => new Set([...current].filter((id) => availableIds.has(id))));
   }, [available, showAdultExtensions]);
 
@@ -592,7 +594,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
   const runBulkAction = async (action) => {
     const isInstall = action === 'install';
     const selectedItems = isInstall
-      ? sortedAvailable.filter((manifest) => selectedAvailableIds.has(manifest.id))
+      ? sortedAvailable.filter((manifest) => isExtensionInstallable(manifest) && selectedAvailableIds.has(manifest.id))
       : sortedInstalled.filter(({ manifest }) => selectedInstalledIds.has(manifest.id)).map(({ manifest }) => manifest);
     if (!selectedItems.length) {
       setConfirmBulk(null);
@@ -642,7 +644,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
 
   const handleBulkAction = (action) => {
     const selectedItems = action === 'install'
-      ? sortedAvailable.filter((manifest) => selectedAvailableIds.has(manifest.id))
+      ? sortedAvailable.filter((manifest) => isExtensionInstallable(manifest) && selectedAvailableIds.has(manifest.id))
       : sortedInstalled.filter(({ manifest }) => selectedInstalledIds.has(manifest.id));
     const triggerRef = action === 'install' ? bulkInstallRef : bulkUninstallRef;
     const trigger = triggerRef.current?.querySelector('button');
@@ -1034,7 +1036,7 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                     className="extensions-square-button"
                     aria-label="Seleccionar todo"
                     title="Seleccionar todo"
-                    onClick={() => { setSelectedAvailableIds(new Set(sortedAvailable.map((manifest) => manifest.id))); setConfirmBulk(null); }}
+                    onClick={() => { setSelectedAvailableIds(new Set(sortedAvailable.filter(isExtensionInstallable).map((manifest) => manifest.id))); setConfirmBulk(null); }}
                     disabled={busy !== '' || loading || updating !== ''}
                     style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
@@ -1116,9 +1118,9 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                   m={m}
                   confirmationOpen={confirmInstall?.id === m.id}
                   selected={selectedAvailableIds.has(m.id)}
-                  onSelectionChange={tutorialPreview ? undefined : (selected) => toggleSelection(setSelectedAvailableIds, m.id, selected)}
+                  onSelectionChange={tutorialPreview || !isExtensionInstallable(m) ? undefined : (selected) => toggleSelection(setSelectedAvailableIds, m.id, selected)}
                   selectionLabel={`Seleccionar ${m.name} para instalar`}
-                  selectionDisabled={busy !== '' || loading}
+                  selectionDisabled={busy !== '' || loading || !isExtensionInstallable(m)}
                   action={
                   <div
                     ref={confirmInstall?.id === m.id ? confirmRef : null}
@@ -1129,9 +1131,9 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
                       variant="ghost"
                       size="icon"
                       className="active:scale-100 hover:bg-transparent hover:text-foreground"
-                      title="Instalar"
-                      aria-label="Instalar"
-                      disabled={busy !== ''}
+                      title={isExtensionInstallable(m) ? 'Instalar' : 'Instalación no disponible temporalmente'}
+                      aria-label={isExtensionInstallable(m) ? 'Instalar' : 'Instalación no disponible temporalmente'}
+                      disabled={busy !== '' || !isExtensionInstallable(m)}
                       onClick={(event) => {
                         const popoverPosition = confirmationPosition(event.currentTarget);
                         setConfirmInstall((current) => current?.id === m.id

@@ -145,12 +145,25 @@
     }
   },
   {
+    "id": "achymanga",
+    "name": "AchyManga",
+    "lang": "es",
+    "version": "1.0.0",
+    "type": "module",
+    "contentWarning": "MIXED",
+    "main": "ext/achymanga.js",
+    "baseUrl": "https://achymanga.online",
+    "icon": "https://achymanga.online/favicon.png",
+    "desc": "Manga, manhwa, manhua y webtoon en español."
+  },
+  {
     "id": "lectorxd",
     "name": "LectorXD",
     "lang": "es",
     "version": "1.0.2",
     "type": "module",
     "contentWarning": "MIXED",
+    "installable": false,
     "main": "ext/lectorxd.js",
     "baseUrl": "https://lectorxd.com",
     "icon": "https://www.google.com/s2/favicons?domain=lectorxd.com&sz=128",

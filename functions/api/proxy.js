@@ -1,8 +1,10 @@
 const ALLOWED_HOSTS = new Set([
   'api.anilist.co',
   'api.mangadex.org',
+  'achymanga.online',
   'b78sk.komiwa.net',
   'blogger.googleusercontent.com',
+  'cdn.achymanga.online',
   'd33y4i2dmzjqjh.cloudfront.net',
   'fobicho.github.io',
   'images.mangalect.org',
@@ -192,6 +194,17 @@ function komiwaImageReferer(request) {
   return komiwaChapterReferer(request) || 'https://www.komiwa.net/';
 }
 
+function achyMangaReferer(request) {
+  const value = new URL(request.url).searchParams.get('referer');
+  if (value) {
+    try {
+      const referer = new URL(value);
+      if (referer.origin === 'https://achymanga.online' && /^\/manga\/[^/]+\/[^/]+\/capitulo-[^/]+\/?$/.test(referer.pathname)) return referer.href;
+    } catch {}
+  }
+  return 'https://achymanga.online/';
+}
+
 function forwardedHeaders(request, target) {
   const headers = new Headers();
   const isMangaDexApi = target.hostname === 'api.mangadex.org';
@@ -219,6 +232,10 @@ function forwardedHeaders(request, target) {
     headers.set('cookie', onfCookies.join('; ').slice(0, 4096));
   }
 
+  if (target.hostname === 'achymanga.online') {
+    headers.set('referer', 'https://achymanga.online/');
+  }
+
   if (isMangaDexApi) {
     headers.set('accept', 'application/json');
     headers.set('user-agent', 'Cytlex/0.1.0 (+https://github.com/fobicho/Cytlex)');
@@ -232,6 +249,9 @@ function forwardedHeaders(request, target) {
   }
   if (target.hostname === 'images.mangalect.org' || target.hostname === 'mangalect.org') {
     headers.set('referer', 'https://mangalect.org/');
+  }
+  if (target.hostname === 'cdn.achymanga.online') {
+    headers.set('referer', achyMangaReferer(request));
   }
   if (target.hostname === 'images.komiwa.net' || target.hostname === 's.imgfi.com' || target.hostname === 'media.mangavault.lat') {
     headers.set('referer', komiwaImageReferer(request));

@@ -71,6 +71,38 @@ async function imageSize(blob) {
   }
 }
 
+async function unscramble4x4(blob) {
+  if (typeof createImageBitmap !== 'function') return blob;
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext('2d');
+    if (!context) return blob;
+    context.drawImage(bitmap, 0, 0);
+
+    const permutation = [11, 6, 13, 0, 14, 3, 8, 5, 1, 15, 4, 10, 9, 2, 7, 12];
+    const cellWidth = 8 * Math.floor(bitmap.width / 32);
+    const cellHeight = 8 * Math.floor(bitmap.height / 32);
+    if (!cellWidth || !cellHeight) return blob;
+    for (let index = 0; index < permutation.length; index += 1) {
+      const sourceX = (index % 4) * cellWidth;
+      const sourceY = Math.floor(index / 4) * cellHeight;
+      const targetIndex = permutation[index];
+      const targetX = (targetIndex % 4) * cellWidth;
+      const targetY = Math.floor(targetIndex / 4) * cellHeight;
+      context.drawImage(bitmap, sourceX, sourceY, cellWidth, cellHeight, targetX, targetY, cellWidth, cellHeight);
+    }
+    return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png')) || blob;
+  } catch {
+    return blob;
+  } finally {
+    bitmap?.close();
+  }
+}
+
 function clampPagePan(pan, start, end, viewportStart, viewportEnd) {
   const min = viewportEnd - end;
   const max = viewportStart - start;
@@ -117,7 +149,7 @@ function OnfChapterLink({ href }) {
   </a>;
 }
 
-function ReaderPanel({ id, src, displaySrc = '', preloadFailed, preloadError, sourceName, blockedChapterUrl, alternativeSourcesUrl, fallbackSrc = '', alt, loading = 'eager', imageReferer, imageCookie, imageClassName, wrapperClassName, placeholderStyle, onContextMenu, onLoaded, onRetry }) {
+function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFailed, preloadError, sourceName, blockedChapterUrl, alternativeSourcesUrl, fallbackSrc = '', alt, loading = 'eager', imageReferer, imageCookie, imageClassName, wrapperClassName, placeholderStyle, onContextMenu, onLoaded, onRetry }) {
   const [status, setStatus] = useState('loading');
   const [imageError, setImageError] = useState('');
   const [attempt, setAttempt] = useState(0);
@@ -130,7 +162,7 @@ function ReaderPanel({ id, src, displaySrc = '', preloadFailed, preloadError, so
   const retrying = useRef(false);
   const imageRef = useRef(null);
   const browserSrc = browserImageUrl(src, imageReferer);
-  const usePreload = browserSrc !== src;
+  const usePreload = forcePreload || browserSrc !== src;
   const imageSrc = usePreload ? displaySrc : srcOverride || (!usingFallback && !displaySrcFailed ? cachedDisplaySrc : '')
     || (usingFallback ? browserImageUrl(fallbackSrc, imageReferer) : browserSrc);
 
@@ -593,6 +625,7 @@ export default function Reader() {
 
   const pageSources = ch?.pages;
   const pageFallbacks = ch?.pageFallbacks;
+  const pageTransforms = ch?.pageTransforms;
   const imageReferer = ch?.imageReferer;
   const imageCookie = ch?.imageCookie || '';
   const onfChapterUrl = sourceId === 'onfmangas' && chapterUrl.startsWith('https://onfmangas.com/lector/') ? chapterUrl : '';
@@ -619,7 +652,9 @@ export default function Reader() {
       setPreloadRevision((revision) => revision + 1);
     };
     const load = async (src) => {
-      const usePreload = browserImageUrl(src, imageReferer) !== src;
+      const pageIndex = pageSources.indexOf(src);
+      const transform = pageTransforms?.[pageIndex];
+      const usePreload = !!transform || browserImageUrl(src, imageReferer) !== src;
       const fallback = pageFallbacks?.[pageSources.indexOf(src)];
       const candidates = usePreload && fallback && fallback !== src ? [src, fallback] : [src];
       let accessRejected = false;
@@ -635,13 +670,14 @@ export default function Reader() {
           const image = await fetchImageBlob(candidate, controller.signal, imageReferer, imageCookie);
           if (cancelled) return false;
           if (image) {
-            const size = candidates.length > 1 ? await imageSize(image) : null;
+            const displayImage = transform === 'scramble-4x4' ? await unscramble4x4(image) : image;
+            const size = candidates.length > 1 ? await imageSize(displayImage) : null;
             if (size === null || !size.small) {
-              saveResult(src, URL.createObjectURL(image));
+              saveResult(src, URL.createObjectURL(displayImage));
               return true;
             }
             if (size.area > bestArea) {
-              bestImage = image;
+              bestImage = displayImage;
               bestArea = size.area;
             }
           }
@@ -703,7 +739,7 @@ export default function Reader() {
         if (typeof objectUrl === 'string') URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [pageSources, pageFallbacks, imageReferer, imageCookie, chUrl, chapterUrl, onfChapterUrl]);
+  }, [pageSources, pageFallbacks, pageTransforms, imageReferer, imageCookie, chUrl, chapterUrl, onfChapterUrl]);
 
   useEffect(() => {
     pumpPreloadedPagesRef.current?.();
@@ -711,7 +747,9 @@ export default function Reader() {
 
   const panelImageProps = (src, index) => {
     const result = preloadedPagesRef.current.get(src);
+    const forcePreload = !!pageTransforms?.[index];
     return {
+      forcePreload,
       displaySrc: typeof result === 'string' ? result : '',
       preloadFailed: !!result && typeof result !== 'string',
       preloadError: result?.failure ? sourceErrorMessage(result.failure, sourceName) : '',
@@ -723,7 +761,7 @@ export default function Reader() {
       imageCookie,
       onRetry: sourceId.startsWith('mangadex') || sourceId === 'onfmangas'
         ? retryChapterImages
-        : browserImageUrl(src, imageReferer) !== src
+        : forcePreload || browserImageUrl(src, imageReferer) !== src
           ? () => retryPreloadedPageRef.current?.(src)
           : undefined
     };
