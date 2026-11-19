@@ -13,7 +13,6 @@ import Tracking from './pages/Tracking.jsx';
 import { resolveMode, settings } from './lib/settings.js';
 import { extensions } from './lib/extensions.js';
 import { lastSearch, resultsScroll, catalogScroll, sourceCatalogState } from './lib/searchState.js';
-import { startNotifier, onNotifyClick, checkLibrary } from './lib/notify.js';
 import { useToast } from './components/Toast.jsx';
 import { appWindow } from './lib/appWindow.js';
 import { px, useScale } from './lib/useScale.js';
@@ -53,17 +52,11 @@ class PageBoundary extends Component {
 }
 
 export const RESET_PAGE_EVENT = 'cytlex:reset-page';
-export const GO_EXTENSIONS_EVENT = 'cytlex:go-extensions';
 const DETAIL_ORIGINS = ['biblioteca', 'explorar', 'fuentes', 'resultados'];
 
 function detailOrigin(location) {
   const from = new URLSearchParams(location.search).get('from');
   return DETAIL_ORIGINS.includes(from) ? from : 'biblioteca';
-}
-
-export function goToExtensions() {
-  window.location.hash = '#/explorar?tab=extensiones';
-  window.dispatchEvent(new CustomEvent(GO_EXTENSIONS_EVENT));
 }
 
 function useResetPage(onReset) {
@@ -73,7 +66,7 @@ function useResetPage(onReset) {
   }, [onReset]);
 }
 
-export default function App({ isVisible = true, tutorialMode = false }) {
+export default function App({ tutorialMode = false }) {
   const { toast } = useToast();
   const [theme, setTheme] = useState(() => settings.get().theme);
   const [mode, setMode] = useState(() => resolveMode(settings.get().mode));
@@ -90,7 +83,6 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   const quickSearchPanel = useRef(null);
   const pointerPosition = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
   const reduceMotion = useReducedMotion();
-  const initialLibraryCheck = useRef(false);
   const location = useLocation();
   const navigate = useNavigate();
   const previousLocation = useRef(location);
@@ -183,46 +175,6 @@ export default function App({ isVisible = true, tutorialMode = false }) {
   useEffect(() => {
     appWindow.isFullscreen().then(setIsFullscreen);
   }, []);
-
-  useEffect(() => startNotifier(), []);
-
-  useEffect(() => {
-    if (!isVisible || initialLibraryCheck.current || !settings.get().notifyEnabled) return;
-    initialLibraryCheck.current = true;
-    let cancelled = false;
-    Promise.resolve(window.cytlex?.isBackground?.()).then((background) => {
-      if (background || cancelled) return;
-      checkLibrary({ silent: true, force: true, notifyFound: false }).then((found) => {
-        if (cancelled || !found.length) return;
-        const chapterCount = found.reduce((sum, item) => sum + item.count, 0);
-        toast({
-          title: found.length === 1 ? '1 obra actualizada' : `${found.length} obras actualizadas`,
-          description: `${chapterCount} ${chapterCount === 1 ? 'capítulo nuevo disponible' : 'capítulos nuevos disponibles'}.`,
-          variant: 'info'
-        });
-      }).catch(() => {});
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [isVisible, toast]);
-
-
-  useEffect(
-    () =>
-      onNotifyClick((payload) => {
-        if (payload?.tipo === 'extensiones') {
-          goToExtensions();
-          return;
-        }
-        if (payload?.tipo === 'biblioteca') {
-          window.location.hash = '#/biblioteca';
-          return;
-        }
-        const url = payload?.url;
-        if (!url) return;
-        window.location.hash = `#/manga?u=${encodeURIComponent(url)}&s=${encodeURIComponent(payload.sourceId || 'leercapitulo')}&from=biblioteca`;
-      }),
-    []
-  );
 
   useEffect(() => {
     if (!quickSearchOpen) return undefined;

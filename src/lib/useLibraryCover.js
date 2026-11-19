@@ -21,7 +21,8 @@ export function useLibraryCover(cover, { enabled = true, cachedOnly = false, cac
       let url = cached !== rejected ? cached : '';
       if (!url && !cachedOnly && rejected !== cover) {
         const electron = Boolean(window.cytlex?.fetchImage);
-        if (electron) url = await preloadLibraryCover(cover, { web: true });
+        const needsProxy = !electron && browserImageUrl(cover) !== cover;
+        if (electron || needsProxy) url = await preloadLibraryCover(cover, { web: true });
         if (!url && !electron) url = cover;
       }
       if (alive) setLoaded({ cover, cachedOnly, src: url === rejected ? '' : url });

@@ -3,17 +3,6 @@ const { contextBridge, ipcRenderer } = require('electron');
 if (process.isMainFrame) contextBridge.exposeInMainWorld('cytlex', {
   httpGet: (url, requestId, options) => ipcRenderer.invoke('http:get', url, requestId, options),
   httpHead: (url) => ipcRenderer.invoke('http:head', url),
-  notify: (payload) => ipcRenderer.invoke('notify:show', payload),
-  notifySupported: () => ipcRenderer.invoke('notify:supported'),
-  setBackgroundCheck: (on, hours) => ipcRenderer.invoke('notify:background', on, hours),
-  confirmTask: () => ipcRenderer.invoke('notify:confirm'),
-  onNotifyClick: (cb) => {
-    const handler = (_e, payload) => cb(payload);
-    ipcRenderer.on('notify:click', handler);
-    return () => ipcRenderer.removeListener('notify:click', handler);
-  },
-  isBackground: () => ipcRenderer.invoke('app:background'),
-  exitBackground: () => ipcRenderer.invoke('app:exit'),
   httpPost: (payload, requestId) => ipcRenderer.invoke('http:post', payload, requestId),
   cancelHttpRequest: (requestId) => ipcRenderer.send('http:cancel', requestId),
   releaseHttpRequest: (requestId) => ipcRenderer.send('http:release', requestId),

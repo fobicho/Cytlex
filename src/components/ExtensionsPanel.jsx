@@ -500,7 +500,20 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
       setUpdates((current) => current.filter((update) => update.id !== id));
       if (r.ok) {
         extUpdates.clear();
-        toast({ title: 'Extensión actualizada', variant: 'success' });
+        const updated = r.actualizadas[0];
+        toast({
+          title: 'Extensión actualizada',
+          description: updated ? `${updated.name} quedó en la versión ${updated.version}.` : undefined,
+          variant: 'success'
+        });
+      } else if (!r.fallos.length) {
+        const current = extensions.installed().find(({ manifest }) => manifest.id === id);
+        const version = current?.installedVersion || current?.manifest.version;
+        toast({
+          title: 'La extensión ya está actualizada',
+          description: version ? `Está en la versión ${version}.` : undefined,
+          variant: 'info'
+        });
       } else {
         setErr('No se pudo actualizar la extensión');
       }
@@ -521,15 +534,27 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
       if (r.fallos.length) {
         toast({
           title: 'Actualización parcial',
-          description: `${r.ok} actualizadas, ${r.fallos.length} fallaron.`,
+          description: [
+            `${r.ok} actualizadas, ${r.fallos.length} fallaron.`,
+            r.actualizadas.map(({ name, version }) => `${name} ${version}`).join(' · ')
+          ].filter(Boolean).join(' '),
           variant: 'error'
         });
       } else if (r.ok === 0) {
-        toast({ title: 'No hay actualizaciones pendientes', variant: 'info' });
+        const versions = extensions.installed()
+          .filter(({ manifest }) => updatedIds.has(manifest.id))
+          .map(({ manifest, installedVersion }) => `${manifest.name} ${installedVersion || manifest.version}`)
+          .join(' · ');
+        toast({
+          title: 'Las extensiones ya están actualizadas',
+          description: versions || undefined,
+          variant: 'info'
+        });
       } else {
         extUpdates.clear();
         toast({
           title: r.ok === 1 ? '1 extensión actualizada' : `${r.ok} extensiones actualizadas`,
+          description: r.actualizadas.map(({ name, version }) => `${name} ${version}`).join(' · '),
           variant: 'success'
         });
       }

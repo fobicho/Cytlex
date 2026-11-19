@@ -28,10 +28,6 @@ const defaults = {
   extIndexUrl: '',
   anilistSynopsisLang: 'romaji',
   anilistCover: false,
-  notifyEnabled: false,
-  notifyHours: 12,
-  notifyBackground: false,
-  extUpdateNotify: false,
   notifyBaseline: {},
   tutorialSeen: false,
   donationSeen: false
@@ -48,6 +44,10 @@ function normalize(s) {
   if (rest.showAdultExtensions === undefined && showAdultManga !== undefined) {
     rest.showAdultExtensions = showAdultManga;
   }
+  delete rest.notifyEnabled;
+  delete rest.notifyHours;
+  delete rest.notifyBackground;
+  delete rest.extUpdateNotify;
   if (theme === 'dark') theme = 'default';
   else if (theme === 'light') { theme = 'default'; mode = 'light'; }
   if (!THEME_IDS.includes(theme)) theme = 'default';

@@ -8,7 +8,7 @@ import defaultExtensionIndex from '../../docs/index.json';
 const KEY = 'cytlex:extensions:v1';
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
 const REPO_INDEX_CACHE_KEY = 'cytlex:repo-index-cache:v1';
-const REPO_INDEX_CACHE_TTL_MS = 10 * 60 * 1000;
+const REPO_INDEX_FRESH_MS = 10 * 60 * 1000;
 const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
 export const SOURCE_CONFIG_CHANGE_EVENT = 'cytlex:source-config-changed';
 export const isRetiredExtension = (id) => id === 'plottwistnofansub' || id === 'yupmanga';
@@ -405,13 +405,14 @@ export const extensions = {
     return '';
   },
 
-  async repoIndex(indexUrl, { refresh = false } = {}) {
+  async repoIndex(indexUrl, { refresh = false, maxAgeMs = null } = {}) {
     const url = String(indexUrl || '').trim();
     if (!refresh) {
       try {
         const cached = JSON.parse(localStorage.getItem(REPO_INDEX_CACHE_KEY));
         const age = Date.now() - cached?.at;
-        if (cached?.url === url && Array.isArray(cached.repo) && age >= 0 && age < REPO_INDEX_CACHE_TTL_MS) {
+        const meetsFreshness = maxAgeMs == null || (age >= 0 && age < maxAgeMs);
+        if (cached?.url === url && Array.isArray(cached.repo) && meetsFreshness) {
           return cached.repo;
         }
       } catch {}
@@ -456,12 +457,13 @@ export const extensions = {
   },
 
   async updateAll(indexUrl, ids) {
-    const repo = await extensions.repoIndex(indexUrl);
+    const repo = await extensions.repoIndex(indexUrl, { maxAgeMs: REPO_INDEX_FRESH_MS });
     const pendientes = new Set(ids || read().map((r) => r.manifest.id));
 
     const records = read();
     let ok = 0;
     const fallos = [];
+    const actualizadas = [];
     await Promise.all(records.map(async (r) => {
       if (!pendientes.has(r.manifest.id)) return;
       const fresh = repo.find((m) => m.id === r.manifest.id);
@@ -483,13 +485,14 @@ export const extensions = {
         r.installedVersion = fresh.version || r.manifest.version || '0';
         clearModule(r.manifest.id);
         ok += 1;
+        actualizadas.push({ id: r.manifest.id, name: fresh.name || r.manifest.name, version: r.installedVersion });
       } catch {
         fallos.push(r.manifest.id);
       }
     }));
 
     write(records);
-    return { ok, fallos };
+    return { ok, fallos, actualizadas };
   },
 
   async sync(indexUrl) {

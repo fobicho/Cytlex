@@ -4,17 +4,9 @@ import { settings } from './settings.js';
 import { chapterIndex } from './chapterIndex.js';
 
 const key = (url, sourceId) => `${sourceId}|${url}`;
+const CHECK_BATCH_SIZE = 24;
 
 let running = false;
-let lastRun = 0;
-const listeners = new Set();
-
-async function finishIfBackground() {
-  try {
-    const bg = await window.cytlex.isBackground();
-    if (bg) window.cytlex.exitBackground();
-  } catch {}
-}
 
 async function countChapters(manga) {
   const sourceId = manga.sourceId || 'leercapitulo';
@@ -24,175 +16,48 @@ async function countChapters(manga) {
   return d.chapters.length;
 }
 
-export async function checkLibrary({ silent = false, force = false, notifyFound = !silent, onProgress } = {}) {
+export async function checkLibrary({ onProgress } = {}) {
   if (running) return [];
-  if (typeof window === 'undefined' || !window.cytlex?.notify) return [];
-  const cfg = settings.get();
-  if (!force && Date.now() - lastRun < 10 * 60 * 1000) return [];
-  lastRun = Date.now();
-
-  if (!cfg.notifyEnabled && !silent) {
-    await finishIfBackground();
-    return [];
-  }
+  if (typeof window === 'undefined') return [];
 
   const favs = lib.favs();
   if (!favs.length) {
     onProgress?.({ current: 0, total: 0 });
-    await finishIfBackground();
     return [];
   }
 
   running = true;
   onProgress?.({ current: 0, total: favs.length });
-  const baseline = { ...(cfg.notifyBaseline || {}) };
+  const baseline = { ...(settings.get().notifyBaseline || {}) };
   const found = [];
-  let checked = 0;
+  let cursor = 0;
+  let completed = 0;
 
-  for (let i = 0; i < favs.length; i += 1) {
-    const m = favs[i];
-    try {
-      const sourceId = m.sourceId || 'leercapitulo';
-      const k = key(m.url, sourceId);
-      const total = await countChapters({ ...m, sourceId });
-      if (total != null) {
-        checked++;
-        const prev = baseline[k];
-        baseline[k] = total;
-
-        if (prev != null && total > prev) {
-          found.push({ url: m.url, sourceId, title: m.title, count: total - prev, last: total });
+  try {
+    // Match the proxy batch limit so independent detail requests can share invocations.
+    await Promise.all(Array.from({ length: Math.min(CHECK_BATCH_SIZE, favs.length) }, async () => {
+      while (cursor < favs.length) {
+        const manga = favs[cursor++];
+        try {
+          const sourceId = manga.sourceId || 'leercapitulo';
+          const k = key(manga.url, sourceId);
+          const total = await countChapters({ ...manga, sourceId });
+          if (total != null) {
+            const prev = baseline[k];
+            baseline[k] = total;
+            if (prev != null && total > prev) {
+              found.push({ url: manga.url, sourceId, title: manga.title, count: total - prev, last: total });
+            }
+          }
+        } catch {} finally {
+          completed += 1;
+          onProgress?.({ current: completed, total: favs.length });
         }
       }
-    } catch {} finally {
-      onProgress?.({ current: i + 1, total: favs.length });
-    }
+    }));
+    settings.set({ notifyBaseline: baseline });
+    return found;
+  } finally {
+    running = false;
   }
-
-  settings.set({ notifyBaseline: baseline });
-
-  if (found.length === 0 && !silent) {
-    try {
-      const sent = await window.cytlex.notify({
-        title: 'Biblioteca al día',
-        body: checked === 1 ? '1 obra revisada, sin novedades' : `${checked} obras revisadas, sin novedades`
-      });
-      console.log('[notify] sin novedades, enviado:', sent);
-    } catch (e) {
-      console.log('[notify] sin novedades, error:', e);
-    }
-  }
-
-  if (notifyFound && found.length === 1) {
-    const f = found[0];
-    try {
-      await window.cytlex.notify({
-        title: f.title || 'Manga de tu biblioteca',
-        body: f.count === 1 ? '1 capítulo nuevo disponible' : `${f.count} capítulos nuevos disponibles`,
-        key: key(f.url, f.sourceId),
-        url: f.url,
-        sourceId: f.sourceId
-      });
-    } catch {}
-  } else if (notifyFound && found.length > 1) {
-    const mangaNames = found.slice(0, 3).map((f) => f.title || 'Manga de tu biblioteca');
-    const totalChapters = found.reduce((sum, f) => sum + f.count, 0);
-    const listed = mangaNames.join(' · ');
-    const remaining = found.length - mangaNames.length;
-    try {
-      await window.cytlex.notify({
-        title: `${found.length} mangas tienen capítulos nuevos`,
-        body: `${totalChapters} capítulos nuevos: ${listed}${remaining > 0 ? ` y ${remaining} más` : ''}`,
-        tipo: 'biblioteca'
-      });
-    } catch {}
-  }
-
-  running = false;
-  if (!silent) await finishIfBackground();
-  return found;
-}
-
-const HOURS = [6, 12, 24];
-
-const TARGET_HOURS = {
-  6: [0, 6, 12, 18],
-  12: [0, 12],
-  24: [12]
-};
-
-export function notifyHours() {
-  const h = Number(settings.get().notifyHours);
-  return HOURS.includes(h) ? h : 12;
-}
-
-function msToNextHour(hours) {
-  const list = TARGET_HOURS[hours] || TARGET_HOURS[12];
-  const now = new Date();
-  for (const h of list) {
-    const t = new Date(now);
-    t.setHours(h, 0, 0, 0);
-    if (t > now) return Math.max(1000, t - now);
-  }
-  const t = new Date(now);
-  t.setDate(t.getDate() + 1);
-  t.setHours(list[0], 0, 0, 0);
-  return Math.max(1000, t - now);
-}
-
-export function startNotifier() {
-  const run = async ({ silent = false, notifyFound = !silent } = {}) => {
-    const cfg = settings.get();
-    const quiereLib = cfg.notifyEnabled;
-    if (!quiereLib) {
-      if (!silent) finishIfBackground();
-      return;
-    }
-    await checkLibrary({ silent, notifyFound }).catch(() => {});
-    if (!silent) finishIfBackground();
-  };
-
-  let id = null;
-  const wanted = () => settings.get().notifyEnabled;
-
-  const arm = () => {
-    if (id) clearTimeout(id);
-    id = null;
-    if (!wanted()) return;
-    id = setTimeout(() => {
-      run();
-      arm();
-    }, msToNextHour(notifyHours()));
-  };
-
-  arm();
-  const off = settings.subscribe(arm);
-
-  const bg = window.cytlex?.isBackground?.();
-  if (bg && typeof bg.then === 'function') {
-    bg.then((v) => {
-      if (!v) return;
-      let done = false;
-      const cerrar = () => {
-        if (done) return;
-        done = true;
-        finishIfBackground();
-      };
-      const tope = setTimeout(cerrar, 90 * 1000);
-      run({ silent: true, notifyFound: true }).finally(() => {
-        clearTimeout(tope);
-        setTimeout(cerrar, 10 * 1000);
-      });
-    });
-  }
-
-  return () => {
-    if (id) clearTimeout(id);
-    off();
-  };
-}
-
-export function onNotifyClick(cb) {
-  if (typeof window === 'undefined' || !window.cytlex?.onNotifyClick) return () => {};
-  return window.cytlex.onNotifyClick(cb);
 }

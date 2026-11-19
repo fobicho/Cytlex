@@ -9,7 +9,6 @@ import { anilist } from '../lib/anilist.js';
 import { consumeBrowserAuthError, consumeBrowserSettingsSection, session } from '../lib/session.js';
 import { tracking } from '../lib/tracking.js';
 import { MODES, THEMES } from '../lib/themes.js';
-import { notifyHours } from '../lib/notify.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { compressBackup, createBackup, parseBackup, readBackupFile, restoreBackup } from '../lib/backup.js';
 import { importMihonBackup, previewMihonBackup } from '../lib/mihonBackup.js';
@@ -212,9 +211,6 @@ export default function Settings({ tutorialPreview = false }) {
   const [connectHintFor, setConnectHintFor] = useState(null);
   const connectHintRef = useRef(null);
   const { toast, dismiss } = useToast();
-  const [bgErr, setBgErr] = useState('');
-  const [bgBusy, setBgBusy] = useState(false);
-  const [confirmBackground, setConfirmBackground] = useState(false);
   const [confirmAdultExtensions, setConfirmAdultExtensions] = useState(false);
   const [adultRatingsDialog, setAdultRatingsDialog] = useState(false);
   const [adultRatingsDraft, setAdultRatingsDraft] = useState(() => [...settings.get().adultContentRatings]);
@@ -316,33 +312,6 @@ export default function Settings({ tutorialPreview = false }) {
         variant: 'error'
       });
     }
-  };
-
-  const applyBackgroundSetting = async (on) => {
-    const previous = settings.get().notifyBackground;
-    setBgBusy(true);
-    set({ notifyBackground: on });
-    try {
-      const r = await window.cytlex?.setBackgroundCheck?.(on, notifyHours());
-      if (r?.ok === false) {
-        set({ notifyBackground: previous });
-        setBgErr(r.error || 'No se pudo registrar la tarea.');
-      }
-    } catch (error) {
-      set({ notifyBackground: previous });
-      setBgErr(String(error?.message || 'No se pudo registrar la tarea.'));
-    } finally {
-      setBgBusy(false);
-    }
-  };
-
-  const toggleBackground = (on) => {
-    setBgErr('');
-    if (on) {
-      setConfirmBackground(true);
-      return;
-    }
-    applyBackgroundSetting(false);
   };
 
   useEffect(() => settings.subscribe(setS), []);
@@ -671,9 +640,13 @@ export default function Settings({ tutorialPreview = false }) {
     setBackupBusy(true);
     try {
       const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
-      for (const manifest of backupInstallManifests) {
-        if (!extensions.isInstalled(manifest.id)) await extensions.install(manifest, indexUrl);
-      }
+      const results = await Promise.allSettled(backupInstallManifests.map((manifest) => (
+        extensions.isInstalled(manifest.id) ? Promise.resolve() : extensions.install(manifest, indexUrl)
+      )));
+      const failed = results.flatMap((result, index) => result.status === 'rejected'
+        ? [backupInstallManifests[index].name || backupInstallManifests[index].id]
+        : []);
+      if (failed.length) throw new Error(`No se pudieron instalar: ${failed.join(', ')}.`);
       finishBackupImport();
     } catch (error) {
       toast({ title: 'No se pudieron instalar las extensiones', description: `${error.message} No se restauró el respaldo.`, variant: 'error' });
@@ -814,17 +787,22 @@ export default function Settings({ tutorialPreview = false }) {
     setMihonBusy(true);
     try {
       const indexUrl = mihonCandidate.indexUrl;
-      const failedInstalls = [];
-      for (const manifest of mihonInstallManifests) {
+      const results = await Promise.all(mihonInstallManifests.map(async (manifest) => {
         throwIfAborted(controller.signal);
-        if (extensions.isInstalled(manifest.id)) continue;
+        if (extensions.isInstalled(manifest.id)) return { id: manifest.id, installed: false };
         try {
           await extensions.install(manifest, indexUrl);
+          return { id: manifest.id, name: manifest.name || manifest.id, installed: true };
         } catch {
-          failedInstalls.push(manifest.name || manifest.id);
+          return { id: manifest.id, name: manifest.name || manifest.id, error: true };
         }
+      }));
+      const installedIds = results.filter(({ installed }) => installed).map(({ id }) => id);
+      if (controller.signal.aborted) {
+        await Promise.all(installedIds.map((id) => extensions.uninstall(id)));
       }
       throwIfAborted(controller.signal);
+      const failedInstalls = results.filter(({ error }) => error).map(({ name }) => name);
       setMihonInstallOpen(false);
       finishMihonImport(mihonKeepUnavailable, failedInstalls);
     } catch (error) {
@@ -1324,73 +1302,12 @@ export default function Settings({ tutorialPreview = false }) {
     );
   } else if (section === 'notificaciones') {
     content = (
-      <div>
-        <Row
-          scale={scale}
-          first
-          title="Avisar de capítulos nuevos"
-          desc="Avisa de novedades en tus mangas guardados cada vez que se ingresa"
-          right={
-            <Switch
-              scale={scale}
-              on={s.notifyEnabled}
-              onChange={(v) => set({ notifyEnabled: v })}
-              label="Avisar de capítulos nuevos"
-            />
-          }
-        />
-        <Row
-          scale={scale}
-          title="Comprobar cada"
-          desc="Elige cada cuántas horas se revisará la biblioteca"
-          right={
-             <div className={cn('flex items-center', !s.notifyEnabled && 'pointer-events-none opacity-50')} aria-disabled={!s.notifyEnabled}>
-              <Dropdown
-                scale={scale}
-                style={{ width: px(132, scale, 108) }}
-                value={notifyHours()}
-                onChange={(v) => set({ notifyHours: Number(v) })}
-                ariaLabel="Comprobar cada"
-                portal
-                options={[
-                  { value: 6, label: '6 horas' },
-                  { value: 12, label: '12 horas' },
-                  { value: 24, label: '1 día' }
-                ]}
-              />
-            </div>
-          }
-        />
-        <Row
-          scale={scale}
-          last
-          title="Notificaciones en segundo plano"
-          desc={
-            s.notifyEnabled
-              ? 'Comprueba capítulos nuevos aún con Cytlex cerrado'
-              : 'Activa el aviso de capítulos nuevos para comprobarlos con Cytlex cerrado'
-          }
-          right={
-            <div
-              className={cn('flex items-center', !s.notifyEnabled && 'pointer-events-none opacity-50')}
-              aria-disabled={!s.notifyEnabled}
-            >
-              <Switch
-                scale={scale}
-                on={s.notifyBackground}
-                onChange={toggleBackground}
-                disabled={bgBusy}
-                label="Notificaciones en segundo plano"
-              />
-            </div>
-          }
-        />
-        {bgErr && (
-          <p className="text-destructive mt-2" style={{ fontSize: fontPx(14, scale, 12) }}>
-            {bgErr}
-          </p>
-        )}
-      </div>
+      <Row
+        scale={scale}
+        first
+        title="Búsqueda de novedades"
+        desc="Los capítulos nuevos solo se revisan cuando pulsas «Buscar actualizaciones» en Biblioteca."
+      />
     );
   } else if (section === 'seguimiento') {
     content = (
@@ -1795,35 +1712,6 @@ export default function Settings({ tutorialPreview = false }) {
         </div>
       </div>
 
-      <Dialog
-        open={confirmBackground}
-        onClose={() => setConfirmBackground(false)}
-        title="Notificaciones en segundo plano"
-        description="¿Permitir que Cytlex revise tu biblioteca y extensiones aunque esté cerrado?"
-        hideDivider
-        bodyClassName="pb-6"
-        scrollableBody={false}
-        scale={scale}
-      >
-        <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
-          <Button
-            variant="outline"
-            onClick={() => setConfirmBackground(false)}
-            style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
-          >
-            Cancelar
-          </Button>
-          <Button
-            onClick={() => {
-              setConfirmBackground(false);
-              applyBackgroundSetting(true);
-            }}
-            style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
-          >
-            Permitir
-          </Button>
-        </div>
-      </Dialog>
       <Dialog
         open={confirmWebDataReset}
         onClose={() => { if (!webDataResetBusy) setConfirmWebDataReset(false); }}

@@ -260,11 +260,7 @@ const Library = memo(function Library({ active = true }) {
     setChecking(true);
     updateLibraryCheckProgress({ current: 0, total: favs.length });
     try {
-      const found = await checkLibrary({
-        silent: true,
-        force: true,
-        onProgress: updateLibraryCheckProgress
-      });
+      const found = await checkLibrary({ onProgress: updateLibraryCheckProgress });
       const n = found.length;
       if (n === 0) {
         toast({ title: 'Todo está al día', description: 'No hay capítulos nuevos en tu biblioteca.', variant: 'info' });
