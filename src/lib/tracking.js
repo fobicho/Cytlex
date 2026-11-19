@@ -1,10 +1,24 @@
 const KEY = 'cytlex:tracking:v1';
 
+let cachedRaw;
+let cachedData;
 const read = () => {
-  try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; }
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw !== cachedRaw || !cachedData) {
+      cachedData = JSON.parse(raw) || {};
+      cachedRaw = raw;
+    }
+    return cachedData;
+  } catch { return {}; }
 };
 const write = (v) => {
-  try { localStorage.setItem(KEY, JSON.stringify(v)); } catch {}
+  try {
+    const raw = JSON.stringify(v);
+    localStorage.setItem(KEY, raw);
+    cachedRaw = raw;
+    cachedData = v;
+  } catch { cachedRaw = undefined; cachedData = undefined; }
 };
 
 const cap = (url, sourceId = 'leercapitulo') => `${sourceId}|${url}`;

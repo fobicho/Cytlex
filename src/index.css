@@ -794,6 +794,16 @@ button.extensions-square-button {
   border-radius: 0 !important;
 }
 
+.chapter-grid-three .chapter-date {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chapter-list > :nth-child(-n + 3) {
+  content-visibility: visible !important;
+}
+
 @media (max-width: 939.98px) {
   button.extensions-square-button {
     min-width: 0 !important;

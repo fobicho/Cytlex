@@ -210,7 +210,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const duplicateCoverScale = useResponsiveCoverSize(coverSetting) / 160;
   const adultExtensionDisabled = !isExtensionAllowed(extensions.manifest(sourceId), showAdultExtensions);
   const detailKey = `${sourceId}|${mangaUrl}`;
-  const detailDelayKey = `${detailKey}|${active ? 'active' : 'inactive'}`;
+  const detailDelayKey = detailKey;
   const preloadedDetail = api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId);
   const [detailState, setDetailState] = useState(() => ({
     key: detailKey,
@@ -237,10 +237,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     return () => { cancelled = true; };
   }, [active, sourceIconKey, sourceManifest?.icon]);
   useEffect(() => {
-    if (!active) {
-      setDetailDelay({ key: detailDelayKey, elapsed: false });
-      return undefined;
-    }
+    if (!active || detailDelayElapsed) return undefined;
     let alive = true;
     const timer = setTimeout(() => {
       if (alive) setDetailDelay({ key: detailDelayKey, elapsed: true });
@@ -249,7 +246,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       alive = false;
       clearTimeout(timer);
     };
-  }, [active, detailDelayKey]);
+  }, [active, detailDelayKey, detailDelayElapsed]);
   const d = detailState.key === detailKey ? detailState.data : api.peekStaleDetail(mangaUrl, sourceId);
   const [err, setErr] = useState('');
   const [detailRetry, setDetailRetry] = useState(0);
@@ -898,20 +895,20 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
 
   const chapterList = useMemo(() => (
       <div
-        className={chaptersPerRow > 1 ? 'grid gap-2 max-md:flex max-md:flex-col' : 'flex flex-col gap-2'}
+        className={cn('chapter-list', chaptersPerRow > 1 ? 'grid gap-2 max-md:flex max-md:flex-col' : 'flex flex-col gap-2', chaptersPerRow === 3 && 'chapter-grid-three')}
         style={chaptersPerRow > 1 ? { gridTemplateColumns: `repeat(${chaptersPerRow}, minmax(0, 1fr))` } : undefined}
       >
-        {chapters.slice(0, renderedChapterCount).map((c, i) => {
+        {chapters.slice(0, renderedChapterCount).map((c) => {
           const cap = progress.get(c.url, sourceId);
           const read = !!cap?.read;
           const inCourse = !read && cap && Number.isInteger(cap?.page) && cap.page > 0;
-          const rowKey = JSON.stringify([i, read, cap?.page, cap?.total, highlightedChapter === c.url,
-            chaptersPerRow, scale, sourceId, mangaUrl, fromParam, readerBackParam]);
+          const rowKey = JSON.stringify([read, cap?.page, cap?.total, highlightedChapter === c.url,
+            scale, sourceId, mangaUrl, fromParam, readerBackParam]);
           const cachedRow = chapterRows.current.get(c.url);
           if (cachedRow?.chapter === c && cachedRow.key === rowKey) return cachedRow.element;
           const element = (
             <a
-              key={i}
+              key={c.url}
               ref={(element) => {
                 if (element) chapterRefs.current.set(c.url, element);
                 else chapterRefs.current.delete(c.url);
@@ -933,7 +930,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                   {c.title}
                 </span>
                 <span
-                  className={cn('block text-muted-foreground', chaptersPerRow === 3 && 'truncate')}
+                  className="chapter-date block text-muted-foreground"
                   style={{
                     fontSize: fontPx(13, scale),
                     lineHeight: `${Math.round(20 * scale)}px`,

@@ -1,7 +1,7 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import MangaCard from './MangaCard.jsx';
 
-export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, renderCard, active = true, overscanRows = 1, responsiveCards = false }) {
+function VirtualMangaGrid({ items, sourceId, coverSize, scale, renderCard, active = true, overscanRows = 1, responsiveCards = false }) {
   const gridRef = useRef(null);
   const frameRef = useRef(0);
   const layoutRef = useRef(null);
@@ -114,3 +114,5 @@ export default function VirtualMangaGrid({ items, sourceId, coverSize, scale, re
     </div>
   );
 }
+
+export default memo(VirtualMangaGrid, (previous, next) => previous.active === false && next.active === false);

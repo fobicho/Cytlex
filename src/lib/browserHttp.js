@@ -150,6 +150,11 @@ function responseFromBatchResult(result) {
   return new Response([204, 205, 304].includes(status) ? null : result.text || '', { status, headers });
 }
 
+function preferDirectRequest(target, method) {
+  return (method === 'GET' && target.origin === 'https://fobicho.github.io' && target.pathname.startsWith('/Cytlex/'))
+    || (method === 'POST' && target.origin === 'https://graphql.anilist.co' && target.pathname === '/');
+}
+
 async function runProxyBatch(entries) {
   const runIndividually = () => Promise.all(entries.map(async (entry) => {
     try { entry.resolve(await browserRequest(entry.url, entry.options)); }
@@ -209,6 +214,9 @@ function scheduleProxyRequest(url, options) {
   const configuredProxy = import.meta.env.VITE_CYTLEX_PROXY_URL;
   const proxyEndpoint = new URL(configuredProxy || '/api/proxy', window.location.href);
   const method = (options.method || 'GET').toUpperCase();
+  if (preferDirectRequest(target, method)) {
+    return browserRequest(url, options);
+  }
   const supportedOptions = new Set(['headers', 'onfReferer', 'onfCookie', 'method', 'body']);
   if (target.origin === window.location.origin || proxyEndpoint.origin !== window.location.origin || !['GET', 'POST'].includes(method) || options.signal
     || (method === 'POST' && typeof options.body !== 'string')
@@ -462,6 +470,16 @@ async function browserRequest(url, options = {}) {
 
   if (target.origin === window.location.origin) {
     response = await fetch(url, directOptions);
+  } else if (preferDirectRequest(target, (fetchOptions.method || 'GET').toUpperCase())) {
+    try {
+      response = await fetch(url, { credentials: 'omit', ...directOptions });
+    } catch (error) {
+      if (requestOptions.signal?.aborted) throw error;
+      const proxied = await fetch(proxyUrl(url), proxyRequestOptions(url, requestOptions));
+      usedProxy = proxied.headers.get('x-cytlex-proxy') === '1';
+      proxyDeniedTarget = proxied.headers.get('x-cytlex-proxy-denied') === '1';
+      response = proxied;
+    }
   } else {
     try {
       let proxied = await fetch(proxyUrl(url, proxyReferer), proxyRequestOptions(url, requestOptions, requestCookie));

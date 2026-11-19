@@ -21,6 +21,7 @@ import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 
 const CATALOG_BATCH_SIZE = 40;
 const isMangaDex = (id) => id === 'mangadex' || id === 'mangadex-en';
+const FIXED_PAGE_SOURCES = new Set(['leercapitulo', 'mangaoni', 'olympusscanlation', 'zonatmo']);
 
 const GENRE_TRANSLATIONS = new Map([
   ['+15', 'Clasificación +15'], ['+18', 'Clasificación +18'], ['+19', 'Clasificación +19'],
@@ -133,14 +134,23 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
   while (batch.length < CATALOG_BATCH_SIZE && queued.length) batch.push(queued.shift());
 
   while (batch.length < CATALOG_BATCH_SIZE && canFetchNextPage && pagesFetched < CATALOG_BATCH_SIZE) {
-    currentPage += 1;
-    pagesFetched += 1;
-    const result = await api.catalog({ ...params, page: currentPage, __cytlexRequestId: requestId }, id);
-    const received = result.items || [];
-    received.forEach((item) => rememberMangaPreview(item, id));
-    addUnique(received);
-    canFetchNextPage = result.hasMore ?? currentPage < (result.totalPages || 1);
-    while (batch.length < CATALOG_BATCH_SIZE && queued.length) batch.push(queued.shift());
+    const startPage = currentPage + 1;
+    const pair = !window.cytlex?.httpGet && FIXED_PAGE_SOURCES.has(id)
+      && CATALOG_BATCH_SIZE - batch.length >= 20 && pagesFetched + 2 <= CATALOG_BATCH_SIZE;
+    const requests = Array.from({ length: pair ? 2 : 1 }, (_, index) =>
+      api.catalog({ ...params, page: startPage + index, __cytlexRequestId: requestId }, id));
+    const results = await Promise.allSettled(requests);
+    for (const result of results) {
+      if (!canFetchNextPage) break;
+      if (result.status === 'rejected') throw result.reason;
+      currentPage += 1;
+      pagesFetched += 1;
+      const received = result.value.items || [];
+      received.forEach((item) => rememberMangaPreview(item, id));
+      addUnique(received);
+      canFetchNextPage = result.value.hasMore ?? currentPage < (result.value.totalPages || 1);
+      while (batch.length < CATALOG_BATCH_SIZE && queued.length) batch.push(queued.shift());
+    }
   }
 
   return { items: batch, queuedItems: queued, page: currentPage, apiHasMore: canFetchNextPage, hasMore: queued.length > 0 || canFetchNextPage };

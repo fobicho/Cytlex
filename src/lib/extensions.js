@@ -8,7 +8,7 @@ import defaultExtensionIndex from '../../docs/index.json';
 const KEY = 'cytlex:extensions:v1';
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
 const REPO_INDEX_CACHE_KEY = 'cytlex:repo-index-cache:v1';
-const REPO_INDEX_FRESH_MS = 10 * 60 * 1000;
+const REPO_INDEX_FRESH_MS = 24 * 60 * 60 * 1000;
 const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
 export const SOURCE_CONFIG_CHANGE_EVENT = 'cytlex:source-config-changed';
 export const isRetiredExtension = (id) => id === 'plottwistnofansub' || id === 'yupmanga';
