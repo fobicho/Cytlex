@@ -5,9 +5,8 @@ const HTTP_GET_CACHE_MAX = 160;
 const HTTP_GET_BATCH_WINDOW_MS = 100;
 const HTTP_GET_BATCH_MAX = 24;
 const PROXY_IMAGE_BATCH_WINDOW_MS = 30;
-const PROXY_IMAGE_BATCH_MAX = 4;
+const PROXY_IMAGE_BATCH_MAX = 40;
 const PROXY_CHAPTER_IMAGE_BATCH_MAX = 40;
-const PROXY_CHAPTER_IMAGE_BATCH_MAX_BYTES = 80 * 1024 * 1024;
 const httpGetCache = new Map();
 const httpGetRequests = new Map();
 const httpGetBatchQueue = [];
@@ -304,27 +303,7 @@ function responseFromImageBatchResult(result, payload, dataStart) {
   return new Response(body, { status, headers });
 }
 
-async function unpackImageBatch(response, expectedCount) {
-  if (!response.ok || response.headers.get('x-cytlex-image-batch') !== '1') return null;
-  const payload = await response.blob();
-  if (payload.size < 4 || payload.size > PROXY_CHAPTER_IMAGE_BATCH_MAX_BYTES + 512_004) return null;
-  const prefix = new DataView(await payload.slice(0, 4).arrayBuffer());
-  const metadataLength = prefix.getUint32(0);
-  if (!metadataLength || metadataLength > 512_000 || 4 + metadataLength > payload.size) return null;
-
-  let metadata;
-  try { metadata = JSON.parse(await payload.slice(4, 4 + metadataLength).text()); }
-  catch { return null; }
-  if (!Array.isArray(metadata?.results) || metadata.results.length !== expectedCount) return null;
-
-  const dataStart = 4 + metadataLength;
-  const results = metadata.results.map((result) => result?.fallback
-    ? { fallback: true }
-    : { response: responseFromImageBatchResult(result, payload, dataStart) });
-  return results.every((result) => result.fallback || result.response) ? results : null;
-}
-
-export async function fetchImageBlobBatch(entries, signal) {
+export async function fetchImageBlobBatch(entries, signal, onResult) {
   if (!Array.isArray(entries) || entries.length < 1 || entries.length > PROXY_CHAPTER_IMAGE_BATCH_MAX) {
     throw new Error(`El capítulo supera el límite de ${PROXY_CHAPTER_IMAGE_BATCH_MAX} paneles por lote.`);
   }
@@ -343,20 +322,40 @@ export async function fetchImageBlobBatch(entries, signal) {
     credentials: 'omit',
     signal,
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ images })
+    body: JSON.stringify({ images, stream: true })
   });
-  if (!response.ok || response.headers.get('x-cytlex-image-batch') !== '1') {
+  if (!response.ok || response.headers.get('x-cytlex-image-batch') !== 'stream' || !response.body) {
     throw Object.assign(new Error('No se pudo cargar el lote de imágenes del capítulo.'), { status: response.status });
   }
 
-  const results = await unpackImageBatch(response, entries.length);
-  if (!results) throw new Error('La respuesta del lote de imágenes no es válida.');
-
-  return Promise.all(results.map(async (result, index) => {
-    if (result.fallback) return { blob: null, error: new Error('La fuente devolvió una imagen demasiado grande.') };
+  const reader = response.body.getReader();
+  let buffer = new Uint8Array();
+  const readBytes = async (size) => {
+    while (buffer.length < size) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error('La respuesta del lote de imágenes está incompleta.');
+      const joined = new Uint8Array(buffer.length + value.length);
+      joined.set(buffer); joined.set(value, buffer.length); buffer = joined;
+    }
+    const result = buffer.slice(0, size);
+    buffer = buffer.slice(size);
+    return result;
+  };
+  const seen = new Set();
+  for (let count = 0; count < entries.length; count++) {
+    const prefix = await readBytes(4);
+    const metadataLength = new DataView(prefix.buffer).getUint32(0);
+    if (!metadataLength || metadataLength > 512_000) throw new Error('Metadatos de imagen no válidos.');
+    const metadata = JSON.parse(new TextDecoder().decode(await readBytes(metadataLength)));
+    const { index, length } = metadata;
+    if (!Number.isInteger(index) || index < 0 || index >= entries.length || seen.has(index)
+      || !Number.isInteger(length) || length < 0 || length > 4 * 1024 * 1024) throw new Error('Respuesta de imagen no válida.');
+    seen.add(index);
+    const bytes = await readBytes(length);
     const entry = entries[index];
     const target = new URL(entry.url);
-    const proxied = result.response;
+    const proxied = responseFromImageBatchResult({ ...metadata, offset: 0 }, new Blob([bytes]), 0);
+    if (!proxied) throw new Error('Respuesta de imagen no válida.');
     const denied = proxied.headers.get('x-cytlex-proxy-denied') === '1';
     const receivedCookie = proxied.headers.get('x-cytlex-onf-cookie') || '';
     if (receivedCookie) onfCookieJar = mergeCookiePairs(onfCookieJar, receivedCookie);
@@ -364,11 +363,11 @@ export async function fetchImageBlobBatch(entries, signal) {
       const checked = assertProxyResponse(proxied, target, entry.url, true, denied);
       const blob = await readImageBlob(checked);
       if (!blob) throw new Error('La fuente no devolvió una imagen válida.');
-      return { blob, error: null };
+      await onResult({ blob, error: null }, index);
     } catch (error) {
-      return { blob: null, error };
+      await onResult({ blob: null, error }, index);
     }
-  }));
+  }
 }
 
 async function runProxyImageBatch(entries) {
@@ -387,32 +386,20 @@ async function runProxyImageBatch(entries) {
   const batchState = { controller, entries };
   entries.forEach((entry) => { entry.dispatched = true; entry.batchState = batchState; });
   try {
-    const response = await fetch(batchImageProxyUrl(), {
-      method: 'POST',
-      credentials: 'omit',
-      signal: controller.signal,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ images: entries.map((entry) => ({
-        url: new URL(entry.url).href,
-        referer: proxyImageReferer(entry.url, entry.referer)
-      })) })
-    });
-    const results = await unpackImageBatch(response, entries.length);
-    if (!results) throw new Error('Invalid proxy image batch response');
-    await Promise.all(entries.map(async (entry, index) => {
+    await fetchImageBlobBatch(entries, controller.signal, async ({ blob, error }, index) => {
+      const entry = entries[index];
       if (entry.cancelled || entry.settled) return;
-      const result = results[index];
-      if (result.fallback) {
+      if (error) {
+        if (error.status && error.status !== 413) {
+          settleProxyImageEntry(entry, 'reject', error);
+          return;
+        }
         try { settleProxyImageEntry(entry, 'resolve', await browserRequest(entry.url, entry.options)); }
         catch (error) { settleProxyImageEntry(entry, 'reject', error); }
         return;
       }
-      const target = new URL(entry.url);
-      const proxied = result.response;
-      const denied = proxied.headers.get('x-cytlex-proxy-denied') === '1';
-      try { settleProxyImageEntry(entry, 'resolve', assertProxyResponse(proxied, target, entry.url, true, denied)); }
-      catch (error) { settleProxyImageEntry(entry, 'reject', error); }
-    }));
+      settleProxyImageEntry(entry, 'resolve', new Response(blob, { status: 200, headers: { 'content-type': blob.type } }));
+    });
   } catch {
     await fallbackIndividually();
   }
@@ -447,9 +434,6 @@ function scheduleProxyImageRequest(url, signal, referer, onfCookie) {
     signal?.addEventListener('abort', entry.abortListener, { once: true });
     proxyImageBatchQueue.push(entry);
     if (proxyImageBatchQueue.length >= PROXY_IMAGE_BATCH_MAX) {
-      clearTimeout(proxyImageBatchTimer);
-      proxyImageBatchTimer = setTimeout(flushProxyImageQueue, 0);
-    } else if (proxyImageBatchQueue.length > 1) {
       clearTimeout(proxyImageBatchTimer);
       proxyImageBatchTimer = setTimeout(flushProxyImageQueue, 0);
     } else if (!proxyImageBatchTimer) {

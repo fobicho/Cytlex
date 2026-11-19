@@ -725,7 +725,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
           <Button
             variant="secondary"
             size="sm"
-            className="extensions-square-button"
+            className="extensions-square-button extensions-sort-button"
             title="Ordenar extensiones"
             aria-label={`Ordenar extensiones: ${sortLabel(sortBy)}`}
             onClick={() => {
@@ -746,7 +746,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
           <Button
             variant="secondary"
             size="sm"
-            className="extensions-square-button"
+            className="extensions-square-button extensions-refresh-button"
             onClick={searchUpdates}
             title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
             aria-label="Buscar actualizaciones"

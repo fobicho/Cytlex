@@ -671,6 +671,37 @@ async function handleImageBatchRequest(request) {
 
   const subrequestBudget = createImageSubrequestBudget(payload.images.length);
   const byteBudget = createImageByteBudget();
+  if (payload.stream === true) {
+    let next = 0;
+    let stopped = false;
+    const body = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        try {
+          await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, payload.images.length) }, async () => {
+            while (!stopped && next < payload.images.length) {
+              const index = next++;
+              const result = await fetchImageBatchItem(payload.images[index], request, subrequestBudget, byteBudget);
+              if (stopped) return;
+              const bytes = result.body ? new Uint8Array(await result.body.arrayBuffer()) : new Uint8Array();
+              if (stopped) return;
+              const metadata = encoder.encode(JSON.stringify({ ...result, body: undefined, index, length: bytes.length }));
+              const prefix = new Uint8Array(4);
+              new DataView(prefix.buffer).setUint32(0, metadata.length);
+              controller.enqueue(prefix);
+              controller.enqueue(metadata);
+              if (bytes.length) controller.enqueue(bytes);
+            }
+          }));
+          if (!stopped) controller.close();
+        } catch (error) {
+          if (!stopped) controller.error(error);
+        }
+      },
+      cancel() { stopped = true; }
+    });
+    return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.image-stream', 'x-cytlex-image-batch': 'stream' } });
+  }
   const results = new Array(payload.images.length);
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, payload.images.length) }, async () => {

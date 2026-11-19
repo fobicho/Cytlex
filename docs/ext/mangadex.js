@@ -2,7 +2,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
   const api = 'https://api.mangadex.org';
   const site = 'https://mangadex.org';
   const coverBase = 'https://uploads.mangadex.org/covers';
-  const pageSize = 20;
+  const pageSize = 40;
   const chapterPageSize = 500;
   const ratings = ['safe', 'suggestive', 'erotica', 'pornographic'];
   const types = { ja: 'Manga', ko: 'Manhwa', zh: 'Manhua', 'zh-hk': 'Manhua' };

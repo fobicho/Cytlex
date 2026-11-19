@@ -1,7 +1,7 @@
 export default function createSource({ fetchText, parse }) {
   const base = 'https://mangalect.org';
   const assets = 'https://images.mangalect.org/file/leermangaesp';
-  const PAGE_SIZE = 20;
+  const PAGE_SIZE = 40;
 
   const abs = (u) => {
     if (!u) return '';

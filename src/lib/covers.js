@@ -57,7 +57,7 @@ function pruneSearchCoverCache() {
 
 async function acquireSearchCoverSlot(signal) {
   if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-  if (activeSearchCoverLoads < MAX_SEARCH_COVER_LOADS) {
+  if (activeSearchCoverLoads < (window.cytlex?.fetchImage ? MAX_SEARCH_COVER_LOADS : 40)) {
     activeSearchCoverLoads += 1;
     return;
   }
@@ -108,7 +108,8 @@ export function hasLibraryCoverLoaded(url) {
 
 function startWaitingLibraryCover() {
   const priorityIndex = libraryCoverWaiters.findIndex((waiter) => waiter.priority);
-  const limit = priorityIndex >= 0 ? MAX_LIBRARY_COVER_LOADS : MAX_LIBRARY_COVER_LOADS - 1;
+  const maxLoads = window.cytlex?.fetchImage ? MAX_LIBRARY_COVER_LOADS : 40;
+  const limit = priorityIndex >= 0 ? maxLoads : maxLoads - 1;
   if (!libraryCoverWaiters.length || activeLibraryCoverLoads >= limit) return;
   const [next] = libraryCoverWaiters.splice(Math.max(priorityIndex, 0), 1);
   activeLibraryCoverLoads += 1;

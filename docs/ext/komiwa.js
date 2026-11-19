@@ -1,7 +1,7 @@
 export default function createSource({ fetchText, fetchPostText, parse }) {
   const site = 'https://www.komiwa.net';
   const api = 'https://b78sk.komiwa.net';
-  const pageSize = 30;
+  const pageSize = 40;
   const chapterLimit = 99999;
   const mangaCache = new Map();
   const chapterCache = new Map();

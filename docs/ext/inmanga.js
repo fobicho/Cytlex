@@ -2,7 +2,7 @@ const BASE = 'https://inmanga.com';
 const CHAPTERS = `${BASE}/chapter/getall`;
 const PAGE_LIST = `${BASE}/chapter/chapterIndexControls`;
 const IMAGE_CDN = 'https://cdn1.intomanga.com/i/m';
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 40;
 
 export default function createSource({ fetchText, fetchPostText, parse }) {
   const chapterCache = new Map();

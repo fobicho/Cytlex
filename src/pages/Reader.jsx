@@ -150,7 +150,7 @@ function OnfChapterLink({ href }) {
 }
 
 function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFailed, preloadError, sourceName, blockedChapterUrl, alternativeSourcesUrl, fallbackSrc = '', alt, loading = 'eager', imageReferer, imageCookie, imageClassName, wrapperClassName, placeholderStyle, onContextMenu, onLoaded, onRetry }) {
-  const [status, setStatus] = useState('loading');
+  const [status, setStatus] = useState(() => displaySrc ? 'loaded' : 'loading');
   const [imageError, setImageError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [usingFallback, setUsingFallback] = useState(false);
@@ -706,6 +706,25 @@ export default function Reader() {
       let cancelled = false;
       const controller = new AbortController();
       const results = new Map();
+      const decodedImages = new Map();
+      const prepareImage = async (src, blob) => {
+        const objectUrl = URL.createObjectURL(blob);
+        try {
+          const image = new Image();
+          image.src = objectUrl;
+          await image.decode();
+          if (cancelled || controller.signal.aborted) {
+            URL.revokeObjectURL(objectUrl);
+            return false;
+          }
+          decodedImages.set(src, image);
+          saveResult(src, objectUrl);
+          return true;
+        } catch (error) {
+          URL.revokeObjectURL(objectUrl);
+          throw error;
+        }
+      };
       const saveResult = (src, value) => {
         const previous = results.get(src);
         if (typeof previous === 'string') URL.revokeObjectURL(previous);
@@ -723,7 +742,7 @@ export default function Reader() {
             if (!blob || cancelled || controller.signal.aborted) return false;
             const image = transform === 'scramble-4x4' ? await unscramble4x4(blob) : blob;
             if (cancelled || controller.signal.aborted) return false;
-            saveResult(src, URL.createObjectURL(image));
+            if (!await prepareImage(src, image)) return false;
             setPreloadRevision((revision) => revision + 1);
             return true;
           } catch (error) {
@@ -754,15 +773,17 @@ export default function Reader() {
       );
 
       if (batchedPages.length) {
-        void fetchImageBlobBatch(batchedPages, controller.signal).then(async (outcomes) => {
-          await Promise.all(batchedPages.map(async ({ src, index }, resultIndex) => {
-            if (cancelled || controller.signal.aborted) return;
-            let { blob, error: failure } = outcomes[resultIndex];
+        const loadBatches = async () => {
+          for (let offset = 0; offset < batchedPages.length && !cancelled; offset += 40) {
+            const batch = batchedPages.slice(offset, offset + 40);
+            try {
+              await fetchImageBlobBatch(batch, controller.signal, async ({ blob, error: failure }, resultIndex) => {
+            const { src, index } = batch[resultIndex];
             if (cancelled || controller.signal.aborted) return;
             if (blob) {
               try {
                 const image = pageTransforms?.[index] === 'scramble-4x4' ? await unscramble4x4(blob) : blob;
-                if (!cancelled && !controller.signal.aborted) saveResult(src, URL.createObjectURL(image));
+                if (!cancelled && !controller.signal.aborted) await prepareImage(src, image);
               } catch (error) {
                 saveResult(src, { failure: error });
               }
@@ -772,13 +793,16 @@ export default function Reader() {
                 accessRejected: sourceId === 'onfmangas' && src.startsWith('https://onfmangas.com/') && failure?.status === 403
               });
             }
-          }));
-          if (!cancelled) setPreloadRevision((revision) => revision + 1);
-        }).catch((error) => {
-          if (cancelled || controller.signal.aborted) return;
-          for (const { src } of batchedPages) saveResult(src, { failure: error });
-          setPreloadRevision((revision) => revision + 1);
-        });
+            if (!cancelled) setPreloadRevision((revision) => revision + 1);
+              });
+            } catch (error) {
+              if (cancelled || controller.signal.aborted) return;
+              for (const { src } of batch) if (!results.has(src)) saveResult(src, { failure: error });
+            }
+            if (!cancelled) setPreloadRevision((revision) => revision + 1);
+          }
+        };
+        void loadBatches();
       }
       for (const src of directTransformPages) void loadOne(src);
 
@@ -786,6 +810,7 @@ export default function Reader() {
         cancelled = true;
         retryPreloadedPageRef.current = null;
         controller.abort();
+        decodedImages.clear();
         for (const [src, objectUrl] of results) {
           if (preloadedPagesRef.current.get(src) === objectUrl) preloadedPagesRef.current.delete(src);
           if (typeof objectUrl === 'string') URL.revokeObjectURL(objectUrl);

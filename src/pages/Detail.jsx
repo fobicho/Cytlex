@@ -299,6 +299,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const [pendingChapterJump, setPendingChapterJump] = useState('');
   const [highlightedChapter, setHighlightedChapter] = useState('');
   const chapterRefs = useRef(new Map());
+  const chapterRows = useRef(new Map());
   const chapterHighlightTimer = useRef(null);
   const chapterScrollFrame = useRef(null);
   const chapterScrollCleanup = useRef(null);
@@ -904,7 +905,11 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           const cap = progress.get(c.url, sourceId);
           const read = !!cap?.read;
           const inCourse = !read && cap && Number.isInteger(cap?.page) && cap.page > 0;
-          return (
+          const rowKey = JSON.stringify([i, read, cap?.page, cap?.total, highlightedChapter === c.url,
+            chaptersPerRow, scale, sourceId, mangaUrl, fromParam, readerBackParam]);
+          const cachedRow = chapterRows.current.get(c.url);
+          if (cachedRow?.chapter === c && cachedRow.key === rowKey) return cachedRow.element;
+          const element = (
             <a
               key={i}
               ref={(element) => {
@@ -992,6 +997,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               </span>
             </a>
           );
+          chapterRows.current.set(c.url, { chapter: c, key: rowKey, element });
+          return element;
         })}
       </div>
   ), [chapters, renderedChapterCount, chaptersPerRow, highlightedChapter, scale, sourceId, mangaUrl, fromParam, readerBackParam, progressTick, progressRevision]);

@@ -19,7 +19,7 @@ import { Input } from './ui/input.jsx';
 import { useScale, px, fontPx } from '../lib/useScale.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 
-const CATALOG_BATCH_SIZE = 20;
+const CATALOG_BATCH_SIZE = 40;
 const isMangaDex = (id) => id === 'mangadex' || id === 'mangadex-en';
 
 const GENRE_TRANSLATIONS = new Map([
@@ -304,11 +304,6 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   useEffect(() => {
     if (sourceId && !sources.some((source) => source.manifest.id === sourceId)) setSourceId('');
   }, [sources, sourceId]);
-
-  useEffect(() => {
-    if (!active || sourceId || !sources.some((source) => source.manifest.id === 'leercapitulo')) return;
-    void api.catalogFilters('leercapitulo').catch(() => {});
-  }, [active, sourceId, sources]);
 
   useEffect(() => {
     const showAllSources = () => {
