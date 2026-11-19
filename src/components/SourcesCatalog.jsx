@@ -135,9 +135,10 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
 
   while (batch.length < CATALOG_BATCH_SIZE && canFetchNextPage && pagesFetched < CATALOG_BATCH_SIZE) {
     const startPage = currentPage + 1;
-    const pair = !window.cytlex?.httpGet && FIXED_PAGE_SOURCES.has(id)
-      && CATALOG_BATCH_SIZE - batch.length >= 20 && pagesFetched + 2 <= CATALOG_BATCH_SIZE;
-    const requests = Array.from({ length: pair ? 2 : 1 }, (_, index) =>
+    const batchPages = id === 'mangaoni' || id === 'olympusscanlation' ? 3 : 2;
+    const group = !window.cytlex?.httpGet && FIXED_PAGE_SOURCES.has(id)
+      && CATALOG_BATCH_SIZE - batch.length >= 20 && pagesFetched + batchPages <= CATALOG_BATCH_SIZE;
+    const requests = Array.from({ length: group ? batchPages : 1 }, (_, index) =>
       api.catalog({ ...params, page: startPage + index, __cytlexRequestId: requestId }, id));
     const results = await Promise.allSettled(requests);
     for (const result of results) {
