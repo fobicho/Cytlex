@@ -159,7 +159,7 @@ function sortLabel(sortBy) {
   return sortBy === 'title-desc' ? 'Z-A' : sortBy === 'added' ? 'Adición' : 'A-Z';
 }
 
-export default function ExtensionsPanel({ tutorialPreview = false }) {
+export default function ExtensionsPanel({ tutorialPreview = false, active = true }) {
   const { toast } = useToast();
   const scale = useScale();
   const configuredRepo = (settings.get().extIndexUrl || '').trim();
@@ -470,6 +470,36 @@ export default function ExtensionsPanel({ tutorialPreview = false }) {
     setHasCheckedRepository(cached);
     setLoading(false);
   }, [repoUrl, tutorialPreview]);
+
+  useEffect(() => {
+    if (!active || !repoUrl || tutorialPreview) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        await extensions.repoIndex(repoUrl, { maxAgeMs: 24 * 60 * 60 * 1000 });
+        await extensions.sync(repoUrl);
+        const [items, found] = await Promise.all([
+          extensions.available(repoUrl),
+          extensions.checkUpdates(repoUrl)
+        ]);
+        if (cancelled) return;
+        refresh();
+        setAvailable(items);
+        setUpdates(found);
+        setHasCheckedRepository(true);
+        setErr('');
+      } catch (error) {
+        if (!cancelled) {
+          setErr(String(error?.message || error));
+          setHasCheckedRepository(true);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [active, repoUrl, tutorialPreview]);
 
   useEffect(() => {
     if (repoUrl && available !== null) {

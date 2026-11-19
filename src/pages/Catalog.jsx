@@ -815,7 +815,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
           </>
         )
       ) : tab === 'extensiones' ? (
-        <ExtensionsPanel tutorialPreview={tutorialPreview} />
+        <ExtensionsPanel tutorialPreview={tutorialPreview} active={active} />
       ) : (
         <SourcesCatalog
           sources={sources}
