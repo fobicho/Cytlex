@@ -411,10 +411,20 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       .filter((x) => x.url);
   }
 
-  async function catalog({ q = '', __cytlexRequestId } = {}) {
-    const url = q ? `${base}/buscar.php?q=${encodeURIComponent(q)}` : `${base}/`;
-    const doc = parse(await fetchText(url, __cytlexRequestId));
-    return { items: mapCards(doc), totalPages: 1, totalText: '' };
+  async function catalog({ q = '', page = 1, __cytlexRequestId } = {}) {
+    const currentPage = Math.max(1, Number(page) || 1);
+    const url = new URL(q ? `${base}/buscar.php` : `${base}/mangas.php`);
+    if (q) url.searchParams.set('q', q);
+    if (currentPage > 1) url.searchParams.set('page', String(currentPage));
+    const doc = parse(await fetchText(url.href, __cytlexRequestId));
+    const hasMore = [...doc.querySelectorAll('a[href]')].some((link) => {
+      try {
+        const next = new URL(link.getAttribute('href'), url);
+        return next.origin === url.origin && next.pathname === url.pathname
+          && Number(next.searchParams.get('page')) === currentPage + 1;
+      } catch { return false; }
+    });
+    return { items: mapCards(doc), totalPages: currentPage + Number(hasMore), hasMore, totalText: '' };
   }
 
   async function detail(mangaUrl) {

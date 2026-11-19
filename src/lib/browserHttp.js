@@ -11,6 +11,7 @@ const httpGetCache = new Map();
 const httpGetRequests = new Map();
 const httpGetBatchQueue = [];
 const proxyImageBatchQueue = [];
+const mangaDexCatalogImages = new Map();
 let httpGetBatchTimer;
 let proxyImageBatchTimer;
 const batchHeaderNames = new Set([
@@ -451,7 +452,64 @@ function scheduleProxyImageRequest(url, signal, referer, onfCookie) {
 }
 
 function requestImage(url, signal, referer = '', onfCookie = '') {
+  const catalogImage = mangaDexCatalogImages.get(url);
+  if (catalogImage) return catalogImage.then((blob) => {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (!blob) throw new Error('No se pudo cargar la portada de MangaDex.');
+    return new Response(blob, { status: 200, headers: { 'content-type': blob.type } });
+  });
   return scheduleProxyImageRequest(url, signal, referer, onfCookie);
+}
+
+async function mangaDexCatalogRequest(url, options) {
+  const endpoint = new URL(proxyUrl(url), window.location.href);
+  endpoint.searchParams.set('catalog', 'mangadex');
+  const response = await fetch(endpoint.href, proxyRequestOptions(url, { credentials: 'omit', ...options }));
+  assertProxyResponse(response, new URL(url), url, true, false);
+  if (!response.body || !response.headers.get('content-type')?.includes('application/vnd.cytlex.catalog-stream')) throw new Error('Respuesta de catálogo no válida.');
+  const reader = response.body.getReader();
+  let buffer = new Uint8Array();
+  const read = async (size) => {
+    while (buffer.length < size) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error('Respuesta de catálogo incompleta.');
+      const joined = new Uint8Array(buffer.length + value.length);
+      joined.set(buffer); joined.set(value, buffer.length); buffer = joined;
+    }
+    const value = buffer.slice(0, size); buffer = buffer.slice(size); return value;
+  };
+  const metadata = async () => {
+    const prefix = await read(4);
+    const size = new DataView(prefix.buffer).getUint32(0);
+    if (!size || size > 3 * 1024 * 1024) throw new Error('Metadatos de catálogo no válidos.');
+    return JSON.parse(new TextDecoder().decode(await read(size)));
+  };
+  const first = await metadata();
+  if (typeof first.catalog !== 'string' || !Array.isArray(first.images) || first.images.length > 40) throw new Error('Catálogo no válido.');
+  const entries = first.images.map((imageUrl) => {
+    let resolve;
+    const promise = new Promise((done) => { resolve = done; });
+    mangaDexCatalogImages.set(imageUrl, promise);
+    return { imageUrl, promise, resolve, done: false };
+  });
+  void (async () => {
+    try {
+      for (let i = 0; i < entries.length; i++) {
+        const result = await metadata();
+        if (!Number.isInteger(result.index) || !entries[result.index] || entries[result.index].done
+          || !Number.isInteger(result.length) || result.length < 0 || result.length > 4 * 1024 * 1024) throw new Error('Portada no válida.');
+        const bytes = await read(result.length);
+        const entry = entries[result.index]; entry.done = true;
+        entry.resolve(result.status === 200 && result.length ? new Blob([bytes], { type: result.contentType }) : null);
+      }
+    } catch {} finally {
+      entries.forEach((entry) => {
+        if (!entry.done) entry.resolve(null);
+        setTimeout(() => { if (mangaDexCatalogImages.get(entry.imageUrl) === entry.promise) mangaDexCatalogImages.delete(entry.imageUrl); }, 60000);
+      });
+    }
+  })();
+  return first.catalog;
 }
 
 async function browserRequest(url, options = {}) {
@@ -470,6 +528,9 @@ async function browserRequest(url, options = {}) {
 
   if (target.origin === window.location.origin) {
     response = await fetch(url, directOptions);
+  } else if ((fetchOptions.method || 'GET').toUpperCase() === 'GET'
+    && target.origin === 'https://fobicho.github.io' && target.pathname.startsWith('/Cytlex/')) {
+    response = await fetch(url, { credentials: 'omit', ...directOptions });
   } else if (preferDirectRequest(target, (fetchOptions.method || 'GET').toUpperCase())) {
     try {
       response = await fetch(url, { credentials: 'omit', ...directOptions });
@@ -546,6 +607,21 @@ export async function httpGet(url, requestId, options = {}) {
   if (bridge?.httpGet) return bridge.httpGet(url, requestId, options);
   const { includeUrl, ...requestOptions } = options;
   const target = new URL(url);
+  if (target.origin === 'https://api.mangadex.org' && target.pathname === '/manga'
+    && target.searchParams.get('limit') === '40' && target.searchParams.getAll('includes[]').includes('cover_art')) {
+    const key = `mangadex-catalog:${target.href}`;
+    let request = httpGetRequests.get(key);
+    if (!request) {
+      request = mangaDexCatalogRequest(url, requestOptions);
+      httpGetRequests.set(key, request);
+    }
+    try {
+      const text = await request;
+      return includeUrl ? { text, url } : text;
+    } finally {
+      if (httpGetRequests.get(key) === request) httpGetRequests.delete(key);
+    }
+  }
   const headers = new Headers(requestOptions.headers || {});
   const canCache = !requestOptions.signal
     && requestOptions.cache !== 'no-store'

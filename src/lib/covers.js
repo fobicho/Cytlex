@@ -305,7 +305,7 @@ export async function preloadLibraryCover(url, { web = false, priority = false }
       if (browserProxy) {
         const now = Date.now();
         if ((failedLibraryCovers.get(url) || 0) > now || (failedCoverHosts.get(host)?.until || 0) > now) return '';
-        const signal = AbortSignal.timeout(6000);
+        const signal = AbortSignal.timeout(30000);
         try {
           const image = await fetchCoverBlob(url, signal);
           if (!image) throw new Error('Invalid image');

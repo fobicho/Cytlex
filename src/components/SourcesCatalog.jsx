@@ -7,6 +7,7 @@ import VirtualMangaGrid from './VirtualMangaGrid.jsx';
 import { SourceBadge } from './SourceBadge.jsx';
 import { api } from '../lib/api.js';
 import { sourceErrorMessage } from '../lib/browserHttp.js';
+import { preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
 import { isLibraryManga } from '../lib/library.js';
 import { extensions, isSourceConfigured } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
@@ -21,7 +22,7 @@ import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 
 const CATALOG_BATCH_SIZE = 40;
 const isMangaDex = (id) => id === 'mangadex' || id === 'mangadex-en';
-const FIXED_PAGE_SOURCES = new Set(['leercapitulo', 'mangaoni', 'olympusscanlation', 'zonatmo']);
+const FIXED_PAGE_SOURCES = new Set(['leercapitulo', 'mangaoni', 'olympusscanlation', 'onfmangas', 'zonatmo']);
 
 const GENRE_TRANSLATIONS = new Map([
   ['+15', 'Clasificación +15'], ['+18', 'Clasificación +18'], ['+19', 'Clasificación +19'],
@@ -135,7 +136,7 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
 
   while (batch.length < CATALOG_BATCH_SIZE && canFetchNextPage && pagesFetched < CATALOG_BATCH_SIZE) {
     const startPage = currentPage + 1;
-    const batchPages = id === 'mangaoni' || id === 'olympusscanlation' ? 3 : 2;
+    const batchPages = id === 'onfmangas' ? 4 : id === 'mangaoni' || id === 'olympusscanlation' ? 3 : 2;
     const group = !window.cytlex?.httpGet && FIXED_PAGE_SOURCES.has(id)
       && CATALOG_BATCH_SIZE - batch.length >= 20 && pagesFetched + batchPages <= CATALOG_BATCH_SIZE;
     const requests = Array.from({ length: group ? batchPages : 1 }, (_, index) =>
@@ -347,13 +348,17 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         requestId: httpRequestId
       });
       if (runId !== requestId.current) return;
+      if (isMangaDex(id)) {
+        for (const manga of result.items) {
+          if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
+        }
+      }
       setItems((current) => append ? [...current, ...result.items] : result.items);
       setQueuedItems(result.queuedItems);
       setLoadedParams({ ...params, q: params.q?.trim?.() || '' });
       setPage(result.page);
       setApiHasMore(result.apiHasMore);
       setHasMore(result.hasMore);
-      if (isMangaDex(id) && !filters.length) loadCatalogFilters(id);
     } catch (loadError) {
       if (runId === requestId.current) setError({ cause: loadError, params, append });
     } finally {
@@ -416,7 +421,9 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
             }
           }
           if (!active || runId !== requestId.current) return;
-          if (isMangaDex(sourceId)) loadCatalogFilters(sourceId);
+          if (isMangaDex(sourceId)) restoredItems.forEach((manga) => {
+            if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
+          });
           setItems(restoredItems.slice(0, CATALOG_BATCH_SIZE));
           setQueuedItems([...(snapshot.queuedItems || []), ...restoredItems.slice(CATALOG_BATCH_SIZE)]);
           setLoadedParams(snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) });
@@ -464,7 +471,9 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         if (!isMangaDex(sourceId)) loadCatalogFilters(sourceId);
         const result = await resultPromise;
         if (!active || runId !== requestId.current) return;
-        if (isMangaDex(sourceId)) loadCatalogFilters(sourceId);
+        if (isMangaDex(sourceId)) result.items.forEach((manga) => {
+          if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
+        });
         setItems(result.items);
         setQueuedItems(result.queuedItems);
         setLoadedParams(params);
@@ -600,7 +609,10 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         type="button"
         variant="secondary"
         className="shrink-0 rounded-md"
-        onClick={() => setFiltersOpen((open) => !open)}
+        onClick={() => {
+          if (isMangaDex(sourceId) && !filters.length) loadCatalogFilters(sourceId);
+          setFiltersOpen((open) => !open);
+        }}
         aria-label={activeFilterCount ? `Filtros, ${activeFilterCount} seleccionados` : 'Filtros'}
         aria-expanded={filtersOpen}
         aria-controls="source-filters"
@@ -733,7 +745,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                 )}
               </div>
             )}
-            {sourceId !== 'leercapitulo' && filters.length > 0 && (
+            {sourceId !== 'leercapitulo' && (filters.length > 0 || isMangaDex(sourceId)) && (
               <>
                 {renderFiltersButton(filterRootRef, 'ml-auto')}
                 {createPortal(
@@ -850,6 +862,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                       m={manga}
                       sourceId={sourceId}
                       from="fuentes"
+                      useLibraryCoverCache={isMangaDex(sourceId) && requiresImageProxy(manga.cover)}
                       coverSize={cardWidth}
                       showAuthor={false}
                       savedInLibrary={isLibraryManga(manga, sourceId, savedMangaKeys)}

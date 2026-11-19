@@ -531,17 +531,17 @@ async function handleBatchRequest(request) {
   });
 }
 
-function createImageSubrequestBudget(total) {
+function createImageSubrequestBudget(total, limit = PROXY_IMAGE_BATCH_MAX_SUBREQUESTS) {
   let used = 0;
   let pendingInitial = total;
   return {
     takeInitial() {
       pendingInitial -= 1;
-      if (used >= PROXY_IMAGE_BATCH_MAX_SUBREQUESTS) throw new Error('Image batch subrequest limit reached');
+      if (used >= limit) throw new Error('Image batch subrequest limit reached');
       used += 1;
     },
     takeAdditional() {
-      if (used >= PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - pendingInitial) {
+      if (used >= limit - pendingInitial) {
         throw new Error('Image batch subrequest limit reached');
       }
       used += 1;
@@ -768,6 +768,65 @@ async function handleImageBatchRequest(request) {
   });
 }
 
+async function handleMangaDexCatalog(request, target) {
+  if (target.origin !== 'https://api.mangadex.org' || target.pathname !== '/manga'
+    || Number(target.searchParams.get('limit')) !== 40 || !target.searchParams.getAll('includes[]').includes('cover_art')) {
+    return errorResponse('Invalid MangaDex catalog request', 400);
+  }
+  const deadline = new AbortController();
+  const timeout = setTimeout(() => deadline.abort(), 12000);
+  let upstream;
+  try {
+    const result = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined,
+      AbortSignal.any([request.signal, deadline.signal]), { retries: 0 });
+    if (result.proxyError) return result.proxyError;
+    upstream = result.upstream;
+    if (!upstream.ok) return new Response(upstream.body, { status: upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
+    const length = Number(upstream.headers.get('content-length'));
+    if (length > PROXY_BATCH_RESPONSE_MAX_BYTES) return errorResponse('Catalog response too large', 502);
+    const raw = await new Response(limitResponseBody(upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
+    const data = JSON.parse(raw);
+    const images = (data.data || []).slice(0, 40).flatMap((item) => {
+      const file = item.relationships?.find((rel) => rel.type === 'cover_art')?.attributes?.fileName;
+      if (!/^[0-9a-f-]{36}$/i.test(item.id || '') || !/^[0-9a-f-]{36}\.(jpg|png|webp|jpeg)$/i.test(file || '')) return [];
+      return [`https://uploads.mangadex.org/covers/${item.id}/${file}.256.jpg`];
+    });
+    const subrequestBudget = createImageSubrequestBudget(images.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
+    const byteBudget = createImageByteBudget();
+    let stopped = false;
+    let next = 0;
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      async start(controller) {
+        const write = (metadata, bytes = new Uint8Array()) => {
+          const encoded = encoder.encode(JSON.stringify(metadata));
+          const prefix = new Uint8Array(4);
+          new DataView(prefix.buffer).setUint32(0, encoded.length);
+          controller.enqueue(prefix); controller.enqueue(encoded);
+          if (bytes.length) controller.enqueue(bytes);
+        };
+        try {
+          write({ catalog: raw, images });
+          await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, images.length) }, async () => {
+            while (!stopped && next < images.length) {
+              const index = next++;
+              const result = await fetchImageBatchItem({ url: images[index] }, request, subrequestBudget, byteBudget);
+              if (stopped) return;
+              const bytes = result.body ? new Uint8Array(await result.body.arrayBuffer()) : new Uint8Array();
+              write({ index, length: bytes.length, status: result.status, contentType: result.contentType || '' }, bytes);
+            }
+          }));
+          if (!stopped) controller.close();
+        } catch (error) { if (!stopped) controller.error(error); }
+      },
+      cancel() { stopped = true; }
+    });
+    return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.catalog-stream', 'x-cytlex-proxy': '1' } });
+  } catch (error) {
+    return errorResponse('The source could not be reached', deadline.signal.aborted ? 504 : 502, false, deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
+  } finally { clearTimeout(timeout); }
+}
+
 export async function onRequest(context) {
   const { request } = context;
   const method = request.method.toUpperCase();
@@ -787,6 +846,10 @@ export async function onRequest(context) {
 
   const target = validateTarget(new URL(request.url).searchParams.get('url'));
   if (!target) return errorResponse('Target is not allowed', 403, true);
+  if (new URL(request.url).searchParams.get('catalog') === 'mangadex') {
+    if (method !== 'GET') return errorResponse('Method not allowed', 405);
+    return handleMangaDexCatalog(request, target);
+  }
 
   let body;
   if (method === 'POST') {

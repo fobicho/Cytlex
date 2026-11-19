@@ -477,7 +477,9 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
     setLoading(true);
     (async () => {
       try {
-        await extensions.repoIndex(repoUrl, { maxAgeMs: 24 * 60 * 60 * 1000 });
+        await extensions.repoIndex(repoUrl, repoUrl === DEFAULT_EXTENSION_REPOSITORY
+          ? { refresh: true }
+          : { maxAgeMs: 24 * 60 * 60 * 1000 });
         await extensions.sync(repoUrl);
         const [items, found] = await Promise.all([
           extensions.available(repoUrl),

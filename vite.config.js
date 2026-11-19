@@ -1,12 +1,30 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { setDefaultResultOrder } from 'node:dns';
+import dns, { setDefaultResultOrder } from 'node:dns';
 import { Readable } from 'node:stream';
 import { onRequest as handleWebProxy } from './functions/api/proxy.js';
 
 setDefaultResultOrder('verbatim');
 
+function configureLocalMangaDexDns() {
+  if (process.env.CYTLEX_DEV_MANGADEX_DNS !== '1') return;
+  const resolver = new dns.Resolver();
+  resolver.setServers(['1.1.1.1']);
+  const systemLookup = dns.lookup;
+  dns.lookup = function (hostname, options, callback) {
+    if (hostname !== 'api.mangadex.org' && hostname !== 'uploads.mangadex.org'
+      && !hostname.endsWith('.mangadex.network')) return systemLookup.apply(this, arguments);
+    if (typeof options === 'function') { callback = options; options = {}; }
+    resolver.resolve4(hostname, (error, addresses) => {
+      if (error || !addresses?.length) return systemLookup(hostname, options, callback);
+      if (options?.all) callback(null, addresses.map((address) => ({ address, family: 4 })));
+      else callback(null, addresses[0], 4);
+    });
+  };
+}
+
 function configureWebProxy(server) {
+  configureLocalMangaDexDns();
   server.middlewares.use(async (req, res, next) => {
     if (!req.url?.startsWith('/api/proxy')) return next();
     try {
