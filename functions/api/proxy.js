@@ -557,7 +557,6 @@ async function handleCombinedSearchRequest(request) {
   if (catalogUrl && (!catalogTarget || catalogTarget.origin !== 'https://api.mangadex.org'
     || catalogTarget.pathname !== '/manga' || Number(catalogTarget.searchParams.get('limit')) !== 40
     || !catalogTarget.searchParams.getAll('includes[]').includes('cover_art'))) return errorResponse('Invalid MangaDex catalog request', 400);
-
   const encoder = new TextEncoder();
   let stopped = false;
   const body = new ReadableStream({
@@ -620,7 +619,10 @@ async function handleCombinedSearchRequest(request) {
         if (!stopped) controller.error(error);
       }
     },
-    cancel() { stopped = true; }
+    cancel() {
+      stopped = true;
+      coverQueue.splice(0).forEach((job) => job.resolve());
+    }
   });
   return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/x-ndjson; charset=utf-8', 'x-cytlex-search-batch': '1' } });
 }
@@ -654,7 +656,7 @@ function createImageByteBudget() {
   };
 }
 
-async function fetchImageBatchItem(item, request, subrequestBudget, byteBudget) {
+async function fetchImageBatchItem(item, request, subrequestBudget, byteBudget, retries = 0) {
   const target = validateTarget(item?.url);
   if (!target) return { status: 403, proxyDenied: true, errorOrigin: 'cytlex' };
 
@@ -687,7 +689,7 @@ async function fetchImageBatchItem(item, request, subrequestBudget, byteBudget) 
       forwardedHeaders(metadataRequest, target),
       undefined,
       signal,
-      { subrequestBudget, retries: 0 }
+      { subrequestBudget, retries }
     );
     if (proxyError) {
       await proxyError.body?.cancel();
@@ -775,7 +777,7 @@ async function handleImageBatchRequest(request) {
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, payload.images.length) }, async () => {
             while (!stopped && next < payload.images.length) {
               const index = next++;
-              const result = await fetchImageBatchItem(payload.images[index], request, subrequestBudget, byteBudget);
+              const result = await fetchImageBatchItem(payload.images[index], request, subrequestBudget, byteBudget, 1);
               if (stopped) return;
               const bytes = result.body ? new Uint8Array(await result.body.arrayBuffer()) : new Uint8Array();
               if (stopped) return;
@@ -802,7 +804,7 @@ async function handleImageBatchRequest(request) {
     while (next < payload.images.length) {
       const index = next;
       next += 1;
-      results[index] = await fetchImageBatchItem(payload.images[index], request, subrequestBudget, byteBudget);
+      results[index] = await fetchImageBatchItem(payload.images[index], request, subrequestBudget, byteBudget, 1);
     }
   }));
   let offset = 0;
@@ -904,7 +906,7 @@ async function handleMangaDexCatalog(request, target) {
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, images.length) }, async () => {
             while (!stopped && next < images.length) {
               const index = next++;
-              const result = await fetchImageBatchItem({ url: images[index] }, request, subrequestBudget, byteBudget);
+              const result = await fetchImageBatchItem({ url: images[index] }, request, subrequestBudget, byteBudget, 1);
               if (stopped) return;
               const bytes = result.body ? new Uint8Array(await result.body.arrayBuffer()) : new Uint8Array();
               write({ index, length: bytes.length, status: result.status, contentType: result.contentType || '' }, bytes);

@@ -1,4 +1,4 @@
-import { extensions, isExtensionAllowed } from './extensions.js';
+import { beginCatalogSearch, extensions, isExtensionAllowed } from './extensions.js';
 import { settings } from './settings.js';
 import { lib, mangaSourceUrl } from './library.js';
 import { deleteSourceCache, listSourceCache, readSourceCache, writeSourceCache } from './sourceCache.js';
@@ -210,7 +210,9 @@ export const api = {
       const savedAge = Date.now() - (saved?.at || 0);
       if (saved?.value?.items && savedAge >= 0 && savedAge <= PERSISTED_CATALOG_TTL_MS) return saved.value;
       try {
-        return await src.catalog(args);
+        const endSearch = beginCatalogSearch(sourceId);
+        try { return await src.catalog(args); }
+        finally { endSearch(); }
       } catch (error) {
         if (isMangaDex(sourceId) && /\b(?:ENOTFOUND|HTTP (?:429|50[234]))\b/.test(String(error?.message || error))) {
           if (saved?.value?.items?.length && savedAge <= 7 * 24 * 60 * 60 * 1000) return saved.value;

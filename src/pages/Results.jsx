@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ChevronLeft, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { extensions, isExtensionAllowed } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
@@ -14,6 +14,17 @@ import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { useScale, px, fontPx } from '../lib/useScale.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
+
+function ResultsBackBar({ onBack, scale }) {
+  const inset = px(16, scale, 12);
+  return (
+    <div className="sticky top-0 z-20 flex shrink-0 items-center border-b border-border/70 bg-sidebar" style={{ minHeight: px(38, scale, 34), marginLeft: `-${inset}`, marginRight: `-${inset}`, paddingLeft: inset, paddingRight: inset, marginBottom: px(12, scale, 10) }}>
+      <Button size="sm" variant="ghost" className="-ml-3 hover:bg-transparent hover:text-foreground" onClick={(event) => { event.currentTarget.blur(); onBack(); }} style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(8, scale, 6), paddingRight: px(8, scale, 6) }}>
+        <ChevronLeft className="mr-1" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Volver
+      </Button>
+    </div>
+  );
+}
 
 export default function Results() {
   const navigate = useNavigate();
@@ -171,20 +182,7 @@ export default function Results() {
 
   return (
     <div className="min-h-full flex flex-col">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="self-start hover:bg-transparent hover:text-foreground"
-        onClick={(e) => { e.currentTarget.blur(); navigate('/explorar'); }}
-        style={{
-          marginTop: px(-8, scale, -6),
-          marginLeft: px(-8, scale, -6),
-          marginBottom: px(4, scale, 3),
-          fontSize: fontPx(14, scale, 12)
-        }}
-      >
-        <ArrowLeft className="mr-1.5" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Volver
-      </Button>
+      <ResultsBackBar onBack={() => navigate('/explorar')} scale={scale} />
 
       <div className="flex items-center" style={{ gap: px(10, scale, 8), marginBottom: `${Math.max(10, Math.round(16 * scale))}px` }}>
         <SourceBadge m={manifest} style={{ width: px(28, scale, 22), height: px(28, scale, 22), fontSize: fontPx(12, scale) }} />

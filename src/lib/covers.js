@@ -509,6 +509,7 @@ export function preloadSearchCover(url) {
       clearTimeout(timer);
       if (acquired) releaseSearchCoverSlot();
       searchCoverControllers.delete(controller);
+      if (searchCoverCache.get(url) === pending) searchCoverCache.delete(url);
     }
   })();
   searchCoverCache.set(url, pending);
@@ -529,26 +530,30 @@ export function createSearchCoverBatch() {
       entries.forEach((entry) => entry.resolve(''));
       return Promise.resolve();
     }
+    const fail = (entry) => {
+      if (searchCoverCache.get(entry.url) === entry.promise) searchCoverCache.delete(entry.url);
+      entry.resolve('');
+    };
     const controller = new AbortController();
     controllers.add(controller);
     const task = fetchSearchCoverBlobBatch(entries, controller.signal, async ({ blob }, index) => {
       const entry = entries[index];
       if (cancelled || generation !== searchCoverGeneration || !blob) {
-        entry.resolve('');
+        fail(entry);
         return;
       }
       const originalUrl = URL.createObjectURL(blob);
       const thumbnail = await makeCoverThumbBlob(originalUrl, SEARCH_THUMB_WIDTH);
       URL.revokeObjectURL(originalUrl);
       if (!thumbnail) {
-        entry.resolve('');
+        fail(entry);
         return;
       }
       const objectUrl = URL.createObjectURL(thumbnail);
       const decoded = await decodeCover(objectUrl);
       if (!decoded || cancelled || generation !== searchCoverGeneration) {
         URL.revokeObjectURL(objectUrl);
-        entry.resolve('');
+        fail(entry);
         return;
       }
       loadedSearchCovers.add(objectUrl);
@@ -557,7 +562,7 @@ export function createSearchCoverBatch() {
       pruneSearchCoverCache();
       entry.resolve(objectUrl);
     }).catch(() => {
-      entries.forEach((entry) => entry.resolve(''));
+      entries.forEach(fail);
     }).finally(() => {
       controllers.delete(controller);
       searchCoverControllers.delete(controller);

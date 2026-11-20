@@ -89,6 +89,7 @@ export default function App({ tutorialMode = false }) {
   const isReader = location.pathname.startsWith('/leer');
   const isElectronApp = typeof window !== 'undefined' && !!window.cytlex;
   const isMangaPage = location.pathname.startsWith('/manga');
+  const isResultsPage = location.pathname === '/resultados';
   const isMigrationSearchPage = isMangaPage && new URLSearchParams(location.search).get('migrationSearch') === '1';
   const mainRef = useRef(null);
   const [detailScrollbarWidth, setDetailScrollbarWidth] = useState(0);
@@ -256,7 +257,7 @@ export default function App({ tutorialMode = false }) {
               : isMigrationSearchPage
               ? { padding: 0, overflowY: 'hidden', '--web-page-padding': `${Math.max(14, Math.round(24 * scale))}px` }
               : isElectronApp
-              ? { padding: `${isMangaPage ? Math.max(12, Math.round(16 * scale)) : Math.max(16, Math.round(24 * scale))}px`, ...(isMangaPage ? { paddingTop: 0, paddingRight: `${Math.max(0, Math.max(12, Math.round(16 * scale)) - detailScrollbarWidth)}px`, '--detail-right-padding': `${Math.max(0, Math.max(12, Math.round(16 * scale)) - detailScrollbarWidth)}px` } : {}) }
+              ? { padding: `${isMangaPage || isResultsPage ? Math.max(12, Math.round(16 * scale)) : Math.max(16, Math.round(24 * scale))}px`, ...((isMangaPage || isResultsPage) ? { paddingTop: 0 } : {}), ...(isMangaPage ? { paddingRight: `${Math.max(0, Math.max(12, Math.round(16 * scale)) - detailScrollbarWidth)}px`, '--detail-right-padding': `${Math.max(0, Math.max(12, Math.round(16 * scale)) - detailScrollbarWidth)}px` } : {}) }
               : isSettingsPage || isExplorePage || isLibraryPage
                 ? {
                     padding: 0,
@@ -266,8 +267,9 @@ export default function App({ tutorialMode = false }) {
                       : {})
                   }
               : {
-                  '--web-page-padding': `${isMangaPage ? Math.max(12, Math.round(16 * scale)) : Math.max(14, Math.round(24 * scale))}px`,
-                  ...(isMangaPage ? { paddingTop: 0, paddingRight: `${Math.max(0, Math.max(12, Math.round(16 * scale)) - detailScrollbarWidth)}px`, '--detail-right-padding': `${Math.max(0, Math.max(12, Math.round(16 * scale)) - detailScrollbarWidth)}px` } : {}),
+                  '--web-page-padding': `${isMangaPage || isResultsPage ? Math.max(12, Math.round(16 * scale)) : Math.max(14, Math.round(24 * scale))}px`,
+                  ...((isMangaPage || isResultsPage) ? { paddingTop: 0 } : {}),
+                  ...(isMangaPage ? { paddingRight: `${Math.max(0, Math.max(12, Math.round(16 * scale)) - detailScrollbarWidth)}px`, '--detail-right-padding': `${Math.max(0, Math.max(12, Math.round(16 * scale)) - detailScrollbarWidth)}px` } : {}),
                 }}
           >
             <PageBoundary>

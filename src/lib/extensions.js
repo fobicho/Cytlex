@@ -109,7 +109,11 @@ function ctx(manifest = {}) {
     id: manifest.id,
     config: manifest.config,
     languageSelections,
-    fetchText: (url, requestId, options) => httpGet(url, requestId, options),
+    fetchText: (url, requestId, options) => httpGet(url, requestId, {
+      ...options,
+      sourceId: manifest.id,
+      ...(activeCatalogSearches.has(manifest.id) ? { search: true } : {})
+    }),
     parse: (html) => new DOMParser().parseFromString(html, 'text/html'),
     head: (url) => httpHead(url)
   };
@@ -197,6 +201,16 @@ addEventListener('message', async (event) => {
 
 const moduleDisposers = new Map();
 const moduleLoads = new Map();
+const activeCatalogSearches = new Map();
+
+export function beginCatalogSearch(sourceId) {
+  activeCatalogSearches.set(sourceId, (activeCatalogSearches.get(sourceId) || 0) + 1);
+  return () => {
+    const count = activeCatalogSearches.get(sourceId) || 0;
+    if (count <= 1) activeCatalogSearches.delete(sourceId);
+    else activeCatalogSearches.set(sourceId, count - 1);
+  };
+}
 
 function extensionErrorDetails(error) {
   return {
@@ -265,9 +279,18 @@ async function loadModule(code, manifest) {
     }
     if (message.kind === 'host-call') {
       const action = message.method === 'fetchText'
-        ? (url, requestId, options) => httpGet(url, requestId, options)
+        ? (url, requestId, options) => httpGet(url, requestId, {
+          ...options,
+          sourceId: manifest.id,
+          ...(activeCatalogSearches.has(manifest.id) ? { search: true } : {})
+        })
         : message.method === 'fetchPostText'
-          ? (payload, requestId) => httpPost({ ...payload, responseType: 'text' }, requestId)
+          ? (payload, requestId) => httpPost({
+            ...payload,
+            responseType: 'text',
+            sourceId: manifest.id,
+            ...(activeCatalogSearches.has(manifest.id) ? { search: true } : {})
+          }, requestId)
         : message.method === 'head'
           ? (url) => httpHead(url)
           : null;

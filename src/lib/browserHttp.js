@@ -118,7 +118,7 @@ function assertProxyResponse(response, target, url, usedProxy, proxyDeniedTarget
   });
 }
 
-function batchDescriptor({ url, options }) {
+function batchDescriptor({ url, options }, includeSearch = false) {
   const target = new URL(url);
   const method = (options.method || 'GET').toUpperCase();
   const requestHeaders = new Headers(options.headers || {});
@@ -133,6 +133,7 @@ function batchDescriptor({ url, options }) {
     ...(method === 'POST' ? { body: options.body } : {}),
     referer: proxyRefererFor(target, options.onfReferer),
     headers,
+    ...((options.search === true || includeSearch) && typeof options.sourceId === 'string' ? { sourceId: options.sourceId, search: true } : {}),
     ...(onfCookie ? { onfCookie } : {})
   };
 }
@@ -157,6 +158,7 @@ function preferDirectRequest(target, method) {
 }
 
 async function runProxyBatch(entries) {
+  const hasSearch = entries.some((entry) => entry.options?.search === true);
   const resolveEntry = (entry, value) => {
     if (entry.settled) return;
     entry.settled = true;
@@ -182,7 +184,7 @@ async function runProxyBatch(entries) {
     await runIndividually();
     return;
   }
-  if (!catalogEntries.length && entries.length < 2) {
+  if (!catalogEntries.length && entries.length < 2 && !hasSearch) {
     await runIndividually();
     return;
   }
@@ -196,7 +198,7 @@ async function runProxyBatch(entries) {
       credentials: 'omit',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        requests: entries.filter((entry) => !entry.catalog).map(batchDescriptor),
+        requests: entries.filter((entry) => !entry.catalog).map((entry) => batchDescriptor(entry, hasSearch)),
         ...(catalogEntries.length ? { catalog: { url: catalogEntries[0].url } } : {})
       })
     });
@@ -252,6 +254,7 @@ async function runProxyBatch(entries) {
           image.resolve(message.status === 200 && bytes.length <= 4 * 1024 * 1024
             ? new Blob([bytes], { type: message.contentType || '' }) : null);
         } catch { image.resolve(null); }
+        return;
       }
     };
     while (true) {
@@ -294,7 +297,7 @@ function scheduleProxyRequest(url, options) {
   if (preferDirectRequest(target, method)) {
     return browserRequest(url, options);
   }
-  const supportedOptions = new Set(['headers', 'onfReferer', 'onfCookie', 'method', 'body']);
+  const supportedOptions = new Set(['headers', 'onfReferer', 'onfCookie', 'method', 'body', 'sourceId', 'search']);
   if (target.origin === window.location.origin || proxyEndpoint.origin !== window.location.origin || !['GET', 'POST'].includes(method) || options.signal
     || (method === 'POST' && typeof options.body !== 'string')
     || Object.keys(options).some((key) => !supportedOptions.has(key))
@@ -467,7 +470,8 @@ export async function fetchSearchCoverBlobBatch(entries, signal, onResult) {
   const catalogTasks = catalogImages.map(async ({ promise, index }) => {
     try {
       const blob = await promise;
-      await onResult(blob ? { blob, error: null } : { blob: null, error: new Error('No se pudo cargar la portada de MangaDex.') }, index);
+      const validBlob = blob ? await readImageBlob(new Response(blob)) : null;
+      await onResult(validBlob ? { blob: validBlob, error: null } : { blob: null, error: new Error('No se pudo cargar la portada.') }, index);
     } catch (error) {
       await onResult({ blob: null, error }, index);
     }
@@ -548,11 +552,6 @@ async function runProxyImageBatch(entries) {
     try { settleProxyImageEntry(entry, 'resolve', await browserRequest(entry.url, entry.options)); }
     catch (error) { settleProxyImageEntry(entry, 'reject', error); }
   }));
-
-  if (entries.length < 2) {
-    await fallbackIndividually();
-    return;
-  }
 
   const controller = new AbortController();
   const batchState = { controller, entries };
@@ -804,6 +803,7 @@ export async function httpGet(url, requestId, options = {}) {
   }
   const headers = new Headers(requestOptions.headers || {});
   const canCache = !requestOptions.signal
+    && requestOptions.search !== true
     && requestOptions.cache !== 'no-store'
     && requestOptions.cache !== 'no-cache'
     && (!requestOptions.method || requestOptions.method.toUpperCase() === 'GET')
@@ -870,6 +870,7 @@ export async function httpPost(payload, requestId) {
   if (bridge?.httpPost) return bridge.httpPost(payload, requestId);
   const response = await scheduleProxyRequest(payload.url, {
     method: 'POST',
+    ...(payload.search === true && typeof payload.sourceId === 'string' ? { search: true, sourceId: payload.sourceId } : {}),
     onfReferer: payload.onfReferer,
     onfCookie: payload.onfCookie,
     headers: { 'Content-Type': 'application/json', ...payload.headers },
