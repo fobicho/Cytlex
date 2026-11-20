@@ -189,10 +189,13 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
               <motion.div
                 animate={{ transform: `scale(${scale})` }}
                 transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-                className="onboarding-card relative flex h-[min(85dvh,32rem)] min-h-0 max-h-[calc(100dvh-1.5rem)] w-full flex-col overflow-hidden rounded-3xl border border-border bg-card text-card-foreground transition-colors duration-300 min-[480px]:h-[min(85dvh,26rem)] md:h-[min(85dvh,28rem)]"
+                className="onboarding-card relative flex h-[min(85dvh,30rem)] min-h-0 max-h-[calc(100dvh-1.5rem)] w-full flex-col overflow-hidden rounded-3xl border border-border bg-card text-card-foreground transition-colors duration-300"
                 style={{ transformOrigin: 'center' }}
               >
-          <div className="onboarding-content min-h-0 flex-1 overflow-x-hidden overflow-y-hidden px-6 py-6 md:px-10 md:pt-6 md:pb-10">
+          <div className={cn(
+            'onboarding-content min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6 md:px-10 md:pt-6 md:pb-10',
+            isTheme && 'onboarding-content--theme'
+          )}>
             <AnimatePresence mode="wait" custom={motionDirection}>
               <motion.div
                 key={step}

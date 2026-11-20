@@ -235,7 +235,10 @@ const Library = memo(function Library({ active = true }) {
         && current.every(({ id, name }, index) => id === latestCats[index].id && name === latestCats[index].name)
         ? current : latestCats);
     };
-    if (active) reloadLibrary();
+    if (active) {
+      reloadLibrary();
+      void api.pruneLibraryDetails(lib.favs());
+    }
     const onImport = () => {
       setFavs(lib.favs());
       setCats(lib.cats());

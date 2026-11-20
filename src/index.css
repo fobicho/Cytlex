@@ -766,7 +766,7 @@
 }
 
 :where(
-  button:not([role="switch"]):not(.current-chapter-jump):not(.chapter-per-row),
+  button:not([role="switch"]):not(.current-chapter-jump):not(.chapter-per-row):not(.catalog-scroll-button),
   input:not([type="radio"]),
   select,
   textarea
@@ -984,6 +984,22 @@ img.manga-cover-corners {
   .onboarding-footer {
     padding-top: 0.5rem;
     padding-bottom: 0.5rem;
+  }
+}
+
+@media (max-width: 479px) {
+  .onboarding-content--theme {
+    padding: 1rem 1.25rem;
+  }
+
+  .onboarding-content--theme .onboarding-step-title {
+    font-size: 1.375rem;
+    line-height: 1.2;
+  }
+
+  .onboarding-content--theme .onboarding-step-description {
+    font-size: 0.9375rem;
+    line-height: 1.4;
   }
 }
 

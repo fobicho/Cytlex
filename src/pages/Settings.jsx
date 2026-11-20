@@ -20,14 +20,22 @@ import { useToast } from '../components/Toast.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
-import { clearPersistentLibraryCoverCache, invalidateLibraryCovers } from '../lib/covers.js';
+import { clearPersistentLibraryCoverCache, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
 import { clearSourceCache } from '../lib/sourceCache.js';
+import { clearRecentChapters } from '../lib/recentChapters.js';
 import SubrouteTabLabel from '../components/SubrouteTabLabel.jsx';
 
 function clearLibraryUnreadCache() {
   localStorage.removeItem('cytlex:libraryUnread:v1');
   localStorage.removeItem('cytlex:libraryUnread:v2');
   window.dispatchEvent(new Event('cytlex:library-unread-reset'));
+}
+
+async function preloadImportedCovers(mangas) {
+  const covers = [...new Set((mangas || [])
+    .map((manga) => manga?.cover)
+    .filter((cover) => typeof cover === 'string' && requiresImageProxy(cover)))];
+  await Promise.all(covers.map((cover) => preloadLibraryCover(cover, { web: true, priority: true })));
 }
 
 function throwIfAborted(signal) {
@@ -272,14 +280,13 @@ export default function Settings({ tutorialPreview = false }) {
     };
   }, [libraryUnreadTipOpen, chaptersPerRowTipOpen]);
 
-  useEffect(() => {
+  const revealSectionTab = (activeTab) => {
     const nav = sectionNavRef.current;
-    const activeTab = nav?.querySelector('[aria-current="page"]');
     if (!nav || !activeTab) return;
 
     const navBounds = nav.getBoundingClientRect();
     const tabBounds = activeTab.getBoundingClientRect();
-    const safeInset = px(16, scale, 12);
+    const safeInset = Number.parseFloat(px(16, scale, 12));
     const leftEdge = navBounds.left + safeInset;
     const rightEdge = navBounds.right - safeInset;
     const scrollOptions = { behavior: reduceMotion ? 'auto' : 'smooth' };
@@ -289,12 +296,16 @@ export default function Settings({ tutorialPreview = false }) {
     } else if (tabBounds.right > rightEdge) {
       nav.scrollBy({ ...scrollOptions, left: tabBounds.right - rightEdge });
     }
+  };
+
+  useEffect(() => {
+    revealSectionTab(sectionNavRef.current?.querySelector('[aria-current="page"]'));
   }, [section, reduceMotion, scale]);
 
   const resetWebData = async () => {
     setWebDataResetBusy(true);
     try {
-      await Promise.all([clearPersistentLibraryCoverCache(), clearSourceCache()]);
+      await Promise.all([clearPersistentLibraryCoverCache(), clearSourceCache(), clearRecentChapters()]);
       const keys = [];
       for (let index = 0; index < localStorage.length; index += 1) {
         const key = localStorage.key(index);
@@ -519,6 +530,7 @@ export default function Settings({ tutorialPreview = false }) {
 
   const finishBackupImport = async ({ omitUnavailable = false } = {}) => {
     if (!backupCandidate) return;
+    setBackupBusy(true);
     try {
       let data = backupCandidate.data;
       let omittedCount = 0;
@@ -541,15 +553,15 @@ export default function Settings({ tutorialPreview = false }) {
         const value = JSON.parse(data['cytlex:favs'] || '[]');
         if (Array.isArray(value)) favorites = value;
       } catch {}
-      const importedCoverUrls = favorites.map((manga) => manga?.cover).filter((cover) => /^https?:\/\//i.test(cover || ''));
-      if (importedCoverUrls.length) {
+      await preloadImportedCovers(favorites);
+      const proxiedCovers = new Set(favorites.map((manga) => manga?.cover).filter((cover) => typeof cover === 'string' && requiresImageProxy(cover)));
+      if (proxiedCovers.size) {
         data = {
           ...data,
-          'cytlex:favs': JSON.stringify(favorites.map((manga) => (
-            /^https?:\/\//i.test(manga?.cover || '') ? { ...manga, coverLocal: '', coverCached: '' } : manga
-          )))
+          'cytlex:favs': JSON.stringify(favorites.map((manga) => proxiedCovers.has(manga?.cover)
+            ? { ...manga, coverLocal: '', coverCached: '' }
+            : manga))
         };
-        await invalidateLibraryCovers(importedCoverUrls);
       }
       restoreBackup(data);
       clearLibraryUnreadCache();
@@ -567,6 +579,8 @@ export default function Settings({ tutorialPreview = false }) {
       window.setTimeout(() => window.location.reload(), 800);
     } catch (error) {
       toast({ title: 'No se pudo restaurar el respaldo', description: error.message, variant: 'error' });
+    } finally {
+      setBackupBusy(false);
     }
   };
 
@@ -592,7 +606,7 @@ export default function Settings({ tutorialPreview = false }) {
         sources.set(id, source);
       });
       if (!sources.size) {
-        finishBackupImport();
+        await finishBackupImport();
         return;
       }
 
@@ -629,10 +643,10 @@ export default function Settings({ tutorialPreview = false }) {
     setBackupInstallManifests([]);
   };
 
-  const keepBackupUnavailable = () => {
+  const keepBackupUnavailable = async () => {
     setBackupReviewOpen(false);
     if (backupInstallManifests.length) setBackupInstallOpen(true);
-    else finishBackupImport();
+    else await finishBackupImport();
   };
 
   const installBackupExtensions = async () => {
@@ -647,7 +661,7 @@ export default function Settings({ tutorialPreview = false }) {
         ? [backupInstallManifests[index].name || backupInstallManifests[index].id]
         : []);
       if (failed.length) throw new Error(`No se pudieron instalar: ${failed.join(', ')}.`);
-      finishBackupImport();
+      await finishBackupImport();
     } catch (error) {
       toast({ title: 'No se pudieron instalar las extensiones', description: `${error.message} No se restauró el respaldo.`, variant: 'error' });
     } finally {
@@ -657,17 +671,22 @@ export default function Settings({ tutorialPreview = false }) {
 
   const loadMihonBackup = async (bytes, fileName) => {
     try {
+      const installedSources = extensions.sources();
+      let repository = [];
+      let candidate = await previewMihonBackup(bytes, installedSources);
       const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
-      const [repository, repositoryError] = await extensions.repoIndex(indexUrl)
-        .then((index) => [index.filter(canInstallExtension), null], (error) => [[], error]);
-      const candidate = await previewMihonBackup(bytes, extensions.sources(), repository);
-      if (repositoryError && candidate.unmatchedCount) {
-        toast({
-          title: 'No se pudieron comprobar las extensiones',
-          description: 'Vuelve a intentar la importación cuando el repositorio esté disponible.',
-          variant: 'error'
-        });
-        return;
+      if (candidate.unmatchedCount) {
+        try {
+          repository = (await extensions.repoIndex(indexUrl)).filter(canInstallExtension);
+          candidate = await previewMihonBackup(bytes, installedSources, repository);
+        } catch {
+          toast({
+            title: 'No se pudieron comprobar las extensiones',
+            description: 'Vuelve a intentar la importación cuando el repositorio esté disponible.',
+            variant: 'error'
+          });
+          return;
+        }
       }
       setMihonUnknownEntries([]);
       setMihonCandidate({ ...candidate, fileName, repository, indexUrl });
@@ -694,8 +713,16 @@ export default function Settings({ tutorialPreview = false }) {
     }
   };
 
-  const finishMihonImport = (keepUnavailable = false, failedInstalls = []) => {
+  const finishMihonImport = async (keepUnavailable = false, failedInstalls = [], showProgressToast = true) => {
     if (!mihonCandidate) return;
+    setMihonBusy(true);
+    const progressToastId = showProgressToast ? toast({
+      title: 'Importando respaldo de Mihon',
+      description: 'Preparando las portadas antes de guardar los mangas…',
+      icon: Loader2,
+      loading: true,
+      duration: null
+    }) : null;
     try {
       const omitted = new Set(keepUnavailable ? [] : mihonUnknownEntries);
       const candidate = {
@@ -703,7 +730,11 @@ export default function Settings({ tutorialPreview = false }) {
         entries: mihonCandidate.entries.filter((entry) => !omitted.has(entry))
           .map((entry) => ({ ...entry, manga: { ...entry.manga } }))
       };
-      const result = importMihonBackup(candidate);
+      await preloadImportedCovers(candidate.entries.map(({ manga }) => manga));
+      const clearCachedCoverUrls = new Set(candidate.entries
+        .map(({ manga }) => manga?.cover)
+        .filter((cover) => typeof cover === 'string' && requiresImageProxy(cover)));
+      const result = importMihonBackup(candidate, { clearCachedCoverUrls });
       clearLibraryUnreadCache();
       setMihonCandidate(null);
       setMihonInstallManifests([]);
@@ -719,6 +750,9 @@ export default function Settings({ tutorialPreview = false }) {
       });
     } catch (error) {
       toast({ title: 'No se pudo importar el respaldo de Mihon', description: error.message, variant: 'error' });
+    } finally {
+      if (progressToastId) dismiss(progressToastId);
+      setMihonBusy(false);
     }
   };
 
@@ -746,11 +780,11 @@ export default function Settings({ tutorialPreview = false }) {
         } else if (manifests.size) {
           setMihonInstallOpen(true);
         } else {
-          finishMihonImport();
+          await finishMihonImport();
         }
         return;
       }
-      finishMihonImport();
+      await finishMihonImport();
     } catch (error) {
       toast({ title: 'No se pudieron comprobar las extensiones', description: error.message, variant: 'error' });
     } finally {
@@ -765,11 +799,11 @@ export default function Settings({ tutorialPreview = false }) {
       setMihonInstallOpen(true);
       return;
     }
-    finishMihonImport(keepUnavailable);
+    void finishMihonImport(keepUnavailable);
   };
 
   const skipMihonMissingSources = () => {
-    finishMihonImport(mihonKeepUnavailable);
+    void finishMihonImport(mihonKeepUnavailable);
   };
 
   const installMihonSources = async () => {
@@ -778,7 +812,7 @@ export default function Settings({ tutorialPreview = false }) {
     mihonImportControllerRef.current = controller;
     const progressToastId = toast({
       title: 'Importando respaldo de Mihon',
-      description: 'Instalando extensiones y aplicando los ajustes necesarios…',
+      description: 'Instalando extensiones, preparando portadas y aplicando ajustes…',
       icon: Loader2,
       loading: true,
       duration: null,
@@ -804,7 +838,7 @@ export default function Settings({ tutorialPreview = false }) {
       throwIfAborted(controller.signal);
       const failedInstalls = results.filter(({ error }) => error).map(({ name }) => name);
       setMihonInstallOpen(false);
-      finishMihonImport(mihonKeepUnavailable, failedInstalls);
+      await finishMihonImport(mihonKeepUnavailable, failedInstalls, false);
     } catch (error) {
       if (!controller.signal.aborted && error?.name !== 'AbortError') {
         toast({ title: 'No se pudieron instalar las extensiones', description: `${error.message} No se importaron los mangas.`, variant: 'error' });
@@ -1688,7 +1722,11 @@ export default function Settings({ tutorialPreview = false }) {
               key={sec.id}
               type="button"
               aria-current={on ? 'page' : undefined}
-              onClick={() => { setSection(sec.id); sessionSeccion = sec.id; }}
+              onClick={(event) => {
+                if (on) revealSectionTab(event.currentTarget);
+                setSection(sec.id);
+                sessionSeccion = sec.id;
+              }}
               className={cn(
                 'group relative shrink-0 p-0 transition-colors'
               )}

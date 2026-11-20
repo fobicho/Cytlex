@@ -9,7 +9,7 @@ import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaS
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { settings } from '../lib/settings.js';
 import { lastSearch, scrollMemory, rememberMangaPreview, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
-import { clearSearchCoverCache, preloadSearchCover } from '../lib/covers.js';
+import { clearSearchCoverCache, createSearchCoverBatch } from '../lib/covers.js';
 import MangaCard from '../components/MangaCard.jsx';
 import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
 import SourcesCatalog from '../components/SourcesCatalog.jsx';
@@ -165,6 +165,33 @@ function SourceSection({ r, coverSize, scale = 1, animate = false, active = true
         <span className="text-muted-foreground shrink-0" style={{ fontSize: fontPx(12, scale) }}>
           · {visibleItems.length}
         </span>
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <div className="hidden items-center gap-1 md:flex">
+            {canLeft && (
+              <button type="button" onClick={() => step(-1)} aria-label="Ver mangas anteriores"
+                className="catalog-scroll-button grid place-items-center rounded-full border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                style={{ width: `${Math.round(30 * scale)}px`, height: `${Math.round(30 * scale)}px` }}>
+                <ChevronLeft style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
+              </button>
+            )}
+            {canRight && (
+              <button type="button" onClick={() => step(1)} aria-label="Ver más mangas"
+                className="catalog-scroll-button grid place-items-center rounded-full border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                style={{ width: `${Math.round(30 * scale)}px`, height: `${Math.round(30 * scale)}px` }}>
+                <ChevronRight style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
+              </button>
+            )}
+          </div>
+          {(visibleItems.length > 15 || (r.hasMore && canRight)) && (
+            <a
+              className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'hover:bg-transparent hover:text-foreground')}
+              href={`#/resultados?s=${encodeURIComponent(r.id)}`}
+              style={{ fontSize: fontPx(14, scale) }}
+            >
+              Ver todos <ChevronRight className="w-4 h-4 ml-1.5" />
+            </a>
+          )}
+        </div>
       </div>
       {!visibleItems.length ? (
         <p className="text-sm text-muted-foreground">
@@ -207,48 +234,6 @@ function SourceSection({ r, coverSize, scale = 1, animate = false, active = true
             </div>
           ))}
         </div>
-        {canLeft && (
-          <button
-            type="button"
-            onClick={() => step(-1)}
-            aria-label="Ver mangas anteriores"
-            className="catalog-scroll-button absolute -left-3 top-[38%] z-10 grid place-items-center rounded-full border border-border bg-background/90 text-foreground shadow-md backdrop-blur-sm transition hover:bg-background"
-            style={{
-              width: `${Math.round(36 * scale)}px`,
-              height: `${Math.round(36 * scale)}px`,
-              marginLeft: `${Math.round(2 * scale)}px`
-            }}
-          >
-            <ChevronLeft style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
-          </button>
-        )}
-        {canRight && (
-          <button
-            type="button"
-            onClick={() => step(1)}
-            aria-label="Ver más mangas"
-            className="catalog-scroll-button absolute -right-3 top-[38%] z-10 grid place-items-center rounded-full border border-border bg-background/90 text-foreground shadow-md backdrop-blur-sm transition hover:bg-background"
-            style={{
-              width: `${Math.round(36 * scale)}px`,
-              height: `${Math.round(36 * scale)}px`,
-              marginRight: `${Math.round(2 * scale)}px`
-            }}
-          >
-            <ChevronRight style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
-          </button>
-        )}
-        {(visibleItems.length > 15 || (r.hasMore && canRight)) && (
-          <a
-            className={cn(
-              buttonVariants({ variant: 'ghost', size: 'sm' }),
-              'absolute -top-11 right-0 hover:bg-transparent hover:text-foreground'
-            )}
-            href={`#/resultados?s=${encodeURIComponent(r.id)}`}
-            style={{ top: `${Math.round(-44 * scale)}px`, fontSize: fontPx(14, scale) }}
-          >
-            Ver todos <ChevronRight className="w-4 h-4 ml-1.5" />
-          </a>
-        )}
       </div>
       )}
     </motion.section>
@@ -260,6 +245,7 @@ let animateSearch = false;
 let activeSearchRun = 0;
 let activeMigrationSearchRun = 0;
 let migrationSearchSnapshot = null;
+let activeSearchKey = '';
 
 const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = false, active = true, migrationInline = null }) {
   const loc = locationOverride;
@@ -284,6 +270,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const searchRef = useRef(null);
   const [searchWrapped, setSearchWrapped] = useState(false);
   const scrollAreaRef = useRef(null);
+  const coverBatchRef = useRef(null);
   const [scrollbarWidth, setScrollbarWidth] = useState(0);
   const [sources, setSources] = useState(() => enabledSources(!!settings.get().showAdultExtensions));
   const [q, setQ] = useState(() => migrationMode ? migrationQuery : lastSearch.q);
@@ -320,6 +307,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     // Catalog stays mounted behind the manga detail page. Keep its blob URLs
     // alive while those cards are hidden so returning to Explore preserves covers.
     if (tab === 'mangas') return;
+    coverBatchRef.current?.cancel();
     clearSearchCoverCache();
     if (!lastSearch.results) return;
     lastSearch.results = lastSearch.results.map((result) => ({
@@ -399,10 +387,14 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
       ? extensions.sources().filter(({ manifest }) => migrationSources.has(manifest.id) && isSourceConfigured(manifest))
       : enabledSources(adultExtensionsEnabled).filter(({ manifest }) => manifest.id !== excludedSourceId);
     if (!list.length && !excludedSourceId) return;
+    const searchKey = JSON.stringify([searchQuery, adultExtensionsEnabled, list.map(({ manifest }) => manifest.id).sort()]);
+    if (!migrationMode && activeSearchKey === searchKey && lastSearch.results?.some((result) => result.status === 'loading')) return;
+    if (!migrationMode) activeSearchKey = searchKey;
     if (!migrationMode) scrollMemory.catalog = 0;
     const main = catalogScroller();
     if (main) main.scrollTop = 0;
     const runId = migrationMode ? ++activeMigrationSearchRun : ++activeSearchRun;
+    coverBatchRef.current?.cancel();
     if (!migrationMode) {
       catalogScroll.clear();
       clearSearchCoverCache();
@@ -411,6 +403,8 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
       lastSearch.genre = '';
       lastSearch.adultExtensionsEnabled = adultExtensionsEnabled;
     }
+    const coverBatch = createSearchCoverBatch();
+    coverBatchRef.current = coverBatch;
     const initialResults = list
       .map((s) => ({ id: s.manifest.id, manifest: s.manifest, status: 'loading', items: [], page: 1, totalPages: 1, hasMore: false }))
       .sort((a, b) => a.manifest.name.localeCompare(b.manifest.name, 'es', { sensitivity: 'base' }));
@@ -420,45 +414,45 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
 
     void Promise.allSettled(list.map(({ manifest }) => extensions.source(manifest.id))).then(() => {
       if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
-      list.forEach(async (s) => {
+      const sourceJobs = list.map(async (s) => {
         try {
           const params = { q: searchQuery, genre: '', page: 1 };
           const r = await api.catalog(params, s.manifest.id);
+          if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
           const items = (r.items || []).filter((m) =>
             (!migrationMode || isUnavailableMangaSource(migrationFromSource) || normalizeMangaTitle(m.title) === normalizeMangaTitle(migrationQuery)) &&
             (s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim())
           ).slice(0, MAX_SEARCH_RESULTS);
-          const visibleCovers = window.cytlex?.fetchImage
-            ? await Promise.all(items.slice(0, 10).map(async (m) => [
-                m.url,
-                await preloadSearchCover(m.cover)
-              ]))
-            : [];
-          const cachedCovers = new Map(visibleCovers.filter(([, cover]) => cover));
-          const loadedItems = items.map((m) => cachedCovers.has(m.url)
-            ? { ...m, coverCached: cachedCovers.get(m.url) }
-            : m);
+          const coverPromises = items.map((m) => coverBatch.preload(m.cover));
           items.forEach((m) => rememberMangaPreview(m, s.manifest.id));
-          if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
-          updateResults((prev) =>
-            prev ? prev.map((x) => (x.id === s.manifest.id
-              ? {
-                  ...x,
-                  status: 'done',
-                  items: loadedItems,
-                  page: 1,
-                  totalPages: r.totalPages || 1,
-                  hasMore: items.length < MAX_SEARCH_RESULTS && (r.hasMore ?? (r.totalPages > 1)),
-                  totalText: r.totalText || ''
-                }
-              : x)) : prev
-          );
+          void Promise.all(coverPromises).then((covers) => {
+            if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+            const loadedItems = items.map((m, index) => covers[index] ? { ...m, coverCached: covers[index] } : m);
+            updateResults((prev) =>
+              prev ? prev.map((x) => (x.id === s.manifest.id
+                ? {
+                    ...x,
+                    status: 'done',
+                    items: loadedItems,
+                    page: r.page || 1,
+                    totalPages: r.totalPages || 1,
+                    hasMore: items.length < MAX_SEARCH_RESULTS && (r.hasMore ?? (r.totalPages > 1)),
+                    totalText: r.totalText || ''
+                  }
+                : x)) : prev
+            );
+          });
         } catch (e) {
           console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);
           if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
           const errorMessage = sourceErrorMessage(e, s.manifest.name);
           updateResults((prev) => (prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'error', errorMessage } : x)) : prev));
         }
+      });
+      void Promise.allSettled(sourceJobs).then(async () => {
+        if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+        await coverBatch.flush();
+        if (!migrationMode && activeSearchKey === searchKey) activeSearchKey = '';
       });
     });
   };

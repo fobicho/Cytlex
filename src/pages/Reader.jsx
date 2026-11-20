@@ -10,7 +10,8 @@ import { tracking } from '../lib/tracking.js';
 import { chapterOrder, detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
-import { browserImageUrl, fetchImage, fetchImageBlob, fetchImageBlobBatch, sourceErrorMessage } from '../lib/browserHttp.js';
+import { browserImageUrl, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchOnfChapter, sourceErrorMessage } from '../lib/browserHttp.js';
+import { readRecentChapter, writeRecentChapter } from '../lib/recentChapters.js';
 import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
@@ -396,6 +397,7 @@ export default function Reader() {
   const chapterUrl = params.get('u') || '';
   const mangaUrl = params.get('m') || '';
   const sourceId = params.get('s') || 'leercapitulo';
+  const recentChapterKey = JSON.stringify([sourceId, extensions.manifest(sourceId)?.version || '0', chapterUrl]);
   const sourceName = extensions.manifest(sourceId)?.name;
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const adultExtensionDisabled = !isExtensionAllowed(extensions.manifest(sourceId), showAdultExtensions);
@@ -556,6 +558,7 @@ export default function Reader() {
   useEffect(() => {
     if (!chapterUrl) return;
     let active = true;
+    const combinedController = new AbortController();
     setErr('');
     wheelZoomRef.current = 0;
     setWheelZoom(0);
@@ -573,7 +576,15 @@ export default function Reader() {
     pendingScrollRef.current = null;
     (async () => {
       try {
-        let r = await api.chapter(chapterUrl, sourceId);
+        let r = extensions.isInstalled(sourceId) && !adultExtensionDisabled ? await readRecentChapter(recentChapterKey) : null;
+        if (!active) return;
+        if (!r && sourceId === 'onfmangas' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
+          try { r = await fetchOnfChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
+        }
+        if (!r && sourceId === 'inmanga' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
+          try { r = await fetchInmangaChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
+        }
+        if (!r) r = await api.chapter(chapterUrl, sourceId);
         if (!r?.pages?.length) r = await api.chapter(chapterUrl, sourceId, { fresh: true });
         if (!active) return;
         if (!r?.pages?.length) {
@@ -596,8 +607,8 @@ export default function Reader() {
       }
     })();
     scrollToTop();
-    return () => { active = false; };
-  }, [chapterUrl, sourceId, sourceName, showAdultExtensions, retryTick]);
+    return () => { active = false; combinedController.abort(); };
+  }, [chapterUrl, sourceId, sourceName, showAdultExtensions, retryTick, recentChapterKey]);
 
   const updateVerticalEnd = useCallback(() => {
     const mainEl = verticalScrollerRef.current;
@@ -707,6 +718,9 @@ export default function Reader() {
       const controller = new AbortController();
       const results = new Map();
       const decodedImages = new Map();
+      const cachedImages = new Array(pageSources.length);
+      let cachedImageCount = 0;
+      let cacheWritten = false;
       const prepareImage = async (src, blob) => {
         const objectUrl = URL.createObjectURL(blob);
         try {
@@ -719,6 +733,13 @@ export default function Reader() {
           }
           decodedImages.set(src, image);
           saveResult(src, objectUrl);
+          pageSources.forEach((pageSrc, index) => {
+            if (pageSrc === src && !cachedImages[index]) { cachedImages[index] = blob; cachedImageCount += 1; }
+          });
+          if (!ch?.fromRecentCache && !cacheWritten && cachedImageCount === pageSources.length) {
+            cacheWritten = true;
+            void writeRecentChapter(recentChapterKey, ch, cachedImages);
+          }
           return true;
         } catch (error) {
           URL.revokeObjectURL(objectUrl);
@@ -764,7 +785,7 @@ export default function Reader() {
       const batchedPages = [];
       const seen = new Set();
       pageSources.forEach((src, index) => {
-        if (!src || seen.has(src) || browserImageUrl(src, imageReferer) === src) return;
+        if (!src || seen.has(src) || (!ch?.combinedImages && browserImageUrl(src, imageReferer) === src)) return;
         seen.add(src);
         batchedPages.push({ src, index, url: src, referer: imageReferer, cookie: imageCookie });
       });
@@ -777,24 +798,35 @@ export default function Reader() {
           for (let offset = 0; offset < batchedPages.length && !cancelled; offset += 40) {
             const batch = batchedPages.slice(offset, offset + 40);
             try {
-              await fetchImageBlobBatch(batch, controller.signal, async ({ blob, error: failure }, resultIndex) => {
-            const { src, index } = batch[resultIndex];
-            if (cancelled || controller.signal.aborted) return;
-            if (blob) {
-              try {
-                const image = pageTransforms?.[index] === 'scramble-4x4' ? await unscramble4x4(blob) : blob;
-                if (!cancelled && !controller.signal.aborted) await prepareImage(src, image);
-              } catch (error) {
-                saveResult(src, { failure: error });
+              const receiveImage = async ({ blob, error: failure }, resultIndex) => {
+                const { src, index } = batch[resultIndex];
+                if (cancelled || controller.signal.aborted) return;
+                if (blob) {
+                  try {
+                    const image = pageTransforms?.[index] === 'scramble-4x4' ? await unscramble4x4(blob) : blob;
+                    if (!cancelled && !controller.signal.aborted) await prepareImage(src, image);
+                  } catch (error) {
+                    saveResult(src, { failure: error });
+                  }
+                } else {
+                  saveResult(src, {
+                    failure,
+                    accessRejected: sourceId === 'onfmangas' && src.startsWith('https://onfmangas.com/') && failure?.status === 403
+                  });
+                }
+                if (!cancelled) setPreloadRevision((revision) => revision + 1);
+              };
+              if (ch?.combinedImages?.length) {
+                const remaining = [];
+                await Promise.all(batch.map(async (entry, resultIndex) => {
+                  if (entry.index >= ch.combinedImages.length) { remaining.push({ ...entry, resultIndex }); return; }
+                  const blob = await ch.combinedImages[entry.index];
+                  await receiveImage({ blob, error: blob ? null : new Error('No se pudo cargar el panel.') }, resultIndex);
+                }));
+                if (remaining.length) await fetchImageBlobBatch(remaining, controller.signal, (result, index) => receiveImage(result, remaining[index].resultIndex));
+              } else {
+                await fetchImageBlobBatch(batch, controller.signal, receiveImage);
               }
-            } else {
-              saveResult(src, {
-                failure,
-                accessRejected: sourceId === 'onfmangas' && src.startsWith('https://onfmangas.com/') && failure?.status === 403
-              });
-            }
-            if (!cancelled) setPreloadRevision((revision) => revision + 1);
-              });
             } catch (error) {
               if (cancelled || controller.signal.aborted) return;
               for (const { src } of batch) if (!results.has(src)) saveResult(src, { failure: error });
@@ -932,7 +964,7 @@ export default function Reader() {
 
   const panelImageProps = (src, index) => {
     const result = preloadedPagesRef.current.get(src);
-    const forcePreload = !!pageTransforms?.[index]
+    const forcePreload = !!ch?.combinedImages?.[index] || !!pageTransforms?.[index]
       || (!window.cytlex?.fetchImage && browserImageUrl(src, imageReferer) !== src);
     return {
       forcePreload,

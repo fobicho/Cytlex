@@ -1,12 +1,14 @@
-import { browserImageUrl, fetchCoverBlob, fetchImage } from './browserHttp.js';
+import { browserImageUrl, fetchCoverBlob, fetchImage, fetchImageBlobBatch, fetchSearchCoverBlobBatch } from './browserHttp.js';
 
 const THUMB_WIDTH = 240;
 const SEARCH_THUMB_WIDTH = 320;
 const MAX_DATAURL = 120000;
 const MAX_SEARCH_COVER_LOADS = 2;
-const MAX_SEARCH_COVERS = 60;
+const MAX_SEARCH_COVERS = 300;
+const SEARCH_COVER_BATCH_SIZE = 40;
 const MAX_LIBRARY_COVERS = 240;
 const MAX_LIBRARY_COVER_LOADS = 4;
+const PROXY_COVER_BATCH_SIZE = 40;
 const LIBRARY_COVER_DB = 'cytlex-library-covers';
 const LIBRARY_COVER_STORE = 'covers';
 const MAX_PERSISTED_LIBRARY_COVERS = 500;
@@ -167,7 +169,7 @@ function idbRequest(request) {
   });
 }
 
-async function readPersistedLibraryCover(url) {
+async function readPersistedLibraryCover(url, allowedPending = null) {
   try {
     const db = await openLibraryCoverDb();
     if (!db) return null;
@@ -175,7 +177,7 @@ async function readPersistedLibraryCover(url) {
     if (!record?.blob) return null;
     const cached = libraryCoverCache.get(url);
     if (typeof cached === 'string') return cached;
-    if (cached) return null;
+    if (cached && cached !== allowedPending) return null;
     const objectUrl = URL.createObjectURL(record.blob);
     libraryCoverCache.set(url, objectUrl);
     markLibraryCoverLoaded(objectUrl);
@@ -184,6 +186,34 @@ async function readPersistedLibraryCover(url) {
     return objectUrl;
   } catch {
     return null;
+  }
+}
+
+async function storeLibraryCoverBlob(url, blob, version, expectedPending) {
+  const originalObjectUrl = URL.createObjectURL(blob);
+  let keepOriginal = false;
+  try {
+    const thumbnail = await makeCoverThumbBlob(originalObjectUrl);
+    const storedBlob = thumbnail && thumbnail.size <= MAX_DATAURL ? thumbnail : null;
+    const objectUrl = storedBlob ? URL.createObjectURL(storedBlob) : originalObjectUrl;
+    keepOriginal = !storedBlob;
+    const decoded = await decodeCover(objectUrl);
+    if (!decoded || (libraryCoverVersions.get(url) || 0) !== version) {
+      URL.revokeObjectURL(objectUrl);
+      return '';
+    }
+    const current = libraryCoverCache.get(url);
+    if (current && current !== expectedPending) {
+      URL.revokeObjectURL(objectUrl);
+      return typeof current === 'string' ? current : '';
+    }
+    markLibraryCoverLoaded(objectUrl);
+    libraryCoverCache.set(url, objectUrl);
+    pruneLibraryCoverCache();
+    if (storedBlob) persistLibraryCover(url, storedBlob, version);
+    return objectUrl;
+  } finally {
+    if (!keepOriginal) URL.revokeObjectURL(originalObjectUrl);
   }
 }
 
@@ -269,6 +299,56 @@ export function getLibraryCover(url) {
   libraryCoverCache.delete(url);
   libraryCoverCache.set(url, cached);
   return cached;
+}
+
+export function preloadLibraryCoversBatch(urls, { web = false } = {}) {
+  if (!web || window.cytlex?.fetchImage) {
+    return Promise.all((urls || []).map((url) => preloadLibraryCover(url, { web })));
+  }
+
+  const entries = [];
+  for (const url of new Set(urls || [])) {
+    if (!url || browserImageUrl(url) === url) continue;
+    const cached = libraryCoverCache.get(url);
+    if (cached) continue;
+    let resolve;
+    const promise = new Promise((done) => { resolve = done; });
+    const entry = { url, promise, resolve, version: libraryCoverVersions.get(url) || 0 };
+    libraryCoverCache.set(url, promise);
+    entries.push(entry);
+  }
+
+  if (!entries.length) return Promise.resolve([]);
+  const fallback = async (entry) => {
+    if (libraryCoverCache.get(entry.url) === entry.promise) libraryCoverCache.delete(entry.url);
+    entry.resolve(await preloadLibraryCover(entry.url, { web: true }));
+  };
+
+  void (async () => {
+    try {
+      const missing = [];
+      await Promise.all(entries.map(async (entry) => {
+        const persisted = await readPersistedLibraryCover(entry.url, entry.promise);
+        if (persisted) entry.resolve(persisted);
+        else if (libraryCoverCache.get(entry.url) === entry.promise) missing.push(entry);
+      }));
+
+      for (let offset = 0; offset < missing.length; offset += PROXY_COVER_BATCH_SIZE) {
+        const batch = missing.slice(offset, offset + PROXY_COVER_BATCH_SIZE);
+        await fetchImageBlobBatch(batch.map(({ url }) => ({ url })), undefined, async ({ blob, error }, index) => {
+          const entry = batch[index];
+          if (error || !blob) { await fallback(entry); return; }
+          const cover = await storeLibraryCoverBlob(entry.url, blob, entry.version, entry.promise);
+          if (cover) entry.resolve(cover);
+          else await fallback(entry);
+        });
+      }
+    } catch {
+      await Promise.all(entries.map((entry) => fallback(entry)));
+    }
+  })();
+
+  return Promise.all(entries.map((entry) => entry.promise));
 }
 
 export async function preloadLibraryCover(url, { web = false, priority = false } = {}) {
@@ -434,6 +514,92 @@ export function preloadSearchCover(url) {
   searchCoverCache.set(url, pending);
   pruneSearchCoverCache();
   return pending;
+}
+
+export function createSearchCoverBatch() {
+  const generation = searchCoverGeneration;
+  const queue = [];
+  const controllers = new Set();
+  const inFlight = new Set();
+  let cancelled = false;
+
+  const dispatch = (entries) => {
+    if (!entries.length) return Promise.resolve();
+    if (cancelled || generation !== searchCoverGeneration) {
+      entries.forEach((entry) => entry.resolve(''));
+      return Promise.resolve();
+    }
+    const controller = new AbortController();
+    controllers.add(controller);
+    const task = fetchSearchCoverBlobBatch(entries, controller.signal, async ({ blob }, index) => {
+      const entry = entries[index];
+      if (cancelled || generation !== searchCoverGeneration || !blob) {
+        entry.resolve('');
+        return;
+      }
+      const originalUrl = URL.createObjectURL(blob);
+      const thumbnail = await makeCoverThumbBlob(originalUrl, SEARCH_THUMB_WIDTH);
+      URL.revokeObjectURL(originalUrl);
+      if (!thumbnail) {
+        entry.resolve('');
+        return;
+      }
+      const objectUrl = URL.createObjectURL(thumbnail);
+      const decoded = await decodeCover(objectUrl);
+      if (!decoded || cancelled || generation !== searchCoverGeneration) {
+        URL.revokeObjectURL(objectUrl);
+        entry.resolve('');
+        return;
+      }
+      loadedSearchCovers.add(objectUrl);
+      decodedSearchCovers.set(objectUrl, decoded);
+      if (searchCoverCache.get(entry.url) === entry.promise) searchCoverCache.set(entry.url, objectUrl);
+      pruneSearchCoverCache();
+      entry.resolve(objectUrl);
+    }).catch(() => {
+      entries.forEach((entry) => entry.resolve(''));
+    }).finally(() => {
+      controllers.delete(controller);
+      searchCoverControllers.delete(controller);
+      inFlight.delete(task);
+    });
+    inFlight.add(task);
+    searchCoverControllers.add(controller);
+    return task;
+  };
+
+  const preload = (url) => {
+    if (cancelled || !url || typeof window === 'undefined' || browserImageUrl(url) === url) return Promise.resolve('');
+    const cached = searchCoverCache.get(url);
+    if (cached) return Promise.resolve(cached);
+
+    let resolve;
+    const promise = new Promise((done) => { resolve = done; });
+    const entry = { url, promise, resolve };
+    searchCoverCache.set(url, promise);
+    queue.push(entry);
+    if (queue.length >= SEARCH_COVER_BATCH_SIZE) dispatch(queue.splice(0, SEARCH_COVER_BATCH_SIZE));
+    pruneSearchCoverCache();
+    return promise;
+  };
+
+  const flush = async () => {
+    if (cancelled || generation !== searchCoverGeneration) return;
+    const tasks = [];
+    while (queue.length) tasks.push(dispatch(queue.splice(0, SEARCH_COVER_BATCH_SIZE)));
+    await Promise.all([...inFlight, ...tasks]);
+  };
+
+  const cancel = () => {
+    cancelled = true;
+    controllers.forEach((controller) => controller.abort());
+    queue.splice(0).forEach((entry) => {
+      if (searchCoverCache.get(entry.url) === entry.promise) searchCoverCache.delete(entry.url);
+      entry.resolve('');
+    });
+  };
+
+  return { preload, flush, cancel };
 }
 
 export async function makeCoverThumb(url, maxWidth = THUMB_WIDTH, signal) {

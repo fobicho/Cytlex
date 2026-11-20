@@ -1,7 +1,7 @@
 import { MigrationSources } from '../components/MigrationSources.jsx';
 import { memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, Puzzle, Link2, ArrowRightLeft, Crosshair } from 'lucide-react';
+import { ChevronLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, Puzzle, Link2, ArrowRightLeft, Crosshair, RefreshCw } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { isMangaCover, lib, mangaSourceUrl, storedCoverThumbnail } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
@@ -250,7 +250,10 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const d = detailState.key === detailKey ? detailState.data : api.peekStaleDetail(mangaUrl, sourceId);
   const [err, setErr] = useState('');
   const [detailRetry, setDetailRetry] = useState(0);
+  const [detailMissingKey, setDetailMissingKey] = useState('');
   const [fav, setFav] = useState(false);
+  const [refreshingDetail, setRefreshingDetail] = useState(false);
+  const detailMissing = detailMissingKey === detailKey;
   const [asc, setAsc] = useState(() => chapterOrder.get(mangaUrl));
   const [groupFilter, setGroupFilter] = useState(() => {
     try {
@@ -362,7 +365,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   }, [coverSrc]);
   const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
   const sourceCover = finalCover;
-  const proxyCover = requiresImageProxy(finalCover) && !!window.cytlex?.fetchImage;
+  const proxyCover = requiresImageProxy(finalCover);
   const cachedCover = getLibraryCover(finalCover) || getSearchCover(finalCover);
   const warmCover = getLibraryCover(knownCover) || getSearchCover(knownCover)
     || (/^(data:|blob:)/i.test(knownCover) || hasLibraryCoverLoaded(knownCover) ? knownCover : '');
@@ -422,7 +425,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             markLibraryCoverLoaded(incomingCover);
             setDisplayedCover(incomingCover);
             setFailedCover('');
-            if (!proxyCover && /^https?:\/\//i.test(finalCover)) preloadLibraryCover(finalCover);
+            if (fav && !proxyCover && /^https?:\/\//i.test(finalCover)) preloadLibraryCover(finalCover);
           }}
           onError={async () => {
             if (coverKeyRef.current !== coverKey) return;
@@ -501,7 +504,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     setExpanded(false);
     setAnimate(false);
     setAsc(chapterOrder.get(mangaUrl));
-    setFav(!!lib.fav(mangaUrl, sourceId));
+    const isFavorite = lib.isFav(mangaUrl, sourceId);
+    setFav(isFavorite);
+    setDetailMissingKey('');
     setAniLinked(!!tracking.get(mangaUrl, sourceId));
 
     let cached = api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId);
@@ -509,6 +514,27 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       ? current : { key: detailKey, data: cached });
     if (cached?.chapters?.length && reconcileMihonProgress(mangaUrl, sourceId, cached.chapters)) {
       setProgressTick((tick) => tick + 1);
+    }
+
+    if (isFavorite) {
+      let alive = true;
+      if (cached?.chapters?.length) {
+        api.persistLibraryDetail(mangaUrl, sourceId, cached);
+        return () => { alive = false; };
+      }
+      api.restoreDetail(mangaUrl, sourceId).then((saved) => {
+        if (!alive) return;
+        if (saved?.chapters?.length) {
+          api.persistLibraryDetail(mangaUrl, sourceId, saved);
+          if (reconcileMihonProgress(mangaUrl, sourceId, saved.chapters)) {
+            setProgressTick((tick) => tick + 1);
+          }
+          setDetailState({ key: detailKey, data: saved });
+          return;
+        }
+        setDetailMissingKey(detailKey);
+      });
+      return () => { alive = false; };
     }
 
     let alive = true;
@@ -627,10 +653,45 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     const chapterUrls = (d?.chapters || []).map((chapter) => chapter.url).filter(Boolean);
     chapterIndex.set(manga.url, manga.sourceId, chapterUrls);
     lib.toggleFav({ ...manga, chapterTotal: chapterUrls.length }, catIds);
+    api.persistLibraryDetail(manga.url, manga.sourceId, d);
     setFav(true);
     makeCoverThumb(manga.cover).then((local) => {
       if (local) lib.updateFav(manga.url, { coverLocal: local }, manga.sourceId);
     });
+  };
+
+  const refreshLibraryDetail = async () => {
+    if (refreshingDetail || !fav) return;
+    setRefreshingDetail(true);
+    setErr('');
+    try {
+      const refreshed = await api.refreshDetail(mangaUrl, sourceId);
+      if (!Array.isArray(refreshed?.chapters) || !refreshed.chapters.length) {
+        throw new Error('La fuente no devolvió capítulos.');
+      }
+      if (d?.chapters?.length) reconcileChapterProgress(d.chapters, refreshed.chapters, sourceId, sourceId, mangaUrl);
+      reconcileMihonProgress(mangaUrl, sourceId, refreshed.chapters);
+      chapterIndex.set(mangaUrl, sourceId, refreshed.chapters.map((chapter) => chapter.url).filter(Boolean));
+      setDetailState({ key: detailKey, data: refreshed });
+      const saved = lib.fav(mangaUrl, sourceId);
+      if (saved) {
+        lib.updateFav(mangaUrl, {
+          title: refreshed.title || saved.title,
+          cover: refreshed.cover || saved.cover,
+          type: refreshed.facts?.tipo || saved.type,
+          author: refreshed.facts?.autor || refreshed.author || refreshed.artist || saved.author,
+          description: refreshed.sinopsis || saved.description,
+          genres: refreshed.genres?.length ? refreshed.genres : saved.genres,
+          chapterTotal: refreshed.chapters.length
+        }, sourceId);
+        api.persistLibraryDetail(mangaUrl, sourceId, refreshed);
+        setCoverTick((tick) => tick + 1);
+      }
+    } catch (error) {
+      setErr(sourceErrorMessage(error, sourceName, 'No se pudo actualizar el detalle.'));
+    } finally {
+      setRefreshingDetail(false);
+    }
   };
 
   const replaceLibraryEntry = async (existing, manga) => {
@@ -665,6 +726,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       coverLocal: '',
       coverCached: ''
     }, existingSourceId);
+    api.persistLibraryDetail(manga.url, manga.sourceId, d);
     reconcileChapterProgress(previousChapters, d?.chapters || [], existingSourceId, manga.sourceId, manga.url);
     reconcileMihonProgress(manga.url, manga.sourceId, d?.chapters || []);
     progress.removeMany(oldProgressUrls, existingSourceId);
@@ -741,6 +803,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       }
     } else if (alreadySaved) {
       lib.toggleFav(pending);
+      void api.removeLibraryDetail(pending.url, pending.sourceId);
       setFav(false);
     }
     setCatPick(null);
@@ -1098,11 +1161,21 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 <Skeleton style={{ height: px(32, scale, 25), width: '66%', maxWidth: px(448, scale, 350) }} />
               )}
             </div>
-            {err ? (
+            {detailMissing && fav && !err ? (
+              <div className="mt-5 text-sm text-muted-foreground" role="status">
+                <p>El detalle aún no está guardado en este dispositivo.</p>
+                <Button className="mt-3" variant="secondary" disabled={refreshingDetail} onClick={() => void refreshLibraryDetail()}>
+                  <RefreshCw className={cn('mr-2 h-4 w-4', refreshingDetail && 'animate-spin')} />
+                  {refreshingDetail ? 'Cargando detalle…' : 'Cargar detalle'}
+                </Button>
+              </div>
+            ) : err ? (
               <div className="mt-5 text-sm text-muted-foreground" role="status">
                 <p className="font-medium text-foreground">No se pudieron cargar los capítulos.</p>
                 <p className="mt-1 break-words">{err}</p>
-                <Button className="mt-3" variant="secondary" onClick={() => setDetailRetry((attempt) => attempt + 1)}>Reintentar</Button>
+                <Button className="mt-3" variant="secondary" disabled={refreshingDetail} onClick={() => fav ? void refreshLibraryDetail() : setDetailRetry((attempt) => attempt + 1)}>
+                  {fav ? 'Reintentar carga' : 'Reintentar'}
+                </Button>
               </div>
             ) : (
               <div className="mt-2 flex flex-wrap items-center" style={{ gap: px(8, scale, 6) }}>
@@ -1113,7 +1186,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               </div>
             )}
           </div>
-          {!err && (
+          {!err && !detailMissing && (
             <div className="col-span-2 min-w-0 md:col-span-1 md:col-start-2" style={{ marginTop: px(4, scale, 3) }}>
               <div className="flex flex-col" style={{ gap: px(8, scale, 6) }}>
                 <Skeleton style={{ height: px(14, scale, 11) }} />
@@ -1293,6 +1366,27 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             )}
           </Button>
         ) : null}
+        {fav && (
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={refreshingDetail}
+            title="Actualizar detalle desde la fuente"
+            aria-label="Actualizar detalle desde la fuente"
+            onClick={(event) => { event.currentTarget.blur(); void refreshLibraryDetail(); }}
+            style={{
+              height: px(40, scale, 33),
+              minHeight: px(40, scale, 33),
+              flexShrink: 0,
+              paddingLeft: px(12, scale, 10),
+              paddingRight: px(12, scale, 10),
+              fontSize: fontPx(14, scale, 12)
+            }}
+          >
+            <RefreshCw className={cn('mr-2 shrink-0', refreshingDetail && 'animate-spin')} style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+            {refreshingDetail ? 'Actualizando' : 'Actualizar'}
+          </Button>
+        )}
         <div className="relative" ref={catMenuRef}>
           <Button
             variant="secondary"

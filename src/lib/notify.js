@@ -10,7 +10,7 @@ let running = false;
 
 async function countChapters(manga) {
   const sourceId = manga.sourceId || 'leercapitulo';
-  const d = await api.detail(manga.url, sourceId, { cacheResult: false });
+  const d = await api.refreshDetail(manga.url, sourceId);
   if (!Array.isArray(d?.chapters) || !d.chapters.length) return null;
   chapterIndex.set(manga.url, sourceId, d.chapters.map((chapter) => chapter.url));
   return d.chapters.length;

@@ -58,7 +58,8 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
     cachedCover: unavailable ? unavailableCachedCover : ''
   });
   const hasElectronImageProxy = typeof window !== 'undefined' && !!window.cytlex?.fetchImage;
-  const proxyCover = requiresImageProxy(preferredCover) && hasElectronImageProxy;
+  const isMangaDexCover = /^https:\/\/uploads\.mangadex\.org\//i.test(preferredCover);
+  const proxyCover = requiresImageProxy(preferredCover) && (hasElectronImageProxy || isMangaDexCover);
   const coverRef = useRef(null);
   const coverImageRef = useRef(null);
   const [coverState, setCoverState] = useState(() => {

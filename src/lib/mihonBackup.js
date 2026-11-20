@@ -387,7 +387,7 @@ export function mergeChapterProgress(...lists) {
   return [...merged.values()];
 }
 
-export function importMihonBackup(candidate) {
+export function importMihonBackup(candidate, { clearCachedCoverUrls = new Set() } = {}) {
   const importableEntries = candidate.entries;
   const previous = Object.fromEntries([FAVORITES_KEY, CATEGORIES_KEY].map((key) => [key, localStorage.getItem(key)]));
   const currentCategories = readStored(CATEGORIES_KEY, [{ id: 'todos', name: 'Todos' }]);
@@ -560,6 +560,7 @@ export function importMihonBackup(candidate) {
       const keepExistingCover = isMangaCover(existing.cover, url) && (matchedByWork || sameEntry);
       const incomingCover = !matchedByWork || sameEntry ? manga.cover : '';
       const cover = (keepExistingCover && existing.cover) || incomingCover || '';
+      const clearCachedCover = clearCachedCoverUrls.has(cover);
       const existingCats = Array.isArray(existing.cats) ? existing.cats : [];
       const keptCategories = existingCats.filter((id) => !previousMihonCategoryIds.has(id)
         && !(defaultCategoryId === id && manga.cats.length));
@@ -577,8 +578,8 @@ export function importMihonBackup(candidate) {
         cover,
         chapterTotal: Math.max(Number(existing.chapterTotal) || 0, Number(manga.chapterTotal) || 0),
         chapterReadCount: Math.max(Number(existing.chapterReadCount) || 0, Number(manga.chapterReadCount) || 0),
-        coverLocal: keepExistingCover && cover === existing.cover ? existing.coverLocal || '' : '',
-        coverCached: keepExistingCover && cover === existing.cover ? existing.coverCached || '' : '',
+        coverLocal: !clearCachedCover && keepExistingCover && cover === existing.cover ? existing.coverLocal || '' : '',
+        coverCached: !clearCachedCover && keepExistingCover && cover === existing.cover ? existing.coverCached || '' : '',
         cats: [...new Set([...keptCategories, ...manga.cats])]
       };
       byManga.set(key, index);

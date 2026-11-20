@@ -1,13 +1,15 @@
-const stores = ['details', 'searches'];
+const stores = ['details', 'searches', 'library-details'];
 let opening;
 
 function openCache() {
   if (!globalThis.indexedDB) return Promise.resolve(null);
   return opening ??= new Promise((resolve, reject) => {
-    const request = indexedDB.open('cytlex-source-cache', 1);
+    const request = indexedDB.open('cytlex-source-cache', 2);
     request.onupgradeneeded = () => {
       for (const name of stores) {
-        request.result.createObjectStore(name, { keyPath: 'key' }).createIndex('at', 'at');
+        if (!request.result.objectStoreNames.contains(name)) {
+          request.result.createObjectStore(name, { keyPath: 'key' }).createIndex('at', 'at');
+        }
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -48,6 +50,32 @@ export async function writeSourceCache(name, key, value, limit) {
         cursor.result.continue();
       };
     };
+  } catch {}
+}
+
+export async function listSourceCache(name) {
+  try {
+    const db = await openCache();
+    if (!db) return [];
+    return await new Promise((resolve, reject) => {
+      const request = db.transaction(name).objectStore(name).getAll();
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteSourceCache(name, key) {
+  try {
+    const db = await openCache();
+    if (!db) return;
+    await new Promise((resolve, reject) => {
+      const request = db.transaction(name, 'readwrite').objectStore(name).delete(key);
+      request.onsuccess = resolve;
+      request.onerror = () => reject(request.error);
+    });
   } catch {}
 }
 

@@ -531,6 +531,100 @@ async function handleBatchRequest(request) {
   });
 }
 
+function bytesToBase64(bytes) {
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
+async function handleCombinedSearchRequest(request) {
+  const contentLength = Number(request.headers.get('content-length')) || 0;
+  if (contentLength > 1_000_000) return errorResponse('Request body is too large', 413);
+  let payload;
+  try {
+    const body = await request.arrayBuffer();
+    if (body.byteLength > 1_000_000) return errorResponse('Request body is too large', 413);
+    payload = JSON.parse(new TextDecoder().decode(body));
+  } catch { return errorResponse('Invalid combined search payload', 400); }
+
+  const requests = payload?.requests;
+  const catalogUrl = payload?.catalog?.url;
+  if (!Array.isArray(requests) || requests.length + (catalogUrl ? 1 : 0) < 1
+    || requests.length + (catalogUrl ? 1 : 0) > PROXY_BATCH_MAX_REQUESTS) return errorResponse('Invalid batch size', 400);
+  const catalogTarget = catalogUrl ? validateTarget(catalogUrl) : null;
+  if (catalogUrl && (!catalogTarget || catalogTarget.origin !== 'https://api.mangadex.org'
+    || catalogTarget.pathname !== '/manga' || Number(catalogTarget.searchParams.get('limit')) !== 40
+    || !catalogTarget.searchParams.getAll('includes[]').includes('cover_art'))) return errorResponse('Invalid MangaDex catalog request', 400);
+
+  const encoder = new TextEncoder();
+  let stopped = false;
+  const body = new ReadableStream({
+    async start(controller) {
+      const send = (value) => { if (!stopped) controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`)); };
+      try {
+        send({ type: 'start' });
+        let nextIndex = 0;
+        let totalResponseBytes = 0;
+        const workers = Array.from({ length: Math.min(PROXY_BATCH_CONCURRENCY, requests.length) }, async () => {
+          while (!stopped && nextIndex < requests.length) {
+            const index = nextIndex++;
+            const result = await fetchBatchItem(requests[index], request);
+            totalResponseBytes += encoder.encode(result?.text || '').byteLength;
+            send({ type: 'result', index, result: totalResponseBytes <= PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES ? result : { fallback: true } });
+          }
+        });
+        const catalogTask = catalogTarget ? (async () => {
+          const response = await handleMangaDexCatalog(request, catalogTarget);
+          const contentType = response.headers.get('content-type') || '';
+          if (!response.ok || !contentType.includes('application/vnd.cytlex.catalog-stream') || !response.body) {
+            send({ type: 'catalog', status: response.status, contentType, errorOrigin: response.headers.get('x-cytlex-error-origin') || 'source', upstreamError: response.headers.get('x-cytlex-upstream-error') || '' });
+            return;
+          }
+          const reader = response.body.getReader();
+          let buffer = new Uint8Array();
+          const read = async (size, allowEnd = false) => {
+            while (buffer.length < size) {
+              const { value, done } = await reader.read();
+              if (done) {
+                if (allowEnd && !buffer.length) return null;
+                throw new Error('Incomplete MangaDex catalog stream');
+              }
+              const joined = new Uint8Array(buffer.length + value.length);
+              joined.set(buffer); joined.set(value, buffer.length); buffer = joined;
+            }
+            const value = buffer.slice(0, size); buffer = buffer.slice(size); return value;
+          };
+          const frame = async (allowEnd = false) => {
+            const prefix = await read(4, allowEnd);
+            if (!prefix) return null;
+            const size = new DataView(prefix.buffer).getUint32(0);
+            if (!size || size > 3 * 1024 * 1024) throw new Error('Invalid MangaDex catalog frame');
+            return JSON.parse(new TextDecoder().decode(await read(size)));
+          };
+          const first = await frame();
+          if (typeof first?.catalog !== 'string' || !Array.isArray(first.images) || first.images.length > 40) throw new Error('Invalid MangaDex catalog metadata');
+          send({ type: 'catalog', status: response.status, contentType, catalog: first.catalog, images: first.images });
+          while (!stopped) {
+            const image = await frame(true);
+            if (!image) break;
+            if (!Number.isInteger(image.index) || !Number.isInteger(image.length) || image.length < 0 || image.length > PROXY_IMAGE_BATCH_ITEM_MAX_BYTES) throw new Error('Invalid MangaDex cover frame');
+            const bytes = await read(image.length);
+            send({ type: 'catalog-image', index: image.index, status: image.status, contentType: image.contentType || '', body: bytesToBase64(bytes) });
+          }
+        })() : Promise.resolve();
+        await Promise.all([...workers, catalogTask]);
+        if (!stopped) controller.close();
+      } catch (error) {
+        if (!stopped) controller.error(error);
+      }
+    },
+    cancel() { stopped = true; }
+  });
+  return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/x-ndjson; charset=utf-8', 'x-cytlex-search-batch': '1' } });
+}
+
 function createImageSubrequestBudget(total, limit = PROXY_IMAGE_BATCH_MAX_SUBREQUESTS) {
   let used = 0;
   let pendingInitial = total;
@@ -827,6 +921,181 @@ async function handleMangaDexCatalog(request, target) {
   } finally { clearTimeout(timeout); }
 }
 
+async function handleOnfChapter(request, target) {
+  if (target.origin !== 'https://onfmangas.com' || !target.pathname.startsWith('/lector/')) return errorResponse('Invalid ONF chapter', 400);
+  const deadline = new AbortController();
+  const timeout = setTimeout(() => deadline.abort(), 12000);
+  const signal = AbortSignal.any([request.signal, deadline.signal]);
+  try {
+    const first = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    if (first.proxyError) return first.proxyError;
+    if (!first.upstream.ok) return new Response(null, { status: first.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
+    const html = await new Response(limitResponseBody(first.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
+    const access = html.match(/(?:window\.)?onfReaderPagesPromise\s*=\s*[\s\S]{0,12000}?\)\s*\(\s*["']([A-Za-z0-9_-]{128,4096})["']\s*\)\s*:\s*Promise\.resolve\b/i)?.[1];
+    if (!access) return errorResponse('ONF chapter requires the standard reader', 422);
+    const cookiePairs = new Map([...onfCookiePairs(request), ...responseOnfCookies(first.upstream)].map((pair) => [pair.slice(0, pair.indexOf('=')), pair]));
+    let cookies = [...cookiePairs.values()].join('; ').slice(0, 4096);
+    const pageTarget = new URL('https://onfmangas.com/reader_pages.php');
+    const pageHeaders = new Headers(request.headers);
+    pageHeaders.set('x-cytlex-onf-cookie', cookies);
+    pageHeaders.set('content-type', 'application/json');
+    pageHeaders.set('x-requested-with', 'XMLHttpRequest');
+    const pageRequest = new Request(request.url, { method: 'POST', headers: pageHeaders });
+    const second = await fetchTarget(pageTarget, 'POST', forwardedHeaders(pageRequest, pageTarget), JSON.stringify({ access }), signal, { retries: 0 });
+    if (second.proxyError || !second.upstream?.ok) return errorResponse('ONF page list unavailable', 422);
+    for (const pair of responseOnfCookies(second.upstream)) cookiePairs.set(pair.slice(0, pair.indexOf('=')), pair);
+    cookies = [...cookiePairs.values()].join('; ').slice(0, 4096);
+    const raw = await new Response(limitResponseBody(second.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
+    const payload = JSON.parse(raw);
+    if (!Array.isArray(payload.pages) || !payload.pages.length || payload.pages.length > 1000) return errorResponse('Invalid ONF page list', 422);
+    const entries = payload.pages.map((page) => {
+      const src = typeof page === 'string' ? page : page?.src || page?.url;
+      const fallback = typeof page === 'object' ? page?.fallback : '';
+      const image = new URL(src, target);
+      if (!validateTarget(image.href)) throw new Error('Invalid ONF image');
+      const alternate = fallback ? new URL(fallback, target) : null;
+      if (alternate && !validateTarget(alternate.href)) throw new Error('Invalid ONF image fallback');
+      return { url: image.href, fallback: alternate?.href || '' };
+    });
+    const initial = entries.slice(0, 40);
+    const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 2);
+    const byteBudget = createImageByteBudget();
+    let stopped = false, next = 0;
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      async start(controller) {
+        const write = (metadata, bytes = new Uint8Array()) => {
+          const data = encoder.encode(JSON.stringify(metadata));
+          const prefix = new Uint8Array(4); new DataView(prefix.buffer).setUint32(0, data.length);
+          controller.enqueue(prefix); controller.enqueue(data); if (bytes.length) controller.enqueue(bytes);
+        };
+        try {
+          write({ pages: entries.map((entry) => entry.url), pageFallbacks: entries.map((entry) => entry.fallback), imageCookie: cookies });
+          await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
+            while (!stopped && next < initial.length) {
+              const index = next++;
+              const result = await fetchImageBatchItem({ url: initial[index].url, referer: target.href, onfCookie: cookies }, request, subrequestBudget, byteBudget);
+              if (stopped) return;
+              const bytes = result.body ? new Uint8Array(await result.body.arrayBuffer()) : new Uint8Array();
+              write({ index, length: bytes.length, status: result.status, contentType: result.contentType || '' }, bytes);
+            }
+          }));
+          if (!stopped) controller.close();
+        } catch (error) { if (!stopped) controller.error(error); }
+      }, cancel() { stopped = true; }
+    });
+    return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
+  } catch (error) {
+    return errorResponse('ONF chapter unavailable', deadline.signal.aborted ? 504 : 422);
+  } finally { clearTimeout(timeout); }
+}
+
+async function handleInmangaChapter(request, target) {
+  if (target.origin !== 'https://inmanga.com' || !target.pathname.startsWith('/chapter/chapterIndexControls')) {
+    return errorResponse('Invalid InManga chapter', 400);
+  }
+  const chapterId = target.searchParams.get('identification') || '';
+  const mangaId = target.searchParams.get('mangaIdentification') || '';
+  if (!/^[\w-]{1,128}$/.test(chapterId) || !/^[\w-]{1,128}$/.test(mangaId)) {
+    return errorResponse('Invalid InManga chapter identifiers', 400);
+  }
+
+  const deadline = new AbortController();
+  const timeout = setTimeout(() => deadline.abort(), 12000);
+  const signal = AbortSignal.any([request.signal, deadline.signal]);
+  try {
+    const pageTarget = new URL('/chapter/chapterIndexControls', target.origin);
+    pageTarget.searchParams.set('identification', chapterId);
+    const first = await fetchTarget(pageTarget, 'GET', forwardedHeaders(request, pageTarget), undefined, signal, { retries: 0 });
+    if (first.proxyError) return first.proxyError;
+    if (!first.upstream.ok) return new Response(null, { status: first.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
+    const html = await new Response(limitResponseBody(first.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
+    const valueFor = (id) => {
+      const tag = html.match(new RegExp(`<[^>]+\\bid=["']${id}["'][^>]*>`, 'i'))?.[0] || '';
+      return tag.match(/\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i)?.slice(1).find(Boolean) || '';
+    };
+    const mangaUuid = valueFor('MangaIdentification') || mangaId;
+    const chapterUuid = valueFor('ChapterIdentification') || chapterId.toLowerCase();
+    const safeSegment = (value) => /^[\w-]{1,128}$/.test(value);
+    if (!safeSegment(mangaUuid) || !safeSegment(chapterUuid)) return errorResponse('Invalid InManga page identifiers', 422);
+
+    const imageTags = [...html.matchAll(/<img\b[^>]*>/gi)].map(([tag]) => tag);
+    const imagePageIds = imageTags.flatMap((tag) => {
+      const classes = /\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(tag)?.slice(1).find(Boolean) || '';
+      if (!/\bImageContainer\b/.test(classes)) return [];
+      const id = /\bid\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag)?.slice(1).find(Boolean) || '';
+      return safeSegment(id) ? [id] : [];
+    });
+    const pageList = html.match(/<(select|div|ul|ol)\b(?=[^>]*\bid=["']PageList["'])[^>]*>([\s\S]*?)<\/\1\s*>/i)?.[2] || '';
+    const listedPageIds = [...pageList.matchAll(/<(?:option|li|div)\b[^>]*>/gi)]
+      .map(([tag]) => /\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag)?.slice(1).find(Boolean)
+        || /\bid\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag)?.slice(1).find(Boolean)
+        || '')
+      .filter(safeSegment);
+    const pageIds = [...new Set(imagePageIds.length ? imagePageIds : listedPageIds)];
+    if (!pageIds.length || pageIds.length > 1000) return errorResponse('Invalid InManga page list', 422);
+
+    const chapterNumber = target.searchParams.get('number') || valueFor('ChapterNumber');
+    const slug = target.searchParams.get('slug') || valueFor('FriendlyMangaName');
+    const legacyMangaName = valueFor('FriendlyMangaName') || slug;
+    const legacyChapterNumber = valueFor('FriendlyChapterNumberUrl') || chapterNumber;
+    const imageReferer = slug && chapterNumber
+      ? `https://inmanga.com/ver/manga/${encodeURIComponent(slug)}/${encodeURIComponent(chapterNumber)}/${encodeURIComponent(chapterUuid)}`
+      : 'https://inmanga.com/';
+    const entries = pageIds.map((id, index) => {
+      const url = `https://cdn1.intomanga.com/i/m/${encodeURIComponent(mangaUuid)}/c/${encodeURIComponent(chapterUuid)}/o/${encodeURIComponent(id)}.jpg`;
+      const fallback = legacyMangaName && legacyChapterNumber
+        ? `https://pack-yak.intomanga.com/images/manga/${encodeURIComponent(legacyMangaName)}/chapter/${encodeURIComponent(legacyChapterNumber)}/page/${index + 1}/${encodeURIComponent(id)}`
+        : '';
+      if (!validateTarget(url) || (fallback && !validateTarget(fallback))) throw new Error('Invalid InManga image URL');
+      return { url, fallback };
+    });
+    const initial = entries.slice(0, 40);
+    const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 2);
+    const byteBudget = createImageByteBudget();
+    let stopped = false;
+    let next = 0;
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      async start(controller) {
+        const write = (metadata, bytes = new Uint8Array()) => {
+          const data = encoder.encode(JSON.stringify(metadata));
+          const prefix = new Uint8Array(4);
+          new DataView(prefix.buffer).setUint32(0, data.length);
+          controller.enqueue(prefix); controller.enqueue(data);
+          if (bytes.length) controller.enqueue(bytes);
+        };
+        try {
+          write({
+            pages: entries.map((entry) => entry.url),
+            pageFallbacks: entries.map((entry) => entry.fallback),
+            imageReferer,
+            label: `Capítulo ${chapterNumber || ''}`.trim(),
+            mangaUrl: `https://inmanga.com/ver/manga/${encodeURIComponent(slug || '')}/${encodeURIComponent(mangaUuid)}`
+          });
+          await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
+            while (!stopped && next < initial.length) {
+              const index = next++;
+              let result = await fetchImageBatchItem({ url: initial[index].url, referer: imageReferer }, request, subrequestBudget, byteBudget);
+              if (result.status >= 400 && initial[index].fallback) {
+                result = await fetchImageBatchItem({ url: initial[index].fallback, referer: imageReferer }, request, subrequestBudget, byteBudget);
+              }
+              if (stopped) return;
+              const bytes = result.body ? new Uint8Array(await result.body.arrayBuffer()) : new Uint8Array();
+              write({ index, length: bytes.length, status: result.status, contentType: result.contentType || '' }, bytes);
+            }
+          }));
+          if (!stopped) controller.close();
+        } catch (error) { if (!stopped) controller.error(error); }
+      },
+      cancel() { stopped = true; }
+    });
+    return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
+  } catch (error) {
+    return errorResponse('InManga chapter unavailable', deadline.signal.aborted ? 504 : 422);
+  } finally { clearTimeout(timeout); }
+}
+
 export async function onRequest(context) {
   const { request } = context;
   const method = request.method.toUpperCase();
@@ -843,9 +1112,21 @@ export async function onRequest(context) {
     if (method !== 'POST') return errorResponse('Method not allowed', 405);
     return handleBatchRequest(request);
   }
+  if (batchMode === 'search') {
+    if (method !== 'POST') return errorResponse('Method not allowed', 405);
+    return handleCombinedSearchRequest(request);
+  }
 
   const target = validateTarget(new URL(request.url).searchParams.get('url'));
   if (!target) return errorResponse('Target is not allowed', 403, true);
+  if (new URL(request.url).searchParams.get('chapter') === 'onf') {
+    if (method !== 'GET') return errorResponse('Method not allowed', 405);
+    return handleOnfChapter(request, target);
+  }
+  if (new URL(request.url).searchParams.get('chapter') === 'inmanga') {
+    if (method !== 'GET') return errorResponse('Method not allowed', 405);
+    return handleInmangaChapter(request, target);
+  }
   if (new URL(request.url).searchParams.get('catalog') === 'mangadex') {
     if (method !== 'GET') return errorResponse('Method not allowed', 405);
     return handleMangaDexCatalog(request, target);

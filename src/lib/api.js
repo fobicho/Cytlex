@@ -1,7 +1,7 @@
 import { extensions, isExtensionAllowed } from './extensions.js';
 import { settings } from './settings.js';
-import { mangaSourceUrl } from './library.js';
-import { readSourceCache, writeSourceCache } from './sourceCache.js';
+import { lib, mangaSourceUrl } from './library.js';
+import { deleteSourceCache, listSourceCache, readSourceCache, writeSourceCache } from './sourceCache.js';
 
 function bridge() {
   if (typeof window !== 'undefined' && window.cytlex) return window.cytlex;
@@ -26,13 +26,14 @@ async function resolveSource(sourceId) {
   return extensions.source(sourceId);
 }
 
-const DETAIL_TTL_MS = 10 * 60 * 1000;
+const DETAIL_TTL_MS = 24 * 60 * 60 * 1000;
 const DETAIL_CACHE_MAX = 40;
 const DETAIL_TIMEOUT_MS = 16000;
 const DETAIL_NOT_FOUND_TTL_MS = 60 * 1000;
 const CHAPTER_TTL_MS = 2 * 60 * 1000;
 const CHAPTER_CACHE_MAX = 40;
 const CATALOG_TTL_MS = 30 * 1000;
+const PERSISTED_CATALOG_TTL_MS = 5 * 60 * 1000;
 const CATALOG_CACHE_MAX = 80;
 
 const detailCache = new Map();
@@ -160,9 +161,9 @@ const pruneCache = (cache, ttl, max) => {
   while (cache.size > max) cache.delete(cache.keys().next().value);
 };
 
-const storeDetail = (key, value) => {
+const storeDetail = (key, value, at = Date.now()) => {
   detailCache.delete(key);
-  detailCache.set(key, { at: Date.now(), value });
+  detailCache.set(key, { at, value });
   while (detailCache.size > DETAIL_CACHE_MAX) detailCache.delete(detailCache.keys().next().value);
 };
 
@@ -178,7 +179,10 @@ export const api = {
   },
 
   async restoreDetail(url, sourceId) {
-    const entry = await readSourceCache('details', detailKey(url, sourceId));
+    const key = detailKey(url, sourceId);
+    const entry = lib.isFav(url, sourceId)
+      ? await readSourceCache('library-details', key) || await readSourceCache('details', key)
+      : await readSourceCache('details', key);
     return entry?.value || null;
   },
 
@@ -186,6 +190,10 @@ export const api = {
     const src = await resolveSource(sourceId);
     const browser = !bridge()?.httpGet;
     const key = browser ? catalogKey(args, sourceId) : '';
+    const { q = '', page = 1, genre = '', year = '', status = '', type = '', sort = '' } = args || {};
+    const searchKey = isMangaDex(sourceId)
+      ? JSON.stringify([sourceCacheKey(sourceId), q, page, genre, year, status, type, sort])
+      : key;
     if (browser) {
       const hit = catalogCache.get(key);
       if (hit && Date.now() - hit.at <= CATALOG_TTL_MS) {
@@ -198,18 +206,14 @@ export const api = {
     }
 
     const request = (async () => {
-      if (!isMangaDex(sourceId)) return src.catalog(args);
-
-      const { q = '', page = 1, genre = '', year = '', status = '', type = '', sort = '' } = args || {};
-      const searchKey = JSON.stringify([sourceCacheKey(sourceId), q, page, genre, year, status, type, sort]);
+      const saved = browser ? await readSourceCache('searches', searchKey) : null;
+      const savedAge = Date.now() - (saved?.at || 0);
+      if (saved?.value?.items && savedAge >= 0 && savedAge <= PERSISTED_CATALOG_TTL_MS) return saved.value;
       try {
-        const result = await src.catalog(args);
-        if (Array.isArray(result?.items)) void writeSourceCache('searches', searchKey, result, 30);
-        return result;
+        return await src.catalog(args);
       } catch (error) {
-        if (/\b(?:ENOTFOUND|HTTP (?:429|50[234]))\b/.test(String(error?.message || error))) {
-          const entry = await readSourceCache('searches', searchKey);
-          if (entry?.value.items.length && Date.now() - entry.at <= 7 * 24 * 60 * 60 * 1000) return entry.value;
+        if (isMangaDex(sourceId) && /\b(?:ENOTFOUND|HTTP (?:429|50[234]))\b/.test(String(error?.message || error))) {
+          if (saved?.value?.items?.length && savedAge <= 7 * 24 * 60 * 60 * 1000) return saved.value;
         }
         throw error;
       }
@@ -221,6 +225,7 @@ export const api = {
       if (browser && Array.isArray(result?.items)) {
         catalogCache.set(key, { at: Date.now(), value: result });
         while (catalogCache.size > CATALOG_CACHE_MAX) catalogCache.delete(catalogCache.keys().next().value);
+        await writeSourceCache('searches', searchKey, result, 100);
       }
       return result;
     } finally {
@@ -237,13 +242,32 @@ export const api = {
     if (!sourceId || !extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
     assertSourceEnabled(sourceId);
     const key = detailKey(url, sourceId);
-    const hit = freshEntry(key);
+    const isFavorite = lib.isFav(url, sourceId);
+    const hit = cacheResult ? freshEntry(key) : null;
     if (hit) {
       if (persistResult && !detailCache.get(key).persisted) {
         detailCache.get(key).persisted = true;
         void writeSourceCache('details', key, hit, DETAIL_CACHE_MAX);
       }
+      if (isFavorite) void writeSourceCache('library-details', key, hit, 1000);
       return hit;
+    }
+    if (cacheResult) {
+      if (isFavorite) {
+        const pinned = await readSourceCache('library-details', key);
+        if (pinned?.value?.chapters?.length) {
+          storeDetail(key, pinned.value, pinned.at);
+          detailCache.get(key).persisted = true;
+          return pinned.value;
+        }
+      }
+      const saved = await readSourceCache('details', key);
+      if (saved?.value?.chapters?.length && Date.now() - saved.at >= 0 && Date.now() - saved.at <= DETAIL_TTL_MS) {
+        storeDetail(key, saved.value, saved.at);
+        detailCache.get(key).persisted = true;
+        if (isFavorite) void writeSourceCache('library-details', key, saved.value, 1000);
+        return saved.value;
+      }
     }
     const failed = detailNotFound.get(key);
     if (failed && Date.now() - failed.at < DETAIL_NOT_FOUND_TTL_MS) throw failed.error;
@@ -265,6 +289,7 @@ export const api = {
           entry.persisted = true;
           void writeSourceCache('details', key, result, DETAIL_CACHE_MAX);
         }
+        if (isFavorite) void writeSourceCache('library-details', key, result, 1000);
       }
       return result;
     } catch (error) {
@@ -280,7 +305,31 @@ export const api = {
 
   async refreshDetail(url, sourceId) {
     const src = await resolveSource(sourceId);
-    return src.detail(mangaSourceUrl(url, sourceId));
+    const result = await withDetailDeadline(src.detail(mangaSourceUrl(url, sourceId)));
+    if (result?.chapters?.length) {
+      const key = detailKey(url, sourceId);
+      storeDetail(key, result);
+      detailCache.get(key).persisted = true;
+      void writeSourceCache('details', key, result, DETAIL_CACHE_MAX);
+      if (lib.isFav(url, sourceId)) void writeSourceCache('library-details', key, result, 1000);
+    }
+    return result;
+  },
+
+  persistLibraryDetail(url, sourceId, value) {
+    if (!lib.isFav(url, sourceId) || !value?.chapters?.length) return;
+    void writeSourceCache('library-details', detailKey(url, sourceId), value, 1000);
+  },
+
+  removeLibraryDetail(url, sourceId) {
+    return deleteSourceCache('library-details', detailKey(url, sourceId));
+  },
+
+  async pruneLibraryDetails(favorites = lib.favs()) {
+    const retained = new Set(favorites.map((manga) => detailKey(manga.url, manga.sourceId || 'leercapitulo')));
+    const cached = await listSourceCache('library-details');
+    await Promise.all(cached.filter((entry) => !retained.has(entry.key))
+      .map((entry) => deleteSourceCache('library-details', entry.key)));
   },
 
   async findManga({ url, title, author = '' }, sourceId) {

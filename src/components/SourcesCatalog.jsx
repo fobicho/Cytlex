@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowUpDown, Filter, Loader2, Search } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
@@ -7,7 +8,7 @@ import VirtualMangaGrid from './VirtualMangaGrid.jsx';
 import { SourceBadge } from './SourceBadge.jsx';
 import { api } from '../lib/api.js';
 import { sourceErrorMessage } from '../lib/browserHttp.js';
-import { preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
+import { preloadLibraryCover, preloadLibraryCoversBatch, requiresImageProxy } from '../lib/covers.js';
 import { isLibraryManga } from '../lib/library.js';
 import { extensions, isSourceConfigured } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
@@ -136,9 +137,11 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
 
   while (batch.length < CATALOG_BATCH_SIZE && canFetchNextPage && pagesFetched < CATALOG_BATCH_SIZE) {
     const startPage = currentPage + 1;
-    const batchPages = id === 'onfmangas' ? 4 : id === 'mangaoni' || id === 'olympusscanlation' ? 3 : 2;
+    const batchPages = id === 'onfmangas' ? Math.min(4, Math.ceil((CATALOG_BATCH_SIZE - batch.length) / 12))
+      : id === 'mangaoni' || id === 'olympusscanlation' ? 3 : 2;
     const group = !window.cytlex?.httpGet && FIXED_PAGE_SOURCES.has(id)
-      && CATALOG_BATCH_SIZE - batch.length >= 20 && pagesFetched + batchPages <= CATALOG_BATCH_SIZE;
+      && (id === 'onfmangas' ? batchPages > 1 : CATALOG_BATCH_SIZE - batch.length >= 20)
+      && pagesFetched + batchPages <= CATALOG_BATCH_SIZE;
     const requests = Array.from({ length: group ? batchPages : 1 }, (_, index) =>
       api.catalog({ ...params, page: startPage + index, __cytlexRequestId: requestId }, id));
     const results = await Promise.allSettled(requests);
@@ -159,13 +162,18 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
 }
 
 export default function SourcesCatalog({ sources, initialSourceId = '', active = true, savedMangaKeys = new Set(), hideSavedManga = false }) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const scale = useScale();
   const reduceMotion = useReducedMotion();
   const [coverSize, setCoverSize] = useState(() => settings.get().coverSize);
   const [restore] = useState(() => sourceCatalogState.takeRestore());
-  const [sourceId, setSourceId] = useState(() => restore?.sourceId || initialSourceId);
+  const [sourceId, setSourceId] = useState(() => initialSourceId || restore?.sourceId || '');
+  const routeSourceId = useRef(initialSourceId);
   const [catalogReadySourceId, setCatalogReadySourceId] = useState(() =>
-    restore?.sourceId && Array.isArray(restore.items) ? restore.sourceId : ''
+    restore?.sourceId && Array.isArray(restore.items) && (!initialSourceId || restore.sourceId === initialSourceId)
+      ? restore.sourceId
+      : ''
   );
   const [filters, setFilters] = useState(() => restore?.filters || []);
   const [filterValues, setFilterValues] = useState(() => restore?.filterValues || {});
@@ -204,6 +212,36 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const useCompactFilterFields = isZonaTmo || sourceId === 'mangalect';
   const filterPanelWidth = px(isZonaTmo ? 480 : 360, scale, 300);
   const getFilterRoot = () => filterRootRef.current;
+  const preloadCatalogCovers = (id, mangas) => {
+    if (id === 'achymanga' && !window.cytlex?.fetchImage) {
+      void preloadLibraryCoversBatch(mangas.map((manga) => manga.cover).filter(Boolean), { web: true });
+    }
+  };
+
+  const selectSource = (id) => {
+    sourceCatalogState.clear();
+    setSourceId(id);
+    const params = new URLSearchParams(location.search);
+    params.set('tab', 'fuentes');
+    params.set('source', id);
+    navigate({ pathname: location.pathname, search: `?${params}` }, { replace: true });
+  };
+
+  const showSourceList = () => {
+    sourceCatalogState.clear();
+    setSourceId('');
+    const params = new URLSearchParams(location.search);
+    params.delete('source');
+    const search = params.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+  };
+
+  useEffect(() => {
+    if (routeSourceId.current === initialSourceId) return;
+    routeSourceId.current = initialSourceId;
+    sourceCatalogState.clear();
+    setSourceId(initialSourceId);
+  }, [initialSourceId]);
 
   useLayoutEffect(() => {
     if (!filtersOpen) {
@@ -319,12 +357,11 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
 
   useEffect(() => {
     const showAllSources = () => {
-      sourceCatalogState.clear();
-      setSourceId('');
+      showSourceList();
     };
     window.addEventListener(SOURCE_CATALOG_HOME_EVENT, showAllSources);
     return () => window.removeEventListener(SOURCE_CATALOG_HOME_EVENT, showAllSources);
-  }, []);
+  }, [location.pathname, location.search]);
 
   const loadCatalog = async (id, params, append = false) => {
     if (!id) return;
@@ -353,6 +390,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
         }
       }
+      preloadCatalogCovers(id, result.items);
       setItems((current) => append ? [...current, ...result.items] : result.items);
       setQueuedItems(result.queuedItems);
       setLoadedParams({ ...params, q: params.q?.trim?.() || '' });
@@ -424,6 +462,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           if (isMangaDex(sourceId)) restoredItems.forEach((manga) => {
             if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
           });
+          preloadCatalogCovers(sourceId, restoredItems.slice(0, CATALOG_BATCH_SIZE));
           setItems(restoredItems.slice(0, CATALOG_BATCH_SIZE));
           setQueuedItems([...(snapshot.queuedItems || []), ...restoredItems.slice(CATALOG_BATCH_SIZE)]);
           setLoadedParams(snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) });
@@ -474,6 +513,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         if (isMangaDex(sourceId)) result.items.forEach((manga) => {
           if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
         });
+        preloadCatalogCovers(sourceId, result.items);
         setItems(result.items);
         setQueuedItems(result.queuedItems);
         setLoadedParams(params);
@@ -677,10 +717,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
             <Card key={manifest.id} className="group rounded-lg border-border/50 shadow-none hover:shadow-none">
               <button
                 type="button"
-                onClick={() => {
-                  sourceCatalogState.clear();
-                  setSourceId(manifest.id);
-                }}
+                onClick={() => selectSource(manifest.id)}
                 className="flex w-full items-center rounded-lg text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 style={{ minHeight: px(68, scale, 56), padding: px(14, scale, 11), gap: px(12, scale, 9) }}
                 aria-label={`Abrir catálogo de ${manifest.name}`}
@@ -703,7 +740,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       {selected && (
         <>
           <div className="flex min-w-0 items-center" style={{ gap: px(10, scale, 8), minHeight: px(36, scale, 30) }}>
-            <Button type="button" variant="ghost" size="icon" className="hover:bg-transparent hover:text-foreground" onClick={() => { sourceCatalogState.clear(); setSourceId(''); }} title="Volver a Fuentes" aria-label="Volver a Fuentes" style={{ width: px(34, scale, 28), height: px(34, scale, 28) }}>
+            <Button type="button" variant="ghost" size="icon" className="hover:bg-transparent hover:text-foreground" onClick={showSourceList} title="Volver a Fuentes" aria-label="Volver a Fuentes" style={{ width: px(34, scale, 28), height: px(34, scale, 28) }}>
               <ArrowLeft style={{ width: px(18, scale, 15), height: px(18, scale, 15) }} />
             </Button>
             <SourceBadge m={selected.manifest} style={{ width: px(30, scale, 24), height: px(30, scale, 24) }} />

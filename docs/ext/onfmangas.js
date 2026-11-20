@@ -413,18 +413,34 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
 
   async function catalog({ q = '', page = 1, __cytlexRequestId } = {}) {
     const currentPage = Math.max(1, Number(page) || 1);
-    const url = new URL(q ? `${base}/buscar.php` : `${base}/mangas.php`);
-    if (q) url.searchParams.set('q', q);
-    if (currentPage > 1) url.searchParams.set('page', String(currentPage));
+    const pageUrl = (pageNumber) => {
+      const url = new URL(q ? `${base}/buscar.php` : `${base}/mangas.php`);
+      if (q) url.searchParams.set('q', q);
+      if (pageNumber > 1) url.searchParams.set('page', String(pageNumber));
+      return url;
+    };
+    const url = pageUrl(currentPage);
+    const nextDocPromise = q && currentPage === 1
+      ? fetchText(pageUrl(2).href, __cytlexRequestId).then(parse).catch(() => null)
+      : null;
     const doc = parse(await fetchText(url.href, __cytlexRequestId));
-    const hasMore = [...doc.querySelectorAll('a[href]')].some((link) => {
+    const nextDoc = nextDocPromise ? await nextDocPromise : null;
+    const itemsByPage = mapCards(doc);
+    const nextItems = nextDoc ? mapCards(nextDoc) : [];
+    const loadedNextPage = nextItems.length > 0;
+    const lastPage = loadedNextPage ? 2 : currentPage;
+    const lastDoc = loadedNextPage ? nextDoc : doc;
+    const hasMore = [...lastDoc.querySelectorAll('a[href]')].some((link) => {
       try {
-        const next = new URL(link.getAttribute('href'), url);
-        return next.origin === url.origin && next.pathname === url.pathname
-          && Number(next.searchParams.get('page')) === currentPage + 1;
+        const next = new URL(link.getAttribute('href'), pageUrl(lastPage));
+        const currentUrl = pageUrl(lastPage);
+        return next.origin === currentUrl.origin && next.pathname === currentUrl.pathname
+          && Number(next.searchParams.get('page') || 1) === lastPage + 1;
       } catch { return false; }
     });
-    return { items: mapCards(doc), totalPages: currentPage + Number(hasMore), hasMore, totalText: '' };
+    const items = [...new Map([...itemsByPage, ...(loadedNextPage ? nextItems : [])]
+      .map((item) => [item.url, item])).values()].slice(0, 30);
+    return { items, page: lastPage, totalPages: lastPage + Number(hasMore), hasMore, totalText: '' };
   }
 
   async function detail(mangaUrl) {

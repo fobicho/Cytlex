@@ -209,6 +209,7 @@ export default function Results() {
                 m={m}
                 sourceId={sourceId}
                 from="resultados"
+                useLibraryCoverCache
                 coverSize={cardWidth}
                 showAuthor={false}
                 savedInLibrary={isLibraryManga(m, sourceId, savedMangaKeys)}
