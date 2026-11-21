@@ -851,6 +851,32 @@ button.library-updates-trigger {
   .extensions-refresh-button .extensions-button-icon {
     margin-inline-end: 0 !important;
   }
+
+}
+
+.extensions-bulk-actions.is-compact .extensions-bulk-label {
+  display: none !important;
+}
+
+.extensions-bulk-actions.is-compact .extensions-button-icon {
+  margin-inline-end: 0 !important;
+}
+
+.extensions-bulk-actions.extensions-measure-full .extensions-bulk-label {
+  display: inline !important;
+}
+
+.extensions-bulk-actions.extensions-measure-full {
+  width: max-content !important;
+  max-width: none !important;
+}
+
+.extensions-bulk-actions.extensions-measure-full > * {
+  flex-shrink: 0 !important;
+}
+
+.extensions-bulk-actions.extensions-measure-full button {
+  width: max-content !important;
 }
 
 button.confirmation-cancel-button,

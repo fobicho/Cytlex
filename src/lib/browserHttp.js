@@ -494,7 +494,8 @@ async function fetchCombinedChapter(url, signal, chapterType, referer = url) {
   if (chapterType === 'onf' && onfCookieJar) headers.set('x-cytlex-onf-cookie', onfCookieJar);
   const response = await fetch(endpoint, { signal, headers, credentials: 'omit' });
   if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('application/vnd.cytlex.chapter-stream')) {
-    throw new Error(`No se pudo usar la carga combinada de ${chapterType === 'onf' ? 'ONF' : 'InManga'}.`);
+    const sourceName = { onf: 'ONF', inmanga: 'InManga', mangaoni: 'MangaOni' }[chapterType] || chapterType;
+    throw new Error(`No se pudo usar la carga combinada de ${sourceName}.`);
   }
   const reader = response.body.getReader();
   let buffer = new Uint8Array();
@@ -549,6 +550,10 @@ export function fetchOnfChapter(url, signal) {
 
 export function fetchInmangaChapter(url, signal) {
   return fetchCombinedChapter(url, signal, 'inmanga', 'https://inmanga.com/');
+}
+
+export function fetchMangaOniChapter(url, signal) {
+  return fetchCombinedChapter(url, signal, 'mangaoni', url);
 }
 
 export async function fetchMangaLectChapter(url, signal) {
@@ -703,6 +708,14 @@ async function fetchMangaDexCatalogRequest(url, options) {
   return response;
 }
 
+async function fetchAchyCatalogRequest(url, options) {
+  const endpoint = new URL(proxyUrl(url), window.location.href);
+  endpoint.searchParams.set('catalog', 'achymanga');
+  const response = await fetch(endpoint.href, proxyRequestOptions(url, { credentials: 'omit', ...options }));
+  assertProxyResponse(response, new URL(url), url, true, false);
+  return response;
+}
+
 function mangaDexCatalogRequest(url, options) {
   return new Promise((resolve, reject) => {
     queueProxyGet({ url, options, resolve, reject, catalog: true });
@@ -717,6 +730,53 @@ async function parseMangaDexCatalogResponse(response) {
     while (buffer.length < size) {
       const { value, done } = await reader.read();
       if (done) throw new Error('Respuesta de catálogo incompleta.');
+      const joined = new Uint8Array(buffer.length + value.length);
+      joined.set(buffer); joined.set(value, buffer.length); buffer = joined;
+    }
+    const value = buffer.slice(0, size); buffer = buffer.slice(size); return value;
+  };
+  const metadata = async () => {
+    const prefix = await read(4);
+    const size = new DataView(prefix.buffer).getUint32(0);
+    if (!size || size > 3 * 1024 * 1024) throw new Error('Metadatos de catálogo no válidos.');
+    return JSON.parse(new TextDecoder().decode(await read(size)));
+  };
+  const first = await metadata();
+  if (typeof first.catalog !== 'string' || !Array.isArray(first.images) || first.images.length > 40) throw new Error('Catálogo no válido.');
+  const entries = first.images.map((imageUrl) => {
+    let resolve;
+    const promise = new Promise((done) => { resolve = done; });
+    mangaDexCatalogImages.set(imageUrl, promise);
+    return { imageUrl, promise, resolve, done: false };
+  });
+  void (async () => {
+    try {
+      for (let i = 0; i < entries.length; i++) {
+        const result = await metadata();
+        if (!Number.isInteger(result.index) || !entries[result.index] || entries[result.index].done
+          || !Number.isInteger(result.length) || result.length < 0 || result.length > 4 * 1024 * 1024) throw new Error('Portada no válida.');
+        const bytes = await read(result.length);
+        const entry = entries[result.index]; entry.done = true;
+        entry.resolve(result.status === 200 && result.length ? new Blob([bytes], { type: result.contentType }) : null);
+      }
+    } catch {} finally {
+      entries.forEach((entry) => {
+        if (!entry.done) entry.resolve(null);
+        setTimeout(() => { if (mangaDexCatalogImages.get(entry.imageUrl) === entry.promise) mangaDexCatalogImages.delete(entry.imageUrl); }, 60000);
+      });
+    }
+  })();
+  return first.catalog;
+}
+
+async function parseAchyCatalogResponse(response) {
+  if (!response.body || !response.headers.get('content-type')?.includes('application/vnd.cytlex.catalog-stream')) throw new Error('Respuesta de catálogo de AchyManga no válida.');
+  const reader = response.body.getReader();
+  let buffer = new Uint8Array();
+  const read = async (size) => {
+    while (buffer.length < size) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error('Respuesta de catálogo de AchyManga incompleta.');
       const joined = new Uint8Array(buffer.length + value.length);
       joined.set(buffer); joined.set(value, buffer.length); buffer = joined;
     }
@@ -851,6 +911,22 @@ export async function httpGet(url, requestId, options = {}) {
   if (bridge?.httpGet) return bridge.httpGet(url, requestId, options);
   const { includeUrl, ...requestOptions } = options;
   const target = new URL(url);
+  if (requestOptions.achyCatalog === true && target.origin === 'https://achymanga.online' && target.pathname === '/catalogo') {
+    const catalogOptions = { ...requestOptions };
+    delete catalogOptions.achyCatalog;
+    const key = `achymanga-catalog:${target.href}`;
+    let request = httpGetRequests.get(key);
+    if (!request) {
+      request = fetchAchyCatalogRequest(url, catalogOptions).then(parseAchyCatalogResponse);
+      httpGetRequests.set(key, request);
+    }
+    try {
+      const text = await request;
+      return includeUrl ? { text, url } : text;
+    } finally {
+      if (httpGetRequests.get(key) === request) httpGetRequests.delete(key);
+    }
+  }
   if (target.origin === 'https://api.mangadex.org' && target.pathname === '/manga'
     && target.searchParams.get('limit') === '40' && target.searchParams.getAll('includes[]').includes('cover_art')) {
     const key = `mangadex-catalog:${target.href}`;

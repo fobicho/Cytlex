@@ -6,7 +6,7 @@ export default function createSource({ fetchText, parse }) {
 
   function catalogPage(url) {
     if (!catalogPageRequests.has(url)) {
-      const request = fetchText(url).then(parse);
+      const request = fetchText(url, undefined, { achyCatalog: true }).then(parse);
       catalogPageRequests.set(url, request);
       request.then(
         () => { if (catalogPageRequests.get(url) === request) catalogPageRequests.delete(url); },

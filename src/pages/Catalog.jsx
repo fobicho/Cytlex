@@ -27,7 +27,7 @@ import { migrateSavedManga } from '../lib/mangaMigration.js';
 const TABS = [
   { id: 'mangas', label: 'Mangas' },
   { id: 'extensiones', label: 'Extensiones' },
-  { id: 'fuentes', label: 'Fuentes' }
+  { id: 'fuentes', label: 'Catálogos' }
 ];
 
 const catalogScroller = () => Array.from(document.querySelectorAll('.catalog-page-scroll')).find((element) => element.offsetParent !== null) || document.querySelector('main');

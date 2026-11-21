@@ -186,7 +186,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     form.set('filter[broadcastStatus]', '0');
     form.set('filter[onlyFavorites]', 'false');
     const searchUrl = `${BASE}/manga/getMangasConsultResult`;
-    const html = await fetchPostText({
+    const response = await fetchPostText({
       url: searchUrl,
       body: form.toString(),
       headers: {
@@ -197,9 +197,37 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
         'X-Requested-With': 'XMLHttpRequest'
       }
     }, __cytlexRequestId);
-    const doc = parse(html);
+    const documents = [];
+    const collectDocuments = (value, depth = 0) => {
+      if (depth > 3 || value == null) return;
+      if (typeof value === 'string') {
+        const content = value.trim();
+        if (!content) return;
+        if (/^\s*(?:<|\{|\[)/.test(content)) {
+          try {
+            const data = JSON.parse(content);
+            if (data && typeof data === 'object') {
+              collectDocuments(data, depth + 1);
+              return;
+            }
+          } catch {}
+        }
+        if (/<[a-z][\s\S]*>/i.test(content)) documents.push(parse(content));
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach((item) => collectDocuments(item, depth + 1));
+        return;
+      }
+      if (typeof value === 'object') {
+        Object.values(value).forEach((item) => collectDocuments(item, depth + 1));
+      }
+    };
+    collectDocuments(response);
+    const blockedResponse = documents.some((doc) => /cloudflare|captcha|access denied|just a moment|error 50[234]/i.test(clean(doc.body?.textContent)));
+    if (blockedResponse) throw new Error('InManga bloqueó la consulta del catálogo. Inténtalo de nuevo más tarde.');
     const seen = new Set();
-    const items = [...doc.querySelectorAll('a[href*="/ver/manga/"]')].map((anchor) => {
+    const items = documents.flatMap((doc) => [...doc.querySelectorAll('a[href*="/ver/manga/"]')]).map((anchor) => {
       const url = abs(anchor.getAttribute('href'));
       const card = anchor.closest('article, li') || anchor;
       const image = anchor.querySelector('img') || card.querySelector('img');

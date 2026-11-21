@@ -10,7 +10,7 @@ import { tracking } from '../lib/tracking.js';
 import { chapterOrder, detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
-import { browserImageUrl, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchMangaLectChapter, fetchOnfChapter, sourceErrorMessage } from '../lib/browserHttp.js';
+import { browserImageUrl, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchMangaLectChapter, fetchMangaOniChapter, fetchOnfChapter, sourceErrorMessage } from '../lib/browserHttp.js';
 import { readRecentChapter, writeRecentChapter } from '../lib/recentChapters.js';
 import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
@@ -587,6 +587,9 @@ export default function Reader() {
         if (!r && sourceId === 'mangalect' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
           try { r = await fetchMangaLectChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
         }
+        if (!r && sourceId === 'mangaoni' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
+          try { r = await fetchMangaOniChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
+        }
         if (!r) r = await api.chapter(chapterUrl, sourceId);
         if (!r?.pages?.length) r = await api.chapter(chapterUrl, sourceId, { fresh: true });
         if (!active) return;
@@ -596,6 +599,15 @@ export default function Reader() {
         }
         setCh(r);
         setChUrl(chapterUrl);
+        if (sourceId === 'mangaoni') {
+          if (r.options?.length) {
+            setMangaDetail({ key: `${sourceId}|${mangaUrl || r.mangaUrl || ''}`, value: { title: r.title || '', chapters: r.options } });
+          } else if (mangaUrl || r.mangaUrl) {
+            api.detail(mangaUrl || r.mangaUrl, sourceId)
+              .then((value) => setMangaDetail({ key: `${sourceId}|${mangaUrl || r.mangaUrl}`, value }))
+              .catch(() => {});
+          }
+        }
         const total = r.pages?.length || 1;
         const saved = progress.get(chapterUrl, sourceId);
         const sp0 = saved && !saved.read ? Math.min(Math.max(saved.page ?? 0, 0), total - 1) : 0;
@@ -990,6 +1002,7 @@ export default function Reader() {
 
   useEffect(() => {
     if (!currentMangaUrl || adultExtensionDisabled) return;
+    if (sourceId === 'mangaoni' && extensions.isInstalled(sourceId) && !window.cytlex?.httpGet) return;
     let alive = true;
     api.detail(currentMangaUrl, sourceId).then((value) => {
       if (alive) setMangaDetail({ key: mangaKey, value });

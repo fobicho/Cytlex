@@ -226,6 +226,11 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
       return sortBy === 'title-desc' ? -order : order;
     });
   }
+  const allInstalledSelected = sortedInstalled.length > 0
+    && sortedInstalled.every(({ manifest }) => selectedInstalledIds.has(manifest.id));
+  const selectableAvailable = sortedAvailable.filter(isExtensionInstallable);
+  const allAvailableSelected = selectableAvailable.length > 0
+    && selectableAvailable.every((manifest) => selectedAvailableIds.has(manifest.id));
   const confirmRef = useRef(null);
   const removeRef = useRef(null);
   const confirmPopoverRef = useRef(null);
@@ -237,6 +242,47 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
   const bulkInstallRef = useRef(null);
   const bulkUninstallRef = useRef(null);
   const bulkConfirmPopoverRef = useRef(null);
+  const installedActionsHeaderRef = useRef(null);
+  const installedActionsRef = useRef(null);
+  const availableActionsHeaderRef = useRef(null);
+  const availableActionsRef = useRef(null);
+  const [compactBulkActions, setCompactBulkActions] = useState(false);
+
+  useLayoutEffect(() => {
+    const measure = (headerRef, actionsRef) => {
+      const header = headerRef.current;
+      const actions = actionsRef.current;
+      if (!header || !actions) return null;
+      actions.classList.add('extensions-measure-full');
+      const requiredWidth = actions.getBoundingClientRect().width;
+      actions.classList.remove('extensions-measure-full');
+      const titleWidth = header.querySelector('h3')?.getBoundingClientRect().width || 0;
+      const gap = Number.parseFloat(getComputedStyle(header).columnGap) || 0;
+      const safetySpace = 16;
+      return { requiredWidth, availableWidth: header.clientWidth - titleWidth - gap - safetySpace };
+    };
+    const update = () => {
+      const measurements = [
+        measure(installedActionsHeaderRef, installedActionsRef),
+        measure(availableActionsHeaderRef, availableActionsRef)
+      ].filter(Boolean);
+      if (!measurements.length) return;
+      const hysteresis = 32;
+      setCompactBulkActions((isCompact) => measurements.some(({ requiredWidth, availableWidth }) => (
+        isCompact ? requiredWidth + hysteresis > availableWidth : requiredWidth > availableWidth
+      )));
+    };
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    [installedActionsHeaderRef, availableActionsHeaderRef].forEach(({ current }) => {
+      if (current) observer?.observe(current);
+    });
+    window.addEventListener('resize', update);
+    update();
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [selectedInstalledIds.size, selectedAvailableIds.size, visibleUpdates.length, scale]);
 
   useLayoutEffect(() => {
     const openConfirmations = [
@@ -787,6 +833,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
 
       <section>
         <div
+          ref={installedActionsHeaderRef}
           className="relative flex items-center justify-between"
           style={{ gap: px(8, scale, 6), marginBottom: px(12, scale, 9) }}
         >
@@ -795,7 +842,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
               Instaladas
             </h3>
           </div>
-          <div className="absolute right-0 top-1/2 flex min-w-0 max-w-full -translate-y-1/2 items-center justify-end" style={{ gap: px(8, scale, 6) }}>
+          <div ref={installedActionsRef} className={cn('extensions-bulk-actions absolute right-0 top-1/2 flex min-w-0 max-w-full -translate-y-1/2 items-center justify-end', compactBulkActions && 'is-compact')} style={{ gap: px(8, scale, 6) }}>
             <AnimatePresence initial={false}>
               {!tutorialPreview && selectedInstalledIds.size > 0 && (
                 <motion.div
@@ -817,7 +864,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
                     <X className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="extensions-button-label">Limpiar selecciones</span>
+                    <span className="extensions-button-label extensions-bulk-label">Limpiar selecciones</span>
                   </Button>
                 </motion.div>
               )}
@@ -836,12 +883,17 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     className="extensions-square-button"
                     aria-label="Seleccionar todo"
                     title="Seleccionar todo"
-                    onClick={() => { setSelectedInstalledIds(new Set(sortedInstalled.map(({ manifest }) => manifest.id))); setConfirmBulk(null); }}
-                    disabled={busy !== '' || updating !== ''}
+                    onClick={() => {
+                      setSelectedInstalledIds((current) => allInstalledSelected
+                        ? current
+                        : new Set(sortedInstalled.map(({ manifest }) => manifest.id)));
+                      setConfirmBulk(null);
+                    }}
+                    disabled={busy !== '' || updating !== '' || allInstalledSelected}
                     style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
                     <CheckSquare className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="extensions-button-label">Seleccionar todo</span>
+                    <span className="extensions-button-label extensions-bulk-label">Seleccionar todo</span>
                   </Button>
                 </motion.div>
               )}
@@ -871,7 +923,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     }}
                   >
                     <Trash2 className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="extensions-button-label">Desinstalar seleccionadas</span>
+                    <span className="extensions-button-label extensions-bulk-label">Desinstalar seleccionadas</span>
                   </Button>
                 </motion.div>
               )}
@@ -1041,13 +1093,14 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
 
       <section>
         <div
+          ref={availableActionsHeaderRef}
           className="relative flex items-center justify-between"
           style={{ gap: px(8, scale, 6), marginBottom: px(12, scale, 9) }}
         >
           <h3 className="font-medium" style={{ fontSize: fontPx(14, scale, 12) }}>
             Disponibles
           </h3>
-          <div className="absolute right-0 top-1/2 flex min-w-0 max-w-full -translate-y-1/2 items-center justify-end" style={{ gap: px(8, scale, 6) }}>
+          <div ref={availableActionsRef} className={cn('extensions-bulk-actions absolute right-0 top-1/2 flex min-w-0 max-w-full -translate-y-1/2 items-center justify-end', compactBulkActions && 'is-compact')} style={{ gap: px(8, scale, 6) }}>
             <AnimatePresence initial={false}>
               {!tutorialPreview && selectedAvailableIds.size > 0 && (
                 <motion.div
@@ -1069,7 +1122,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
                     <X className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="extensions-button-label">Limpiar selecciones</span>
+                    <span className="extensions-button-label extensions-bulk-label">Limpiar selecciones</span>
                   </Button>
                 </motion.div>
               )}
@@ -1088,12 +1141,17 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     className="extensions-square-button"
                     aria-label="Seleccionar todo"
                     title="Seleccionar todo"
-                    onClick={() => { setSelectedAvailableIds(new Set(sortedAvailable.filter(isExtensionInstallable).map((manifest) => manifest.id))); setConfirmBulk(null); }}
-                    disabled={busy !== '' || loading || updating !== ''}
+                    onClick={() => {
+                      setSelectedAvailableIds((current) => allAvailableSelected
+                        ? current
+                        : new Set(selectableAvailable.map((manifest) => manifest.id)));
+                      setConfirmBulk(null);
+                    }}
+                    disabled={busy !== '' || loading || updating !== '' || allAvailableSelected}
                     style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
                     <CheckSquare className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="extensions-button-label">Seleccionar todo</span>
+                    <span className="extensions-button-label extensions-bulk-label">Seleccionar todo</span>
                   </Button>
                 </motion.div>
               )}
@@ -1122,7 +1180,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     }}
                   >
                     <Download className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="extensions-button-label">Instalar seleccionadas</span>
+                    <span className="extensions-button-label extensions-bulk-label">Instalar seleccionadas</span>
                   </Button>
                 </motion.div>
               )}
