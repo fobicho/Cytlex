@@ -4,7 +4,7 @@ const HTTP_GET_CACHE_TTL_MS = 20 * 1000;
 const HTTP_GET_CACHE_MAX = 160;
 const HTTP_GET_BATCH_WINDOW_MS = 250;
 const HTTP_CATALOG_BATCH_WINDOW_MS = 500;
-const HTTP_GET_BATCH_MAX = 24;
+const HTTP_GET_BATCH_MAX = 40;
 const PROXY_IMAGE_BATCH_WINDOW_MS = 30;
 const PROXY_IMAGE_BATCH_MAX = 40;
 const PROXY_CHAPTER_IMAGE_BATCH_MAX = 40;
@@ -15,6 +15,7 @@ const proxyImageBatchQueue = [];
 const mangaDexCatalogImages = new Map();
 let httpGetBatchTimer;
 let proxyImageBatchTimer;
+let httpGetBatchWindowMs = HTTP_GET_BATCH_WINDOW_MS;
 const batchHeaderNames = new Set([
   'accept', 'content-type', 'x-requested-with', 'user-agent', 'accept-language',
   'x-cytlex-upstream-origin', 'x-cytlex-upstream-referer'
@@ -179,10 +180,6 @@ async function runProxyBatch(entries) {
   }));
 
   const catalogEntries = entries.filter((entry) => entry.catalog);
-  if (!catalogEntries.length && entries.length < 2) {
-    await runIndividually();
-    return;
-  }
 
   const catalogImageBatches = new Map();
   const fallbackTasks = [];
@@ -284,7 +281,7 @@ function flushProxyGetQueue() {
   httpGetBatchTimer = null;
   const entries = httpGetBatchQueue.splice(0, HTTP_GET_BATCH_MAX);
   void runProxyBatch(entries);
-  if (httpGetBatchQueue.length) httpGetBatchTimer = setTimeout(flushProxyGetQueue, HTTP_GET_BATCH_WINDOW_MS);
+  if (httpGetBatchQueue.length) httpGetBatchTimer = setTimeout(flushProxyGetQueue, httpGetBatchWindowMs);
 }
 
 function queueProxyGet(entry) {
@@ -294,11 +291,15 @@ function queueProxyGet(entry) {
     httpGetBatchTimer = setTimeout(flushProxyGetQueue, 0);
   } else {
     clearTimeout(httpGetBatchTimer);
-    const delay = httpGetBatchQueue.some((item) => item.catalog)
-      ? HTTP_CATALOG_BATCH_WINDOW_MS
-      : HTTP_GET_BATCH_WINDOW_MS;
+    const delay = Math.max(httpGetBatchWindowMs, httpGetBatchQueue.some((item) => item.catalog) ? HTTP_CATALOG_BATCH_WINDOW_MS : 0);
     httpGetBatchTimer = setTimeout(flushProxyGetQueue, delay);
   }
+}
+
+export function setHttpGetBatchWindow(duration) {
+  const previous = httpGetBatchWindowMs;
+  httpGetBatchWindowMs = Math.max(0, Number(duration) || 0);
+  return () => { httpGetBatchWindowMs = previous; };
 }
 
 function scheduleProxyRequest(url, options) {

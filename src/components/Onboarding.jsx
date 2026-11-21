@@ -37,7 +37,7 @@ const WALKTHROUGH_VIEWS = [
   { id: 'explorar', label: 'Explorar', icon: Compass, desc: 'Busca tus mangas preferidos, administra tus extensiones y revisa las fuentes.' },
   { id: 'ajustes', label: 'Ajustes', icon: SettingsIcon, desc: 'Configura la aplicación a tu gusto, con una amplia gama de modificaciones distintas.' }
 ];
-const SETTINGS_SECTION_IDS = ['apariencia', 'biblioteca', 'lector', 'categorias', 'extensiones', 'notificaciones', 'seguimiento', 'respaldo', 'atajos'];
+const SETTINGS_SECTION_IDS = ['apariencia', 'biblioteca', 'lector', 'categorias', 'extensiones', 'seguimiento', 'respaldo', 'atajos'];
 const STEP_CONTENT_VARIANTS = {
   enter: (direction) => ({ opacity: 0, x: direction === 0 ? 0 : direction > 0 ? 24 : -24 }),
   center: { opacity: 1, x: 0 },

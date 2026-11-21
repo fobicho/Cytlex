@@ -2,9 +2,10 @@ import { api } from './api.js';
 import { lib } from './library.js';
 import { settings } from './settings.js';
 import { chapterIndex } from './chapterIndex.js';
+import { setHttpGetBatchWindow } from './browserHttp.js';
 
 const key = (url, sourceId) => `${sourceId}|${url}`;
-const CHECK_BATCH_SIZE = 24;
+const CHECK_BATCH_SIZE = 40;
 
 let running = false;
 
@@ -32,9 +33,10 @@ export async function checkLibrary({ onProgress } = {}) {
   const found = [];
   let cursor = 0;
   let completed = 0;
+  const restoreBatchWindow = setHttpGetBatchWindow(1500);
 
   try {
-    // Match the proxy batch limit so independent detail requests can share invocations.
+    // Give slower sources such as MangaDex time to enqueue their detail requests together.
     await Promise.all(Array.from({ length: Math.min(CHECK_BATCH_SIZE, favs.length) }, async () => {
       while (cursor < favs.length) {
         const manga = favs[cursor++];
@@ -58,6 +60,7 @@ export async function checkLibrary({ onProgress } = {}) {
     settings.set({ notifyBaseline: baseline });
     return found;
   } finally {
+    restoreBatchWindow();
     running = false;
   }
 }

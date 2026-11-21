@@ -23,7 +23,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
   };
 
   const acquireRequestSlot = async () => {
-    if (activeRequests >= 2) await new Promise((resolve) => requestWaiters.push(resolve));
+    if (activeRequests >= 8) await new Promise((resolve) => requestWaiters.push(resolve));
     else activeRequests += 1;
     const slot = requestQueue.then(async () => {
       const wait = requestInterval - (Date.now() - lastRequestAt);

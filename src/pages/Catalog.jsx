@@ -307,6 +307,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationError, setMigrationError] = useState('');
   const scale = useScale();
+  const prefersReducedMotion = useReducedMotion();
   const isBrowserApp = typeof window !== 'undefined' && (!window.cytlex || !!migrationInline);
 
   useLayoutEffect(() => {
@@ -585,10 +586,27 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     if (t === 'mangas' || t === 'extensiones' || t === 'fuentes') setTab(t);
   }, [loc.search]);
 
+  const revealCatalogTab = (tabElement) => {
+    const nav = tabsRef.current;
+    if (!nav || !tabElement) return;
+
+    const navBounds = nav.getBoundingClientRect();
+    const tabBounds = tabElement.getBoundingClientRect();
+    const safeInset = Number.parseFloat(px(16, scale, 12));
+    const leftEdge = navBounds.left + safeInset;
+    const rightEdge = navBounds.right - safeInset;
+    const scrollOptions = { behavior: prefersReducedMotion ? 'auto' : 'smooth' };
+
+    if (tabBounds.left < leftEdge) {
+      nav.scrollBy({ ...scrollOptions, left: tabBounds.left - leftEdge });
+    } else if (tabBounds.right > rightEdge) {
+      nav.scrollBy({ ...scrollOptions, left: tabBounds.right - rightEdge });
+    }
+  };
+
   useEffect(() => {
-    const activeTab = tabsRef.current?.querySelector('[aria-current="page"]');
-    activeTab?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [tab]);
+    revealCatalogTab(tabsRef.current?.querySelector('[aria-current="page"]'));
+  }, [tab, prefersReducedMotion, scale]);
 
   useLayoutEffect(() => {
     const main = catalogScroller();
@@ -647,6 +665,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
       >
         <div
           ref={tabsRef}
+          data-catalog-subroutes
           className={cn(
             'flex w-max max-w-full flex-nowrap items-center overflow-x-auto overscroll-x-contain whitespace-nowrap no-scrollbar',
             tab === 'mangas' && 'shrink-0'
@@ -674,8 +693,9 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
               <button
                 key={t.id}
                 type="button"
-                onClick={() => {
+                onClick={(event) => {
                   if (active) {
+                    revealCatalogTab(event.currentTarget);
                     const main = catalogScroller();
                     if (main?.scrollTop > 1) {
                       main.scrollTo({ top: 0, behavior: 'smooth' });

@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
-import { Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, X, Database, Download, Upload, CircleHelp, Settings as SettingsIcon } from 'lucide-react';
+import { Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Heart, X, Database, Download, Upload, CircleHelp, Settings as SettingsIcon } from 'lucide-react';
 import { CONTENT_WARNING_RATINGS, resolveMode, settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
 import { api } from '../lib/api.js';
@@ -243,7 +243,6 @@ const SECTIONS = [
   { id: 'lector', label: 'Lector', icon: BookOpen },
   { id: 'categorias', label: 'Categorías', icon: Tags },
   { id: 'extensiones', label: 'Extensiones', icon: Puzzle },
-  { id: 'notificaciones', label: 'Notificaciones', icon: Bell },
   { id: 'seguimiento', label: 'Seguimiento', icon: Link2 },
   { id: 'respaldo', label: 'Respaldo', icon: Database }
 ];
@@ -1435,15 +1434,6 @@ export default function Settings({ tutorialPreview = false }) {
           </div>
         )}
       </div>
-    );
-  } else if (section === 'notificaciones') {
-    content = (
-      <Row
-        scale={scale}
-        first
-        title="Búsqueda de novedades"
-        desc="Los capítulos nuevos solo se revisan cuando pulsas «Buscar actualizaciones» en Biblioteca."
-      />
     );
   } else if (section === 'seguimiento') {
     content = (

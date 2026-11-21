@@ -35,9 +35,10 @@ const ALLOWED_SUFFIXES = ['t34798ndc.com', 'mangadex.network', 'ntr-files.online
 const REDIRECT_LIMIT = 5;
 const UPSTREAM_RETRIES = 2;
 const PROXY_RESPONSE_MAX_BYTES = 50 * 1024 * 1024;
-const PROXY_BATCH_MAX_REQUESTS = 24;
+const PROXY_BATCH_MAX_REQUESTS = 40;
 const PROXY_BATCH_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
-const PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES = 8 * 1024 * 1024;
+const PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
+const PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES = 32 * 1024 * 1024;
 const PROXY_BATCH_CONCURRENCY = 6;
 const PROXY_IMAGE_BATCH_MAX_REQUESTS = 40;
 const PROXY_IMAGE_BATCH_ITEM_MAX_BYTES = 4 * 1024 * 1024;
@@ -446,14 +447,14 @@ async function fetchBatchItem(item, request) {
     }
 
     const contentLength = Number(upstream.headers.get('content-length'));
-    if (Number.isFinite(contentLength) && contentLength > PROXY_BATCH_RESPONSE_MAX_BYTES) {
+    if (Number.isFinite(contentLength) && contentLength > PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES) {
       await upstream.body?.cancel();
       return { fallback: true };
     }
 
     const responseBody = upstream.body ? limitResponseBody(
       upstream.body,
-      PROXY_BATCH_RESPONSE_MAX_BYTES,
+      PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES,
       () => clearTimeout(timeout),
       () => { responseTooLarge = true; deadline.abort(); }
     ) : null;

@@ -237,6 +237,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
   const removePopoverRef = useRef(null);
   const updateRef = useRef(null);
   const updatePopoverRef = useRef(null);
+  const [compactRefreshButton, setCompactRefreshButton] = useState(false);
   const allRef = useRef(null);
   const allPopoverRef = useRef(null);
   const bulkInstallRef = useRef(null);
@@ -283,6 +284,33 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
       window.removeEventListener('resize', update);
     };
   }, [selectedInstalledIds.size, selectedAvailableIds.size, visibleUpdates.length, scale]);
+
+  useLayoutEffect(() => {
+    const toolbar = toolbarTarget?.closest('.catalog-toolbar');
+    const subroutes = toolbar?.querySelector('[data-catalog-subroutes]');
+    if (!toolbar || !subroutes || !toolbarTarget) return undefined;
+    const update = () => {
+      const actions = toolbarTarget;
+      actions.classList.add('extensions-toolbar-measure-full');
+      const requiredWidth = actions.getBoundingClientRect().width;
+      actions.classList.remove('extensions-toolbar-measure-full');
+      const toolbarStyle = getComputedStyle(toolbar);
+      const gap = Number.parseFloat(toolbarStyle.columnGap) || 0;
+      const padding = (Number.parseFloat(toolbarStyle.paddingLeft) || 0) + (Number.parseFloat(toolbarStyle.paddingRight) || 0);
+      const availableWidth = toolbar.clientWidth - padding - subroutes.scrollWidth - gap;
+      setCompactRefreshButton((compact) => compact
+        ? requiredWidth > availableWidth - 8
+        : requiredWidth > availableWidth);
+    };
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    [toolbar, subroutes, toolbarTarget].forEach((element) => observer?.observe(element));
+    window.addEventListener('resize', update);
+    update();
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [toolbarTarget, scale]);
 
   useLayoutEffect(() => {
     const openConfirmations = [
@@ -794,7 +822,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
           <Button
             variant="secondary"
             size="sm"
-            className="extensions-square-button extensions-refresh-button"
+            className={cn('extensions-square-button extensions-refresh-button', compactRefreshButton && 'is-compact')}
             onClick={searchUpdates}
             title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
             aria-label="Buscar actualizaciones"
