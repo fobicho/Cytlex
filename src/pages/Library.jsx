@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { RefreshCw, ArrowUpDown } from 'lucide-react';
+import { RefreshCw, ArrowUpDown, Search, X } from 'lucide-react';
 import { isMangaCover, isUnresolvedMihonSource, lib, storedCoverThumbnail } from '../lib/library.js';
 import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
@@ -14,6 +14,7 @@ import { tracking } from '../lib/tracking.js';
 import { api } from '../lib/api.js';
 import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
+import { Input } from '../components/ui/input.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px, fontPx, toolbarButtonStyle } from '../lib/useScale.js';
@@ -90,6 +91,11 @@ const invalidateUnreadCountsForUrl = (mangaUrl) => {
   }
 };
 const compareLibraryTitles = (a, b) => libraryTitleCollator.compare(String(a.title || ''), String(b.title || ''));
+const normalizeLibrarySearch = (value) => String(value || '').trim().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase();
+const truncateCategoryName = (name, limit) => {
+  const characters = Array.from(String(name || '').normalize('NFC'));
+  return characters.length > limit ? `${characters.slice(0, limit).join('')}..` : String(name || '');
+};
 const sameLibraryFavorites = (left, right) => left.length === right.length && left.every((manga, index) => {
   const next = right[index];
   if (manga === next) return true;
@@ -183,9 +189,11 @@ const Library = memo(function Library({ active = true }) {
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [, setSourceConfigVersion] = useState(0);
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('cytlex:librarySort') || 'title-asc');
+  const [libraryQuery, setLibraryQuery] = useState('');
   const [unread, setUnread] = useState({});
   const unreadVersions = useRef(new Map());
   const categoryTabsRef = useRef(null);
+  const librarySearchInputRef = useRef(null);
   const libraryActionsRef = useRef(null);
   const [compactLibraryUpdates, setCompactLibraryUpdates] = useState(false);
   const scale = useScale();
@@ -204,10 +212,12 @@ const Library = memo(function Library({ active = true }) {
       const style = getComputedStyle(toolbar);
       const padding = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
       const gap = Number.parseFloat(style.columnGap) || 0;
-      const availableForActions = toolbar.clientWidth - padding - subroutes.scrollWidth - gap;
+      const reservedCategoryWidth = Math.min(subroutes.scrollWidth, Math.max(240, Math.round(320 * scale)));
+      const availableForActions = toolbar.clientWidth - padding - reservedCategoryWidth - gap;
+      const compactReserve = Math.max(16, Math.round(28 * scale));
       setCompactLibraryUpdates((compact) => compact
-        ? requiredWidth > availableForActions - 8
-        : requiredWidth > availableForActions);
+        ? requiredWidth > availableForActions - compactReserve - 8
+        : requiredWidth > availableForActions - compactReserve);
     };
 
     const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
@@ -369,18 +379,23 @@ const Library = memo(function Library({ active = true }) {
     () => sortLibraryManga(inCategory.slice(), sortBy, unreadSort || {}),
     [inCategory, sortBy, unreadSort]
   );
+  const categoryName = cats.find((category) => category.id === sel)?.name || 'Biblioteca';
+  const searched = useMemo(() => {
+    const query = normalizeLibrarySearch(libraryQuery);
+    return query ? shown.filter((manga) => normalizeLibrarySearch(manga.title).includes(query)) : shown;
+  }, [shown, libraryQuery]);
   const visitedCategories = useMemo(() => cats
     .filter((category) => visitedCategoryIds.includes(category.id))
     .map((category) => ({
       ...category,
       items: category.id === sel
-        ? shown
+        ? searched
         : sortLibraryManga(
             favs.filter((manga) => (manga.cats || []).includes(category.id)),
             sortBy,
             unreadSort || {}
           )
-    })), [cats, visitedCategoryIds, sel, shown, favs, sortBy, unreadSort]);
+    })), [cats, visitedCategoryIds, sel, searched, favs, sortBy, unreadSort]);
 
   const selectCategory = (categoryId) => {
     setSel(categoryId);
@@ -529,6 +544,8 @@ const Library = memo(function Library({ active = true }) {
                   key={c.id}
                   type="button"
                   aria-current={active ? 'page' : undefined}
+                  aria-label={c.name}
+                  title={c.name}
                   onClick={() => {
                     if (active) {
                       const main = libraryScroller();
@@ -546,18 +563,63 @@ const Library = memo(function Library({ active = true }) {
                   )}
                   style={{ fontSize: fontPx(14, scale), scrollMarginInline: px(16, scale, 12) }}
                 >
-                  <SubrouteTabLabel active={active}>{c.name}</SubrouteTabLabel>
+                  <SubrouteTabLabel active={active}>{truncateCategoryName(c.name, 15)}</SubrouteTabLabel>
                 </button>
               );
             })}
           </div>
         </nav>
-        <div ref={libraryActionsRef} className="ml-auto flex shrink-0 items-center" style={{ gap: px(8, scale, 6) }}>
+        <div ref={libraryActionsRef} className="ml-auto flex min-w-0 shrink items-center" style={{ gap: px(8, scale, 6) }}>
+          <div
+            className="catalog-search flex min-w-0 flex-1 items-center self-center"
+            style={{
+              flexBasis: px(280, scale, 240),
+              minWidth: 0,
+              height: px(32, scale, 28),
+              gap: px(12, scale, 9)
+            }}
+          >
+            <div className="relative min-w-0 flex-1">
+              <Input
+                ref={librarySearchInputRef}
+                className="bg-card border-border/70"
+                placeholder={`Buscar en ${truncateCategoryName(categoryName, 15)}`}
+                aria-label={`Buscar en ${categoryName}`}
+                value={libraryQuery}
+                onChange={(event) => {
+                  setLibraryQuery(event.target.value);
+                  const main = libraryScroller();
+                  if (main?.scrollTop > 0) {
+                    libraryScroll.set(sel, 0);
+                    main.scrollTop = 0;
+                  }
+                }}
+                enterKeyHint="search"
+                style={{
+                  height: px(32, scale, 28),
+                  fontSize: fontPx(14, scale),
+                  paddingLeft: px(12, scale, 9),
+                  paddingRight: px(40, scale, 34)
+                }}
+              />
+              <button
+                type="button"
+                aria-label={libraryQuery ? 'Limpiar búsqueda' : `Buscar en ${categoryName}`}
+                onClick={() => libraryQuery ? setLibraryQuery('') : librarySearchInputRef.current?.focus()}
+                className="absolute inset-y-0 right-0 grid place-items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                style={{ width: px(36, scale, 30) }}
+              >
+                {libraryQuery
+                  ? <X aria-hidden="true" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+                  : <Search aria-hidden="true" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />}
+              </button>
+            </div>
+          </div>
           <Button
             size="sm"
             variant="secondary"
             title="Ordenar"
-            className="library-sort-trigger rounded-none disabled:opacity-100"
+            className="library-sort-trigger shrink-0 rounded-none disabled:opacity-100"
             onClick={() => {
               const order = ['title-asc', 'title-desc', 'unread-desc', 'recent'];
               const next = order[(order.indexOf(sortBy) + 1) % order.length];
@@ -580,7 +642,7 @@ const Library = memo(function Library({ active = true }) {
             aria-label={checking ? 'Buscando actualizaciones' : 'Buscar actualizaciones'}
             onClick={runCheck}
             title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
-            className={cn('library-updates-trigger extensions-refresh-button rounded-none', compactLibraryUpdates && 'is-compact')}
+            className={cn('library-updates-trigger extensions-refresh-button shrink-0 rounded-none', compactLibraryUpdates && 'is-compact')}
             style={toolbarButtonStyle(scale)}
           >
             {checking ? (
@@ -626,7 +688,7 @@ const Library = memo(function Library({ active = true }) {
               <EmptyState
                 face="(っ-;)"
                 tone="sad"
-                title={favs.some((f) => (f.cats || []).includes(category.id)) ? 'No hay mangas visibles con este filtro' : 'Tu biblioteca está vacía'}
+                title={libraryQuery.trim() ? 'No hay mangas que coincidan con la búsqueda' : favs.some((f) => (f.cats || []).includes(category.id)) ? 'No hay mangas visibles con este filtro' : 'Tu biblioteca está vacía'}
               />
             ) : view === 'grid' ? (
               <VirtualMangaGrid
