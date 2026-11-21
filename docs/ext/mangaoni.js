@@ -244,32 +244,9 @@ export default function createSource({ fetchText, parse, head }) {
       }
     }
 
-    // El sitio no manda la lista de capitulos en el HTML: se trae de la ficha
-    // cuando el slug y el id la identifican sin ambiguedad.
-    let options = [];
     const mangaUrl = abs(doc.querySelector('a.ajp')?.getAttribute('href')) || '';
-    if (mangaUrl) {
-      const ficha = parse(await fetchText(mangaUrl));
-      const id = chapterIdOf(url);
-      const opts = [...ficha.querySelectorAll('#c_list a')]
-        .map((a) => ({ url: abs(a.getAttribute('href')), title: text(a, '.entry-title-h2') }))
-        .filter((o) => o.url && o.title);
-      // La ficha ya viene en orden inverso (cap 155 primero). Cytlex invierte
-      // options al mostrarla, asi que se entrega tal cual y en pantalla queda
-      // del capitulo 1 en adelante. En esta lista el anterior va por delante.
-      options = opts;
-      const idx = options.findIndex((o) => chapterIdOf(o.url) === id);
-      return {
-        label: options[idx]?.title || '',
-        mangaUrl,
-        pages,
-        options,
-        prev: idx >= 0 && options[idx + 1] ? { title: options[idx + 1].title, url: options[idx + 1].url } : null,
-        next: idx >= 0 && options[idx - 1] ? { title: options[idx - 1].title, url: options[idx - 1].url } : null
-      };
-    }
-
-    return { label: '', mangaUrl, pages, options, prev: null, next: null };
+    // El lector ya carga la ficha y usa sus capítulos para el selector y la navegación.
+    return { label: '', mangaUrl, pages, options: [], prev: null, next: null };
   }
 
   return { id: 'mangaoni', name: 'MangaOni', catalog, detail, chapter };

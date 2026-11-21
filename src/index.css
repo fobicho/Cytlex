@@ -1137,21 +1137,20 @@ img.manga-cover-corners {
 
 .sidebar-glyph-viewport {
   display: flex;
-  flex: 0 1 32px;
-  min-width: 20px;
-  height: 100%;
+  position: absolute;
+  inset: 0;
   align-items: center;
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 18%, #000 82%, transparent 100%);
-  mask-image: linear-gradient(90deg, transparent 0%, #000 18%, #000 82%, transparent 100%);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 12%, #000 88%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, #000 12%, #000 88%, transparent 100%);
   color: hsl(var(--primary));
-  opacity: 0.72;
   font-family: 'Noto Sans JP Variable', 'Noto Sans JP', sans-serif;
   font-size: 0.82em;
   line-height: 1;
 }
 
 .sidebar-active-route-label {
+  position: relative;
   display: flex;
   flex: 1 1 0;
   min-width: 0;
@@ -1161,23 +1160,46 @@ img.manga-cover-corners {
 }
 
 .sidebar-active-route-name {
+  position: relative;
+  z-index: 2;
   flex: none;
   white-space: nowrap;
 }
 
+.sidebar-active-route-name-selected {
+  isolation: isolate;
+}
+
+.sidebar-active-route-name-selected::before {
+  position: absolute;
+  z-index: -1;
+  inset: -3px -12px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, hsl(var(--primary)) 10%, hsl(var(--sidebar-background))) 12px,
+    color-mix(in srgb, hsl(var(--primary)) 10%, hsl(var(--sidebar-background))) calc(100% - 12px),
+    transparent
+  );
+  content: '';
+  pointer-events: none;
+}
+
 .sidebar-glyph-leading {
   flex: 0 1 32px;
+  min-width: 20px;
 }
 
 .sidebar-glyph-trailing {
   flex: 1 1 16px;
+  min-width: 0;
 }
 
 .sidebar-glyph-track {
   display: flex;
   width: max-content;
   flex: none;
-  animation: cx-sidebar-ribbon 12s linear infinite;
+  animation: cx-sidebar-glyph-cycle 12s linear infinite;
   will-change: transform;
 }
 
@@ -1188,10 +1210,6 @@ img.manga-cover-corners {
 .sidebar-glyph-track-static {
   animation: none;
   will-change: auto;
-}
-
-.sidebar-glyph-track-static > span + span {
-  display: none;
 }
 
 .sidebar-ribbon-segment {
@@ -1209,6 +1227,12 @@ img.manga-cover-corners {
 @keyframes cx-sidebar-ribbon {
   to {
     transform: translate3d(-50%, 0, 0);
+  }
+}
+
+@keyframes cx-sidebar-glyph-cycle {
+  to {
+    transform: translate3d(-25%, 0, 0);
   }
 }
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronsRight } from 'lucide-react';
+import { BookOpen, ChevronsRight, Compass, Settings as SettingsIcon } from 'lucide-react';
 import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
 import { SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
@@ -9,9 +9,9 @@ import { settings, SIDEBAR_WIDTH } from '../lib/settings.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
 
 const navItems = [
-  { to: '/biblioteca', label: 'Biblioteca' },
-  { to: '/explorar', label: 'Explorar' },
-  { to: '/ajustes', label: 'Ajustes' }
+  { to: '/biblioteca', label: 'Biblioteca', icon: BookOpen },
+  { to: '/explorar', label: 'Explorar', icon: Compass },
+  { to: '/ajustes', label: 'Ajustes', icon: SettingsIcon }
 ];
 
 const SIDEBAR_GLYPHS = '彼らのすべての機器と器具はまるで命があるかのようだった';
@@ -28,7 +28,7 @@ const activeScroller = () => {
     .find((element) => element.offsetParent !== null) || main;
 };
 
-function ActiveRouteLabel({ label }) {
+function ActiveRouteLabel({ label, active }) {
   const [glyphs] = useState(randomSidebarGlyphs);
   const reduceMotion = useReducedMotion();
 
@@ -42,19 +42,40 @@ function ActiveRouteLabel({ label }) {
     }
   }, []);
 
-  const ticker = (side) => (
-    <span aria-hidden="true" className={cn('sidebar-glyph-viewport', `sidebar-glyph-${side}`)}>
-      <span className={cn('sidebar-glyph-track', reduceMotion && 'sidebar-glyph-track-static')}>
-        <span>{glyphs}</span><span>{glyphs}</span>
-      </span>
-    </span>
-  );
-
   return (
     <span className="sidebar-active-route-label">
-      {ticker('leading')}
-      <span className="sidebar-active-route-name">{label}</span>
-      {ticker('trailing')}
+      <AnimatePresence initial={false}>
+        {active && (
+          <motion.span
+            key="glyph-ticker"
+            aria-hidden="true"
+            className="sidebar-glyph-viewport"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 0.68 }}
+            exit={{ opacity: 0, transition: { duration: 0.16, ease: 'easeOut' } }}
+            transition={{
+              opacity: {
+                duration: 0.2,
+                ease: reduceMotion ? 'easeOut' : 'easeIn'
+              }
+            }}
+          >
+            <span className={cn('sidebar-glyph-track', reduceMotion && 'sidebar-glyph-track-static')}>
+              {[0, 1, 2, 3].map((copy) => <span key={copy}>{glyphs}</span>)}
+            </span>
+          </motion.span>
+        )}
+      </AnimatePresence>
+      {active && <span key="leading" aria-hidden="true" className="sidebar-glyph-leading" />}
+      <motion.span
+        key="route-name"
+        layout={reduceMotion ? false : 'position'}
+        transition={{ layout: { duration: 0.24, ease: [0.23, 1, 0.32, 1] } }}
+        className={cn('sidebar-active-route-name', active && 'sidebar-active-route-name-selected')}
+      >
+        {label}
+      </motion.span>
+      {active && <span key="trailing" aria-hidden="true" className="sidebar-glyph-trailing" />}
     </span>
   );
 }
@@ -160,6 +181,15 @@ export default function Sidebar({ tutorialNavOnly = false }) {
             : item.to === '/explorar'
               ? lastExploreListRoute
               : item.to;
+          const Icon = item.icon;
+          const collapsedEnter = reduceMotion ? 'scale(1)' : 'scale(0.96)';
+          const collapsedExit = reduceMotion ? 'scale(1)' : 'scale(0.98)';
+          const expandedEnter = reduceMotion ? 'translateX(0)' : 'translateX(-3px)';
+          const expandedExit = reduceMotion ? 'translateX(0)' : 'translateX(3px)';
+          const routeIconSize = Math.max(16, Math.round(20 * scale));
+          const routeVerticalPadding = Math.max(7, Math.round(10 * scale));
+          const routeHeight = routeIconSize + routeVerticalPadding * 2;
+          const transition = { duration: 0.18, ease: [0.23, 1, 0.32, 1] };
           return (
             <NavLink
               key={item.to}
@@ -223,11 +253,11 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                 )}
                 style={{
                   gap: collapsed ? 0 : `${Math.max(7, Math.round(12 * scale))}px`,
-                  paddingTop: `${Math.max(7, Math.round(10 * scale))}px`,
-                  paddingBottom: `${Math.max(7, Math.round(10 * scale))}px`,
+                  paddingTop: `${routeVerticalPadding}px`,
+                  paddingBottom: `${routeVerticalPadding}px`,
                   paddingLeft: collapsed ? '0px' : `${Math.max(6, Math.round(8 * scale))}px`,
                   paddingRight: '0px',
-                  justifyContent: collapsed ? 'center' : 'flex-start',
+                  minHeight: `${routeHeight}px`,
                   fontSize: fontPx(14, scale, 11)
                 }}
               >
@@ -237,22 +267,33 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                     className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-primary"
                   />
                 )}
-                {isActive && !collapsed ? (
-                  <ActiveRouteLabel label={item.label} />
-                ) : (
-                  <span
-                    className={cn(
-                      'min-w-0 whitespace-nowrap overflow-hidden leading-none transition-[max-width,opacity,transform] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
-                      collapsed && 'text-center'
-                    )}
-                    style={{
-                      maxWidth: collapsed ? `${Math.round(24 * scale)}px` : `${Math.round(160 * scale)}px`,
-                      transitionDuration: collapsed ? '180ms' : '300ms'
-                    }}
-                  >
-                    {collapsed ? item.label.slice(0, 1) : item.label}
-                  </span>
-                )}
+                <AnimatePresence initial={false} mode="sync">
+                  {collapsed ? (
+                    <motion.span
+                      key="collapsed-icon"
+                      aria-hidden="true"
+                      className="absolute inset-0 grid place-items-center leading-none"
+                      initial={{ opacity: 0, transform: collapsedEnter }}
+                      animate={{ opacity: 1, transform: 'translateX(0) scale(1)' }}
+                      exit={{ opacity: 0, transform: collapsedExit }}
+                      transition={transition}
+                    >
+                      <Icon className="shrink-0" aria-hidden="true" strokeWidth={1.9} style={{ width: `${routeIconSize}px`, height: `${routeIconSize}px` }} />
+                    </motion.span>
+                  ) : (
+                    <motion.span
+                      key="expanded-label"
+                      className="absolute inset-y-0 right-0 flex min-w-0 items-center overflow-hidden"
+                      initial={{ opacity: 0, transform: expandedEnter }}
+                      animate={{ opacity: 1, transform: 'translateX(0) scale(1)' }}
+                      exit={{ opacity: 0, transform: expandedExit }}
+                      transition={transition}
+                      style={{ left: `${Math.max(6, Math.round(8 * scale))}px` }}
+                    >
+                      <ActiveRouteLabel label={item.label} active={isActive} />
+                    </motion.span>
+                  )}
+                </AnimatePresence>
               </div>
             </NavLink>
           );

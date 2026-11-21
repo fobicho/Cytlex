@@ -59,6 +59,7 @@ const sourceCacheKey = (sourceId) => {
   return JSON.stringify([sourceId, version, languages]);
 };
 const detailKey = (url, sourceId) => `${sourceCacheKey(sourceId)}|${mangaSourceUrl(url, sourceId)}`;
+const libraryDetailKey = (url, sourceId) => JSON.stringify(['library-detail', sourceId, mangaSourceUrl(url, sourceId)]);
 const chapterKey = (url, sourceId) => `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}|${url}`;
 const catalogKey = (args, sourceId) => {
   const params = Object.fromEntries(Object.entries(args || {}).filter(([key]) => key !== '__cytlexRequestId'));
@@ -66,6 +67,21 @@ const catalogKey = (args, sourceId) => {
   return JSON.stringify([sourceCacheKey(sourceId), orderedParams]);
 };
 const titleKey = (value) => String(value || '').normalize('NFKC').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+
+function libraryDetailIdentity(key) {
+  try {
+    const parsed = JSON.parse(key);
+    if (Array.isArray(parsed) && parsed[0] === 'library-detail') return `${parsed[1]}|${parsed[2]}`;
+  } catch {}
+  const separator = key.lastIndexOf('|');
+  if (separator < 0) return '';
+  try {
+    const sourceConfig = JSON.parse(key.slice(0, separator));
+    return Array.isArray(sourceConfig) ? `${sourceConfig[0]}|${key.slice(separator + 1)}` : '';
+  } catch {
+    return '';
+  }
+}
 
 async function withDetailDeadline(request) {
   let timer;
@@ -193,6 +209,30 @@ export const api = {
 
   async restoreDetail(url, sourceId) {
     const key = detailKey(url, sourceId);
+    if (lib.isFav(url, sourceId)) {
+      const stableKey = libraryDetailKey(url, sourceId);
+      const stable = await readSourceCache('library-details', stableKey);
+      if (stable?.value?.chapters?.length) return stable.value;
+
+      const legacyEntries = await listSourceCache('library-details');
+      const legacy = legacyEntries.find((entry) => libraryDetailIdentity(entry.key) === `${sourceId}|${mangaSourceUrl(url, sourceId)}`
+        && entry.value?.chapters?.length);
+      if (legacy) {
+        await writeSourceCache('library-details', stableKey, legacy.value, 1000);
+        return legacy.value;
+      }
+
+      const legacyDetails = (await listSourceCache('details')).find((entry) =>
+        libraryDetailIdentity(entry.key) === `${sourceId}|${mangaSourceUrl(url, sourceId)}`
+        && entry.value?.chapters?.length
+        && Date.now() - entry.at >= 0
+        && Date.now() - entry.at <= DETAIL_TTL_MS
+      );
+      if (legacyDetails) {
+        await writeSourceCache('library-details', stableKey, legacyDetails.value, 1000);
+        return legacyDetails.value;
+      }
+    }
     const entry = lib.isFav(url, sourceId)
       ? await readSourceCache('library-details', key) || await readSourceCache('details', key)
       : await readSourceCache('details', key);
@@ -331,17 +371,20 @@ export const api = {
 
   persistLibraryDetail(url, sourceId, value) {
     if (!lib.isFav(url, sourceId) || !value?.chapters?.length) return;
-    return writeSourceCache('library-details', detailKey(url, sourceId), value, 1000);
+    return writeSourceCache('library-details', libraryDetailKey(url, sourceId), value, 1000);
   },
 
   removeLibraryDetail(url, sourceId) {
-    return deleteSourceCache('library-details', detailKey(url, sourceId));
+    return Promise.all([
+      deleteSourceCache('library-details', libraryDetailKey(url, sourceId)),
+      deleteSourceCache('library-details', detailKey(url, sourceId))
+    ]);
   },
 
   async pruneLibraryDetails(favorites = lib.favs()) {
-    const retained = new Set(favorites.map((manga) => detailKey(manga.url, manga.sourceId || 'leercapitulo')));
+    const retained = new Set(favorites.map((manga) => `${manga.sourceId || 'leercapitulo'}|${mangaSourceUrl(manga.url, manga.sourceId || 'leercapitulo')}`));
     const cached = await listSourceCache('library-details');
-    await Promise.all(cached.filter((entry) => !retained.has(entry.key))
+    await Promise.all(cached.filter((entry) => !retained.has(libraryDetailIdentity(entry.key)))
       .map((entry) => deleteSourceCache('library-details', entry.key)));
   },
 
