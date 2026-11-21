@@ -108,7 +108,8 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       '[itemprop="description"]',
       '[class*="synopsis" i]', '[id*="synopsis" i]',
       '[class*="sinopsis" i]', '[id*="sinopsis" i]',
-      '[class*="manga-description" i]', '[id*="manga-description" i]'
+      '[class*="manga-description" i]', '[id*="manga-description" i]',
+      '.panel-body'
     ];
     const candidates = [];
     for (const selector of selectors) {
@@ -234,6 +235,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const title = text(doc, 'h1') || clean(doc.querySelector('meta[property="og:title"]')?.getAttribute('content')) || clean(doc.title);
     const cover = coverFrom(doc);
     const synopsis = synopsisFrom(doc, title);
+    const metaAuthor = clean(doc.querySelector('meta[name="author"], meta[property="article:author"]')?.getAttribute('content'));
     const genres = [...doc.querySelectorAll('a[href*="genre"], a[href*="genero"], [class*="genre"] a, [class*="genero"] a')]
       .map((element) => clean(element.textContent)).filter(Boolean);
     const chapters = chaptersData
@@ -255,7 +257,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
         status: factValue(doc, ['Estado', 'Status']),
         tipo: factValue(doc, ['Tipo', 'Type']) || 'Manga',
         autor: factValue(doc, ['Autor', 'Author', 'Artist'])
-          || clean(doc.querySelector('meta[name="author"], meta[property="article:author"]')?.getAttribute('content')),
+          || (normalized(metaAuthor) === 'inmanga' ? '' : metaAuthor),
         vistas: factValue(doc, ['Vistas', 'Views']),
         publicacion: factValue(doc, ['Publicación', 'Publication']),
         periodicidad: factValue(doc, ['Periodicidad', 'Frequency']),
