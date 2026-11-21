@@ -99,7 +99,7 @@
     "id": "mangadex",
     "name": "MangaDex",
     "lang": "multi",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "type": "module",
     "contentWarning": "MIXED",
     "main": "ext/mangadex.js",

@@ -5,16 +5,16 @@ import { chapterIndex } from './chapterIndex.js';
 import { setHttpGetBatchWindow } from './browserHttp.js';
 
 const key = (url, sourceId) => `${sourceId}|${url}`;
-const CHECK_BATCH_SIZE = 40;
+const CHECK_BATCH_SIZE = 50;
 
 let running = false;
 
 async function countChapters(manga) {
   const sourceId = manga.sourceId || 'leercapitulo';
-  const d = await api.refreshDetail(manga.url, sourceId);
-  if (!Array.isArray(d?.chapters) || !d.chapters.length) return null;
-  chapterIndex.set(manga.url, sourceId, d.chapters.map((chapter) => chapter.url));
-  return d.chapters.length;
+  const chapters = await api.refreshChapters(manga.url, sourceId);
+  if (!Array.isArray(chapters) || !chapters.length) return null;
+  chapterIndex.set(manga.url, sourceId, chapters.map((chapter) => chapter.url));
+  return chapters.length;
 }
 
 export async function checkLibrary({ onProgress } = {}) {
@@ -33,7 +33,7 @@ export async function checkLibrary({ onProgress } = {}) {
   const found = [];
   let cursor = 0;
   let completed = 0;
-  const restoreBatchWindow = setHttpGetBatchWindow(1500);
+  const restoreBatchWindow = setHttpGetBatchWindow(5000);
 
   try {
     // Give slower sources such as MangaDex time to enqueue their detail requests together.

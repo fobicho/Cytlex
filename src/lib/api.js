@@ -369,6 +369,26 @@ export const api = {
     return result;
   },
 
+  async refreshChapters(url, sourceId) {
+    const src = await resolveSource(sourceId);
+    if (typeof src.libraryChapters === 'function') {
+      const chapters = await withDetailDeadline(src.libraryChapters(mangaSourceUrl(url, sourceId)));
+      if (chapters?.length) {
+        const key = detailKey(url, sourceId);
+        const existing = freshEntry(key) || await this.restoreDetail(url, sourceId);
+        if (existing) {
+          const result = { ...existing, chapters };
+          storeDetail(key, result);
+          detailCache.get(key).persisted = true;
+          void writeSourceCache('details', key, result, DETAIL_CACHE_MAX);
+          if (lib.isFav(url, sourceId)) void writeSourceCache('library-details', key, result, 1000);
+        }
+      }
+      return chapters;
+    }
+    return (await this.refreshDetail(url, sourceId))?.chapters || [];
+  },
+
   persistLibraryDetail(url, sourceId, value) {
     if (!lib.isFav(url, sourceId) || !value?.chapters?.length) return;
     return writeSourceCache('library-details', libraryDetailKey(url, sourceId), value, 1000);
