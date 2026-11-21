@@ -18,3 +18,18 @@ export function px(value, scale, min = 1) {
 export function fontPx(value, scale, min = 1) {
   return `${Math.max(min, Math.round(value * scale * 0.95))}px`;
 }
+
+export function toolbarButtonStyle(scale) {
+  const height = px(32, scale, 26);
+  return {
+    height,
+    minHeight: height,
+    maxHeight: height,
+    boxSizing: 'border-box',
+    paddingTop: 0,
+    paddingBottom: 0,
+    fontSize: fontPx(14, scale),
+    paddingLeft: px(8, scale, 6),
+    paddingRight: px(8, scale, 6)
+  };
+}

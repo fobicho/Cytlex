@@ -16,7 +16,7 @@ import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { cn } from '../lib/utils.js';
-import { useScale, px, fontPx } from '../lib/useScale.js';
+import { useScale, px, fontPx, toolbarButtonStyle } from '../lib/useScale.js';
 import SubrouteTabLabel from '../components/SubrouteTabLabel.jsx';
 import { useLibraryCover } from '../lib/useLibraryCover.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
@@ -186,9 +186,39 @@ const Library = memo(function Library({ active = true }) {
   const [unread, setUnread] = useState({});
   const unreadVersions = useRef(new Map());
   const categoryTabsRef = useRef(null);
-  const previousCategoryRef = useRef('');
+  const libraryActionsRef = useRef(null);
+  const [compactLibraryUpdates, setCompactLibraryUpdates] = useState(false);
   const scale = useScale();
   const isBrowserApp = typeof window !== 'undefined' && !window.cytlex;
+
+  useLayoutEffect(() => {
+    if (!active) return undefined;
+    const actions = libraryActionsRef.current;
+    const toolbar = actions?.closest('.library-toolbar');
+    const subroutes = toolbar?.querySelector('[data-catalog-subroutes]');
+    if (!actions || !toolbar || !subroutes) return undefined;
+    const update = () => {
+      actions.classList.add('extensions-toolbar-measure-full');
+      const requiredWidth = actions.getBoundingClientRect().width;
+      actions.classList.remove('extensions-toolbar-measure-full');
+      const style = getComputedStyle(toolbar);
+      const padding = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+      const gap = Number.parseFloat(style.columnGap) || 0;
+      const availableForActions = toolbar.clientWidth - padding - subroutes.scrollWidth - gap;
+      setCompactLibraryUpdates((compact) => compact
+        ? requiredWidth > availableForActions - 8
+        : requiredWidth > availableForActions);
+    };
+
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    [toolbar, subroutes, actions].forEach((element) => observer?.observe(element));
+    window.addEventListener('resize', update);
+    update();
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [active, cats, sel, scale, checking, checkProgress.current, checkProgress.total]);
 
   useEffect(() => {
     const activeTab = categoryTabsRef.current?.querySelector('[aria-current="page"]');
@@ -353,7 +383,6 @@ const Library = memo(function Library({ active = true }) {
     })), [cats, visitedCategoryIds, sel, shown, favs, sortBy, unreadSort]);
 
   const selectCategory = (categoryId) => {
-    if (categoryId !== sel) previousCategoryRef.current = sel;
     setSel(categoryId);
     setVisitedCategoryIds((current) => current.includes(categoryId) ? current : [...current, categoryId]);
   };
@@ -470,7 +499,7 @@ const Library = memo(function Library({ active = true }) {
       } : undefined}
     >
       <div
-        className="-mt-2 max-md:-mt-3 flex shrink-0 min-w-0 flex-nowrap items-center border-b border-border/70 bg-sidebar mb-3"
+        className="library-toolbar -mt-2 max-md:-mt-3 flex shrink-0 min-w-0 flex-nowrap items-center border-b border-border/70 bg-sidebar mb-3"
         style={{
           gap: `${Math.max(16, Math.round(24 * scale))}px`,
           marginBottom: isBrowserApp ? 0 : `${Math.max(8, Math.round(12 * scale))}px`,
@@ -486,41 +515,44 @@ const Library = memo(function Library({ active = true }) {
           ref={categoryTabsRef}
           aria-label="Categorías de Biblioteca"
           className="flex min-w-0 flex-1 items-center overflow-x-auto overscroll-x-contain whitespace-nowrap no-scrollbar"
-          style={{ gap: `${Math.max(16, Math.round(24 * scale))}px`, height: px(38, scale, 34) }}
+          style={{ height: px(38, scale, 34) }}
         >
-          {cats.map((c) => {
-            const active = c.id === sel;
-            return (
-              <button
-                key={c.id}
-                type="button"
-                aria-current={active ? 'page' : undefined}
-                onClick={() => {
-                  if (active) {
-                    const main = libraryScroller();
-                    if (main?.scrollTop > 1) {
-                      libraryScroll.set(sel, 0);
-                      main.scrollTo({ top: 0, behavior: 'smooth' });
+          <div
+            data-catalog-subroutes
+            className="flex w-max min-w-max items-center whitespace-nowrap"
+            style={{ gap: `${Math.max(16, Math.round(24 * scale))}px`, height: '100%' }}
+          >
+            {cats.map((c) => {
+              const active = c.id === sel;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  aria-current={active ? 'page' : undefined}
+                  onClick={() => {
+                    if (active) {
+                      const main = libraryScroller();
+                      if (main?.scrollTop > 1) {
+                        libraryScroll.set(sel, 0);
+                        main.scrollTo({ top: 0, behavior: 'smooth' });
+                        return;
+                      }
                       return;
                     }
-                    if (previousCategoryRef.current && cats.some((category) => category.id === previousCategoryRef.current)) {
-                      selectCategory(previousCategoryRef.current);
-                    }
-                    return;
-                  }
-                  selectCategory(c.id);
-                }}
-                className={cn(
-                  'group relative shrink-0 p-0 transition-colors'
-                )}
-                style={{ fontSize: fontPx(14, scale), scrollMarginInline: px(16, scale, 12) }}
-              >
-                <SubrouteTabLabel active={active}>{c.name}</SubrouteTabLabel>
-              </button>
-            );
-          })}
+                    selectCategory(c.id);
+                  }}
+                  className={cn(
+                    'group relative shrink-0 p-0 transition-colors'
+                  )}
+                  style={{ fontSize: fontPx(14, scale), scrollMarginInline: px(16, scale, 12) }}
+                >
+                  <SubrouteTabLabel active={active}>{c.name}</SubrouteTabLabel>
+                </button>
+              );
+            })}
+          </div>
         </nav>
-        <div className="ml-auto flex shrink-0 items-center" style={{ gap: px(8, scale, 6) }}>
+        <div ref={libraryActionsRef} className="ml-auto flex shrink-0 items-center" style={{ gap: px(8, scale, 6) }}>
           <Button
             size="sm"
             variant="secondary"
@@ -532,12 +564,7 @@ const Library = memo(function Library({ active = true }) {
               setSortBy(next);
               try { localStorage.setItem('cytlex:librarySort', next); } catch {}
             }}
-            style={{
-              height: px(32, scale, 26),
-              fontSize: fontPx(14, scale),
-              paddingLeft: px(8, scale, 6),
-              paddingRight: px(8, scale, 6)
-            }}
+            style={toolbarButtonStyle(scale)}
           >
             <ArrowUpDown
               className="mr-2"
@@ -553,26 +580,21 @@ const Library = memo(function Library({ active = true }) {
             aria-label={checking ? 'Buscando actualizaciones' : 'Buscar actualizaciones'}
             onClick={runCheck}
             title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
-            className="library-updates-trigger rounded-none"
-            style={{
-              height: px(32, scale, 26),
-              fontSize: fontPx(14, scale),
-              paddingLeft: px(8, scale, 6),
-              paddingRight: px(8, scale, 6)
-            }}
+            className={cn('library-updates-trigger extensions-refresh-button rounded-none', compactLibraryUpdates && 'is-compact')}
+            style={toolbarButtonStyle(scale)}
           >
             {checking ? (
               <RefreshCw
-                className="mr-2 animate-spin max-md:mr-0"
+                className="extensions-button-icon mr-2 animate-spin"
                 style={{ width: `${Math.round(14 * scale)}px`, height: `${Math.round(14 * scale)}px` }}
               />
             ) : (
               <RefreshCw
-                className="mr-2 max-md:mr-0"
+                className="extensions-button-icon mr-2"
                 style={{ width: `${Math.round(14 * scale)}px`, height: `${Math.round(14 * scale)}px` }}
               />
             )}
-            <span className="max-md:hidden">
+            <span className="extensions-button-label">
               {checking ? (
                 <>
                   Buscando

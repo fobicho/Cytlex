@@ -11,7 +11,7 @@ import { Dialog } from './ui/dialog.jsx';
 import { useToast } from './Toast.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils.js';
-import { useScale, px, fontPx } from '../lib/useScale.js';
+import { useScale, px, fontPx, toolbarButtonStyle } from '../lib/useScale.js';
 
 function ExtensionCard({ m, action, updatable = false, disabled = false, scale = 1, selected = false, confirmationOpen = false, onSelectionChange, selectionLabel, selectionDisabled = false }) {
   const [imgOk, setImgOk] = useState(true);
@@ -286,6 +286,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
   }, [selectedInstalledIds.size, selectedAvailableIds.size, visibleUpdates.length, scale]);
 
   useLayoutEffect(() => {
+    if (!active) return undefined;
     const toolbar = toolbarTarget?.closest('.catalog-toolbar');
     const subroutes = toolbar?.querySelector('[data-catalog-subroutes]');
     if (!toolbar || !subroutes || !toolbarTarget) return undefined;
@@ -310,7 +311,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
       observer?.disconnect();
       window.removeEventListener('resize', update);
     };
-  }, [toolbarTarget, scale]);
+  }, [toolbarTarget, scale, active]);
 
   useLayoutEffect(() => {
     const openConfirmations = [
@@ -809,12 +810,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
               setSortBy(next);
               try { localStorage.setItem('cytlex:extensionsSort', next); } catch {}
             }}
-            style={{
-              height: px(32, scale, 26),
-              fontSize: fontPx(14, scale, 12),
-              paddingLeft: px(8, scale, 6),
-              paddingRight: px(8, scale, 6)
-            }}
+            style={toolbarButtonStyle(scale)}
           >
             <ArrowUpDown className="extensions-button-icon mr-2" style={{ width: px(14, scale, 11), height: px(14, scale, 11) }} />
             <span className="extensions-button-label">{sortLabel(sortBy)}</span>
@@ -826,13 +822,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
             onClick={searchUpdates}
             title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
             aria-label="Buscar actualizaciones"
-            style={{
-              opacity: 1,
-              height: px(32, scale, 26),
-              fontSize: fontPx(14, scale, 12),
-              paddingLeft: px(8, scale, 6),
-              paddingRight: px(8, scale, 6)
-            }}
+            style={{ ...toolbarButtonStyle(scale), opacity: 1 }}
           >
             <RefreshCw
               className={cn('extensions-button-icon mr-2', checkingUpdates && 'animate-spin')}

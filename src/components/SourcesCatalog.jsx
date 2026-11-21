@@ -18,7 +18,7 @@ import { Card } from './ui/card.jsx';
 import { Dropdown } from './ui/dropdown.jsx';
 import { EmptyState } from './ui/empty-state.jsx';
 import { Input } from './ui/input.jsx';
-import { useScale, px, fontPx } from '../lib/useScale.js';
+import { useScale, px, fontPx, toolbarButtonStyle } from '../lib/useScale.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 
 const CATALOG_BATCH_SIZE = 40;
@@ -699,12 +699,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
               setSourceSort(next);
               try { localStorage.setItem('cytlex:sourcesSort', next); } catch {}
             }}
-            style={{
-              height: px(32, scale, 26),
-              fontSize: fontPx(14, scale, 12),
-              paddingLeft: px(8, scale, 6),
-              paddingRight: px(8, scale, 6)
-            }}
+            style={toolbarButtonStyle(scale)}
           >
             <ArrowUpDown className="mr-2" style={{ width: px(14, scale, 11), height: px(14, scale, 11) }} />
             {sourceSort === 'title-desc' ? 'Z-A' : sourceSort === 'added' ? 'Adición' : 'A-Z'}

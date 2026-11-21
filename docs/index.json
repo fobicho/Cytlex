@@ -148,7 +148,7 @@
     "id": "achymanga",
     "name": "AchyManga",
     "lang": "es",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "type": "module",
     "contentWarning": "MIXED",
     "main": "ext/achymanga.js",

@@ -646,7 +646,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
         className={cn(
           'catalog-toolbar -mt-2 max-md:-mt-3 shrink-0 items-center border-b border-border/70 bg-sidebar mb-3',
           'flex flex-wrap',
-          tab !== 'mangas' && 'max-md:flex-nowrap'
+          tab !== 'mangas' && 'flex-nowrap'
         )}
         style={{
           columnGap: `${Math.max(16, Math.round(24 * scale))}px`,
@@ -729,7 +729,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
         {tab === 'fuentes' && (
           <div
             id="sources-toolbar"
-            className="ml-auto flex items-center self-center empty:hidden max-md:justify-end"
+            className="ml-auto flex shrink-0 items-center self-center empty:hidden max-md:justify-end"
             style={{ gap: px(8, scale, 6) }}
           />
         )}

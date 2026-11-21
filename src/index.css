@@ -837,6 +837,9 @@ button.library-updates-trigger {
 @media (max-width: 939.98px) {
   button.extensions-square-button {
     min-width: 0 !important;
+  }
+
+  button.extensions-square-button:not(.extensions-sort-button):not(.extensions-refresh-button) {
     padding-inline: 6px !important;
   }
 }
@@ -851,6 +854,10 @@ button.library-updates-trigger {
 
 .extensions-refresh-button.is-compact .extensions-button-icon {
   margin-inline-end: 0 !important;
+}
+
+.extensions-refresh-button {
+  transition-property: background-color, border-color, color, opacity, box-shadow, transform !important;
 }
 
 .extensions-toolbar-measure-full {

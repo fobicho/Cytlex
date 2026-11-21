@@ -264,7 +264,6 @@ const canInstallExtension = (manifest) => !!manifest?.id && (
 );
 
 let sessionSeccion = '';
-let previousSessionSeccion = '';
 
 export default function Settings({ tutorialPreview = false }) {
   const location = useLocation();
@@ -273,8 +272,6 @@ export default function Settings({ tutorialPreview = false }) {
     const restoredSection = consumeBrowserSettingsSection() || sessionSeccion;
     return SECTIONS.some(({ id }) => id === restoredSection) ? restoredSection : 'apariencia';
   });
-  const previousSectionRef = useRef(previousSessionSeccion);
-  const currentSectionRef = useRef(section);
   const [libraryUnreadTipOpen, setLibraryUnreadTipOpen] = useState(false);
   const libraryUnreadTipRef = useRef(null);
   const [chaptersPerRowTipOpen, setChaptersPerRowTipOpen] = useState(false);
@@ -409,12 +406,6 @@ export default function Settings({ tutorialPreview = false }) {
     sessionSeccion = nextSection;
   }, [location.search]);
   useEffect(() => tracking.subscribe(() => setLinkedCount(tracking.linkedCount())), []);
-  useEffect(() => {
-    if (currentSectionRef.current === section) return;
-    previousSectionRef.current = currentSectionRef.current;
-    previousSessionSeccion = currentSectionRef.current;
-    currentSectionRef.current = section;
-  }, [section]);
   useEffect(() => {
     if (!connectHintFor) return;
     const timer = window.setTimeout(() => setConnectHintFor(null), 3000);
@@ -1827,10 +1818,7 @@ export default function Settings({ tutorialPreview = false }) {
                     content.scrollTo({ top: 0, behavior: 'smooth' });
                     return;
                   }
-                  if (previousSectionRef.current) {
-                    setSection(previousSectionRef.current);
-                    sessionSeccion = previousSectionRef.current;
-                  } else revealSectionTab(event.currentTarget);
+                  revealSectionTab(event.currentTarget);
                   return;
                 }
                 setSection(sec.id);
