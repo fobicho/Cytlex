@@ -4,7 +4,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { ChevronsRight } from 'lucide-react';
 import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
-import { SOURCE_CATALOG_HOME_EVENT } from '../lib/searchState.js';
+import { SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
 import { settings, SIDEBAR_WIDTH } from '../lib/settings.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
 
@@ -24,7 +24,7 @@ const DURATION = 0.3;
 const SIDEBAR_SCALE_MIN = 0.72;
 const activeScroller = () => {
   const main = document.querySelector('main');
-  return Array.from(main?.querySelectorAll('.library-page-scroll, .catalog-page-scroll') || [])
+  return Array.from(main?.querySelectorAll('.library-page-scroll, .catalog-page-scroll, .settings-section-scroll') || [])
     .find((element) => element.offsetParent !== null) || main;
 };
 
@@ -59,8 +59,6 @@ function ActiveRouteLabel({ label }) {
   );
 }
 
-let lastLibraryRoute = '/biblioteca';
-let lastExploreRoute = '/explorar?tab=mangas';
 let lastLibraryListRoute = '/biblioteca';
 let lastExploreListRoute = '/explorar?tab=mangas';
 
@@ -70,7 +68,7 @@ function routeSection(location) {
   if (location.pathname.startsWith('/manga')) {
     const from = new URLSearchParams(location.search).get('from');
     if (from === 'biblioteca') return '/biblioteca';
-    if (from === 'explorar' || from === 'fuentes') return '/explorar';
+    if (from === 'explorar' || from === 'fuentes' || from === 'resultados') return '/explorar';
   }
   return '';
 }
@@ -109,14 +107,8 @@ export default function Sidebar({ tutorialNavOnly = false }) {
   useEffect(() => {
     const section = routeSection(location);
     const route = `${location.pathname}${location.search}`;
-    if (section === '/biblioteca') {
-      lastLibraryRoute = route;
-      if (!location.pathname.startsWith('/manga')) lastLibraryListRoute = route;
-    }
-    if (section === '/explorar') {
-      lastExploreRoute = route;
-      if (!location.pathname.startsWith('/manga')) lastExploreListRoute = route;
-    }
+    if (section === '/biblioteca' && !location.pathname.startsWith('/manga')) lastLibraryListRoute = route;
+    if (section === '/explorar' && !location.pathname.startsWith('/manga')) lastExploreListRoute = route;
   }, [location.pathname, location.search]);
 
   useEffect(() => {
@@ -164,9 +156,9 @@ export default function Sidebar({ tutorialNavOnly = false }) {
         {navItems.map((item) => {
           const isActive = routeSection(location) === item.to || location.pathname === item.to;
           const destination = item.to === '/biblioteca'
-            ? lastLibraryRoute
+            ? lastLibraryListRoute
             : item.to === '/explorar'
-              ? lastExploreRoute
+              ? lastExploreListRoute
               : item.to;
           return (
             <NavLink
@@ -182,18 +174,13 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                   : destination}
               onClick={(event) => {
                 if (tutorialNavOnly) return;
+                if (!isActive) resetSubrouteScroll(destination);
                 if (isActive) {
                   if (location.pathname.startsWith('/manga')
                     && (item.to === '/biblioteca' || item.to === '/explorar')) {
                     event.preventDefault();
-                    const main = activeScroller();
-                    if (main?.scrollTop > 1) {
-                      main.scrollTo({ top: 0, behavior: 'smooth' });
-                      return;
-                    }
                     const listRoute = item.to === '/biblioteca' ? lastLibraryListRoute : lastExploreListRoute;
-                    if (item.to === '/biblioteca') lastLibraryRoute = listRoute;
-                    else lastExploreRoute = listRoute;
+                    resetSubrouteScroll(listRoute);
                     navigate(listRoute);
                     return;
                   }
@@ -205,13 +192,10 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                   }
                   if (item.to === '/explorar' || item.to === '/biblioteca') {
                     const main = activeScroller();
-                    if (item.to === '/explorar' && main?.querySelector('[data-source-catalog-selected="true"]')) {
+                    if (item.to === '/explorar' && main?.querySelector('[data-source-catalog-active="true"]')) {
                       event.preventDefault();
-                      if (main.scrollTop > 1) {
-                        main.scrollTo({ top: 0, behavior: 'smooth' });
-                        return;
-                      }
                       window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
+                      main.scrollTo({ top: 0, behavior: 'smooth' });
                       return;
                     }
                     if (main?.scrollTop > 1) {
@@ -219,15 +203,14 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                       event.preventDefault();
                       return;
                     }
-                    const exploreStart = main?.closest('[data-explore-start="true"]')
-                      || main?.querySelector('[data-explore-start="true"]');
-                    if (item.to === '/explorar' && exploreStart) {
-                      event.preventDefault();
-                      return;
-                    }
-                    if (item.to === '/biblioteca') return;
+                    event.preventDefault();
+                    return;
                   }
-                  window.dispatchEvent(new CustomEvent(RESET_PAGE_EVENT));
+                  if (item.to === '/ajustes') {
+                    const main = activeScroller();
+                    if (main?.scrollTop > 1) main.scrollTo({ top: 0, behavior: 'smooth' });
+                    event.preventDefault();
+                  }
                 }
               }}
             >

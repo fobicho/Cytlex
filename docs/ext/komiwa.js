@@ -129,7 +129,10 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     if (!manga?.id) throw new Error('No se encontraron los datos del manga en Komiwa.');
     rememberManga(manga);
 
-    const chaptersData = await fetchText(`${api}/manga/${encodeURIComponent(manga.id)}/chapters?page=1&limit=${chapterLimit}&sort=desc`);
+    const [chaptersData, html] = await Promise.all([
+      fetchText(`${api}/manga/${encodeURIComponent(manga.id)}/chapters?page=1&limit=${chapterLimit}&sort=desc`),
+      fetchText(`${site}/manga/${encodeURIComponent(slug)}`)
+    ]);
     const chapterResponse = JSON.parse(chaptersData);
     const listed = chapterResponse?.data?.chapters || [];
     const mangaTitle = clean(manga.title).toLocaleLowerCase('es');
@@ -155,7 +158,6 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const chapterOptions = chapters.map(({ title, url: chapterUrl }) => ({ title, url: chapterUrl }));
     for (const item of listed) chapterCache.set(item.id, { manga, chapterOptions });
 
-    const html = await fetchText(`${site}/manga/${encodeURIComponent(slug)}`);
     const doc = parse(html);
     const structured = [...doc.querySelectorAll('script[type="application/ld+json"]')]
       .map((node) => {

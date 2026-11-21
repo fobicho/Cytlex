@@ -186,6 +186,7 @@ const Library = memo(function Library({ active = true }) {
   const [unread, setUnread] = useState({});
   const unreadVersions = useRef(new Map());
   const categoryTabsRef = useRef(null);
+  const previousCategoryRef = useRef('');
   const scale = useScale();
   const isBrowserApp = typeof window !== 'undefined' && !window.cytlex;
 
@@ -352,6 +353,7 @@ const Library = memo(function Library({ active = true }) {
     })), [cats, visitedCategoryIds, sel, shown, favs, sortBy, unreadSort]);
 
   const selectCategory = (categoryId) => {
+    if (categoryId !== sel) previousCategoryRef.current = sel;
     setSel(categoryId);
     setVisitedCategoryIds((current) => current.includes(categoryId) ? current : [...current, categoryId]);
   };
@@ -493,7 +495,21 @@ const Library = memo(function Library({ active = true }) {
                 key={c.id}
                 type="button"
                 aria-current={active ? 'page' : undefined}
-                onClick={() => selectCategory(c.id)}
+                onClick={() => {
+                  if (active) {
+                    const main = libraryScroller();
+                    if (main?.scrollTop > 1) {
+                      libraryScroll.set(sel, 0);
+                      main.scrollTo({ top: 0, behavior: 'smooth' });
+                      return;
+                    }
+                    if (previousCategoryRef.current && cats.some((category) => category.id === previousCategoryRef.current)) {
+                      selectCategory(previousCategoryRef.current);
+                    }
+                    return;
+                  }
+                  selectCategory(c.id);
+                }}
                 className={cn(
                   'group relative shrink-0 p-0 transition-colors'
                 )}

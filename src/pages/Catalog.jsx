@@ -8,7 +8,7 @@ import { isLibraryManga, lib, libraryIdentityKey, libraryKey } from '../lib/libr
 import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaSource, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { settings } from '../lib/settings.js';
-import { lastSearch, scrollMemory, rememberMangaPreview, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
+import { lastSearch, scrollMemory, rememberMangaPreview, catalogScroll, sourceCatalogState, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import { clearSearchCoverCache, createSearchCoverBatch } from '../lib/covers.js';
 import MangaCard from '../components/MangaCard.jsx';
 import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
@@ -288,6 +288,8 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     const t = new URLSearchParams(loc.search).get('tab');
     return t === 'mangas' || t === 'extensiones' || t === 'fuentes' ? t : sessionTab;
   });
+  const previousTabRef = useRef('');
+  const currentTabRef = useRef(tab);
   const tabsRef = useRef(null);
   const toolbarRef = useRef(null);
   const searchRef = useRef(null);
@@ -326,6 +328,11 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     setHideSavedManga(!!s.hideSavedManga);
   }), []);
   useEffect(() => { sessionTab = tab; }, [tab]);
+  useEffect(() => {
+    if (currentTabRef.current === tab) return;
+    previousTabRef.current = currentTabRef.current;
+    currentTabRef.current = tab;
+  }, [tab]);
   useEffect(() => {
     // Catalog stays mounted behind the manga detail page. Keep its blob URLs
     // alive while those cards are hidden so returning to Explore preserves covers.
@@ -499,6 +506,20 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     navigate(`/manga?${params.toString()}`);
   };
 
+  const navigateToTab = (nextTab) => {
+    if (!nextTab || nextTab === tab) return;
+    setTab(nextTab);
+    const params = new URLSearchParams(loc.search);
+    params.set('tab', nextTab);
+    params.delete('source');
+    params.delete('q');
+    params.delete('quick');
+    params.delete('migrationFrom');
+    params.delete('migrationSource');
+    params.delete('migrationTargets');
+    navigate({ pathname: loc.pathname, search: `?${params}` }, { replace: true });
+  };
+
   const confirmMigration = async () => {
     if (!migrationSelection || migrationBusy || !migrationFromUrl || !migrationFromSource) return;
     setMigrationBusy(true);
@@ -641,37 +662,14 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                 onClick={() => {
                   if (active) {
                     const main = catalogScroller();
-                    if (t.id === 'fuentes' && main?.querySelector('[data-source-catalog-selected="true"]')) {
-                      window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
+                    if (main?.scrollTop > 1) {
+                      main.scrollTo({ top: 0, behavior: 'smooth' });
+                      return;
                     }
-                    if (t.id === 'mangas') {
-                      setQ('');
-                      lastSearch.q = '';
-                      lastSearch.genre = '';
-                      lastSearch.results = null;
-                      setResults(null);
-                      if (migrationMode) {
-                        const params = new URLSearchParams(loc.search);
-                        params.delete('q');
-                        params.delete('migrationFrom');
-                        params.delete('migrationSource');
-                        params.delete('migrationTargets');
-                        navigate({ pathname: loc.pathname, search: `?${params}` }, { replace: true });
-                      }
-                    }
-                    main?.scrollTo({ top: 0, behavior: 'smooth' });
+                    navigateToTab(previousTabRef.current);
                     return;
                   }
-                  setTab(t.id);
-                  const params = new URLSearchParams(loc.search);
-                  params.set('tab', t.id);
-                  params.delete('source');
-                  params.delete('q');
-                  params.delete('quick');
-                  params.delete('migrationFrom');
-                  params.delete('migrationSource');
-                  params.delete('migrationTargets');
-                  navigate({ pathname: loc.pathname, search: `?${params}` }, { replace: true });
+                  navigateToTab(t.id);
                 }}
                 className={cn(
                   'group relative shrink-0 p-0 transition-colors'

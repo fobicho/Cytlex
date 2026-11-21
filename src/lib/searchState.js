@@ -129,6 +129,20 @@ export const resultsScroll = {
   }
 };
 
+export function resetSubrouteScroll(route) {
+  const [pathname, search = ''] = String(route || '').split('?');
+  if (pathname === '/biblioteca') {
+    let category = '';
+    try { category = localStorage.getItem('cytlex:libraryCategory') || ''; } catch {}
+    libraryScroll.set(category, 0);
+  } else if (pathname === '/explorar') {
+    scrollMemory.catalog = 0;
+    sourceCatalogState.saveScroll(0);
+  } else if (pathname === '/resultados') {
+    resultsScroll.set(new URLSearchParams(search).get('s'), 0);
+  }
+}
+
 const detailScrollMap = new Map();
 
 let restorePending = false;
