@@ -189,7 +189,7 @@ async function readPersistedLibraryCover(url, allowedPending = null) {
   }
 }
 
-async function storeLibraryCoverBlob(url, blob, version, expectedPending) {
+async function storeLibraryCoverBlob(url, blob, version, expectedPending, persist = false) {
   const originalObjectUrl = URL.createObjectURL(blob);
   let keepOriginal = false;
   try {
@@ -210,7 +210,11 @@ async function storeLibraryCoverBlob(url, blob, version, expectedPending) {
     markLibraryCoverLoaded(objectUrl);
     libraryCoverCache.set(url, objectUrl);
     pruneLibraryCoverCache();
-    if (storedBlob) persistLibraryCover(url, storedBlob, version);
+    if (storedBlob) {
+      if (persist) {
+        if (!await persistLibraryCover(url, storedBlob, version)) return '';
+      } else void persistLibraryCover(url, storedBlob, version);
+    } else if (persist) return '';
     return objectUrl;
   } finally {
     if (!keepOriginal) URL.revokeObjectURL(originalObjectUrl);
@@ -219,19 +223,46 @@ async function storeLibraryCoverBlob(url, blob, version, expectedPending) {
 
 async function persistLibraryCover(url, blob, version) {
   try {
-    if ((libraryCoverVersions.get(url) || 0) !== version) return;
+    if ((libraryCoverVersions.get(url) || 0) !== version) return false;
     const db = await openLibraryCoverDb();
-    if (!db) return;
-    if ((libraryCoverVersions.get(url) || 0) !== version) return;
-    const store = db.transaction(LIBRARY_COVER_STORE, 'readwrite').objectStore(LIBRARY_COVER_STORE);
+    if (!db || (libraryCoverVersions.get(url) || 0) !== version) return false;
+    const transaction = db.transaction(LIBRARY_COVER_STORE, 'readwrite');
+    const transactionComplete = new Promise((resolve, reject) => {
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+    const store = transaction.objectStore(LIBRARY_COVER_STORE);
     store.put({ url: persistedCoverKey(url), blob, usedAt: Date.now() });
     const count = await idbRequest(store.count());
-    if (count <= MAX_PERSISTED_LIBRARY_COVERS) return;
+    await transactionComplete;
+    if (count <= MAX_PERSISTED_LIBRARY_COVERS) return true;
     const records = await idbRequest(db.transaction(LIBRARY_COVER_STORE, 'readonly').objectStore(LIBRARY_COVER_STORE).getAll());
     records.sort((a, b) => a.usedAt - b.usedAt);
-    const cleanup = db.transaction(LIBRARY_COVER_STORE, 'readwrite').objectStore(LIBRARY_COVER_STORE);
+    const cleanupTransaction = db.transaction(LIBRARY_COVER_STORE, 'readwrite');
+    const cleanupComplete = new Promise((resolve, reject) => {
+      cleanupTransaction.oncomplete = resolve;
+      cleanupTransaction.onerror = () => reject(cleanupTransaction.error);
+      cleanupTransaction.onabort = () => reject(cleanupTransaction.error);
+    });
+    const cleanup = cleanupTransaction.objectStore(LIBRARY_COVER_STORE);
     records.slice(0, count - MAX_PERSISTED_LIBRARY_COVERS).forEach((record) => cleanup.delete(record.url));
-  } catch {}
+    await cleanupComplete;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function persistCachedLibraryCover(url, cover, version) {
+  try {
+    if (!/^(blob:|data:)/i.test(cover || '')) return false;
+    const response = await fetch(cover);
+    if (!response.ok) return false;
+    return await persistLibraryCover(url, await response.blob(), version);
+  } catch {
+    return false;
+  }
 }
 
 export async function restoreLibraryCover(url) {
@@ -301,27 +332,38 @@ export function getLibraryCover(url) {
   return cached;
 }
 
-export function preloadLibraryCoversBatch(urls, { web = false } = {}) {
+export function preloadLibraryCoversBatch(urls, { web = false, persist = false, onProgress } = {}) {
+  const uniqueUrls = [...new Set((urls || []).filter(Boolean))];
+  let current = 0;
+  const reportProgress = (url) => {
+    current += 1;
+    onProgress?.({ current, total: uniqueUrls.length, url });
+  };
   if (!web || window.cytlex?.fetchImage) {
-    return Promise.all((urls || []).map((url) => preloadLibraryCover(url, { web })));
+    return Promise.all(uniqueUrls.map(async (url) => {
+      try { return await preloadLibraryCover(url, { web, persist }); }
+      finally { reportProgress(url); }
+    }));
   }
 
   const entries = [];
-  for (const url of new Set(urls || [])) {
-    if (!url || browserImageUrl(url) === url) continue;
+  const tasks = uniqueUrls.map((url) => {
+    if (browserImageUrl(url) === url) return Promise.resolve('');
     const cached = libraryCoverCache.get(url);
-    if (cached) continue;
+    if (cached) return persist ? preloadLibraryCover(url, { web: true, persist }) : Promise.resolve(cached);
     let resolve;
     const promise = new Promise((done) => { resolve = done; });
-    const entry = { url, promise, resolve, version: libraryCoverVersions.get(url) || 0 };
+    const entry = { url, promise, resolve, version: libraryCoverVersions.get(url) || 0, persist };
     libraryCoverCache.set(url, promise);
     entries.push(entry);
-  }
+    return promise;
+  });
 
-  if (!entries.length) return Promise.resolve([]);
+  const results = Promise.all(tasks.map((task, index) => task.finally(() => reportProgress(uniqueUrls[index]))));
+  if (!entries.length) return results;
   const fallback = async (entry) => {
     if (libraryCoverCache.get(entry.url) === entry.promise) libraryCoverCache.delete(entry.url);
-    entry.resolve(await preloadLibraryCover(entry.url, { web: true }));
+    entry.resolve(await preloadLibraryCover(entry.url, { web: true, persist: entry.persist }));
   };
 
   void (async () => {
@@ -338,7 +380,7 @@ export function preloadLibraryCoversBatch(urls, { web = false } = {}) {
         await fetchImageBlobBatch(batch.map(({ url }) => ({ url })), undefined, async ({ blob, error }, index) => {
           const entry = batch[index];
           if (error || !blob) { await fallback(entry); return; }
-          const cover = await storeLibraryCoverBlob(entry.url, blob, entry.version, entry.promise);
+          const cover = await storeLibraryCoverBlob(entry.url, blob, entry.version, entry.promise, entry.persist);
           if (cover) entry.resolve(cover);
           else await fallback(entry);
         });
@@ -348,10 +390,10 @@ export function preloadLibraryCoversBatch(urls, { web = false } = {}) {
     }
   })();
 
-  return Promise.all(entries.map((entry) => entry.promise));
+  return results;
 }
 
-export async function preloadLibraryCover(url, { web = false, priority = false } = {}) {
+export async function preloadLibraryCover(url, { web = false, priority = false, persist = false } = {}) {
   if (!url || typeof window === 'undefined') return '';
   const browserProxy = web && browserImageUrl(url) !== url;
   if (!browserProxy && !window.cytlex?.fetchImage && !/^(data:|blob:)/i.test(url)) return '';
@@ -368,7 +410,9 @@ export async function preloadLibraryCover(url, { web = false, priority = false }
     }
     libraryCoverCache.delete(url);
     libraryCoverCache.set(url, cached);
-    return cached;
+    const cover = await cached;
+    if (persist && cover && !await persistCachedLibraryCover(url, cover, libraryCoverVersions.get(url) || 0)) return '';
+    return cover;
   }
 
   let pending;
@@ -435,7 +479,12 @@ export async function preloadLibraryCover(url, { web = false, priority = false }
       }
       libraryCoverCache.set(url, objectUrl);
       pruneLibraryCoverCache();
-      if (thumbnail) persistLibraryCover(url, thumbnail, version);
+      if (thumbnail) {
+        if (persist) {
+          if (!await persistLibraryCover(url, thumbnail, version)) return '';
+        }
+        else void persistLibraryCover(url, thumbnail, version);
+      } else if (persist) return '';
       return objectUrl;
     } catch {
       return '';

@@ -563,13 +563,21 @@
   src: url('/fonts/space-grotesk-700.ttf') format('truetype');
 }
 
+@font-face {
+  font-family: 'Absans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('https://raw.githubusercontent.com/collletttivo/absans/main/fonts/Absans-Regular.woff2') format('woff2');
+}
+
 @layer base {
   * {
     @apply border-border;
   }
 
   html {
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: 'Satoshi', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -578,6 +586,11 @@
     @apply bg-background text-foreground;
     margin: 0;
     padding: 0;
+  }
+
+  html.tutorial-open,
+  body.tutorial-open {
+    overflow: hidden;
   }
 
   a {
@@ -785,12 +798,29 @@ button[title*="seleccion" i],
 button[aria-label*="marcar" i],
 button[title*="marcar" i],
 button[aria-label*="filtros" i],
-button[title*="filtros" i],
-[aria-label="Filtros de búsqueda"] button {
+button[title*="filtros" i] {
   border-radius: 6px !important;
 }
 
+button.detail-square-control,
+button.current-chapter-jump {
+  border-radius: 0 !important;
+}
+
+button.current-chapter-jump,
+button.current-chapter-jump:hover {
+  background-color: transparent !important;
+  color: hsl(var(--foreground)) !important;
+}
+
 button.extensions-square-button {
+  border-radius: 0 !important;
+}
+
+button.source-filters-trigger,
+button.source-sort-trigger,
+button.library-sort-trigger,
+button.library-updates-trigger {
   border-radius: 0 !important;
 }
 
@@ -875,6 +905,7 @@ img.manga-cover-corners {
   gap: 3px;
   border-radius: 0;
   color: hsl(var(--sidebar-foreground));
+  font-family: 'Absans', system-ui, sans-serif;
   font-size: 11px;
   -webkit-tap-highlight-color: transparent;
 }
@@ -927,6 +958,10 @@ img.manga-cover-corners {
 }
 
 @media (max-width: 767px) {
+  button {
+    font-family: 'Absans', system-ui, sans-serif;
+  }
+
   .app-shell--web:not(:has(.browser-main--reader)) {
     padding-bottom: calc(56px + env(safe-area-inset-bottom));
   }
@@ -1003,6 +1038,10 @@ img.manga-cover-corners {
   }
 }
 
+.onboarding-content--theme {
+  padding-block: 1rem;
+}
+
 @layer utilities {
   .glass {
     @apply bg-card/60 backdrop-blur-xl border;
@@ -1041,11 +1080,50 @@ img.manga-cover-corners {
   animation: cx-update-pulse 1.2s ease-in-out 1;
 }
 
+.catalog-scroll-control {
+  display: grid;
+  place-items: center;
+  border: 1px solid hsl(var(--border));
+  border-radius: 9999px;
+  background: hsl(var(--background));
+  color: hsl(var(--primary));
+  box-shadow: 0 1px 3px hsl(var(--foreground) / 0.14);
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.catalog-scroll-button:not(:disabled):hover .catalog-scroll-control {
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.catalog-scroll-button:disabled .catalog-scroll-control {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.7;
+}
+
+.catalog-scroll-button:focus-visible .catalog-scroll-control {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
 .sidebar-ribbon-viewport {
   display: flex;
   width: 100%;
   min-width: 0;
   overflow: hidden;
+}
+
+.sidebar-navigation {
+  font-family: 'Absans', system-ui, sans-serif;
+}
+
+.subroute-tab-label {
+  font-family: 'Absans', system-ui, sans-serif;
+}
+
+.subroute-back-button {
+  font-family: 'Absans', system-ui, sans-serif;
 }
 
 .sidebar-ribbon-track {
@@ -1055,6 +1133,65 @@ img.manga-cover-corners {
   flex: none;
   animation: cx-sidebar-ribbon 12s linear infinite;
   will-change: transform;
+}
+
+.sidebar-glyph-viewport {
+  display: flex;
+  flex: 0 1 32px;
+  min-width: 20px;
+  height: 100%;
+  align-items: center;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 18%, #000 82%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, #000 18%, #000 82%, transparent 100%);
+  color: hsl(var(--primary));
+  opacity: 0.72;
+  font-family: 'Noto Sans JP Variable', 'Noto Sans JP', sans-serif;
+  font-size: 0.82em;
+  line-height: 1;
+}
+
+.sidebar-active-route-label {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.sidebar-active-route-name {
+  flex: none;
+  white-space: nowrap;
+}
+
+.sidebar-glyph-leading {
+  flex: 0 1 32px;
+}
+
+.sidebar-glyph-trailing {
+  flex: 1 1 16px;
+}
+
+.sidebar-glyph-track {
+  display: flex;
+  width: max-content;
+  flex: none;
+  animation: cx-sidebar-ribbon 12s linear infinite;
+  will-change: transform;
+}
+
+.sidebar-glyph-track > span {
+  flex: none;
+}
+
+.sidebar-glyph-track-static {
+  animation: none;
+  will-change: auto;
+}
+
+.sidebar-glyph-track-static > span + span {
+  display: none;
 }
 
 .sidebar-ribbon-segment {
@@ -1087,6 +1224,10 @@ img.manga-cover-corners {
   }
 
   .sidebar-ribbon-track {
+    animation: none;
+  }
+
+  .sidebar-glyph-track {
     animation: none;
   }
 }

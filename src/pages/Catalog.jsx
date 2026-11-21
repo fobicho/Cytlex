@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Loader2, ChevronRight, ChevronLeft } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { sourceErrorMessage } from '../lib/browserHttp.js';
 import { isLibraryManga, lib, libraryIdentityKey, libraryKey } from '../lib/library.js';
@@ -53,6 +53,7 @@ const sourceLangSubtitle = (manifest) => {
 };
 
 function SourceSection({ r, coverSize, scale = 1, animate = false, active = true, onMangaSelect, returnTo = '', savedMangaKeys, hideSavedManga = false }) {
+  const prefersReducedMotion = useReducedMotion();
   const trackRef = useRef(null);
   const mainRef = useRef(null);
   const [trackWidth, setTrackWidth] = useState(0);
@@ -131,6 +132,7 @@ function SourceSection({ r, coverSize, scale = 1, animate = false, active = true
     : r.items;
   if (hideSavedManga && r.items.length && !visibleItems.length && !r.hasMore) return null;
   const visible = visibleItems.slice(0, 15);
+  const hasCarousel = trackWidth > 0 && visible.length > columns;
 
   return (
     <motion.section
@@ -149,9 +151,14 @@ function SourceSection({ r, coverSize, scale = 1, animate = false, active = true
       >
         <SourceBadge m={r.manifest} />
         <div className="min-w-0">
-          <h3 className="font-semibold" style={{ fontSize: fontPx(14, scale) }}>
-            {r.manifest.name}
-          </h3>
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="min-w-0 truncate font-semibold" style={{ fontSize: fontPx(14, scale) }}>
+              {r.manifest.name}
+            </h3>
+            <span className="shrink-0 text-muted-foreground" style={{ fontSize: fontPx(12, scale) }}>
+              · {visibleItems.length}
+            </span>
+          </div>
           {(() => {
             const langs = sourceLangSubtitle(r.manifest);
             if (!langs) return null;
@@ -162,26 +169,7 @@ function SourceSection({ r, coverSize, scale = 1, animate = false, active = true
             );
           })()}
         </div>
-        <span className="text-muted-foreground shrink-0" style={{ fontSize: fontPx(12, scale) }}>
-          · {visibleItems.length}
-        </span>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          <div className="hidden items-center gap-1 md:flex">
-            {canLeft && (
-              <button type="button" onClick={() => step(-1)} aria-label="Ver mangas anteriores"
-                className="catalog-scroll-button grid place-items-center rounded-full border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                style={{ width: `${Math.round(30 * scale)}px`, height: `${Math.round(30 * scale)}px` }}>
-                <ChevronLeft style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
-              </button>
-            )}
-            {canRight && (
-              <button type="button" onClick={() => step(1)} aria-label="Ver más mangas"
-                className="catalog-scroll-button grid place-items-center rounded-full border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                style={{ width: `${Math.round(30 * scale)}px`, height: `${Math.round(30 * scale)}px` }}>
-                <ChevronRight style={{ width: `${Math.round(16 * scale)}px`, height: `${Math.round(16 * scale)}px` }} />
-              </button>
-            )}
-          </div>
           {(visibleItems.length > 15 || (r.hasMore && canRight)) && (
             <a
               className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'hover:bg-transparent hover:text-foreground')}
@@ -203,37 +191,72 @@ function SourceSection({ r, coverSize, scale = 1, animate = false, active = true
         </p>
       ) : (
       <div className="relative">
-        <div
-          ref={trackRef}
-          onScroll={measure}
-          className="flex overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          style={{
-            gap: `${gap}px`,
-            scrollSnapType: 'x proximity'
-          }}
-        >
-          {visible.map((m, i) => (
-            <div
-              key={i}
-              className="shrink-0"
-              style={{ scrollSnapAlign: 'start', width: cardWidth || 150 }}
-            >
-              <MangaCard
-                m={m}
-                sourceId={r.id}
-                from="explorar"
-                returnTo={returnTo}
-                onSelect={(manga, sourceId) => {
-                  catalogScroll.set(r.id, trackRef.current?.scrollLeft || 0);
-                  onMangaSelect?.(manga, sourceId);
-                }}
-                coverSize={cardWidth}
-                showAuthor={false}
-                savedInLibrary={isLibraryManga(m, r.id, savedMangaKeys)}
-              />
-            </div>
-          ))}
+        <div className="min-w-0">
+          <div
+            ref={trackRef}
+            id={`source-results-${r.id}`}
+            onScroll={measure}
+            className="flex w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            style={{
+              gap: `${gap}px`,
+              scrollSnapType: 'x proximity'
+            }}
+          >
+            {visible.map((m, i) => (
+              <div
+                key={i}
+                className="shrink-0"
+                style={{ scrollSnapAlign: 'start', width: cardWidth || 150 }}
+              >
+                <MangaCard
+                  m={m}
+                  sourceId={r.id}
+                  from="explorar"
+                  returnTo={returnTo}
+                  onSelect={(manga, sourceId) => {
+                    catalogScroll.set(r.id, trackRef.current?.scrollLeft || 0);
+                    onMangaSelect?.(manga, sourceId);
+                  }}
+                  coverSize={cardWidth}
+                  showAuthor={false}
+                  savedInLibrary={isLibraryManga(m, r.id, savedMangaKeys)}
+                />
+              </div>
+            ))}
+          </div>
         </div>
+          {hasCarousel && (
+            <div className="pointer-events-none absolute inset-0 z-10 hidden md:block">
+              <AnimatePresence initial={false}>
+                {canLeft && (
+                  <motion.button key="left" type="button" onClick={() => step(-1)} aria-label="Desplazar resultados a la izquierda" aria-controls={`source-results-${r.id}`} title="Ver mangas anteriores"
+                    initial={{ opacity: 0, transform: `translateY(-50%) translateX(${prefersReducedMotion ? 0 : -4}px)` }}
+                    animate={{ opacity: 1, transform: 'translateY(-50%) translateX(0)' }}
+                    exit={{ opacity: 0, transform: `translateY(-50%) translateX(${prefersReducedMotion ? 0 : -4}px)` }}
+                    transition={{ duration: prefersReducedMotion ? 0.1 : 0.16, ease: [0.23, 1, 0.32, 1] }}
+                    className="catalog-scroll-button pointer-events-auto grid shrink-0 place-items-center bg-transparent focus-visible:outline-none"
+                    style={{ position: 'absolute', left: 0, top: '50%', width: `${Math.max(48, Math.round(40 * scale))}px`, height: `${Math.max(48, Math.round(40 * scale))}px` }}>
+                    <span className="catalog-scroll-control" style={{ width: `${Math.max(32, Math.round(32 * scale))}px`, height: `${Math.max(32, Math.round(32 * scale))}px` }}>
+                      <ChevronLeft aria-hidden="true" strokeWidth={2.25} style={{ width: `${Math.max(18, Math.round(18 * scale))}px`, height: `${Math.max(18, Math.round(18 * scale))}px` }} />
+                    </span>
+                  </motion.button>
+                )}
+                {canRight && (
+                  <motion.button key="right" type="button" onClick={() => step(1)} aria-label="Desplazar resultados a la derecha" aria-controls={`source-results-${r.id}`} title="Ver más mangas"
+                    initial={{ opacity: 0, transform: `translateY(-50%) translateX(${prefersReducedMotion ? 0 : 4}px)` }}
+                    animate={{ opacity: 1, transform: 'translateY(-50%) translateX(0)' }}
+                    exit={{ opacity: 0, transform: `translateY(-50%) translateX(${prefersReducedMotion ? 0 : 4}px)` }}
+                    transition={{ duration: prefersReducedMotion ? 0.1 : 0.16, ease: [0.23, 1, 0.32, 1] }}
+                    className="catalog-scroll-button pointer-events-auto grid shrink-0 place-items-center bg-transparent focus-visible:outline-none"
+                    style={{ position: 'absolute', right: 0, top: '50%', width: `${Math.max(48, Math.round(40 * scale))}px`, height: `${Math.max(48, Math.round(40 * scale))}px` }}>
+                    <span className="catalog-scroll-control" style={{ width: `${Math.max(32, Math.round(32 * scale))}px`, height: `${Math.max(32, Math.round(32 * scale))}px` }}>
+                      <ChevronRight aria-hidden="true" strokeWidth={2.25} style={{ width: `${Math.max(18, Math.round(18 * scale))}px`, height: `${Math.max(18, Math.round(18 * scale))}px` }} />
+                    </span>
+                  </motion.button>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
       </div>
       )}
     </motion.section>
@@ -602,7 +625,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
             <Button
               size="sm"
               variant="ghost"
-              className="-ml-3 hover:bg-transparent hover:text-foreground"
+              className="subroute-back-button -ml-3 hover:bg-transparent hover:text-foreground"
               onClick={(e) => { e.currentTarget.blur(); migrationInline.onBack(); }}
               style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(8, scale, 6), paddingRight: px(8, scale, 6) }}
             >
@@ -756,14 +779,15 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
               <>
                   {searching && (
                   <div
-                    className="flex items-center gap-2.5"
+                    className="flex items-center gap-2.5 text-muted-foreground"
                     style={{
-                      marginTop: `${Math.max(8, Math.round(12 * scale))}px`,
+                      minHeight: px(32, scale, 28),
                       marginBottom: `${Math.max(10, Math.round(16 * scale))}px`
                     }}
+                    role="status"
                   >
-                    <Loader2 className="animate-spin text-muted-foreground" style={{ width: px(20, scale, 16), height: px(20, scale, 16) }} />
-                    <p className="text-sm text-muted-foreground">
+                    <Loader2 className="animate-spin" style={{ width: px(20, scale, 16), height: px(20, scale, 16) }} />
+                    <p className="text-sm">
                       Buscando en {catalogSources.length} {catalogSources.length === 1 ? 'extensión' : 'extensiones'}...
                     </p>
                   </div>
@@ -781,7 +805,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                     title="No hay mangas nuevos"
                     description="Los mangas encontrados ya están en Biblioteca. Puedes desactivar «Ocultar mangas ya guardados» en Ajustes > Biblioteca."
                   />
-                ) : visibleCompleted.map((r, i) => (
+                ) : visibleCompleted.map((r) => (
                   <SourceSection
                     key={r.id}
                     r={r}

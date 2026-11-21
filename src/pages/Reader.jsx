@@ -10,7 +10,7 @@ import { tracking } from '../lib/tracking.js';
 import { chapterOrder, detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
-import { browserImageUrl, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchOnfChapter, sourceErrorMessage } from '../lib/browserHttp.js';
+import { browserImageUrl, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchMangaLectChapter, fetchOnfChapter, sourceErrorMessage } from '../lib/browserHttp.js';
 import { readRecentChapter, writeRecentChapter } from '../lib/recentChapters.js';
 import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
@@ -583,6 +583,9 @@ export default function Reader() {
         }
         if (!r && sourceId === 'inmanga' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
           try { r = await fetchInmangaChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
+        }
+        if (!r && sourceId === 'mangalect' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
+          try { r = await fetchMangaLectChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
         }
         if (!r) r = await api.chapter(chapterUrl, sourceId);
         if (!r?.pages?.length) r = await api.chapter(chapterUrl, sourceId, { fresh: true });

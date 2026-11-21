@@ -19,7 +19,7 @@ function ResultsBackBar({ onBack, scale }) {
   const inset = px(16, scale, 12);
   return (
     <div className="sticky top-0 z-20 flex shrink-0 items-center border-b border-border/70 bg-sidebar" style={{ minHeight: px(38, scale, 34), marginLeft: `-${inset}`, marginRight: `-${inset}`, paddingLeft: inset, paddingRight: inset, marginBottom: px(12, scale, 10) }}>
-      <Button size="sm" variant="ghost" className="-ml-3 hover:bg-transparent hover:text-foreground" onClick={(event) => { event.currentTarget.blur(); onBack(); }} style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(8, scale, 6), paddingRight: px(8, scale, 6) }}>
+      <Button size="sm" variant="ghost" className="subroute-back-button -ml-3 hover:bg-transparent hover:text-foreground" onClick={(event) => { event.currentTarget.blur(); onBack(); }} style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(8, scale, 6), paddingRight: px(8, scale, 6) }}>
         <ChevronLeft className="mr-1" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Volver
       </Button>
     </div>

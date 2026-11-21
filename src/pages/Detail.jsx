@@ -37,7 +37,7 @@ function DetailBackBar({ onBack, scale }) {
   const inset = px(16, scale, 12);
   return (
     <div className="sticky top-0 z-20 flex shrink-0 items-center border-b border-border/70 bg-sidebar" style={{ minHeight: px(38, scale, 34), marginLeft: `-${inset}`, marginRight: 'calc(-1 * var(--detail-right-padding, 15px))', paddingLeft: inset, paddingRight: inset, marginBottom: px(12, scale, 10) }}>
-      <Button size="sm" variant="ghost" className="-ml-3 hover:bg-transparent hover:text-foreground" onClick={(event) => { event.currentTarget.blur(); onBack(); }} style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(8, scale, 6), paddingRight: px(8, scale, 6) }}>
+      <Button size="sm" variant="ghost" className="subroute-back-button -ml-3 text-muted-foreground hover:bg-transparent hover:text-foreground" onClick={(event) => { event.currentTarget.blur(); onBack(); }} style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(8, scale, 6), paddingRight: px(8, scale, 6) }}>
         <ChevronLeft className="mr-1" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Volver
       </Button>
     </div>
@@ -204,6 +204,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   useEffect(() => {
     if (fromParam === 'fuentes') sourceCatalogState.requestRestore();
   }, [fromParam]);
+  const sourceConfigured = isSourceConfigured(extensions.manifest(sourceId));
   const sourceAvailable = extensions.isInstalled(sourceId);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [coverSetting, setCoverSetting] = useState(() => settings.get().coverSize);
@@ -346,8 +347,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     const tCover = t?.cover;
     if (anilistCover && tCover) return tCover;
     if (anilistCover && tLocal) return tLocal;
-    if (d?.cover && isMangaCover(d.cover, mangaUrl)) return d.cover;
     if (knownCover) return knownCover;
+    if (d?.cover && isMangaCover(d.cover, mangaUrl)) return d.cover;
     return '';
   }, [d?.cover, knownCover, mangaUrl, sourceId, anilistCover, coverTick]);
 
@@ -1163,11 +1164,15 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             </div>
             {detailMissing && fav && !err ? (
               <div className="mt-5 text-sm text-muted-foreground" role="status">
-                <p>El detalle aún no está guardado en este dispositivo.</p>
-                <Button className="mt-3" variant="secondary" disabled={refreshingDetail} onClick={() => void refreshLibraryDetail()}>
-                  <RefreshCw className={cn('mr-2 h-4 w-4', refreshingDetail && 'animate-spin')} />
-                  {refreshingDetail ? 'Cargando detalle…' : 'Cargar detalle'}
-                </Button>
+                <p>{sourceConfigured ? 'El detalle aún no está guardado en este dispositivo.' : 'La fuente está desactivada. El manga sigue en Biblioteca, pero no se puede cargar su detalle.'}</p>
+                {sourceConfigured ? (
+                  <Button className="mt-3" variant="secondary" disabled={refreshingDetail} onClick={() => void refreshLibraryDetail()}>
+                    <RefreshCw className={cn('mr-2 h-4 w-4', refreshingDetail && 'animate-spin')} />
+                    {refreshingDetail ? 'Cargando detalle…' : 'Cargar detalle'}
+                  </Button>
+                ) : (
+                  <Button className="mt-3" variant="secondary" onClick={() => { window.location.hash = '#/ajustes'; }}>Ir a Ajustes</Button>
+                )}
               </div>
             ) : err ? (
               <div className="mt-5 text-sm text-muted-foreground" role="status">
@@ -1256,12 +1261,11 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           >
             {d.title}
           </h1>
-          {author && (
-            <div className="text-muted-foreground mt-1" style={{ fontSize: fontPx(15, scale) }}>
-              Por {author}
-            </div>
-          )}
-          <div className="mt-1">
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="min-w-0 truncate text-muted-foreground" style={{ fontSize: fontPx(15, scale) }}>
+              Por {author || 'Autor desconocido'}
+            </span>
+            <span aria-hidden="true" className="text-muted-foreground">·</span>
             <SourceLine key={sourceId} sourceId={sourceId} manifest={sourceManifest} scale={scale} iconFailed={sourceIconFailed} />
           </div>
           <div className="mt-2 flex flex-wrap items-center" style={{ gap: px(8, scale, 6) }}>
@@ -1370,6 +1374,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           <Button
             type="button"
             variant="secondary"
+            className="detail-square-control"
             disabled={refreshingDetail}
             title="Actualizar detalle desde la fuente"
             aria-label="Actualizar detalle desde la fuente"
@@ -1597,7 +1602,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             size="sm"
             variant="secondary"
             title="Capítulos por fila"
-            className="chapter-per-row hidden rounded-lg md:inline-flex"
+            className="detail-square-control chapter-per-row hidden md:inline-flex"
             onClick={() => {
               const order = [1, 2, 3];
               const next = order[(order.indexOf(chaptersPerRow) + 1) % order.length];
@@ -1612,16 +1617,15 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               height: px(32, scale, 27),
               fontSize: fontPx(13, scale, 11),
               paddingLeft: px(10, scale, 8),
-              paddingRight: px(10, scale, 8),
-              borderRadius: px(8, scale, 6)
+              paddingRight: px(10, scale, 8)
             }}
           >
             {chaptersPerRow} por fila
           </Button>
           <Button
             size="icon"
-            variant="secondary"
-            className="current-chapter-jump aspect-square shrink-0 rounded-lg p-0"
+            variant="ghost"
+            className="current-chapter-jump aspect-square shrink-0 rounded-none bg-transparent p-0 text-foreground shadow-none hover:bg-transparent hover:text-foreground active:scale-100"
             title={currentChapter ? `Ir a ${currentChapter.title}` : 'No hay un capítulo actual'}
             aria-label={currentChapter ? `Ir al capítulo actual: ${currentChapter.title}` : 'No hay un capítulo actual'}
             disabled={!currentChapter}
@@ -1633,7 +1637,6 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               minHeight: px(32, scale, 27),
               aspectRatio: '1 / 1',
               boxSizing: 'border-box',
-              borderRadius: px(8, scale, 6),
               flexShrink: 0
             }}
           >

@@ -16,5 +16,5 @@ export function px(value, scale, min = 1) {
 }
 
 export function fontPx(value, scale, min = 1) {
-  return `${Math.max(min, Math.round(value * scale * 0.9))}px`;
+  return `${Math.max(min, Math.round(value * scale * 0.95))}px`;
 }

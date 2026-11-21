@@ -5,6 +5,7 @@ import { useLocation } from 'react-router-dom';
 import { Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Bell, Heart, X, Database, Download, Upload, CircleHelp, Settings as SettingsIcon } from 'lucide-react';
 import { CONTENT_WARNING_RATINGS, resolveMode, settings } from '../lib/settings.js';
 import { lib } from '../lib/library.js';
+import { api } from '../lib/api.js';
 import { anilist } from '../lib/anilist.js';
 import { consumeBrowserAuthError, consumeBrowserSettingsSection, session } from '../lib/session.js';
 import { tracking } from '../lib/tracking.js';
@@ -20,7 +21,8 @@ import { useToast } from '../components/Toast.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
-import { clearPersistentLibraryCoverCache, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
+import { clearPersistentLibraryCoverCache, preloadLibraryCoversBatch } from '../lib/covers.js';
+import { browserImageUrl } from '../lib/browserHttp.js';
 import { clearSourceCache } from '../lib/sourceCache.js';
 import { clearRecentChapters } from '../lib/recentChapters.js';
 import SubrouteTabLabel from '../components/SubrouteTabLabel.jsx';
@@ -31,11 +33,78 @@ function clearLibraryUnreadCache() {
   window.dispatchEvent(new Event('cytlex:library-unread-reset'));
 }
 
-async function preloadImportedCovers(mangas) {
+function needsPersistentImportedCover(cover) {
+  return typeof cover === 'string'
+    && /^https?:\/\//i.test(cover)
+    && (Boolean(window.cytlex?.fetchImage) || browserImageUrl(cover) !== cover);
+}
+
+async function preloadImportedCovers(mangas, onProgress) {
   const covers = [...new Set((mangas || [])
     .map((manga) => manga?.cover)
-    .filter((cover) => typeof cover === 'string' && requiresImageProxy(cover)))];
-  await Promise.all(covers.map((cover) => preloadLibraryCover(cover, { web: true, priority: true })));
+    .filter(needsPersistentImportedCover))];
+  const results = await preloadLibraryCoversBatch(covers, {
+    web: true,
+    persist: true,
+    onProgress: ({ current, total }) => onProgress?.({ label: 'Preparando las portadas', current, total })
+  });
+  return results.filter((cover) => !cover).length;
+}
+
+async function cacheImportedLibraryDetails(mangas, onProgress) {
+  let current = 0;
+  let next = 0;
+  let failed = 0;
+  const maxConcurrent = Math.min(12, mangas.length);
+  await Promise.all(Array.from({ length: maxConcurrent }, async () => {
+    while (next < mangas.length) {
+      const manga = mangas[next++];
+      const sourceId = manga?.sourceId || 'leercapitulo';
+      const resolvedId = extensions.resolveInstalledSource(sourceId, manga?.sourceName, manga?.url) || sourceId;
+      const title = manga?.title || 'Manga';
+      try {
+        let detail = await api.restoreDetail(manga?.url, sourceId);
+        if (!detail?.chapters?.length) {
+          const available = extensions.isInstalled(resolvedId);
+          if (available) detail = await api.detail(manga.url, resolvedId, { cacheResult: false, persistResult: false, allowDisabled: true });
+        }
+        if (!detail?.chapters?.length || !(await api.persistLibraryDetail(manga.url, sourceId, detail))) failed += 1;
+      } catch {
+        failed += 1;
+      }
+      current += 1;
+      onProgress?.({ label: 'Guardando la información de tus mangas', current, total: mangas.length, currentLabel: title });
+    }
+  }));
+  return failed;
+}
+
+function BackupProgress({ progress, scale }) {
+  if (!progress) return null;
+  const determinate = progress.total > 0;
+  const value = determinate ? Math.round((progress.current / progress.total) * 100) : 0;
+  return (
+    <div className="space-y-2 rounded-lg border bg-secondary/40" style={{ padding: px(12, scale, 10), marginBottom: px(16, scale, 12) }} role="status" aria-live="polite">
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-medium text-foreground" style={{ fontSize: fontPx(13, scale, 11) }}>{progress.label}</span>
+        {determinate && <span className="shrink-0 text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10) }}>{progress.current} de {progress.total}</span>}
+      </div>
+      <div
+        className="h-2 overflow-hidden rounded-full bg-muted"
+        role="progressbar"
+        aria-label={progress.label}
+        aria-valuemin={0}
+        aria-valuemax={determinate ? 100 : undefined}
+        aria-valuenow={determinate ? value : undefined}
+      >
+        <div
+          className={`h-full rounded-full bg-primary transition-[width] duration-200 ${determinate ? '' : 'w-2/5 animate-pulse'}`}
+          style={determinate ? { width: `${value}%` } : undefined}
+        />
+      </div>
+      {progress.currentLabel && <p className="truncate text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10) }} title={progress.currentLabel}>{progress.currentLabel}</p>}
+    </div>
+  );
 }
 
 function throwIfAborted(signal) {
@@ -229,6 +298,7 @@ export default function Settings({ tutorialPreview = false }) {
   const [backupMissingSources, setBackupMissingSources] = useState([]);
   const [backupUnavailableSources, setBackupUnavailableSources] = useState([]);
   const [backupInstallManifests, setBackupInstallManifests] = useState([]);
+  const [backupProgress, setBackupProgress] = useState(null);
   const [mihonCandidate, setMihonCandidate] = useState(null);
   const [mihonInstallManifests, setMihonInstallManifests] = useState([]);
   const [mihonUnknownEntries, setMihonUnknownEntries] = useState([]);
@@ -516,6 +586,7 @@ export default function Settings({ tutorialPreview = false }) {
       return;
     }
     setBackupBusy(true);
+    setBackupProgress({ label: 'Leyendo el respaldo' });
     try {
       const result = await window.cytlex.openBackup();
       if (result?.canceled) return;
@@ -525,6 +596,7 @@ export default function Settings({ tutorialPreview = false }) {
       toast({ title: 'No se pudo importar el respaldo', description: error.message, variant: 'error' });
     } finally {
       setBackupBusy(false);
+      setBackupProgress(null);
     }
   };
 
@@ -532,6 +604,7 @@ export default function Settings({ tutorialPreview = false }) {
     if (!backupCandidate) return;
     setBackupBusy(true);
     try {
+      setBackupProgress({ label: 'Preparando la restauración' });
       let data = backupCandidate.data;
       let omittedCount = 0;
       if (omitUnavailable) {
@@ -553,8 +626,11 @@ export default function Settings({ tutorialPreview = false }) {
         const value = JSON.parse(data['cytlex:favs'] || '[]');
         if (Array.isArray(value)) favorites = value;
       } catch {}
-      await preloadImportedCovers(favorites);
-      const proxiedCovers = new Set(favorites.map((manga) => manga?.cover).filter((cover) => typeof cover === 'string' && requiresImageProxy(cover)));
+      if (favorites.some((manga) => needsPersistentImportedCover(manga?.cover))) {
+        setBackupProgress({ label: 'Preparando las portadas', current: 0, total: new Set(favorites.map((manga) => manga?.cover).filter(needsPersistentImportedCover)).size });
+      }
+      const coverFailures = await preloadImportedCovers(favorites, setBackupProgress);
+      const proxiedCovers = new Set(favorites.map((manga) => manga?.cover).filter(needsPersistentImportedCover));
       if (proxiedCovers.size) {
         data = {
           ...data,
@@ -563,17 +639,22 @@ export default function Settings({ tutorialPreview = false }) {
             : manga))
         };
       }
+      setBackupProgress({ label: 'Guardando tu biblioteca' });
       restoreBackup(data);
       clearLibraryUnreadCache();
+      const detailFailures = favorites.length
+        ? await cacheImportedLibraryDetails(favorites, setBackupProgress)
+        : 0;
       setBackupCandidate(null);
       setBackupInstallOpen(false);
       setBackupReviewOpen(false);
       setBackupMissingSources([]);
       setBackupUnavailableSources([]);
       setBackupInstallManifests([]);
+      setBackupProgress(null);
       toast({
         title: 'Respaldo restaurado',
-        description: `Cytlex se recargará para aplicar los datos${omittedCount ? `; ${omittedCount} mangas omitidos` : ''}.`,
+        description: `Cytlex se recargará para aplicar los datos${coverFailures ? `; ${coverFailures} portadas no pudieron guardarse` : ''}${detailFailures ? `; no se pudo guardar la información de ${detailFailures} mangas` : ''}${omittedCount ? `; ${omittedCount} mangas omitidos` : ''}.`,
         variant: 'success'
       });
       window.setTimeout(() => window.location.reload(), 800);
@@ -581,12 +662,14 @@ export default function Settings({ tutorialPreview = false }) {
       toast({ title: 'No se pudo restaurar el respaldo', description: error.message, variant: 'error' });
     } finally {
       setBackupBusy(false);
+      setBackupProgress(null);
     }
   };
 
   const confirmBackupImport = async () => {
     if (!backupCandidate) return;
     setBackupBusy(true);
+    setBackupProgress({ label: 'Revisando las fuentes del respaldo' });
     try {
       let favorites = [];
       try {
@@ -631,6 +714,7 @@ export default function Settings({ tutorialPreview = false }) {
       toast({ title: 'No se pudieron comprobar las extensiones', description: error.message, variant: 'error' });
     } finally {
       setBackupBusy(false);
+      setBackupProgress(null);
     }
   };
 
@@ -638,6 +722,7 @@ export default function Settings({ tutorialPreview = false }) {
     setBackupInstallOpen(false);
     setBackupReviewOpen(false);
     setBackupCandidate(null);
+    setBackupProgress(null);
     setBackupMissingSources([]);
     setBackupUnavailableSources([]);
     setBackupInstallManifests([]);
@@ -652,11 +737,18 @@ export default function Settings({ tutorialPreview = false }) {
   const installBackupExtensions = async () => {
     if (!backupCandidate) return;
     setBackupBusy(true);
+    setBackupProgress({ label: 'Preparando las fuentes', current: 0, total: backupInstallManifests.length });
     try {
       const indexUrl = settings.get().extIndexUrl?.trim() || DEFAULT_EXTENSION_REPOSITORY;
-      const results = await Promise.allSettled(backupInstallManifests.map((manifest) => (
-        extensions.isInstalled(manifest.id) ? Promise.resolve() : extensions.install(manifest, indexUrl)
-      )));
+      let current = 0;
+      const results = await Promise.allSettled(backupInstallManifests.map(async (manifest) => {
+        try {
+          if (!extensions.isInstalled(manifest.id)) await extensions.install(manifest, indexUrl);
+        } finally {
+          current += 1;
+          setBackupProgress({ label: 'Preparando las fuentes', current, total: backupInstallManifests.length, currentLabel: manifest.name || manifest.id });
+        }
+      }));
       const failed = results.flatMap((result, index) => result.status === 'rejected'
         ? [backupInstallManifests[index].name || backupInstallManifests[index].id]
         : []);
@@ -666,6 +758,7 @@ export default function Settings({ tutorialPreview = false }) {
       toast({ title: 'No se pudieron instalar las extensiones', description: `${error.message} No se restauró el respaldo.`, variant: 'error' });
     } finally {
       setBackupBusy(false);
+      setBackupProgress(null);
     }
   };
 
@@ -1526,10 +1619,15 @@ export default function Settings({ tutorialPreview = false }) {
               toast({ title: 'Respaldo demasiado grande', description: 'El límite de importación es 100 MB.', variant: 'error' });
               return;
             }
+            setBackupBusy(true);
+            setBackupProgress({ label: 'Leyendo el respaldo' });
             try {
               loadBackupContent(await readBackupFile(file), file.name);
             } catch (error) {
               toast({ title: 'No se pudo leer el respaldo', description: error.message, variant: 'error' });
+            } finally {
+              setBackupBusy(false);
+              setBackupProgress(null);
             }
           }}
         />
@@ -1554,6 +1652,7 @@ export default function Settings({ tutorialPreview = false }) {
             }
           }}
         />
+        {backupBusy && !backupCandidate && backupProgress && <BackupProgress progress={backupProgress} scale={scale} />}
         <Row
           scale={scale}
           first
@@ -1789,6 +1888,7 @@ export default function Settings({ tutorialPreview = false }) {
         scrollableBody={false}
         scale={scale}
       >
+        <BackupProgress progress={backupProgress} scale={scale} />
         <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
           <Button
             variant="outline"
@@ -1803,7 +1903,7 @@ export default function Settings({ tutorialPreview = false }) {
             disabled={backupBusy}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            {backupBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Cargando</> : 'Restaurar'}
+            {backupBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Restaurando</> : 'Restaurar'}
           </Button>
         </div>
       </Dialog>
@@ -1817,6 +1917,7 @@ export default function Settings({ tutorialPreview = false }) {
         scrollableBody={false}
         scale={scale}
       >
+        {backupBusy && <BackupProgress progress={backupProgress} scale={scale} />}
         <div className="space-y-2 text-muted-foreground" style={{ fontSize: fontPx(13, scale, 11), marginBottom: px(18, scale, 14) }}>
           {backupUnavailableSources.map((source) => (
             <div key={source.id} className="flex items-center justify-between gap-4">
@@ -1861,6 +1962,7 @@ export default function Settings({ tutorialPreview = false }) {
         scrollableBody={false}
         scale={scale}
       >
+        {backupBusy && <BackupProgress progress={backupProgress} scale={scale} />}
         <div className="space-y-2 text-muted-foreground" style={{ fontSize: fontPx(13, scale, 11), marginBottom: px(18, scale, 14) }}>
           {backupMissingSources.filter((source) => source.manifest).map((source) => (
             <div key={source.id} className="flex items-center justify-between gap-4">
@@ -1907,7 +2009,7 @@ export default function Settings({ tutorialPreview = false }) {
             disabled={backupBusy || !backupInstallManifests.length}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            {backupBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Cargando</> : 'Instalar y restaurar'}
+            {backupBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Preparando</> : 'Instalar y restaurar'}
           </Button>
         </div>
       </Dialog>

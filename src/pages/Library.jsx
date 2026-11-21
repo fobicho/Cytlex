@@ -6,7 +6,7 @@ import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
 import VirtualMangaGrid from '../components/VirtualMangaGrid.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
-import { extensions, isExtensionAllowed, isUnavailableMangaSource } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaSource, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
 import { checkLibrary } from '../lib/notify.js';
 import { progress } from '../lib/progress.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
@@ -66,6 +66,8 @@ const updateLibraryCheckProgress = (progress) => {
 };
 const sourceIdFor = (manga) => {
   const id = manga.sourceId || 'leercapitulo';
+  const savedSourceName = String(manga.sourceName || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (savedSourceName.startsWith('mangadex') && /(?:english|ingles|mangadexen)/.test(savedSourceName)) return 'mangadex-en';
   return isUnresolvedMihonSource(id)
     ? extensions.resolveInstalledSource(id, manga.sourceName, manga.url) || id
     : id;
@@ -179,6 +181,7 @@ const Library = memo(function Library({ active = true }) {
   const [coverSize, setCoverSize] = useState(() => settings.get().coverSize);
   const [showUnread, setShowUnread] = useState(() => settings.get().libraryShowUnread);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
+  const [, setSourceConfigVersion] = useState(0);
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('cytlex:librarySort') || 'title-asc');
   const [unread, setUnread] = useState({});
   const unreadVersions = useRef(new Map());
@@ -199,6 +202,11 @@ const Library = memo(function Library({ active = true }) {
     }),
     []
   );
+  useEffect(() => {
+    const refreshSourceConfig = () => setSourceConfigVersion((version) => version + 1);
+    window.addEventListener(SOURCE_CONFIG_CHANGE_EVENT, refreshSourceConfig);
+    return () => window.removeEventListener(SOURCE_CONFIG_CHANGE_EVENT, refreshSourceConfig);
+  }, []);
   useEffect(() => {
     const updates = [];
     const reassigned = new Set();
@@ -501,7 +509,7 @@ const Library = memo(function Library({ active = true }) {
             size="sm"
             variant="secondary"
             title="Ordenar"
-            className="rounded-md disabled:opacity-100"
+            className="library-sort-trigger rounded-none disabled:opacity-100"
             onClick={() => {
               const order = ['title-asc', 'title-desc', 'unread-desc', 'recent'];
               const next = order[(order.indexOf(sortBy) + 1) % order.length];
@@ -529,7 +537,7 @@ const Library = memo(function Library({ active = true }) {
             aria-label={checking ? 'Buscando actualizaciones' : 'Buscar actualizaciones'}
             onClick={runCheck}
             title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
-            className="rounded-md"
+            className="library-updates-trigger rounded-none"
             style={{
               height: px(32, scale, 26),
               fontSize: fontPx(14, scale),
@@ -593,7 +601,10 @@ const Library = memo(function Library({ active = true }) {
                 renderCard={(m, cardWidth) => {
                   const sid = sourceIdFor(m);
                   const sourceNotOffered = isUnavailableMangaSource(sid);
-                  const adultBlocked = !isExtensionAllowed(extensions.manifest(sid), showAdultExtensions);
+                  const sourceManifest = extensions.manifest(sid);
+                  const adultBlocked = !isExtensionAllowed(sourceManifest, showAdultExtensions);
+                  const sourceNotConfigured = extensions.isInstalled(sid) && !isSourceConfigured(sourceManifest);
+                  const sourceUnavailable = !extensions.isInstalled(sid) || adultBlocked || sourceNotConfigured;
                   const validCover = isMangaCover(m.cover, m.url);
                   const cover = (validCover && m.cover) || recallCover(m.url, sid);
                   return (
@@ -601,9 +612,9 @@ const Library = memo(function Library({ active = true }) {
                       key={`${sid}|${m.url}`}
                       m={validCover && m.cover === cover ? m : { ...m, cover, ...(!validCover && { coverCached: '', coverLocal: '' }) }}
                       sourceId={sid}
-                      unavailable={!extensions.isInstalled(sid) || adultBlocked}
+                      unavailable={sourceUnavailable}
                       canOpenUnavailable={sourceNotOffered}
-                      unavailableLabel={sourceNotOffered ? 'Extensión no disponible' : adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}
+                      unavailableLabel={sourceNotOffered ? 'Extensión no disponible' : adultBlocked ? 'Fuente bloqueada' : !extensions.isInstalled(sid) ? 'Fuente no instalada' : 'Fuente desactivada'}
                       minimal
                       from="biblioteca"
                       coverSize={cardWidth}
@@ -634,9 +645,12 @@ const Library = memo(function Library({ active = true }) {
                     icon: sourceManifest.icon || m.sourceIcon
                   };
                   const adultBlocked = !isExtensionAllowed(sourceManifest, showAdultExtensions);
-                  const unavailable = !extensions.isInstalled(sid) || adultBlocked;
+                  const installed = extensions.isInstalled(sid);
+                  const sourceNotConfigured = installed && !isSourceConfigured(sourceManifest);
+                  const unavailable = !installed || adultBlocked || sourceNotConfigured;
                   const sourceNotOffered = isUnavailableMangaSource(sid);
                   const linkDisabled = unavailable && !sourceNotOffered;
+                  const unavailableLabel = sourceNotOffered ? 'Extensión no disponible' : adultBlocked ? 'Fuente bloqueada' : !installed ? 'Fuente no instalada' : 'Fuente desactivada';
                   return (
                     <div key={`${sid}|${m.url}`} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5">
                       <a
@@ -655,7 +669,7 @@ const Library = memo(function Library({ active = true }) {
                           )}
                           {unavailable && (
                             <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 px-0.5 text-center font-semibold leading-tight text-white" style={{ fontSize: fontPx(8, scale, 7) }}>
-                              <span>{sourceNotOffered ? 'Extensión no disponible' : adultBlocked ? 'Fuente bloqueada' : 'Fuente no instalada'}</span>
+                              <span>{unavailableLabel}</span>
                               <span className="flex max-w-full min-w-0 items-center rounded-full bg-black/80 py-0.5 pl-0.5 pr-1 text-left" style={{ gap: px(4, scale, 3) }} title={sourceInfo.name}>
                                 <SourceBadge m={sourceInfo} className="rounded-full bg-white shadow-sm" style={{ width: px(18, scale, 16), height: px(18, scale, 16), fontSize: fontPx(8, scale, 7) }} />
                                 <span className="min-w-0 truncate" style={{ fontSize: fontPx(8, scale, 7) }}>{sourceInfo.name}</span>

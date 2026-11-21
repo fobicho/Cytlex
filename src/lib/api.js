@@ -1,4 +1,4 @@
-import { beginCatalogSearch, extensions, isExtensionAllowed } from './extensions.js';
+import { extensions, isExtensionAllowed, isSourceConfigured } from './extensions.js';
 import { settings } from './settings.js';
 import { lib, mangaSourceUrl } from './library.js';
 import { deleteSourceCache, listSourceCache, readSourceCache, writeSourceCache } from './sourceCache.js';
@@ -15,14 +15,18 @@ function notInstalledError(id) {
 }
 
 function assertSourceEnabled(sourceId) {
-  if (!isExtensionAllowed(extensions.manifest(sourceId), settings.get().showAdultExtensions)) {
+  const source = extensions.manifest(sourceId);
+  if (!isSourceConfigured(source)) {
+    throw new Error(`La fuente «${source.name || sourceId}» está desactivada. Activa un idioma en Ajustes > Extensiones para usarla.`);
+  }
+  if (!isExtensionAllowed(source, settings.get().showAdultExtensions)) {
     throw new Error('Esta extensión está desactivada. Activa «Mostrar extensiones +18» en Ajustes > Extensiones para usarla.');
   }
 }
 
-async function resolveSource(sourceId) {
+async function resolveSource(sourceId, { allowDisabled = false } = {}) {
   if (!sourceId || !extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
-  assertSourceEnabled(sourceId);
+  if (!allowDisabled) assertSourceEnabled(sourceId);
   return extensions.source(sourceId);
 }
 
@@ -34,6 +38,7 @@ const CHAPTER_TTL_MS = 2 * 60 * 1000;
 const CHAPTER_CACHE_MAX = 40;
 const CATALOG_TTL_MS = 30 * 1000;
 const PERSISTED_CATALOG_TTL_MS = 5 * 60 * 1000;
+const CATALOG_FILTERS_TTL_MS = 24 * 60 * 60 * 1000;
 const CATALOG_CACHE_MAX = 80;
 
 const detailCache = new Map();
@@ -136,7 +141,15 @@ function catalogFiltersFor(sourceId, src) {
   if (typeof src.catalogFilters !== 'function') return Promise.resolve([]);
   const key = `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}`;
   if (!catalogFiltersCache.has(key)) {
-    const request = Promise.resolve().then(() => src.catalogFilters()).catch((error) => {
+    const request = (async () => {
+      const saved = await readSourceCache('catalog-filters', key);
+      if (Array.isArray(saved?.value) && Date.now() - saved.at >= 0 && Date.now() - saved.at <= CATALOG_FILTERS_TTL_MS) {
+        return saved.value;
+      }
+      const filters = await src.catalogFilters();
+      if (Array.isArray(filters)) await writeSourceCache('catalog-filters', key, filters, 100);
+      return filters;
+    })().catch((error) => {
       catalogFiltersCache.delete(key);
       throw error;
     });
@@ -210,9 +223,7 @@ export const api = {
       const savedAge = Date.now() - (saved?.at || 0);
       if (saved?.value?.items && savedAge >= 0 && savedAge <= PERSISTED_CATALOG_TTL_MS) return saved.value;
       try {
-        const endSearch = beginCatalogSearch(sourceId);
-        try { return await src.catalog(args); }
-        finally { endSearch(); }
+        return await src.catalog(args);
       } catch (error) {
         if (isMangaDex(sourceId) && /\b(?:ENOTFOUND|HTTP (?:429|50[234]))\b/.test(String(error?.message || error))) {
           if (saved?.value?.items?.length && savedAge <= 7 * 24 * 60 * 60 * 1000) return saved.value;
@@ -240,9 +251,9 @@ export const api = {
     return catalogFiltersFor(sourceId, src);
   },
 
-  async detail(url, sourceId, { cacheResult = true, persistResult = cacheResult } = {}) {
+  async detail(url, sourceId, { cacheResult = true, persistResult = cacheResult, allowDisabled = false } = {}) {
     if (!sourceId || !extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
-    assertSourceEnabled(sourceId);
+    if (!allowDisabled) assertSourceEnabled(sourceId);
     const key = detailKey(url, sourceId);
     const isFavorite = lib.isFav(url, sourceId);
     const hit = cacheResult ? freshEntry(key) : null;
@@ -277,7 +288,7 @@ export const api = {
     let request = detailRequests.get(key);
     if (!request) {
       request = withDetailDeadline((async () => {
-        const src = await resolveSource(sourceId);
+        const src = await resolveSource(sourceId, { allowDisabled });
         return src.detail(mangaSourceUrl(url, sourceId));
       })());
       detailRequests.set(key, request);
@@ -320,7 +331,7 @@ export const api = {
 
   persistLibraryDetail(url, sourceId, value) {
     if (!lib.isFav(url, sourceId) || !value?.chapters?.length) return;
-    void writeSourceCache('library-details', detailKey(url, sourceId), value, 1000);
+    return writeSourceCache('library-details', detailKey(url, sourceId), value, 1000);
   },
 
   removeLibraryDetail(url, sourceId) {

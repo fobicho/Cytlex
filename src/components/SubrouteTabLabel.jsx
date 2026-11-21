@@ -1,6 +1,6 @@
 export default function SubrouteTabLabel({ children, active }) {
   return (
-    <span className="grid whitespace-nowrap">
+    <span className="subroute-tab-label grid whitespace-nowrap">
       <span aria-hidden="true" className="invisible col-start-1 row-start-1 font-bold">
         {children}
       </span>

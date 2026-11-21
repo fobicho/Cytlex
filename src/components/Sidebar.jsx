@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { BookOpen, Compass, Settings as SettingsIcon, ChevronsRight } from 'lucide-react';
+import { ChevronsRight } from 'lucide-react';
 import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
 import { SOURCE_CATALOG_HOME_EVENT } from '../lib/searchState.js';
@@ -9,10 +9,15 @@ import { settings, SIDEBAR_WIDTH } from '../lib/settings.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
 
 const navItems = [
-  { to: '/biblioteca', icon: BookOpen, label: 'Biblioteca' },
-  { to: '/explorar', icon: Compass, label: 'Explorar' },
-  { to: '/ajustes', icon: SettingsIcon, label: 'Ajustes' }
+  { to: '/biblioteca', label: 'Biblioteca' },
+  { to: '/explorar', label: 'Explorar' },
+  { to: '/ajustes', label: 'Ajustes' }
 ];
+
+const SIDEBAR_GLYPHS = '彼らのすべての機器と器具はまるで命があるかのようだった';
+const randomSidebarGlyphs = () => Array.from({ length: 12 }, () =>
+  SIDEBAR_GLYPHS[Math.floor(Math.random() * SIDEBAR_GLYPHS.length)]
+).join('');
 
 const EASE = [0.25, 0.1, 0.25, 1];
 const DURATION = 0.3;
@@ -22,6 +27,37 @@ const activeScroller = () => {
   return Array.from(main?.querySelectorAll('.library-page-scroll, .catalog-page-scroll') || [])
     .find((element) => element.offsetParent !== null) || main;
 };
+
+function ActiveRouteLabel({ label }) {
+  const [glyphs] = useState(randomSidebarGlyphs);
+  const reduceMotion = useReducedMotion();
+
+  useEffect(() => {
+    if (!document.getElementById('cytlex-sidebar-noto-jp')) {
+      const font = document.createElement('link');
+      font.id = 'cytlex-sidebar-noto-jp';
+      font.rel = 'stylesheet';
+      font.href = 'https://cdn.jsdelivr.net/npm/@fontsource-variable/noto-sans-jp@5.3.1/wght.css';
+      document.head.appendChild(font);
+    }
+  }, []);
+
+  const ticker = (side) => (
+    <span aria-hidden="true" className={cn('sidebar-glyph-viewport', `sidebar-glyph-${side}`)}>
+      <span className={cn('sidebar-glyph-track', reduceMotion && 'sidebar-glyph-track-static')}>
+        <span>{glyphs}</span><span>{glyphs}</span>
+      </span>
+    </span>
+  );
+
+  return (
+    <span className="sidebar-active-route-label">
+      {ticker('leading')}
+      <span className="sidebar-active-route-name">{label}</span>
+      {ticker('trailing')}
+    </span>
+  );
+}
 
 let lastLibraryRoute = '/biblioteca';
 let lastExploreRoute = '/explorar?tab=mangas';
@@ -119,7 +155,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
       <nav
         aria-label="Navegación principal"
         inert={tutorialNavOnly}
-        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col"
+        className="sidebar-navigation flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col"
         style={{
           gap: `${Math.max(2, Math.round(4 * scale))}px`,
           padding: `${Math.max(6, Math.round(12 * scale))}px`
@@ -136,6 +172,8 @@ export default function Sidebar({ tutorialNavOnly = false }) {
             <NavLink
               key={item.to}
               aria-current={isActive ? 'page' : undefined}
+              aria-label={item.label}
+              title={collapsed ? item.label : undefined}
               className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
               to={tutorialNavOnly && item.to === '/explorar'
                 ? '/explorar?tab=mangas'
@@ -204,9 +242,9 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                   gap: collapsed ? 0 : `${Math.max(7, Math.round(12 * scale))}px`,
                   paddingTop: `${Math.max(7, Math.round(10 * scale))}px`,
                   paddingBottom: `${Math.max(7, Math.round(10 * scale))}px`,
-                  paddingLeft: `${Math.max(6, Math.round(8 * scale))}px`,
+                  paddingLeft: collapsed ? '0px' : `${Math.max(6, Math.round(8 * scale))}px`,
                   paddingRight: '0px',
-                  justifyContent: 'flex-start',
+                  justifyContent: collapsed ? 'center' : 'flex-start',
                   fontSize: fontPx(14, scale, 11)
                 }}
               >
@@ -216,32 +254,22 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                     className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-primary"
                   />
                 )}
-                <div
-                  className="shrink-0 grid place-items-center"
-                  style={{
-                    width: `${Math.max(20, Math.round(32 * scale))}px`,
-                    height: `${Math.max(14, Math.round(20 * scale))}px`
-                  }}
-                >
-                  <item.icon
+                {isActive && !collapsed ? (
+                  <ActiveRouteLabel label={item.label} />
+                ) : (
+                  <span
+                    className={cn(
+                      'min-w-0 whitespace-nowrap overflow-hidden leading-none transition-[max-width,opacity,transform] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
+                      collapsed && 'text-center'
+                    )}
                     style={{
-                      width: `${Math.max(14, Math.round(20 * scale))}px`,
-                      height: `${Math.max(14, Math.round(20 * scale))}px`
+                      maxWidth: collapsed ? `${Math.round(24 * scale)}px` : `${Math.round(160 * scale)}px`,
+                      transitionDuration: collapsed ? '180ms' : '300ms'
                     }}
-                  />
-                </div>
-                <span
-                  className={cn(
-                    'whitespace-nowrap overflow-hidden leading-none transition-[max-width,opacity,transform] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
-                    collapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'opacity-100 translate-x-0'
-                  )}
-                  style={{
-                    maxWidth: collapsed ? 0 : `${Math.round(160 * scale)}px`,
-                    transitionDuration: collapsed ? '180ms' : '300ms'
-                  }}
-                >
-                  {item.label}
-                </span>
+                  >
+                    {collapsed ? item.label.slice(0, 1) : item.label}
+                  </span>
+                )}
               </div>
             </NavLink>
           );

@@ -3,6 +3,7 @@ let onfCookieJar = '';
 const HTTP_GET_CACHE_TTL_MS = 20 * 1000;
 const HTTP_GET_CACHE_MAX = 160;
 const HTTP_GET_BATCH_WINDOW_MS = 250;
+const HTTP_CATALOG_BATCH_WINDOW_MS = 500;
 const HTTP_GET_BATCH_MAX = 24;
 const PROXY_IMAGE_BATCH_WINDOW_MS = 30;
 const PROXY_IMAGE_BATCH_MAX = 40;
@@ -118,7 +119,7 @@ function assertProxyResponse(response, target, url, usedProxy, proxyDeniedTarget
   });
 }
 
-function batchDescriptor({ url, options }, includeSearch = false) {
+function batchDescriptor({ url, options }) {
   const target = new URL(url);
   const method = (options.method || 'GET').toUpperCase();
   const requestHeaders = new Headers(options.headers || {});
@@ -133,7 +134,6 @@ function batchDescriptor({ url, options }, includeSearch = false) {
     ...(method === 'POST' ? { body: options.body } : {}),
     referer: proxyRefererFor(target, options.onfReferer),
     headers,
-    ...((options.search === true || includeSearch) && typeof options.sourceId === 'string' ? { sourceId: options.sourceId, search: true } : {}),
     ...(onfCookie ? { onfCookie } : {})
   };
 }
@@ -158,7 +158,6 @@ function preferDirectRequest(target, method) {
 }
 
 async function runProxyBatch(entries) {
-  const hasSearch = entries.some((entry) => entry.options?.search === true);
   const resolveEntry = (entry, value) => {
     if (entry.settled) return;
     entry.settled = true;
@@ -180,16 +179,12 @@ async function runProxyBatch(entries) {
   }));
 
   const catalogEntries = entries.filter((entry) => entry.catalog);
-  if (catalogEntries.length > 1) {
-    await runIndividually();
-    return;
-  }
-  if (!catalogEntries.length && entries.length < 2 && !hasSearch) {
+  if (!catalogEntries.length && entries.length < 2) {
     await runIndividually();
     return;
   }
 
-  let catalogImages = null;
+  const catalogImageBatches = new Map();
   const fallbackTasks = [];
   const fallbackEntry = (entry) => fallbackTasks.push(runIndividually([entry]));
   try {
@@ -198,8 +193,8 @@ async function runProxyBatch(entries) {
       credentials: 'omit',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        requests: entries.filter((entry) => !entry.catalog).map((entry) => batchDescriptor(entry, hasSearch)),
-        ...(catalogEntries.length ? { catalog: { url: catalogEntries[0].url } } : {})
+        requests: entries.filter((entry) => !entry.catalog).map(batchDescriptor),
+        ...(catalogEntries.length ? { catalogs: catalogEntries.map((entry) => ({ url: entry.url })) } : {})
       })
     });
     if (!response.ok || response.headers.get('x-cytlex-search-batch') !== '1' || !response.body) throw new Error('Proxy batch unavailable');
@@ -223,7 +218,8 @@ async function runProxyBatch(entries) {
         return;
       }
       if (message.type === 'catalog') {
-        const entry = catalogEntries[0];
+        const catalogIndex = Number(message.index) || 0;
+        const entry = catalogEntries[catalogIndex];
         if (!entry || entry.settled) return;
         const headers = new Headers({ 'x-cytlex-proxy': '1', 'content-type': message.contentType || '' });
         if (message.errorOrigin) headers.set('x-cytlex-error-origin', message.errorOrigin);
@@ -235,7 +231,7 @@ async function runProxyBatch(entries) {
           rejectEntry(entry, new Error('Respuesta de catálogo no válida.'));
           return;
         }
-        catalogImages = message.images.map((imageUrl) => {
+        const images = message.images.map((imageUrl) => {
           let resolve;
           const promise = new Promise((done) => { resolve = done; });
           const imageEntry = { imageUrl, promise, resolve, done: false };
@@ -243,10 +239,12 @@ async function runProxyBatch(entries) {
           return imageEntry;
         });
         resolveEntry(entry, message.catalog);
+        catalogImageBatches.set(catalogIndex, images);
         return;
       }
-      if (message.type === 'catalog-image' && catalogImages) {
-        const image = catalogImages[message.index];
+      if (message.type === 'catalog-image') {
+        const images = catalogImageBatches.get(Number(message.catalogIndex) || 0);
+        const image = images?.[message.index];
         if (!image || image.done) return;
         image.done = true;
         try {
@@ -275,10 +273,10 @@ async function runProxyBatch(entries) {
     await Promise.all(fallbackTasks);
     await runIndividually();
   } finally {
-    catalogImages?.forEach((image) => {
+    catalogImageBatches.forEach((images) => images.forEach((image) => {
       if (!image.done) image.resolve(null);
       setTimeout(() => { if (mangaDexCatalogImages.get(image.imageUrl) === image.promise) mangaDexCatalogImages.delete(image.imageUrl); }, 60000);
-    });
+    }));
   }
 }
 
@@ -287,6 +285,20 @@ function flushProxyGetQueue() {
   const entries = httpGetBatchQueue.splice(0, HTTP_GET_BATCH_MAX);
   void runProxyBatch(entries);
   if (httpGetBatchQueue.length) httpGetBatchTimer = setTimeout(flushProxyGetQueue, HTTP_GET_BATCH_WINDOW_MS);
+}
+
+function queueProxyGet(entry) {
+  httpGetBatchQueue.push(entry);
+  if (httpGetBatchQueue.length >= HTTP_GET_BATCH_MAX) {
+    clearTimeout(httpGetBatchTimer);
+    httpGetBatchTimer = setTimeout(flushProxyGetQueue, 0);
+  } else {
+    clearTimeout(httpGetBatchTimer);
+    const delay = httpGetBatchQueue.some((item) => item.catalog)
+      ? HTTP_CATALOG_BATCH_WINDOW_MS
+      : HTTP_GET_BATCH_WINDOW_MS;
+    httpGetBatchTimer = setTimeout(flushProxyGetQueue, delay);
+  }
 }
 
 function scheduleProxyRequest(url, options) {
@@ -306,14 +318,7 @@ function scheduleProxyRequest(url, options) {
   }
 
   return new Promise((resolve, reject) => {
-    httpGetBatchQueue.push({ url, options, resolve, reject });
-    if (httpGetBatchQueue.length >= HTTP_GET_BATCH_MAX) {
-      clearTimeout(httpGetBatchTimer);
-      httpGetBatchTimer = setTimeout(flushProxyGetQueue, 0);
-    } else {
-      clearTimeout(httpGetBatchTimer);
-      httpGetBatchTimer = setTimeout(flushProxyGetQueue, HTTP_GET_BATCH_WINDOW_MS);
-    }
+    queueProxyGet({ url, options, resolve, reject });
   });
 }
 
@@ -546,6 +551,73 @@ export function fetchInmangaChapter(url, signal) {
   return fetchCombinedChapter(url, signal, 'inmanga', 'https://inmanga.com/');
 }
 
+export async function fetchMangaLectChapter(url, signal) {
+  const endpoint = new URL(proxyUrl(url, url));
+  endpoint.searchParams.set('chapter', 'mangalect');
+  const response = await fetch(endpoint, { signal, credentials: 'omit' });
+  if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('application/vnd.cytlex.chapter-stream')) {
+    throw new Error('No se pudo usar la carga combinada de MangaLect.');
+  }
+  const reader = response.body.getReader();
+  let buffer = new Uint8Array();
+  const read = async (size) => {
+    while (buffer.length < size) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error('La respuesta del capítulo está incompleta.');
+      const joined = new Uint8Array(buffer.length + value.length);
+      joined.set(buffer); joined.set(value, buffer.length); buffer = joined;
+    }
+    const value = buffer.slice(0, size);
+    buffer = buffer.slice(size);
+    return value;
+  };
+  const metadata = async () => {
+    const prefix = await read(4);
+    const size = new DataView(prefix.buffer).getUint32(0);
+    if (!size || size > 3 * 1024 * 1024) throw new Error('Metadatos del capítulo no válidos.');
+    return JSON.parse(new TextDecoder().decode(await read(size)));
+  };
+  const first = await metadata();
+  if (typeof first.html !== 'string' || !Array.isArray(first.pages) || !first.pages.length || first.pages.length > 1000) {
+    throw new Error('Lista de páginas de MangaLect no válida.');
+  }
+  const doc = new DOMParser().parseFromString(first.html, 'text/html');
+  const slug = (new URL(url).pathname.match(/\/lectura\/([^/]+)\//) || [])[1] || '';
+  const href = (selector) => {
+    const value = doc.querySelector(selector)?.getAttribute('href') || '';
+    try { return value ? new URL(value, url).href : ''; } catch { return ''; }
+  };
+  const entries = first.pages.slice(0, 40).map(() => {
+    let resolve;
+    const promise = new Promise((done) => { resolve = done; });
+    return { promise, resolve, done: false };
+  });
+  void (async () => {
+    try {
+      for (let i = 0; i < entries.length; i++) {
+        const item = await metadata();
+        if (!Number.isInteger(item.index) || !entries[item.index] || entries[item.index].done
+          || !Number.isInteger(item.length) || item.length < 0 || item.length > 4 * 1024 * 1024) throw new Error('Panel de MangaLect no válido.');
+        const bytes = await read(item.length);
+        const entry = entries[item.index];
+        entry.done = true;
+        entry.resolve(item.status === 200 && item.length ? new Blob([bytes], { type: item.contentType }) : null);
+      }
+    } catch {} finally { entries.forEach((entry) => { if (!entry.done) entry.resolve(null); }); }
+  })();
+  const previous = href('a.prev-button');
+  const next = href('a.next-button');
+  return {
+    label: doc.querySelector('h1')?.textContent?.replace(/\s+/g, ' ').trim() || '',
+    mangaUrl: slug ? new URL(`/info/${slug}/`, url).href : '',
+    pages: first.pages,
+    combinedImages: entries.map((entry) => entry.promise),
+    options: [],
+    prev: previous ? { title: 'Anterior', url: previous } : null,
+    next: next ? { title: 'Siguiente', url: next } : null
+  };
+}
+
 async function runProxyImageBatch(entries) {
   const fallbackIndividually = async () => Promise.all(entries.map(async (entry) => {
     if (entry.cancelled || entry.settled) return;
@@ -633,14 +705,7 @@ async function fetchMangaDexCatalogRequest(url, options) {
 
 function mangaDexCatalogRequest(url, options) {
   return new Promise((resolve, reject) => {
-    httpGetBatchQueue.push({ url, options, resolve, reject, catalog: true });
-    if (httpGetBatchQueue.length >= HTTP_GET_BATCH_MAX) {
-      clearTimeout(httpGetBatchTimer);
-      httpGetBatchTimer = setTimeout(flushProxyGetQueue, 0);
-    } else {
-      clearTimeout(httpGetBatchTimer);
-      httpGetBatchTimer = setTimeout(flushProxyGetQueue, HTTP_GET_BATCH_WINDOW_MS);
-    }
+    queueProxyGet({ url, options, resolve, reject, catalog: true });
   });
 }
 

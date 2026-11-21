@@ -2,6 +2,19 @@ export default function createSource({ fetchText, parse }) {
   const base = 'https://achymanga.online';
   const imageHost = 'cdn.achymanga.online';
   const readableTypes = new Set(['manga', 'manhwa', 'manhua', 'webtoon', 'comic', 'one_shot', 'doujinshi', 'oel']);
+  const catalogPageRequests = new Map();
+
+  function catalogPage(url) {
+    if (!catalogPageRequests.has(url)) {
+      const request = fetchText(url).then(parse);
+      catalogPageRequests.set(url, request);
+      request.then(
+        () => { if (catalogPageRequests.get(url) === request) catalogPageRequests.delete(url); },
+        () => { if (catalogPageRequests.get(url) === request) catalogPageRequests.delete(url); }
+      );
+    }
+    return catalogPageRequests.get(url);
+  }
 
   const absolute = (value) => {
     if (!value) return '';
@@ -47,16 +60,18 @@ export default function createSource({ fetchText, parse }) {
   } = {}) {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries({ q, genero, demografia, estado, tipo, idioma, orden })) {
-      if (value) params.set(key, String(value));
+      const isDefault = (key === 'idioma' && value === 'es') || (key === 'orden' && value === 'titulo');
+      if (value && !isDefault) params.set(key, String(value));
     }
-    const doc = parse(await fetchText(`${base}/catalogo?${params}`));
+    const query = params.toString();
+    const doc = await catalogPage(`${base}/catalogo${query ? `?${query}` : ''}`);
     assertPublicPage(doc);
     const items = mapCards(doc);
     return { items, totalPages: 1, totalText: items.length ? String(items.length) : '' };
   }
 
   async function catalogFilters() {
-    const doc = parse(await fetchText(`${base}/catalogo`));
+    const doc = await catalogPage(`${base}/catalogo`);
     assertPublicPage(doc);
     return [
       { id: 'genero', label: 'Género', type: 'select', options: selectOptions(doc, 'genero') },

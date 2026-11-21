@@ -66,7 +66,8 @@ export function isExtensionAllowed(source, showAdultExtensions) {
 
 export function isSourceConfigured(source) {
   const manifest = source?.manifest || source;
-  const languages = manifest?.config?.languages || manifest?.languages;
+  const subSource = manifest?.config?.sources?.find((item) => item.id === manifest.id);
+  const languages = manifest?.config?.languages || manifest?.languages || subSource?.languages;
   if (!Array.isArray(languages) || !languages.length) return true;
   try {
     const selected = JSON.parse(localStorage.getItem(EXT_CONFIG_KEY))?.[manifest.id]?.languages;
@@ -112,7 +113,6 @@ function ctx(manifest = {}) {
     fetchText: (url, requestId, options) => httpGet(url, requestId, {
       ...options,
       sourceId: manifest.id,
-      ...(activeCatalogSearches.has(manifest.id) ? { search: true } : {})
     }),
     parse: (html) => new DOMParser().parseFromString(html, 'text/html'),
     head: (url) => httpHead(url)
@@ -201,17 +201,6 @@ addEventListener('message', async (event) => {
 
 const moduleDisposers = new Map();
 const moduleLoads = new Map();
-const activeCatalogSearches = new Map();
-
-export function beginCatalogSearch(sourceId) {
-  activeCatalogSearches.set(sourceId, (activeCatalogSearches.get(sourceId) || 0) + 1);
-  return () => {
-    const count = activeCatalogSearches.get(sourceId) || 0;
-    if (count <= 1) activeCatalogSearches.delete(sourceId);
-    else activeCatalogSearches.set(sourceId, count - 1);
-  };
-}
-
 function extensionErrorDetails(error) {
   return {
     status: error?.status,
@@ -282,14 +271,12 @@ async function loadModule(code, manifest) {
         ? (url, requestId, options) => httpGet(url, requestId, {
           ...options,
           sourceId: manifest.id,
-          ...(activeCatalogSearches.has(manifest.id) ? { search: true } : {})
         })
         : message.method === 'fetchPostText'
           ? (payload, requestId) => httpPost({
             ...payload,
             responseType: 'text',
             sourceId: manifest.id,
-            ...(activeCatalogSearches.has(manifest.id) ? { search: true } : {})
           }, requestId)
         : message.method === 'head'
           ? (url) => httpHead(url)

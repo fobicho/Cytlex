@@ -1,10 +1,10 @@
-const stores = ['details', 'searches', 'library-details'];
+const stores = ['details', 'searches', 'catalog-filters', 'library-details'];
 let opening;
 
 function openCache() {
   if (!globalThis.indexedDB) return Promise.resolve(null);
   return opening ??= new Promise((resolve, reject) => {
-    const request = indexedDB.open('cytlex-source-cache', 2);
+    const request = indexedDB.open('cytlex-source-cache', 3);
     request.onupgradeneeded = () => {
       for (const name of stores) {
         if (!request.result.objectStoreNames.contains(name)) {
@@ -35,22 +35,32 @@ export async function readSourceCache(name, key) {
 export async function writeSourceCache(name, key, value, limit) {
   try {
     const db = await openCache();
-    if (!db) return;
-    const store = db.transaction(name, 'readwrite').objectStore(name);
-    store.put({ key, value, at: Date.now() });
-    const count = store.count();
-    count.onsuccess = () => {
-      let excess = count.result - limit;
-      if (excess <= 0) return;
-      const cursor = store.index('at').openKeyCursor();
-      cursor.onsuccess = () => {
-        if (!cursor.result || excess <= 0) return;
-        store.delete(cursor.result.primaryKey);
-        excess -= 1;
-        cursor.result.continue();
+    if (!db) return false;
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(name, 'readwrite');
+      const store = transaction.objectStore(name);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+      store.put({ key, value, at: Date.now() });
+      const count = store.count();
+      count.onsuccess = () => {
+        let excess = count.result - limit;
+        if (excess <= 0) return;
+        const cursor = store.index('at').openKeyCursor();
+        cursor.onsuccess = () => {
+          if (!cursor.result || excess <= 0) return;
+          store.delete(cursor.result.primaryKey);
+          excess -= 1;
+          cursor.result.continue();
+        };
       };
-    };
-  } catch {}
+      count.onerror = () => reject(count.error);
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function listSourceCache(name) {

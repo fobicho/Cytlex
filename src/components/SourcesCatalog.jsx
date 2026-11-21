@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ArrowUpDown, Filter, Loader2, Search } from 'lucide-react';
+import { ArrowLeft, ArrowUpDown, Filter, Loader2, Search, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import MangaCard from './MangaCard.jsx';
 import VirtualMangaGrid from './VirtualMangaGrid.jsx';
@@ -139,7 +139,7 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
     const startPage = currentPage + 1;
     const batchPages = id === 'onfmangas' ? Math.min(4, Math.ceil((CATALOG_BATCH_SIZE - batch.length) / 12))
       : id === 'mangaoni' || id === 'olympusscanlation' ? 3 : 2;
-    const group = !window.cytlex?.httpGet && FIXED_PAGE_SOURCES.has(id)
+    const group = !window.cytlex?.httpGet && (FIXED_PAGE_SOURCES.has(id) || id === 'mangalect')
       && (id === 'onfmangas' ? batchPages > 1 : CATALOG_BATCH_SIZE - batch.length >= 20)
       && pagesFetched + batchPages <= CATALOG_BATCH_SIZE;
     const requests = Array.from({ length: group ? batchPages : 1 }, (_, index) =>
@@ -567,6 +567,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     });
   };
   const hasActiveFilters = !!query.trim() || Object.values(filterValues).some((value) => Array.isArray(value) ? value.length > 0 : Boolean(value));
+  const canRestoreCatalog = hasActiveFilters || !!String(loadedParams.q || '').trim();
   const reset = () => {
     setQuery('');
     setFilterValues({});
@@ -648,7 +649,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       <Button
         type="button"
         variant="secondary"
-        className="shrink-0 rounded-md"
+        className="source-filters-trigger shrink-0 rounded-none"
         onClick={() => {
           if (isMangaDex(sourceId) && !filters.length) loadCatalogFilters(sourceId);
           setFiltersOpen((open) => !open);
@@ -689,6 +690,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           <Button
             variant="secondary"
             size="sm"
+            className="source-sort-trigger rounded-none"
             title="Ordenar fuentes"
             aria-label={`Ordenar fuentes: ${sourceSort === 'title-desc' ? 'Z-A' : sourceSort === 'added' ? 'Adición' : 'A-Z'}`}
             onClick={() => {
@@ -751,7 +753,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                   type="button"
                   variant="secondary"
                   size="sm"
-                  className="shrink-0"
+                  className="source-sort-trigger shrink-0 rounded-none"
                   onClick={() => {
                     const sort = leercapituloSort === 'az' ? 'za' : 'az';
                     loadCatalog(sourceId, { ...loadedParams, q: query.trim(), ...filterValues, sort });
@@ -861,8 +863,23 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                     placeholder={`Buscar en ${selected.manifest.name}…`}
                     aria-label={`Buscar mangas en ${selected.manifest.name}`}
                     className="bg-muted/50 border-none"
-                    style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(36, scale, 30), paddingRight: px(12, scale, 9) }}
+                    style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(36, scale, 30), paddingRight: px(canRestoreCatalog ? 40 : 12, scale, canRestoreCatalog ? 32 : 9) }}
                   />
+                  {canRestoreCatalog && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Mostrar catálogo principal de ${selected.manifest.name}`}
+                      title="Mostrar catálogo principal"
+                      onClick={reset}
+                      disabled={loading}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      style={{ width: px(28, scale, 24), height: px(28, scale, 24) }}
+                    >
+                      <X style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+                    </Button>
+                  )}
                 </div>
                 <Button type="submit" disabled={loading || !query.trim()} style={{ width: px(96, scale, 88), height: px(36, scale, 30), fontSize: fontPx(14, scale, 12) }}>
                   <Search className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />

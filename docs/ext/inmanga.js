@@ -95,6 +95,14 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const titleMentions = titleKey ? content.split(titleKey).length - 1 : 0;
     return /\b(?:online|gratis|leer)\b/.test(content) && titleMentions >= 2;
   };
+  const removeLeadingTitle = (value, title) => {
+    const content = clean(value);
+    const titleText = clean(title);
+    if (!content || !titleText || normalized(content.slice(0, titleText.length)) !== normalized(titleText)) return content;
+    const next = content[titleText.length];
+    if (next && !/[\s:：|–—-]/u.test(next)) return content;
+    return clean(content.slice(titleText.length).replace(/^[\s:：|–—-]+/u, ''));
+  };
   const synopsisFrom = (doc, title) => {
     const selectors = [
       '[itemprop="description"]',
@@ -109,10 +117,10 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     for (const element of doc.querySelectorAll('main p, article p, p')) candidates.push(clean(element.textContent));
     for (const element of doc.querySelectorAll('[class*="description" i], [id*="description" i]')) candidates.push(clean(element.textContent));
     const content = candidates.find((value) => value.length > 60 && !isSeoSynopsis(value, title));
-    if (content) return content;
+    if (content) return removeLeadingTitle(content, title);
     const meta = clean(doc.querySelector('meta[property="og:description"]')?.getAttribute('content')
       || doc.querySelector('meta[name="description"]')?.getAttribute('content'));
-    return isSeoSynopsis(meta, title) ? '' : meta;
+    return isSeoSynopsis(meta, title) ? '' : removeLeadingTitle(meta, title);
   };
   const factValue = (doc, labels) => {
     const wanted = new Set(labels.map(normalized));

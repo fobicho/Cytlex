@@ -118,9 +118,6 @@ export function Dropdown({
   const menu = open && (
     <div
       ref={menuRef}
-      role="listbox"
-      aria-label={ariaLabel}
-      aria-multiselectable={multiple || undefined}
       style={{
         ...(portal && pos ? { top: pos.top, left: pos.left, maxHeight: `${pos.maxHeight}px`, ...(menuWidth ? { width: pos.width, minWidth: pos.width } : { minWidth: pos.width }) } : null),
         ...(portal ? null : { marginTop: px(4, sc, 3), maxHeight: px(menuMaxHeight, sc, 200) }),
@@ -128,31 +125,34 @@ export function Dropdown({
       }}
       className={cn(
         portal ? 'fixed z-[60]' : 'absolute z-40',
-        'min-w-full overflow-hidden rounded-[6px] border border-border bg-card shadow-2xl',
+        'isolate flex min-w-full flex-col overflow-hidden rounded-[6px] border border-border bg-popover text-popover-foreground shadow-2xl',
         menuClassName
       )}
       data-scrollable
     >
+      {multiple && (
+        <div className="shrink-0 bg-popover p-1">
+          <Input
+            ref={searchRef}
+            className="h-9"
+            aria-label={`Buscar en ${ariaLabel}`}
+            placeholder="Buscar género…"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+      )}
       <div
         ref={listRef}
-        className="dd-scroll overflow-y-auto"
+        role="listbox"
+        aria-label={ariaLabel}
+        aria-multiselectable={multiple || undefined}
+        className="dd-scroll min-h-0 flex-auto overflow-y-auto bg-popover"
         style={{
-          maxHeight: portal && pos ? `${pos.maxHeight}px` : px(menuMaxHeight, sc, 200),
           padding: `${px(4, sc, 3)} ${px(4, sc, 3)} ${px(4, sc, 3)} ${px(4, sc, 3)}`
         }}
+        data-scrollable
       >
-        {multiple && (
-          <div className="sticky top-0 z-10 bg-card pb-1">
-            <Input
-              ref={searchRef}
-              className="h-9"
-              aria-label={`Buscar en ${ariaLabel}`}
-              placeholder="Buscar género…"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
-        )}
         {multiple && visibleOptions.length === 0 && <p className="px-2 py-2 text-muted-foreground">No se encontraron géneros.</p>}
         {visibleOptions.map((o) => {
           const active = multiple ? value.includes(o.value) : o.value === value;

@@ -70,8 +70,12 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   }, [step]);
 
   useEffect(() => {
+    document.documentElement.classList.add('tutorial-open');
     document.body.classList.add('tutorial-open');
-    return () => document.body.classList.remove('tutorial-open');
+    return () => {
+      document.documentElement.classList.remove('tutorial-open');
+      document.body.classList.remove('tutorial-open');
+    };
   }, []);
 
   useEffect(() => {
@@ -274,7 +278,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 )}
 
                 {isTheme && (
-                  <div className="mt-4 space-y-3">
+                  <div className="mt-3 space-y-2">
                     <div className="flex gap-2">
                       {MODES.map((m) => (
                         <button
@@ -291,7 +295,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                         </button>
                       ))}
                     </div>
-                    <div className="grid grid-cols-2 gap-3 min-[480px]:grid-cols-3">
+                    <div className="grid grid-cols-2 gap-2 min-[480px]:grid-cols-3">
                       {THEMES.map((t) => {
                         const sw = t.swatch[resolveMode(mode)] || t.swatch.dark;
                         const selected = theme === t.id;
@@ -300,7 +304,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                             key={t.id}
                             onClick={() => applyTheme(t.id, mode)}
                             className={cn(
-                              'group flex min-w-0 items-center gap-2 rounded-xl border px-2 py-2 text-left transition-all sm:gap-3 sm:px-3 sm:py-1.5',
+                              'group flex min-w-0 items-center gap-2 rounded-xl border px-2 py-1.5 text-left transition-all sm:gap-3 sm:px-3 sm:py-1.5',
                               selected
                                 ? 'border-primary bg-primary/5'
                                 : 'border-border hover:bg-muted/40'

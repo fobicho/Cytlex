@@ -136,8 +136,8 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
 
   const scale = coverSize ? coverSize / 160 : uiScale;
   const px = (n, min) => Math.max(min, Math.round(n * scale));
-  const fontPx = (n, min) => Math.max(min, Math.round(n * scale * 0.9));
-  const titleStyle = { fontSize: `${fontPx(13.5, 11)}px` };
+  const fontPx = (n, min) => Math.max(min, Math.round(n * scale));
+  const titleStyle = { fontSize: `${fontPx(15, 11)}px` };
   const subStyle = { fontSize: `${fontPx(12, 10)}px` };
   const badgeStyle = {
     fontSize: `${fontPx(11, 9)}px`,
