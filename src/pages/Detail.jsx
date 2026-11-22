@@ -7,7 +7,7 @@ import { isMangaCover, lib, mangaSourceUrl, storedCoverThumbnail } from '../lib/
 import { progress } from '../lib/progress.js';
 import { reconcileMihonProgress } from '../lib/mihonProgress.js';
 import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaSource } from '../lib/extensions.js';
-import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, makeCoverThumb, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
+import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover, recallMangaPreview, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { reconcileChapterProgress } from '../lib/mangaMigration.js';
@@ -656,9 +656,6 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     lib.toggleFav({ ...manga, chapterTotal: chapterUrls.length }, catIds);
     api.persistLibraryDetail(manga.url, manga.sourceId, d);
     setFav(true);
-    makeCoverThumb(manga.cover).then((local) => {
-      if (local) lib.updateFav(manga.url, { coverLocal: local }, manga.sourceId);
-    });
   };
 
   const refreshLibraryDetail = async () => {
@@ -732,9 +729,6 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     reconcileMihonProgress(manga.url, manga.sourceId, d?.chapters || []);
     progress.removeMany(oldProgressUrls, existingSourceId);
     setFav(true);
-    makeCoverThumb(manga.cover).then((local) => {
-      if (local) lib.updateFav(manga.url, { coverLocal: local }, manga.sourceId);
-    });
     setReplacingDuplicate(false);
     setDup(null);
   };

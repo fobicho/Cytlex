@@ -512,7 +512,7 @@ async function fetchCombinedChapter(url, signal, chapterType, referer = url) {
   };
   const metadata = async () => {
     const prefix = await read(4); const size = new DataView(prefix.buffer).getUint32(0);
-    if (!size || size > 512_000) throw new Error('Metadatos del capítulo no válidos.');
+    if (!size || size > (chapterType === 'achymanga' ? 3 * 1024 * 1024 : 512_000)) throw new Error('Metadatos del capítulo no válidos.');
     return JSON.parse(new TextDecoder().decode(await read(size)));
   };
   const chapter = await metadata();
@@ -545,6 +545,10 @@ async function fetchCombinedChapter(url, signal, chapterType, referer = url) {
     prev: chapter.prev || null,
     next: chapter.next || null
   };
+}
+
+export function fetchAchyChapter(url, signal) {
+  return fetchCombinedChapter(url, signal, 'achymanga', url);
 }
 
 export function fetchOnfChapter(url, signal) {
@@ -717,6 +721,14 @@ async function fetchAchyCatalogRequest(url, options) {
   const response = await fetch(endpoint.href, proxyRequestOptions(url, { credentials: 'omit', ...options }));
   assertProxyResponse(response, new URL(url), url, true, false);
   return response;
+}
+
+async function fetchOlympusDetailRequest(url, options) {
+  const endpoint = new URL(proxyUrl(url), window.location.href);
+  endpoint.searchParams.set('detail', 'olympus');
+  const response = await fetch(endpoint.href, proxyRequestOptions(url, { credentials: 'omit', ...options }));
+  assertProxyResponse(response, new URL(url), url, true, false);
+  return response.text();
 }
 
 function mangaDexCatalogRequest(url, options) {
@@ -921,6 +933,23 @@ export async function httpGet(url, requestId, options = {}) {
     let request = httpGetRequests.get(key);
     if (!request) {
       request = fetchAchyCatalogRequest(url, catalogOptions).then(parseAchyCatalogResponse);
+      httpGetRequests.set(key, request);
+    }
+    try {
+      const text = await request;
+      return includeUrl ? { text, url } : text;
+    } finally {
+      if (httpGetRequests.get(key) === request) httpGetRequests.delete(key);
+    }
+  }
+  if (requestOptions.olympusDetail === true && target.origin === 'https://olympusxyz.com'
+    && /^\/api\/series\/[^/]+$/.test(target.pathname)) {
+    const detailOptions = { ...requestOptions };
+    delete detailOptions.olympusDetail;
+    const key = `olympus-detail:${target.href}`;
+    let request = httpGetRequests.get(key);
+    if (!request) {
+      request = fetchOlympusDetailRequest(url, detailOptions);
       httpGetRequests.set(key, request);
     }
     try {

@@ -966,6 +966,120 @@ function achyCatalogImages(html, catalogUrl) {
   return [...images];
 }
 
+function achyChapterData(html, chapterUrl) {
+  const manifestText = html.match(/<[^>]+\bid=["']datos-manifiesto-d["'][^>]*>([\s\S]*?)<\/[^>]+>/i)?.[1] || '{}';
+  const manifest = JSON.parse(decodeHtmlAttribute(manifestText));
+  const script = [...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script\s*>/gi)]
+    .map(([, value]) => value)
+    .find((value) => value.includes('function decryptD') && value.includes('CLAVE_XOR')) || '';
+  const key = script.match(/\bconst\s+CLAVE_XOR\s*=\s*(["'])(.*?)\1/s)?.[2];
+  if (!manifest.d || !key) throw new Error('AchyManga page list unavailable');
+
+  let encoded = String(manifest.d).replace(/-/g, '+').replace(/_/g, '/');
+  encoded += '='.repeat((4 - encoded.length % 4) % 4);
+  const binary = atob(encoded);
+  const keyBytes = new TextEncoder().encode(key);
+  const decoded = Uint8Array.from(binary, (character, index) => character.charCodeAt(0) ^ keyBytes[index % keyBytes.length]);
+  const pages = JSON.parse(new TextDecoder().decode(decoded));
+  if (!Array.isArray(pages) || !pages.length || pages.length > 1000) throw new Error('Invalid AchyManga page list');
+  const pageUrls = pages.map((value) => {
+    const image = validateTarget(new URL(value, chapterUrl).href);
+    if (!image || image.hostname !== 'cdn.achymanga.online') throw new Error('Invalid AchyManga image URL');
+    return image.href;
+  });
+
+  const manga = new URL(chapterUrl);
+  manga.pathname = manga.pathname.replace(/\/capitulo-[^/]+\/?$/, '');
+  manga.search = '';
+  manga.hash = '';
+  const prefix = `${manga.origin}${manga.pathname.replace(/\/+$/, '')}/capitulo-`;
+  const seen = new Set();
+  const options = [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a\s*>/gi)].flatMap(([, attrs, content]) => {
+    const id = attrs.match(/\bid\s*=\s*(["'])(.*?)\1/i)?.[2] || '';
+    const rawHref = attrs.match(/\bhref\s*=\s*(["'])(.*?)\1/i)?.[2] || '';
+    let href = '';
+    try { href = rawHref ? new URL(decodeHtmlAttribute(rawHref), chapterUrl).href : ''; } catch {}
+    if (!href.startsWith(prefix) || id === 'btn-leer' || seen.has(href)) return [];
+    const markup = content.match(/<span\b[^>]*>([\s\S]*?)<\/span\s*>/i)?.[1] || content;
+    const label = decodeHtmlAttribute(markup.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ')).trim();
+    if (/^leer desde el cap[ií]tulo\b/i.test(label)) return [];
+    seen.add(href);
+    const dataNum = attrs.match(/\bdata-num\s*=\s*(["'])(.*?)\1/i)?.[2];
+    const num = Number(dataNum || label.match(/[\d.]+/)?.[0] || href.match(/capitulo-([\d.]+)/)?.[1]);
+    return [{ url: href, title: label || `Capítulo ${num}`, num }];
+  }).sort((a, b) => (Number.isFinite(a.num) ? a.num : Infinity) - (Number.isFinite(b.num) ? b.num : Infinity));
+  const currentPath = new URL(chapterUrl);
+  currentPath.pathname = currentPath.pathname.replace(/\/+$/, '');
+  const currentIndex = options.findIndex((option) => {
+    const optionUrl = new URL(option.url);
+    optionUrl.pathname = optionUrl.pathname.replace(/\/+$/, '');
+    return optionUrl.href === currentPath.href;
+  });
+  const current = currentIndex >= 0 ? options[currentIndex] : null;
+  const previous = currentIndex > 0 ? options[currentIndex - 1] : null;
+  const next = currentIndex >= 0 ? options[currentIndex + 1] || null : null;
+  return {
+    label: current?.title || `Capítulo ${chapterUrl.match(/capitulo-([\d.]+)/)?.[1] || ''}`,
+    mangaUrl: manga.href,
+    pages: pageUrls,
+    pageTransforms: pageUrls.map((page) => (/[?&]s=1\b|_s\.webp/i.test(page) ? 'scramble-4x4' : '')),
+    imageReferer: chapterUrl,
+    options: options.map(({ url, title }) => ({ url, title })),
+    prev: previous ? { title: previous.title, url: previous.url } : null,
+    next: next ? { title: next.title, url: next.url } : null
+  };
+}
+
+async function handleAchyChapter(request, target) {
+  if (target.origin !== 'https://achymanga.online' || !/^\/manga\/[^/]+\/[^/]+\/capitulo-[^/]+\/?$/.test(target.pathname)) {
+    return errorResponse('Invalid AchyManga chapter', 400);
+  }
+  const deadline = new AbortController();
+  const timeout = setTimeout(() => deadline.abort(), 12000);
+  const signal = AbortSignal.any([request.signal, deadline.signal]);
+  try {
+    const result = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    if (result.proxyError) return result.proxyError;
+    if (!result.upstream.ok) return new Response(null, { status: result.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
+    const html = await new Response(limitResponseBody(result.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
+    const chapter = achyChapterData(html, target.href);
+    const initial = chapter.pages.slice(0, PROXY_IMAGE_BATCH_MAX_REQUESTS);
+    const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
+    const byteBudget = createImageByteBudget();
+    let stopped = false;
+    let next = 0;
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      async start(controller) {
+        const write = (metadata, bytes = new Uint8Array()) => {
+          const data = encoder.encode(JSON.stringify(metadata));
+          const prefix = new Uint8Array(4);
+          new DataView(prefix.buffer).setUint32(0, data.length);
+          controller.enqueue(prefix); controller.enqueue(data);
+          if (bytes.length) controller.enqueue(bytes);
+        };
+        try {
+          write(chapter);
+          await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
+            while (!stopped && next < initial.length) {
+              const index = next++;
+              const image = await fetchImageBatchItem({ url: initial[index], referer: target.href }, request, subrequestBudget, byteBudget);
+              if (stopped) return;
+              const bytes = image.body ? new Uint8Array(await image.body.arrayBuffer()) : new Uint8Array();
+              write({ index, length: bytes.length, status: image.status, contentType: image.contentType || '' }, bytes);
+            }
+          }));
+          if (!stopped) controller.close();
+        } catch (error) { if (!stopped) controller.error(error); }
+      },
+      cancel() { stopped = true; }
+    });
+    return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
+  } catch (error) {
+    return errorResponse('AchyManga chapter unavailable', deadline.signal.aborted ? 504 : 422);
+  } finally { clearTimeout(timeout); }
+}
+
 async function handleAchyCatalog(request, target) {
   if (target.origin !== 'https://achymanga.online' || target.pathname !== '/catalogo') {
     return errorResponse('Invalid AchyManga catalog request', 400);
@@ -1014,6 +1128,49 @@ async function handleAchyCatalog(request, target) {
     return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.catalog-stream', 'x-cytlex-proxy': '1' } });
   } catch (error) {
     return errorResponse('AchyManga catalog unavailable', deadline.signal.aborted ? 504 : 502, false,
+      deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
+  } finally { clearTimeout(timeout); }
+}
+
+async function handleOlympusDetail(request, target) {
+  const slug = target.pathname.match(/^\/api\/series\/([\w-]+)$/)?.[1] || '';
+  if (target.origin !== 'https://olympusxyz.com' || !slug || target.searchParams.get('type') !== 'comic') {
+    return errorResponse('Invalid Olympus detail request', 400);
+  }
+  const deadline = new AbortController();
+  const timeout = setTimeout(() => deadline.abort(), 12000);
+  const signal = AbortSignal.any([request.signal, deadline.signal]);
+  const readJson = async (url) => {
+    const page = validateTarget(url);
+    const result = await fetchTarget(page, 'GET', forwardedHeaders(request, page), undefined, signal, { retries: 0 });
+    if (result.proxyError) throw { response: result.proxyError };
+    if (!result.upstream.ok) {
+      throw { response: new Response(result.upstream.body, {
+        status: result.upstream.status,
+        headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' }
+      }) };
+    }
+    const raw = await new Response(limitResponseBody(result.upstream.body, PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES,
+      () => {}, () => deadline.abort())).text();
+    return JSON.parse(raw);
+  };
+  try {
+    const chapterPage = (page) => `https://olympusxyz.com/api/series/${slug}/chapters?page=${page}&direction=desc&type=comic`;
+    const [series, first] = await Promise.all([readJson(target.href), readJson(chapterPage(1))]);
+    const lastPage = Math.min(Math.max(Number(first?.meta?.last_page) || 1, 1), 200);
+    const fetchedPages = Math.min(lastPage, PROXY_BATCH_MAX_REQUESTS - 1);
+    const results = [first];
+    for (let start = 2; start <= fetchedPages; start += 6) {
+      const count = Math.min(6, fetchedPages - start + 1);
+      results.push(...await Promise.all(Array.from({ length: count }, (_, index) => readJson(chapterPage(start + index)))));
+    }
+    const chapters = results.flatMap((result) => result?.data || []);
+    return Response.json({ ...series, chapters, chaptersLastPage: lastPage, chaptersFetchedPages: fetchedPages }, {
+      headers: { 'cache-control': 'no-store', 'x-cytlex-proxy': '1' }
+    });
+  } catch (error) {
+    if (error?.response) return error.response;
+    return errorResponse('Olympus detail unavailable', deadline.signal.aborted ? 504 : 502, false,
       deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
   } finally { clearTimeout(timeout); }
 }
@@ -1388,6 +1545,14 @@ export async function onRequest(context) {
   if (requestUrl.searchParams.get('catalog') === 'achymanga') {
     if (method !== 'GET') return errorResponse('Method not allowed', 405);
     return handleAchyCatalog(request, target);
+  }
+  if (requestUrl.searchParams.get('detail') === 'olympus') {
+    if (method !== 'GET') return errorResponse('Method not allowed', 405);
+    return handleOlympusDetail(request, target);
+  }
+  if (requestUrl.searchParams.get('chapter') === 'achymanga') {
+    if (method !== 'GET') return errorResponse('Method not allowed', 405);
+    return handleAchyChapter(request, target);
   }
   if (new URL(request.url).searchParams.get('chapter') === 'onf') {
     if (method !== 'GET') return errorResponse('Method not allowed', 405);

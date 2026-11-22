@@ -2,7 +2,7 @@ export default function createSource({ fetchText }) {
   const base = 'https://olympusxyz.com';
   const LIMIT_PAGES = 200;
 
-  const getJson = async (url, requestId) => JSON.parse(await fetchText(url, requestId));
+  const getJson = async (url, requestId, options) => JSON.parse(await fetchText(url, requestId, options));
   const isComic = (s) => (s.type || 'comic').toLowerCase() === 'comic';
   let seriesListRequest;
   let latestChapters;
@@ -48,18 +48,21 @@ export default function createSource({ fetchText }) {
     return { items, totalPages, totalText: '' };
   }
 
-  async function fetchChapterList(slug) {
-    const chaptersFetch = (page) =>
-      getJson(`${base}/api/series/${slug}/chapters?page=${page}&direction=desc&type=comic`);
-    const first = await chaptersFetch(1);
-    const lastPage = Math.min(first?.meta?.last_page || 1, LIMIT_PAGES);
+  async function fetchChapterPages(slug, firstPage, lastPage) {
     const rest = [];
-    for (let start = 2; start <= lastPage; start += 6) {
+    for (let start = firstPage; start <= lastPage; start += 6) {
       const count = Math.min(6, lastPage - start + 1);
-      const batch = await Promise.all(Array.from({ length: count }, (_, i) => chaptersFetch(start + i)));
+      const batch = await Promise.all(Array.from({ length: count }, (_, i) =>
+        getJson(`${base}/api/series/${slug}/chapters?page=${start + i}&direction=desc&type=comic`)));
       rest.push(...batch);
     }
-    return [first, ...rest].flatMap((res) => res?.data || []);
+    return rest.flatMap((res) => res?.data || []);
+  }
+
+  async function fetchChapterList(slug) {
+    const first = await getJson(`${base}/api/series/${slug}/chapters?page=1&direction=desc&type=comic`);
+    const lastPage = Math.min(first?.meta?.last_page || 1, LIMIT_PAGES);
+    return [first, ...await fetchChapterPages(slug, 2, lastPage)].flatMap((res) => res?.data || []);
   }
 
   function listChapters(slug) {
@@ -74,10 +77,17 @@ export default function createSource({ fetchText }) {
 
   async function detail(mangaUrl) {
     const slug = String(mangaUrl).split('/').filter(Boolean).pop();
-    const [data, entries] = await Promise.all([
-      getJson(`${base}/api/series/${slug}?type=comic`),
-      listChapters(slug)
-    ]);
+    const data = await getJson(`${base}/api/series/${slug}?type=comic`, undefined, { olympusDetail: true });
+    let entries;
+    if (Array.isArray(data?.chapters)) {
+      entries = data.chapters;
+      const lastPage = Math.min(data.chaptersLastPage || 1, LIMIT_PAGES);
+      const fetchedPages = Math.min(data.chaptersFetchedPages || 1, lastPage);
+      if (fetchedPages < lastPage) entries.push(...await fetchChapterPages(slug, fetchedPages + 1, lastPage));
+      latestChapters = { slug, entries };
+    } else {
+      entries = await listChapters(slug);
+    }
     const s = data?.data || {};
     const chapters = entries.map((c) => ({
       url: `${base}/capitulo/${slug}/${c.id}`,

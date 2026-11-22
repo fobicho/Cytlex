@@ -10,11 +10,12 @@ import { tracking } from '../lib/tracking.js';
 import { chapterOrder, detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
-import { browserImageUrl, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchMangaLectChapter, fetchMangaOniChapter, fetchOnfChapter, sourceErrorMessage } from '../lib/browserHttp.js';
+import { browserImageUrl, fetchAchyChapter, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchMangaLectChapter, fetchMangaOniChapter, fetchOnfChapter, sourceErrorMessage } from '../lib/browserHttp.js';
 import { readRecentChapter, writeRecentChapter } from '../lib/recentChapters.js';
 import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
+import { useToast } from '../components/Toast.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
 
@@ -434,6 +435,7 @@ export default function Reader() {
   const paginated = mode === 'paginado' || mode === 'paginado-rtl';
   const rtl = mode === 'paginado-rtl';
   const useDouble = paginated && doublePage;
+  const { toast } = useToast();
   const [page, setPage] = useState(0);
   const scale = useScale();
   useEffect(() => settings.subscribe((s) => {
@@ -446,7 +448,6 @@ export default function Reader() {
   useEffect(() => settings.subscribe((s) => setDoublePage(!!s.readerDoublePage)), []);
   useEffect(() => settings.subscribe((s) => setShowAdultExtensions(!!s.showAdultExtensions)), []);
   const [menu, setMenu] = useState(null);
-  const [toast, setToast] = useState('');
   const [wheelZoom, setWheelZoom] = useState(0);
   const wheelZoomRef = useRef(0);
   const zoomContentRef = useRef(null);
@@ -578,6 +579,9 @@ export default function Reader() {
       try {
         let r = extensions.isInstalled(sourceId) && !adultExtensionDisabled ? await readRecentChapter(recentChapterKey) : null;
         if (!active) return;
+        if (!r && sourceId === 'achymanga' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
+          try { r = await fetchAchyChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
+        }
         if (!r && sourceId === 'onfmangas' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
           try { r = await fetchOnfChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
         }
@@ -615,7 +619,7 @@ export default function Reader() {
         setPage(sp);
         if (sp > 0) {
           pendingScrollRef.current = sp;
-          setToast(`Continuando desde la página ${sp + 1}`);
+          toast({ title: `Continuando desde la página ${sp + 1}`, variant: 'info', duration: 2600 });
         }
       } catch (e) {
         if (active) setErr(sourceErrorMessage(e, sourceName, 'No se pudo obtener la lista de páginas.'));
@@ -623,7 +627,7 @@ export default function Reader() {
     })();
     scrollToTop();
     return () => { active = false; combinedController.abort(); };
-  }, [chapterUrl, sourceId, sourceName, showAdultExtensions, retryTick, recentChapterKey]);
+  }, [chapterUrl, sourceId, sourceName, showAdultExtensions, retryTick, recentChapterKey, toast]);
 
   const updateVerticalEnd = useCallback(() => {
     const mainEl = verticalScrollerRef.current;
@@ -1091,12 +1095,6 @@ export default function Reader() {
     };
   }, [menu]);
 
-  useEffect(() => {
-    if (!toast) return undefined;
-    const id = setTimeout(() => setToast(''), 2600);
-    return () => clearTimeout(id);
-  }, [toast]);
-
   const go = (url) => `#/leer?u=${encodeURIComponent(url)}&m=${encodeURIComponent(currentMangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}${detailBackQS}`;
 
   const openPanelMenu = (e, url, label) => {
@@ -1120,8 +1118,8 @@ export default function Reader() {
       }
       return fetchImageBlob(target.url, undefined, ch.imageReferer, ch.imageCookie);
     });
-    if (result?.ok) setToast('Panel descargado');
-    else if (!result?.canceled) setToast(result?.error || 'No se pudo descargar');
+    if (result?.ok) toast({ title: 'Panel descargado', variant: 'success', duration: 2600 });
+    else if (!result?.canceled) toast({ title: result?.error || 'No se pudo descargar', variant: 'error' });
   };
 
   const allPages = [...Array(ch?.pages?.length || 0).keys()];
@@ -1540,21 +1538,6 @@ export default function Reader() {
         </div>
       )}
 
-      {toast && (
-        <div
-          className="fixed left-1/2 -translate-x-1/2 z-50 rounded-lg border border-border bg-card shadow-2xl"
-          style={{
-            bottom: px(16, scale, 11),
-            paddingLeft: px(16, scale, 11),
-            paddingRight: px(16, scale, 11),
-            paddingTop: px(8, scale, 6),
-            paddingBottom: px(8, scale, 6),
-            fontSize: fontPx(14, scale, 12)
-          }}
-        >
-          {toast}
-        </div>
-      )}
     </div>
   );
 }
