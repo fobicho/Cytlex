@@ -19,6 +19,7 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
   const declaredRating = String(m.contentWarning || '').trim().toUpperCase();
   const hasAdultContent = ['MIXED', 'NSFW'].includes(declaredRating);
   const contentRating = hasAdultContent ? declaredRating : 'SAFE';
+  const contentRatingLabel = contentRating === 'NSFW' ? '+18 NSFW' : contentRating;
   const iconSize = Number(px(40, scale, 32).replace('px', ''));
   const identity = (
     <>
@@ -75,10 +76,10 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
               hasAdultContent ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'
             )}
             title={`Clasificación de contenido: ${contentRating}`}
-            aria-label={hasAdultContent ? `+18 ${contentRating}` : 'SAFE'}
+            aria-label={contentRatingLabel}
             style={{ fontSize: fontPx(11, scale, 9) }}
           >
-            {hasAdultContent ? `+18 ${contentRating}` : 'SAFE'}
+            {contentRatingLabel}
           </span>
         </div>
       </div>

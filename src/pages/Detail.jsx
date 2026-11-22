@@ -204,7 +204,6 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   useEffect(() => {
     if (fromParam === 'fuentes') sourceCatalogState.requestRestore();
   }, [fromParam]);
-  const sourceConfigured = isSourceConfigured(extensions.manifest(sourceId));
   const sourceAvailable = extensions.isInstalled(sourceId);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const [coverSetting, setCoverSetting] = useState(() => settings.get().coverSize);
@@ -251,10 +250,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const d = detailState.key === detailKey ? detailState.data : api.peekStaleDetail(mangaUrl, sourceId);
   const [err, setErr] = useState('');
   const [detailRetry, setDetailRetry] = useState(0);
-  const [detailMissingKey, setDetailMissingKey] = useState('');
   const [fav, setFav] = useState(false);
   const [refreshingDetail, setRefreshingDetail] = useState(false);
-  const detailMissing = detailMissingKey === detailKey;
   const [asc, setAsc] = useState(() => chapterOrder.get(mangaUrl));
   const [groupFilter, setGroupFilter] = useState(() => {
     try {
@@ -501,13 +498,13 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     if (migrationSearchMode) return undefined;
     if (!mangaUrl) return undefined;
     if (!extensions.isInstalled(sourceId)) return undefined;
+    if (adultExtensionDisabled) return undefined;
     setErr('');
     setExpanded(false);
     setAnimate(false);
     setAsc(chapterOrder.get(mangaUrl));
     const isFavorite = lib.isFav(mangaUrl, sourceId);
     setFav(isFavorite);
-    setDetailMissingKey('');
     setAniLinked(!!tracking.get(mangaUrl, sourceId));
 
     let cached = api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId);
@@ -523,7 +520,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         api.persistLibraryDetail(mangaUrl, sourceId, cached);
         return () => { alive = false; };
       }
-      api.restoreDetail(mangaUrl, sourceId).then((saved) => {
+      const loadSavedDetail = async () => {
+        let saved = null;
+        try { saved = await api.restoreDetail(mangaUrl, sourceId); } catch {}
         if (!alive) return;
         if (saved?.chapters?.length) {
           api.persistLibraryDetail(mangaUrl, sourceId, saved);
@@ -533,8 +532,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           setDetailState({ key: detailKey, data: saved });
           return;
         }
-        setDetailMissingKey(detailKey);
-      });
+        void refreshLibraryDetail();
+      };
+      loadSavedDetail();
       return () => { alive = false; };
     }
 
@@ -598,7 +598,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       });
 
     return () => { alive = false; };
-  }, [mangaUrl, sourceId, sourceName, migrationSearchMode, detailRetry]);
+  }, [mangaUrl, sourceId, sourceName, migrationSearchMode, detailRetry, adultExtensionDisabled]);
 
   useLayoutEffect(() => {
     if (!active || !d || !detailDelayElapsed || !sourceIconReady) return undefined;
@@ -662,7 +662,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   };
 
   const refreshLibraryDetail = async () => {
-    if (refreshingDetail || !fav) return;
+    if (refreshingDetail || !lib.isFav(mangaUrl, sourceId)) return;
     setRefreshingDetail(true);
     setErr('');
     try {
@@ -1162,19 +1162,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 <Skeleton style={{ height: px(32, scale, 25), width: '66%', maxWidth: px(448, scale, 350) }} />
               )}
             </div>
-            {detailMissing && fav && !err ? (
-              <div className="mt-5 text-sm text-muted-foreground" role="status">
-                <p>{sourceConfigured ? 'El detalle aún no está guardado en este dispositivo.' : 'La fuente está desactivada. El manga sigue en Biblioteca, pero no se puede cargar su detalle.'}</p>
-                {sourceConfigured ? (
-                  <Button className="mt-3" variant="secondary" disabled={refreshingDetail} onClick={() => void refreshLibraryDetail()}>
-                    <RefreshCw className={cn('mr-2 h-4 w-4', refreshingDetail && 'animate-spin')} />
-                    {refreshingDetail ? 'Cargando detalle…' : 'Cargar detalle'}
-                  </Button>
-                ) : (
-                  <Button className="mt-3" variant="secondary" onClick={() => { window.location.hash = '#/ajustes'; }}>Ir a Ajustes</Button>
-                )}
-              </div>
-            ) : err ? (
+            {err ? (
               <div className="mt-5 text-sm text-muted-foreground" role="status">
                 <p className="font-medium text-foreground">No se pudieron cargar los capítulos.</p>
                 <p className="mt-1 break-words">{err}</p>
@@ -1191,7 +1179,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               </div>
             )}
           </div>
-          {!err && !detailMissing && (
+          {!err && (
             <div className="col-span-2 min-w-0 md:col-span-1 md:col-start-2" style={{ marginTop: px(4, scale, 3) }}>
               <div className="flex flex-col" style={{ gap: px(8, scale, 6) }}>
                 <Skeleton style={{ height: px(14, scale, 11) }} />

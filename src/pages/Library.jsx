@@ -1,17 +1,18 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { RefreshCw, ArrowUpDown, Search, X } from 'lucide-react';
 import { isMangaCover, isUnresolvedMihonSource, lib, storedCoverThumbnail } from '../lib/library.js';
 import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
 import VirtualMangaGrid from '../components/VirtualMangaGrid.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
-import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaSource, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaSource, SOURCE_CONFIG_CHANGE_EVENT, EXTENSION_INSTALLED_EVENT } from '../lib/extensions.js';
 import { checkLibrary } from '../lib/notify.js';
 import { progress } from '../lib/progress.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { tracking } from '../lib/tracking.js';
 import { api } from '../lib/api.js';
+import { setHttpGetBatchWindow } from '../lib/browserHttp.js';
 import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { Input } from '../components/ui/input.jsx';
@@ -22,14 +23,18 @@ import SubrouteTabLabel from '../components/SubrouteTabLabel.jsx';
 import { useLibraryCover } from '../lib/useLibraryCover.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 import { libraryScroll, recallCover, rememberMangaPreview } from '../lib/searchState.js';
+import { attachHorizontalScrollFade } from '../lib/horizontalScrollFade.js';
 
 let sessionCategoria = '';
 let libraryCheckInFlight = false;
 let libraryCheckCooldownUntil = 0;
 let libraryCheckProgress = { current: 0, total: 0 };
 const libraryCheckProgressListeners = new Set();
+let libraryDetailBackfillPromise = null;
+let pendingLibraryDetailBackfill = null;
 const UNREAD_CACHE_KEY = 'cytlex:libraryUnread:v2';
 const LIBRARY_CATEGORY_KEY = 'cytlex:libraryCategory';
+const LIBRARY_SEARCH_OPEN_KEY = 'cytlex:librarySearchOpen:v1';
 const libraryScroller = () => document.querySelector('.library-page-scroll') || document.querySelector('main');
 const libraryTitleCollator = new Intl.Collator('es', { sensitivity: 'base', numeric: true });
 const initialLibraryCategory = (categories) => {
@@ -73,6 +78,7 @@ const sourceIdFor = (manga) => {
     ? extensions.resolveInstalledSource(id, manga.sourceName, manga.url) || id
     : id;
 };
+const isMangaDexManga = (manga) => ['mangadex', 'mangadex-en'].includes(sourceIdFor(manga));
 const mangaUrlKey = (url) => {
   try {
     const parsed = new URL(url);
@@ -113,6 +119,67 @@ const sameLibraryFavorites = (left, right) => left.length === right.length && le
     && manga.addedAt === next.addedAt
     && (manga.cats || []).join('\0') === (next.cats || []).join('\0');
 });
+
+async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, installedSourceIds = null) {
+  const pending = favorites.filter((manga) => {
+    const resolvedId = sourceIdFor(manga);
+    return extensions.isInstalled(resolvedId)
+      && (installedSourceIds?.has(resolvedId) || isExtensionAllowed(extensions.manifest(resolvedId), showAdultExtensions))
+      && isSourceConfigured(extensions.manifest(resolvedId));
+  });
+  pending.sort((a, b) => Number(isMangaDexManga(b)) - Number(isMangaDexManga(a)));
+  if (!pending.length) return;
+
+  const restoreBatchWindow = setHttpGetBatchWindow(5000);
+  try {
+    let next = 0;
+    const concurrency = Math.min(50, pending.length);
+    await Promise.all(Array.from({ length: concurrency }, async () => {
+      while (isActive() && next < pending.length) {
+        const manga = pending[next++];
+        const savedSourceId = manga.sourceId || 'leercapitulo';
+        const resolvedId = sourceIdFor(manga);
+        try {
+          let detail = await api.restoreDetail(manga.url, savedSourceId);
+          if (!detail?.chapters?.length) {
+            detail = api.peekDetail(manga.url, resolvedId);
+            if (!detail?.chapters?.length) {
+              const chaptersDetail = await api.detailFromLibraryChapters(manga.url, resolvedId, manga);
+              detail = chaptersDetail || await api.detail(manga.url, resolvedId, { cacheResult: false, persistResult: false, allowDisabled: true });
+            }
+          }
+          if (detail?.chapters?.length) await api.persistLibraryDetail(manga.url, savedSourceId, detail);
+        } catch {
+          // Keep this manga in the library; the missing detail can be retried next time.
+        }
+      }
+    }));
+  } finally {
+    restoreBatchWindow();
+  }
+}
+
+function queueLibraryDetailBackfill(favorites, showAdultExtensions, isActive, installedSourceIds = null) {
+  pendingLibraryDetailBackfill = { favorites, showAdultExtensions, isActive, installedSourceIds };
+  if (!libraryDetailBackfillPromise) {
+    libraryDetailBackfillPromise = (async () => {
+      while (pendingLibraryDetailBackfill) {
+        const job = pendingLibraryDetailBackfill;
+        pendingLibraryDetailBackfill = null;
+        await backfillLibraryDetails(job.favorites, job.showAdultExtensions, job.isActive, job.installedSourceIds);
+      }
+    })().finally(() => {
+      libraryDetailBackfillPromise = null;
+      if (pendingLibraryDetailBackfill) queueLibraryDetailBackfill(
+        pendingLibraryDetailBackfill.favorites,
+        pendingLibraryDetailBackfill.showAdultExtensions,
+        pendingLibraryDetailBackfill.isActive,
+        pendingLibraryDetailBackfill.installedSourceIds
+      );
+    });
+  }
+}
+
 const sortLibraryManga = (items, sortBy, unread) => items.sort((a, b) => {
   switch (sortBy) {
     case 'title-desc':
@@ -175,6 +242,8 @@ function CachedLibraryCover({ cover, title, className, cachedOnly = false, cache
 }
 
 const Library = memo(function Library({ active = true }) {
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const [cats, setCats] = useState(() => lib.cats());
   const [sel, setSel] = useState(() => initialLibraryCategory(lib.cats()));
   const [visitedCategoryIds, setVisitedCategoryIds] = useState(() => [initialLibraryCategory(lib.cats())]);
@@ -187,7 +256,7 @@ const Library = memo(function Library({ active = true }) {
   const [coverSize, setCoverSize] = useState(() => settings.get().coverSize);
   const [showUnread, setShowUnread] = useState(() => settings.get().libraryShowUnread);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
-  const [, setSourceConfigVersion] = useState(0);
+  const [sourceConfigVersion, setSourceConfigVersion] = useState(0);
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('cytlex:librarySort') || 'title-asc');
   const [libraryQuery, setLibraryQuery] = useState('');
   const [unread, setUnread] = useState({});
@@ -196,6 +265,11 @@ const Library = memo(function Library({ active = true }) {
   const librarySearchInputRef = useRef(null);
   const libraryActionsRef = useRef(null);
   const [compactLibraryUpdates, setCompactLibraryUpdates] = useState(false);
+  const [compactLibrarySearch, setCompactLibrarySearch] = useState(false);
+  const [librarySearchOpen, setLibrarySearchOpen] = useState(() => {
+    try { return localStorage.getItem(LIBRARY_SEARCH_OPEN_KEY) === '1'; } catch { return false; }
+  });
+  const reduceMotion = useReducedMotion();
   const scale = useScale();
   const isBrowserApp = typeof window !== 'undefined' && !window.cytlex;
 
@@ -203,37 +277,105 @@ const Library = memo(function Library({ active = true }) {
     if (!active) return undefined;
     const actions = libraryActionsRef.current;
     const toolbar = actions?.closest('.library-toolbar');
-    const subroutes = toolbar?.querySelector('[data-catalog-subroutes]');
-    if (!actions || !toolbar || !subroutes) return undefined;
+    const toolbarRow = toolbar?.querySelector('.library-toolbar-row');
+    const subroutes = toolbarRow?.querySelector('[data-catalog-subroutes]');
+    if (!actions || !toolbar || !toolbarRow || !subroutes) return undefined;
     const update = () => {
       actions.classList.add('extensions-toolbar-measure-full');
-      const requiredWidth = actions.getBoundingClientRect().width;
+      const sortButton = actions.querySelector('[data-library-sort]');
+      const updatesButton = actions.querySelector('[data-library-updates]');
+      const sortWidth = sortButton?.getBoundingClientRect().width || 0;
+      const fullUpdatesWidth = updatesButton?.getBoundingClientRect().width || 0;
       actions.classList.remove('extensions-toolbar-measure-full');
-      const style = getComputedStyle(toolbar);
+      const style = getComputedStyle(toolbarRow);
       const padding = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
       const gap = Number.parseFloat(style.columnGap) || 0;
-      const reservedCategoryWidth = Math.min(subroutes.scrollWidth, Math.max(240, Math.round(320 * scale)));
-      const availableForActions = toolbar.clientWidth - padding - reservedCategoryWidth - gap;
-      const compactReserve = Math.max(16, Math.round(28 * scale));
-      setCompactLibraryUpdates((compact) => compact
-        ? requiredWidth > availableForActions - compactReserve - 8
-        : requiredWidth > availableForActions - compactReserve);
+      // Keep the current category visible, then give the remaining width to
+      // actions. The refresh control compacts before the search field does.
+      const reservedCategoryWidth = Math.max(
+        Number.parseFloat(px(96, scale, 76)),
+        subroutes.scrollWidth
+      );
+      const availableForActions = toolbarRow.clientWidth - padding - reservedCategoryWidth - gap;
+      const actionGap = Number.parseFloat(getComputedStyle(actions).columnGap) || 0;
+      const minSearchWidth = Math.max(120, Math.round(140 * scale));
+      const preferredSearchWidth = Number.parseFloat(px(280, scale, 240));
+      const updatesCompactWidth = updatesButton?.getBoundingClientRect().height || 0;
+      const updatesThreshold = preferredSearchWidth + sortWidth + fullUpdatesWidth + (actionGap * 2);
+      const nextCompactUpdates = compactLibraryUpdates
+        ? availableForActions < updatesThreshold + 8
+        : availableForActions < updatesThreshold;
+      const updatesWidth = nextCompactUpdates ? updatesCompactWidth : fullUpdatesWidth;
+      const availableForSearch = availableForActions - sortWidth - updatesWidth - (actionGap * 2);
+      setCompactLibraryUpdates(nextCompactUpdates);
+      setCompactLibrarySearch((compact) => compact
+        ? availableForSearch < minSearchWidth + 16
+        : availableForSearch < minSearchWidth);
     };
 
     const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
-    [toolbar, subroutes, actions].forEach((element) => observer?.observe(element));
+    [toolbar, toolbarRow, subroutes, actions].forEach((element) => observer?.observe(element));
     window.addEventListener('resize', update);
     update();
     return () => {
       observer?.disconnect();
       window.removeEventListener('resize', update);
     };
-  }, [active, cats, sel, scale, checking, checkProgress.current, checkProgress.total]);
+  }, [active, cats, sel, scale, checking, checkProgress.current, checkProgress.total, compactLibraryUpdates]);
+
+  const toggleLibrarySearch = () => {
+    const nextOpen = !librarySearchOpen;
+    setLibrarySearchOpen(nextOpen);
+    try {
+      if (nextOpen) localStorage.setItem(LIBRARY_SEARCH_OPEN_KEY, '1');
+      else localStorage.removeItem(LIBRARY_SEARCH_OPEN_KEY);
+    } catch {}
+  };
+
+  const revealCategoryTab = (tab, behavior = reduceMotion ? 'auto' : 'smooth') => {
+    const nav = categoryTabsRef.current;
+    if (!nav || !tab) return;
+
+    const navBounds = nav.getBoundingClientRect();
+    const tabBounds = tab.getBoundingClientRect();
+    const leftEdge = navBounds.left;
+    const rightEdge = navBounds.right;
+    const scrollOptions = { behavior };
+
+    if (tabBounds.left < leftEdge) {
+      nav.scrollBy({ ...scrollOptions, left: tabBounds.left - leftEdge });
+    } else if (tabBounds.right > rightEdge) {
+      nav.scrollBy({ ...scrollOptions, left: tabBounds.right - rightEdge });
+    }
+  };
 
   useEffect(() => {
     const activeTab = categoryTabsRef.current?.querySelector('[aria-current="page"]');
-    activeTab?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [sel]);
+    revealCategoryTab(activeTab);
+  }, [sel, reduceMotion, scale]);
+
+  useLayoutEffect(() => {
+    const nav = categoryTabsRef.current;
+    if (!active || !nav) return undefined;
+    let frame = 0;
+    const revealActive = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        revealCategoryTab(nav.querySelector('[aria-current="page"]'), 'auto');
+      });
+    };
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(revealActive) : null;
+    observer?.observe(nav);
+    window.addEventListener('resize', revealActive);
+    revealActive();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener('resize', revealActive);
+    };
+  }, [active, reduceMotion, scale]);
+
+  useEffect(() => attachHorizontalScrollFade(categoryTabsRef.current), []);
 
   useEffect(
     () => settings.subscribe((s) => {
@@ -245,8 +387,18 @@ const Library = memo(function Library({ active = true }) {
   );
   useEffect(() => {
     const refreshSourceConfig = () => setSourceConfigVersion((version) => version + 1);
+    const backfillInstalledSources = (event) => {
+      const sourceIds = new Set(event.detail?.sourceIds || []);
+      if (!sourceIds.size) return;
+      const favorites = lib.favs().filter((manga) => sourceIds.has(sourceIdFor(manga)));
+      if (favorites.length) queueLibraryDetailBackfill(favorites, true, () => true, sourceIds);
+    };
     window.addEventListener(SOURCE_CONFIG_CHANGE_EVENT, refreshSourceConfig);
-    return () => window.removeEventListener(SOURCE_CONFIG_CHANGE_EVENT, refreshSourceConfig);
+    window.addEventListener(EXTENSION_INSTALLED_EVENT, backfillInstalledSources);
+    return () => {
+      window.removeEventListener(SOURCE_CONFIG_CHANGE_EVENT, refreshSourceConfig);
+      window.removeEventListener(EXTENSION_INSTALLED_EVENT, backfillInstalledSources);
+    };
   }, []);
   useEffect(() => {
     const updates = [];
@@ -296,6 +448,11 @@ const Library = memo(function Library({ active = true }) {
     window.addEventListener('cytlex:library-unread-reset', onImport);
     return () => window.removeEventListener('cytlex:library-unread-reset', onImport);
   }, [active]);
+
+  useEffect(() => {
+    if (!active || !favs.length) return;
+    queueLibraryDetailBackfill(favs, showAdultExtensions, () => activeRef.current);
+  }, [active, favs, showAdultExtensions, sourceConfigVersion]);
 
   useEffect(() => {
     const syncProgress = (progress) => setCheckProgress(progress);
@@ -503,6 +660,43 @@ const Library = memo(function Library({ active = true }) {
     });
   }, [inCategory, showUnread]);
 
+  const librarySearchField = (
+    <div className="relative min-w-0 flex-1" role="search">
+      <Input
+        ref={librarySearchInputRef}
+        className="bg-card border-border/70"
+        placeholder={`Buscar en ${truncateCategoryName(categoryName, 10)}`}
+        aria-label={`Buscar en ${categoryName}`}
+        value={libraryQuery}
+        onChange={(event) => {
+          setLibraryQuery(event.target.value);
+          const main = libraryScroller();
+          if (main?.scrollTop > 0) {
+            libraryScroll.set(sel, 0);
+            main.scrollTop = 0;
+          }
+        }}
+        enterKeyHint="search"
+        style={{
+          height: px(32, scale, 28),
+          fontSize: fontPx(14, scale),
+          paddingLeft: px(12, scale, 9),
+          paddingRight: px(40, scale, 34)
+        }}
+      />
+      <button
+        type="button"
+        aria-label={libraryQuery ? 'Limpiar búsqueda' : `Buscar en ${categoryName}`}
+        onClick={() => libraryQuery ? setLibraryQuery('') : librarySearchInputRef.current?.focus()}
+        className="absolute inset-y-0 right-0 grid place-items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        style={{ width: px(36, scale, 30) }}
+      >
+        {libraryQuery
+          ? <X aria-hidden="true" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+          : <Search aria-hidden="true" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />}
+      </button>
+    </div>
+  );
   return (
     <div
       className={isBrowserApp ? 'flex h-full min-h-0 min-w-0 flex-col' : 'min-h-full flex flex-col'}
@@ -514,14 +708,23 @@ const Library = memo(function Library({ active = true }) {
       } : undefined}
     >
       <div
-        className="library-toolbar -mt-2 max-md:-mt-3 flex shrink-0 min-w-0 flex-nowrap items-center border-b border-border/70 bg-sidebar mb-3"
+        className="library-toolbar -mt-2 max-md:-mt-3 flex min-w-0 shrink-0 flex-col border-b border-border/70 bg-sidebar"
         style={{
-          gap: `${Math.max(16, Math.round(24 * scale))}px`,
           marginBottom: isBrowserApp ? 0 : `${Math.max(8, Math.round(12 * scale))}px`,
-          height: px(38, scale, 34),
           marginTop: isBrowserApp ? 'calc(-1 * var(--web-page-padding, 0px))' : undefined,
           marginLeft: isBrowserApp ? `-${px(16, scale, 12)}` : undefined,
-          marginRight: isBrowserApp ? `-${px(16, scale, 12)}` : undefined,
+          marginRight: isBrowserApp ? `-${px(16, scale, 12)}` : undefined
+        }}
+      >
+      <div
+        className="library-toolbar-row flex shrink-0 min-w-0 flex-nowrap items-center"
+        style={{
+          gap: `${Math.max(16, Math.round(24 * scale))}px`,
+          height: `calc(${px(38, scale, 34)} - 1px)`,
+          minHeight: `calc(${px(38, scale, 34)} - 1px)`,
+          maxHeight: `calc(${px(38, scale, 34)} - 1px)`,
+          boxSizing: 'border-box',
+          overflow: 'hidden',
           paddingLeft: px(16, scale, 12),
           paddingRight: px(16, scale, 12)
         }}
@@ -530,7 +733,7 @@ const Library = memo(function Library({ active = true }) {
           ref={categoryTabsRef}
           aria-label="Categorías de Biblioteca"
           className="flex min-w-0 flex-1 items-center overflow-x-auto overscroll-x-contain whitespace-nowrap no-scrollbar"
-          style={{ height: px(38, scale, 34) }}
+          style={{ height: `calc(${px(38, scale, 34)} - 1px)`, minWidth: px(96, scale, 76) }}
         >
           <div
             data-catalog-subroutes
@@ -546,7 +749,7 @@ const Library = memo(function Library({ active = true }) {
                   aria-current={active ? 'page' : undefined}
                   aria-label={c.name}
                   title={c.name}
-                  onClick={() => {
+                  onClick={(event) => {
                     if (active) {
                       const main = libraryScroller();
                       if (main?.scrollTop > 1) {
@@ -554,6 +757,7 @@ const Library = memo(function Library({ active = true }) {
                         main.scrollTo({ top: 0, behavior: 'smooth' });
                         return;
                       }
+                      revealCategoryTab(event.currentTarget);
                       return;
                     }
                     selectCategory(c.id);
@@ -570,55 +774,40 @@ const Library = memo(function Library({ active = true }) {
           </div>
         </nav>
         <div ref={libraryActionsRef} className="ml-auto flex min-w-0 shrink items-center" style={{ gap: px(8, scale, 6) }}>
-          <div
-            className="catalog-search flex min-w-0 flex-1 items-center self-center"
-            style={{
-              flexBasis: px(280, scale, 240),
-              minWidth: 0,
-              height: px(32, scale, 28),
-              gap: px(12, scale, 9)
-            }}
-          >
-            <div className="relative min-w-0 flex-1">
-              <Input
-                ref={librarySearchInputRef}
-                className="bg-card border-border/70"
-                placeholder={`Buscar en ${truncateCategoryName(categoryName, 15)}`}
-                aria-label={`Buscar en ${categoryName}`}
-                value={libraryQuery}
-                onChange={(event) => {
-                  setLibraryQuery(event.target.value);
-                  const main = libraryScroller();
-                  if (main?.scrollTop > 0) {
-                    libraryScroll.set(sel, 0);
-                    main.scrollTop = 0;
-                  }
-                }}
-                enterKeyHint="search"
-                style={{
-                  height: px(32, scale, 28),
-                  fontSize: fontPx(14, scale),
-                  paddingLeft: px(12, scale, 9),
-                  paddingRight: px(40, scale, 34)
-                }}
-              />
-              <button
+          {compactLibrarySearch ? (
+            <div className="relative z-30 flex shrink-0 items-center">
+              <Button
                 type="button"
-                aria-label={libraryQuery ? 'Limpiar búsqueda' : `Buscar en ${categoryName}`}
-                onClick={() => libraryQuery ? setLibraryQuery('') : librarySearchInputRef.current?.focus()}
-                className="absolute inset-y-0 right-0 grid place-items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                style={{ width: px(36, scale, 30) }}
+                size="sm"
+                variant="secondary"
+                aria-label={librarySearchOpen ? 'Cerrar búsqueda' : `Abrir búsqueda en ${categoryName}`}
+                aria-expanded={librarySearchOpen}
+                aria-controls="library-search-row"
+                onClick={toggleLibrarySearch}
+                className="library-search-trigger rounded-none"
+                style={{ ...toolbarButtonStyle(scale), width: px(32, scale, 26), paddingLeft: 0, paddingRight: 0 }}
               >
-                {libraryQuery
-                  ? <X aria-hidden="true" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
-                  : <Search aria-hidden="true" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />}
-              </button>
+                <Search aria-hidden="true" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
+              </Button>
             </div>
-          </div>
+          ) : (
+            <div
+              className="catalog-search flex min-w-0 flex-1 items-center self-center"
+              style={{
+                flexBasis: px(280, scale, 240),
+                minWidth: px(140, scale, 120),
+                height: px(32, scale, 28),
+                gap: px(12, scale, 9)
+              }}
+            >
+              {librarySearchField}
+            </div>
+          )}
           <Button
             size="sm"
             variant="secondary"
             title="Ordenar"
+            data-library-sort
             className="library-sort-trigger shrink-0 rounded-none disabled:opacity-100"
             onClick={() => {
               const order = ['title-asc', 'title-desc', 'unread-desc', 'recent'];
@@ -640,6 +829,7 @@ const Library = memo(function Library({ active = true }) {
             disabled={!favs.length || checking || checkCooldown > 0}
             aria-busy={checking}
             aria-label={checking ? 'Buscando actualizaciones' : 'Buscar actualizaciones'}
+            data-library-updates
             onClick={runCheck}
             title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
             className={cn('library-updates-trigger extensions-refresh-button shrink-0 rounded-none', compactLibraryUpdates && 'is-compact')}
@@ -669,6 +859,26 @@ const Library = memo(function Library({ active = true }) {
           </Button>
         </div>
       </div>
+      <AnimatePresence initial={false}>
+        {compactLibrarySearch && librarySearchOpen && (
+          <motion.div
+            id="library-search-row"
+            initial={{ height: 0, opacity: 0, transform: 'translateY(-4px)' }}
+            animate={{ height: 'auto', opacity: 1, transform: 'translateY(0px)' }}
+            exit={{ height: 0, opacity: 0, transform: 'translateY(-4px)' }}
+            transition={reduceMotion ? { duration: 0 } : { duration: 0.18, ease: [0.23, 1, 0.32, 1] }}
+            className="min-w-0 shrink-0 overflow-hidden"
+            style={{ containerType: 'inline-size' }}
+          >
+            <div className="flex min-w-0 items-center justify-center bg-sidebar" style={{ padding: `0 ${px(16, scale, 12)} ${px(3, scale, 3)}` }}>
+              <div className="catalog-search flex min-w-0 items-center" style={{ width: '100%', height: px(32, scale, 28) }}>
+                {librarySearchField}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      </div>
 
       <div
         className={isBrowserApp ? 'page-content-scroll library-page-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain' : ''}
@@ -679,18 +889,19 @@ const Library = memo(function Library({ active = true }) {
           paddingBottom: px(12, scale, 10)
         } : undefined}
       >
+      <section hidden={searched.length !== 0} aria-hidden={searched.length !== 0}>
+        <EmptyState
+          face="(っ-;)"
+          tone="sad"
+          title={libraryQuery.trim() ? 'No hay mangas que coincidan con la búsqueda' : favs.some((f) => (f.cats || []).includes(sel)) ? 'No hay mangas visibles con este filtro' : 'Tu biblioteca está vacía'}
+        />
+      </section>
       {visitedCategories.map((category) => {
         const selected = category.id === sel;
         const categoryItems = category.items;
         return (
           <section key={category.id} hidden={!selected} aria-hidden={!selected}>
-            {categoryItems.length === 0 ? (
-              <EmptyState
-                face="(っ-;)"
-                tone="sad"
-                title={libraryQuery.trim() ? 'No hay mangas que coincidan con la búsqueda' : favs.some((f) => (f.cats || []).includes(category.id)) ? 'No hay mangas visibles con este filtro' : 'Tu biblioteca está vacía'}
-              />
-            ) : view === 'grid' ? (
+            {categoryItems.length > 0 && (view === 'grid' ? (
               <VirtualMangaGrid
                 items={categoryItems}
                 coverSize={displayCoverSize}
@@ -790,7 +1001,7 @@ const Library = memo(function Library({ active = true }) {
                   );
                 })}
               </div>
-            )}
+            ))}
           </section>
         );
       })}

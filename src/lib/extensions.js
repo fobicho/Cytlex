@@ -11,6 +11,7 @@ const REPO_INDEX_CACHE_KEY = 'cytlex:repo-index-cache:v1';
 const REPO_INDEX_FRESH_MS = 24 * 60 * 60 * 1000;
 const ADULT_CONTENT_WARNINGS = ['MIXED', 'NSFW'];
 export const SOURCE_CONFIG_CHANGE_EVENT = 'cytlex:source-config-changed';
+export const EXTENSION_INSTALLED_EVENT = 'cytlex:extension-installed';
 export const isRetiredExtension = (id) => id === 'plottwistnofansub' || id === 'yupmanga';
 export const isUnavailableMangaSource = (id) => isRetiredExtension(id) || isUnresolvedMihonSource(id);
 const NON_INSTALLABLE_EXTENSION_IDS = new Set(defaultExtensionIndex.filter((manifest) => manifest.installable === false).map((manifest) => manifest.id));
@@ -543,7 +544,7 @@ export const extensions = {
     return repo.filter((m) => m && m.id && !installedIds.has(m.id));
   },
 
-  async install(manifest, indexUrl) {
+  async install(manifest, indexUrl, { backfillLibrary = true } = {}) {
     if (isRetiredExtension(manifest.id)) throw new Error('Esta extensión fue retirada.');
     if (!isExtensionInstallable(manifest)) throw new Error('Esta extensión está desactivada temporalmente.');
     let code = null;
@@ -560,6 +561,11 @@ export const extensions = {
     clearModule(manifest.id);
     for (const sid of [manifest.id, ...(subSources(manifest)?.map((s) => s.id) || [])]) {
       chapterIndex.dropSource(sid);
+    }
+    if (backfillLibrary) {
+      window.dispatchEvent(new CustomEvent(EXTENSION_INSTALLED_EVENT, {
+        detail: { sourceIds: [manifest.id, ...(subSources(manifest)?.map((source) => source.id) || [])] }
+      }));
     }
   },
 

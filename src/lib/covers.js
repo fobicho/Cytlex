@@ -9,6 +9,7 @@ const SEARCH_COVER_BATCH_SIZE = 40;
 const MAX_LIBRARY_COVERS = 240;
 const MAX_LIBRARY_COVER_LOADS = 4;
 const PROXY_COVER_BATCH_SIZE = 40;
+const PROXY_COVER_RETRY_BATCH_SIZE = 8;
 const LIBRARY_COVER_DB = 'cytlex-library-covers';
 const LIBRARY_COVER_STORE = 'covers';
 const MAX_PERSISTED_LIBRARY_COVERS = 500;
@@ -29,6 +30,18 @@ let libraryCoverDbPromise;
 let searchCoverGeneration = 0;
 let activeSearchCoverLoads = 0;
 let activeLibraryCoverLoads = 0;
+
+function libraryCoverBatchUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== 'uploads.mangadex.org' || !parsed.pathname.includes('/covers/')) return url;
+    if (/\.(?:256|512)\.(?:jpe?g|png|webp)$/i.test(parsed.pathname)) return url;
+    parsed.pathname += '.256.jpg';
+    return parsed.href;
+  } catch {
+    return url;
+  }
+}
 
 export function requiresImageProxy(url) {
   try {
@@ -365,6 +378,23 @@ export function preloadLibraryCoversBatch(urls, { web = false, persist = false, 
     if (libraryCoverCache.get(entry.url) === entry.promise) libraryCoverCache.delete(entry.url);
     entry.resolve(await preloadLibraryCover(entry.url, { web: true, persist: entry.persist }));
   };
+  const fetchBatch = async (batch, retryBatchOverflow = true) => {
+    const overflow = [];
+    await fetchImageBlobBatch(batch.map(({ url }) => ({ url: libraryCoverBatchUrl(url) })), undefined, async ({ blob, error }, index) => {
+      const entry = batch[index];
+      if (error || !blob) {
+        if (retryBatchOverflow && ['batch-response-too-large', 'subrequest-limit'].includes(error?.reason)) overflow.push(entry);
+        else await fallback(entry);
+        return;
+      }
+      const cover = await storeLibraryCoverBlob(entry.url, blob, entry.version, entry.promise, entry.persist);
+      if (cover) entry.resolve(cover);
+      else await fallback(entry);
+    });
+    for (let offset = 0; offset < overflow.length; offset += PROXY_COVER_RETRY_BATCH_SIZE) {
+      await fetchBatch(overflow.slice(offset, offset + PROXY_COVER_RETRY_BATCH_SIZE), false);
+    }
+  };
 
   void (async () => {
     try {
@@ -375,16 +405,17 @@ export function preloadLibraryCoversBatch(urls, { web = false, persist = false, 
         else if (libraryCoverCache.get(entry.url) === entry.promise) missing.push(entry);
       }));
 
+      const batches = [];
       for (let offset = 0; offset < missing.length; offset += PROXY_COVER_BATCH_SIZE) {
-        const batch = missing.slice(offset, offset + PROXY_COVER_BATCH_SIZE);
-        await fetchImageBlobBatch(batch.map(({ url }) => ({ url })), undefined, async ({ blob, error }, index) => {
-          const entry = batch[index];
-          if (error || !blob) { await fallback(entry); return; }
-          const cover = await storeLibraryCoverBlob(entry.url, blob, entry.version, entry.promise, entry.persist);
-          if (cover) entry.resolve(cover);
-          else await fallback(entry);
-        });
+        batches.push(missing.slice(offset, offset + PROXY_COVER_BATCH_SIZE));
       }
+      let nextBatch = 0;
+      await Promise.all(Array.from({ length: Math.min(2, batches.length) }, async () => {
+        while (nextBatch < batches.length) {
+          const batch = batches[nextBatch++];
+          await fetchBatch(batch);
+        }
+      }));
     } catch {
       await Promise.all(entries.map((entry) => fallback(entry)));
     }

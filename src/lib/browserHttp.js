@@ -281,7 +281,10 @@ function flushProxyGetQueue() {
   httpGetBatchTimer = null;
   const entries = httpGetBatchQueue.splice(0, HTTP_GET_BATCH_MAX);
   void runProxyBatch(entries);
-  if (httpGetBatchQueue.length) httpGetBatchTimer = setTimeout(flushProxyGetQueue, httpGetBatchWindowMs);
+  if (httpGetBatchQueue.length) {
+    const delay = httpGetBatchQueue.length >= HTTP_GET_BATCH_MAX ? 0 : httpGetBatchWindowMs;
+    httpGetBatchTimer = setTimeout(flushProxyGetQueue, delay);
+  }
 }
 
 function queueProxyGet(entry) {

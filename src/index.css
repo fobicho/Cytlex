@@ -927,7 +927,7 @@ img.manga-cover-corners {
 }
 
 .category-count {
-  border-radius: 6px !important;
+  border-radius: 0 !important;
 }
 
 .browser-mobile-nav {
@@ -1125,6 +1125,30 @@ img.manga-cover-corners {
   animation: cx-update-pulse 1.8s ease-in-out infinite;
 }
 
+.cx-subroute-update-pulse::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 2px;
+  background: hsl(var(--primary));
+  transform-origin: center;
+  animation: cx-subroute-update-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes cx-subroute-update-pulse {
+  0%, 100% { opacity: 0.55; transform: scaleX(0.62); }
+  50% { opacity: 1; transform: scaleX(1); }
+}
+
+.cx-subroute-update-pulse-closing::after {
+  animation: cx-subroute-update-exit 180ms ease-out forwards;
+}
+
+@keyframes cx-subroute-update-exit {
+  to { opacity: 0; transform: scaleX(0.62); }
+}
+
 .cx-chapter-pulse {
   animation: cx-update-pulse 1.2s ease-in-out 1;
 }
@@ -1294,6 +1318,16 @@ img.manga-cover-corners {
   .cx-chapter-pulse {
     animation: none;
     border-color: hsl(var(--primary));
+  }
+
+  .cx-subroute-update-pulse::after {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .cx-subroute-update-pulse-closing::after {
+    opacity: 0;
   }
 
   .sidebar-ribbon-track {

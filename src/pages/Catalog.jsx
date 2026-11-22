@@ -23,6 +23,7 @@ import { useScale, px, fontPx } from '../lib/useScale.js';
 import SubrouteTabLabel from '../components/SubrouteTabLabel.jsx';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 import { migrateSavedManga } from '../lib/mangaMigration.js';
+import { attachHorizontalScrollFade } from '../lib/horizontalScrollFade.js';
 
 const TABS = [
   { id: 'mangas', label: 'Mangas' },
@@ -607,6 +608,22 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   useEffect(() => {
     revealCatalogTab(tabsRef.current?.querySelector('[aria-current="page"]'));
   }, [tab, prefersReducedMotion, scale]);
+
+  useLayoutEffect(() => {
+    const nav = tabsRef.current;
+    if (!nav) return undefined;
+    const revealActive = () => revealCatalogTab(nav.querySelector('[aria-current="page"]'), 'auto');
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(revealActive) : null;
+    observer?.observe(nav);
+    window.addEventListener('resize', revealActive);
+    revealActive();
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', revealActive);
+    };
+  }, [tab, scale]);
+
+  useEffect(() => attachHorizontalScrollFade(tabsRef.current), []);
 
   useLayoutEffect(() => {
     const main = catalogScroller();

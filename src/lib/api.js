@@ -43,6 +43,7 @@ const CATALOG_CACHE_MAX = 80;
 
 const detailCache = new Map();
 const detailRequests = new Map();
+const libraryChapterRequests = new Map();
 const detailNotFound = new Map();
 const chapterCache = new Map();
 const chapterRequests = new Map();
@@ -307,7 +308,8 @@ export const api = {
     }
     if (cacheResult) {
       if (isFavorite) {
-        const pinned = await readSourceCache('library-details', key);
+        const pinned = await readSourceCache('library-details', libraryDetailKey(url, sourceId))
+          || await readSourceCache('library-details', key);
         if (pinned?.value?.chapters?.length) {
           storeDetail(key, pinned.value, pinned.at);
           detailCache.get(key).persisted = true;
@@ -389,7 +391,40 @@ export const api = {
     return (await this.refreshDetail(url, sourceId))?.chapters || [];
   },
 
-  persistLibraryDetail(url, sourceId, value) {
+  async detailFromLibraryChapters(url, sourceId, manga) {
+    const key = detailKey(url, sourceId);
+    const cached = freshEntry(key);
+    if (cached?.chapters?.length) return cached;
+    const src = await resolveSource(sourceId, { allowDisabled: true });
+    if (typeof src.libraryChapters !== 'function') return null;
+    let request = libraryChapterRequests.get(key);
+    if (!request) {
+      request = withDetailDeadline((async () => {
+        const chapters = await src.libraryChapters(mangaSourceUrl(url, sourceId));
+        const author = manga?.author || manga?.artist || '';
+        const status = typeof manga?.status === 'string' ? manga.status : '';
+        const detail = {
+          title: manga?.title || '',
+          cover: manga?.cover || '',
+          altTitles: '',
+          genres: Array.isArray(manga?.genres) ? manga.genres : [],
+          facts: { estado: status, status, tipo: manga?.type || 'Manga', autor: author, vistas: '' },
+          sinopsis: manga?.description || '',
+          chapters: Array.isArray(chapters) ? chapters : []
+        };
+        if (detail.chapters.length) storeDetail(key, detail);
+        return detail;
+      })());
+      libraryChapterRequests.set(key, request);
+    }
+    try {
+      return await request;
+    } finally {
+      if (libraryChapterRequests.get(key) === request) libraryChapterRequests.delete(key);
+    }
+  },
+
+  async persistLibraryDetail(url, sourceId, value) {
     if (!lib.isFav(url, sourceId) || !value?.chapters?.length) return;
     return writeSourceCache('library-details', libraryDetailKey(url, sourceId), value, 1000);
   },
