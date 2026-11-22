@@ -33,10 +33,10 @@ export async function checkLibrary({ onProgress } = {}) {
   const found = [];
   let cursor = 0;
   let completed = 0;
-  const restoreBatchWindow = setHttpGetBatchWindow(5000);
+  const restoreBatchWindow = setHttpGetBatchWindow(250);
 
   try {
-    // Give slower sources such as MangaDex time to enqueue their detail requests together.
+    // Keep update checks responsive while still combining requests queued together.
     await Promise.all(Array.from({ length: Math.min(CHECK_BATCH_SIZE, favs.length) }, async () => {
       while (cursor < favs.length) {
         const manga = favs[cursor++];

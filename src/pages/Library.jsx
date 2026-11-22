@@ -130,7 +130,7 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
   pending.sort((a, b) => Number(isMangaDexManga(b)) - Number(isMangaDexManga(a)));
   if (!pending.length) return;
 
-  const restoreBatchWindow = setHttpGetBatchWindow(5000);
+  const restoreBatchWindow = setHttpGetBatchWindow(250);
   try {
     let next = 0;
     const concurrency = Math.min(50, pending.length);

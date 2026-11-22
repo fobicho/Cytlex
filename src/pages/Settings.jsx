@@ -71,7 +71,7 @@ async function cacheImportedLibraryDetails(mangas, onProgress) {
   let failed = 0;
   const allowedMangas = allowedImportedMangas(mangas);
   const maxConcurrent = Math.min(50, allowedMangas.length);
-  const restoreBatchWindow = setHttpGetBatchWindow(5000);
+  const restoreBatchWindow = setHttpGetBatchWindow(250);
   try {
     const restored = new Array(allowedMangas.length);
     let lookupNext = 0;

@@ -292,8 +292,7 @@ function queueProxyGet(entry) {
   if (httpGetBatchQueue.length >= HTTP_GET_BATCH_MAX) {
     clearTimeout(httpGetBatchTimer);
     httpGetBatchTimer = setTimeout(flushProxyGetQueue, 0);
-  } else {
-    clearTimeout(httpGetBatchTimer);
+  } else if (!httpGetBatchTimer) {
     const delay = Math.max(httpGetBatchWindowMs, httpGetBatchQueue.some((item) => item.catalog) ? HTTP_CATALOG_BATCH_WINDOW_MS : 0);
     httpGetBatchTimer = setTimeout(flushProxyGetQueue, delay);
   }

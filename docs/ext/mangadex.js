@@ -6,13 +6,8 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
   const chapterPageSize = 500;
   const ratings = ['safe', 'suggestive', 'erotica', 'pornographic'];
   const types = { ja: 'Manga', ko: 'Manhwa', zh: 'Manhua', 'zh-hk': 'Manhua' };
-  const requestInterval = 500;
-  let requestQueue = Promise.resolve();
-  let activeRequests = 0;
   let blockedUntil = 0;
-  let lastRequestAt = 0;
   let genreOptionsRequest = null;
-  const requestWaiters = [];
   const mangaMetadata = new Map();
 
   const rememberManga = (item) => {
@@ -22,37 +17,14 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
     if (mangaMetadata.size > 80) mangaMetadata.delete(mangaMetadata.keys().next().value);
   };
 
-  const acquireRequestSlot = async () => {
-    if (activeRequests >= 8) await new Promise((resolve) => requestWaiters.push(resolve));
-    else activeRequests += 1;
-    const slot = requestQueue.then(async () => {
-      const wait = requestInterval - (Date.now() - lastRequestAt);
-      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-      const retryAfter = Math.ceil((blockedUntil - Date.now()) / 1000);
-      if (retryAfter > 0) throw new Error(`HTTP 429 de MangaDex (Retry-After: ${retryAfter})`);
-      lastRequestAt = Date.now();
-    });
-    requestQueue = slot.catch(() => {});
-    try {
-      await slot;
-    } catch (error) {
-      releaseRequestSlot();
-      throw error;
-    }
-  };
-  const releaseRequestSlot = () => {
-    const next = requestWaiters.shift();
-    if (next) next();
-    else activeRequests -= 1;
-  };
-
   const json = (url, requestId) => {
     const request = async () => {
       let data;
       let response = '';
       for (let attempt = 0; attempt < 3; attempt += 1) {
         let retryDelay = 0;
-        await acquireRequestSlot();
+        const blockedSeconds = Math.ceil((blockedUntil - Date.now()) / 1000);
+        if (blockedSeconds > 0) throw new Error(`HTTP 429 de MangaDex (Retry-After: ${blockedSeconds})`);
         try {
           response = await fetchText(url, requestId);
           data = JSON.parse(response);
@@ -78,8 +50,6 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
             throw error;
           }
           retryDelay = 700 * (2 ** attempt) + Math.random() * 300;
-        } finally {
-          releaseRequestSlot();
         }
         if (retryDelay) await new Promise((resolve) => setTimeout(resolve, retryDelay));
       }

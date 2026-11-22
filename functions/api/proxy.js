@@ -45,11 +45,24 @@ const PROXY_IMAGE_BATCH_ITEM_MAX_BYTES = 4 * 1024 * 1024;
 const PROXY_IMAGE_BATCH_TOTAL_MAX_BYTES = 80 * 1024 * 1024;
 const PROXY_IMAGE_BATCH_MAX_SUBREQUESTS = 50;
 const PROXY_IMAGE_BATCH_CONCURRENCY = 6;
+const MANGADEX_REQUEST_INTERVAL_MS = 200;
 const ONF_COOKIE_PAIR = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+=[^;\r\n]{1,2048}$/;
 const PROXY_BATCH_HEADERS = new Set([
   'accept', 'content-type', 'x-requested-with', 'user-agent', 'accept-language',
   'x-cytlex-upstream-origin', 'x-cytlex-upstream-referer'
 ]);
+let mangaDexRequestQueue = Promise.resolve();
+let mangaDexLastRequestAt = 0;
+
+function waitForMangaDexRequestSlot() {
+  const slot = mangaDexRequestQueue.then(async () => {
+    const wait = MANGADEX_REQUEST_INTERVAL_MS - (Date.now() - mangaDexLastRequestAt);
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    mangaDexLastRequestAt = Date.now();
+  });
+  mangaDexRequestQueue = slot.catch(() => {});
+  return slot;
+}
 
 function limitResponseBody(body, maxBytes, onFinish, abortUpstream) {
   const reader = body.getReader();
@@ -349,6 +362,8 @@ async function fetchTarget(initialTarget, method, headers, body, signal, options
         && target.hostname === 'www.leercapitulo.co' && target.pathname.startsWith('/manga/');
       const attemptSignal = firstMangaRequest ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : signal;
       try {
+        if (mangaDexApi) await waitForMangaDexRequestSlot();
+        signal.throwIfAborted();
         response = await fetch(target, {
           method: currentMethod,
           headers: currentHeaders,
