@@ -51,7 +51,7 @@
     "id": "zonatmo",
     "name": "ZonaTMO",
     "lang": "es",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "type": "module",
     "contentWarning": "MIXED",
     "main": "ext/zonatmo.js",

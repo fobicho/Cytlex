@@ -481,7 +481,7 @@ export async function fetchSearchCoverBlobBatch(entries, signal, onResult) {
   const catalogImages = [];
   const remoteImages = [];
   entries.forEach((entry, index) => {
-    const catalogImage = mangaDexCatalogImages.get(entry.url);
+    const catalogImage = mangaDexCatalogImages.get(catalogImageKey(entry.url));
     if (catalogImage) catalogImages.push({ promise: catalogImage, index });
     else remoteImages.push({ ...entry, index });
   });
@@ -508,7 +508,7 @@ async function fetchCombinedChapter(url, signal, chapterType, referer = url) {
   if (chapterType === 'onf' && onfCookieJar) headers.set('x-cytlex-onf-cookie', onfCookieJar);
   const response = await fetch(endpoint, { signal, headers, credentials: 'omit' });
   if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('application/vnd.cytlex.chapter-stream')) {
-    const sourceName = { onf: 'ONF', inmanga: 'InManga', mangaoni: 'MangaOni' }[chapterType] || chapterType;
+    const sourceName = { onf: 'ONF', inmanga: 'InManga', mangaoni: 'MangaOni', zonatmo: 'ZonaTMO' }[chapterType] || chapterType;
     throw new Error(`No se pudo usar la carga combinada de ${sourceName}.`);
   }
   const reader = response.body.getReader();
@@ -564,6 +564,10 @@ export function fetchAchyChapter(url, signal) {
 
 export function fetchOnfChapter(url, signal) {
   return fetchCombinedChapter(url, signal, 'onf', url);
+}
+
+export function fetchZonaTmoChapter(url, signal) {
+  return fetchCombinedChapter(url, signal, 'zonatmo', 'https://zonatmo.org/');
 }
 
 export function fetchInmangaChapter(url, signal) {
@@ -709,7 +713,7 @@ function scheduleProxyImageRequest(url, signal, referer, onfCookie) {
 }
 
 function requestImage(url, signal, referer = '', onfCookie = '') {
-  const catalogImage = mangaDexCatalogImages.get(url);
+  const catalogImage = mangaDexCatalogImages.get(catalogImageKey(url));
   if (catalogImage) return catalogImage.then((blob) => {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     if (!blob) throw new Error('No se pudo cargar la portada de MangaDex.');
@@ -758,8 +762,9 @@ async function fetchOnfDetailRequest(url, options) {
       const bytes = Uint8Array.from(atob(payload.cover.base64), (character) => character.charCodeAt(0));
       if (bytes.length <= PROXY_IMAGE_ITEM_MAX_BYTES) {
         const promise = Promise.resolve(new Blob([bytes], { type: payload.cover.contentType }));
-        mangaDexCatalogImages.set(payload.cover.url, promise);
-        setTimeout(() => { if (mangaDexCatalogImages.get(payload.cover.url) === promise) mangaDexCatalogImages.delete(payload.cover.url); }, 60000);
+        const key = catalogImageKey(payload.cover.url);
+        mangaDexCatalogImages.set(key, promise);
+        setTimeout(() => { if (mangaDexCatalogImages.get(key) === promise) mangaDexCatalogImages.delete(key); }, 60000);
       }
     } catch {}
   }

@@ -7,7 +7,7 @@ import { isMangaCover, lib, mangaSourceUrl, storedCoverThumbnail } from '../lib/
 import { progress } from '../lib/progress.js';
 import { reconcileMihonProgress } from '../lib/mihonProgress.js';
 import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaSource } from '../lib/extensions.js';
-import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, markLibraryCoverLoaded, persistAvailableLibraryCover, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
+import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, markLibraryCoverLoaded, persistAvailableLibraryCover, preloadLibraryCover } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover, recallMangaPreview, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { reconcileChapterProgress } from '../lib/mangaMigration.js';
@@ -25,7 +25,7 @@ import { Dropdown } from '../components/ui/dropdown.jsx';
 import AniListPanel from '../components/AniListPanel.jsx';
 import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
-import { sourceErrorMessage } from '../lib/browserHttp.js';
+import { browserImageUrl, sourceErrorMessage } from '../lib/browserHttp.js';
 import Catalog from './Catalog.jsx';
 
 const SYNOPSIS_CONTROL_SIZE = 24;
@@ -210,43 +210,24 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const duplicateCoverScale = useResponsiveCoverSize(coverSetting) / 160;
   const adultExtensionDisabled = !isExtensionAllowed(extensions.manifest(sourceId), showAdultExtensions);
   const detailKey = `${sourceId}|${mangaUrl}`;
-  const detailDelayKey = detailKey;
   const preloadedDetail = api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId);
   const [detailState, setDetailState] = useState(() => ({
     key: detailKey,
     data: preloadedDetail
   }));
-  const [detailDelay, setDetailDelay] = useState(() => ({ key: detailDelayKey, elapsed: Boolean(preloadedDetail) }));
-  const detailDelayElapsed = detailDelay.key === detailDelayKey
-    ? detailDelay.elapsed
-    : Boolean(preloadedDetail);
-  const sourceIconKey = `${detailDelayKey}|${sourceManifest?.icon || ''}`;
-  const [sourceIconState, setSourceIconState] = useState({ key: '', ready: false, failed: false });
+  const sourceIconKey = `${detailKey}|${sourceManifest?.icon || ''}`;
+  const [sourceIconState, setSourceIconState] = useState({ key: '', failed: false });
   const preloadedSourceIcon = getSourceIconResult(sourceManifest?.icon);
-  const sourceIconReady = !sourceManifest?.icon
-    || preloadedSourceIcon !== null
-    || (sourceIconState.key === sourceIconKey && sourceIconState.ready);
   const sourceIconFailed = preloadedSourceIcon === false
     || (sourceIconState.key === sourceIconKey && sourceIconState.failed);
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!active || !sourceManifest?.icon) return undefined;
     let cancelled = false;
     preloadSourceIcon(sourceManifest.icon).then((loaded) => {
-      if (!cancelled) setSourceIconState({ key: sourceIconKey, ready: true, failed: !loaded });
+      if (!cancelled) setSourceIconState({ key: sourceIconKey, failed: !loaded });
     });
     return () => { cancelled = true; };
   }, [active, sourceIconKey, sourceManifest?.icon]);
-  useEffect(() => {
-    if (!active || detailDelayElapsed) return undefined;
-    let alive = true;
-    const timer = setTimeout(() => {
-      if (alive) setDetailDelay({ key: detailDelayKey, elapsed: true });
-    }, 500);
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [active, detailDelayKey, detailDelayElapsed]);
   const d = detailState.key === detailKey ? detailState.data : api.peekStaleDetail(mangaUrl, sourceId);
   const [err, setErr] = useState('');
   const [detailRetry, setDetailRetry] = useState(0);
@@ -363,7 +344,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   }, [coverSrc]);
   const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
   const sourceCover = finalCover;
-  const proxyCover = requiresImageProxy(finalCover);
+  const proxyCover = browserImageUrl(finalCover) !== finalCover;
   const libraryCachedCover = getLibraryCover(finalCover);
   const cachedCover = libraryCachedCover || getSearchCover(finalCover);
   const warmCover = getLibraryCover(knownCover) || getSearchCover(knownCover)
@@ -603,7 +584,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   }, [mangaUrl, sourceId, sourceName, migrationSearchMode, detailRetry, adultExtensionDisabled]);
 
   useLayoutEffect(() => {
-    if (!active || !d || !detailDelayElapsed || !sourceIconReady) return undefined;
+    if (!active || !d) return undefined;
     const cover = coverRef.current;
     const syn = synRef.current;
     if (!cover || !syn) return undefined;
@@ -649,7 +630,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       document.fonts?.removeEventListener('loadingdone', update);
       window.removeEventListener('resize', update);
     };
-  }, [active, d, detailDelayElapsed, sourceIconReady, scale, synopsis]);
+  }, [active, d, scale, synopsis]);
 
   const addToLibrary = (manga, catIds) => {
     if (!Array.isArray(catIds) || catIds.length === 0) return;
@@ -727,6 +708,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       coverLocal: '',
       coverCached: ''
     }, existingSourceId);
+    void persistAvailableLibraryCover(manga.cover);
     api.persistLibraryDetail(manga.url, manga.sourceId, d);
     reconcileChapterProgress(previousChapters, d?.chapters || [], existingSourceId, manga.sourceId, manga.url);
     reconcileMihonProgress(manga.url, manga.sourceId, d?.chapters || []);
@@ -1139,7 +1121,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         action={<Button variant="secondary" onClick={() => setDetailRetry((attempt) => attempt + 1)}>Reintentar</Button>}
       />
     );
-  if (!d || !detailDelayElapsed || !sourceIconReady)
+  if (!d)
     return (
       <div className="min-h-full flex flex-col">
         <DetailBackBar onBack={() => navigate(backTo)} scale={scale} />

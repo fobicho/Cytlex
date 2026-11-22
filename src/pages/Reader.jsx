@@ -10,7 +10,7 @@ import { tracking } from '../lib/tracking.js';
 import { chapterOrder, detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
-import { browserImageUrl, fetchAchyChapter, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchMangaLectChapter, fetchMangaOniChapter, fetchOnfChapter, sourceErrorMessage } from '../lib/browserHttp.js';
+import { browserImageUrl, fetchAchyChapter, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchMangaLectChapter, fetchMangaOniChapter, fetchOnfChapter, fetchZonaTmoChapter, sourceErrorMessage } from '../lib/browserHttp.js';
 import { readRecentChapter, writeRecentChapter } from '../lib/recentChapters.js';
 import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
@@ -584,6 +584,9 @@ export default function Reader() {
         }
         if (!r && sourceId === 'onfmangas' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
           try { r = await fetchOnfChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
+        }
+        if (!r && sourceId === 'zonatmo' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
+          try { r = await fetchZonaTmoChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
         }
         if (!r && sourceId === 'inmanga' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
           try { r = await fetchInmangaChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }

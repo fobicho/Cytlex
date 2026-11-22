@@ -1372,6 +1372,75 @@ async function handleOnfChapter(request, target) {
   } finally { clearTimeout(timeout); }
 }
 
+async function handleZonaTmoChapter(request, target) {
+  if (target.hostname !== 'zonatmo.org' || !target.pathname.startsWith('/view_uploads/')) return errorResponse('Invalid ZonaTMO chapter', 400);
+  const deadline = new AbortController();
+  const timeout = setTimeout(() => deadline.abort(), 12000);
+  const signal = AbortSignal.any([request.signal, deadline.signal]);
+  try {
+    const result = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    if (result.proxyError) return result.proxyError;
+    if (!result.upstream.ok) return new Response(null, { status: result.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
+    const html = await new Response(limitResponseBody(result.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
+    const pages = [];
+    for (const tag of html.match(/<img\b[^>]*>/gi) || []) {
+      if (!/\bclass\s*=\s*(["'])[^"']*\breader-image\b[^"']*\1/i.test(tag)) continue;
+      const raw = tag.match(/\b(?:src|data-src)\s*=\s*(["'])(.*?)\1/i)?.[2];
+      if (!raw) continue;
+      try {
+        const page = new URL(decodeHtmlAttribute(raw), target);
+        if (validateTarget(page.href)) pages.push(page.href);
+      } catch {}
+    }
+    const uniquePages = [...new Set(pages)].slice(0, 1000);
+    if (!uniquePages.length) return errorResponse('ZonaTMO chapter has no pages', 422);
+    const select = html.match(/<select\b(?=[^>]*\bid\s*=\s*(["'])chapterSelect\1)[^>]*>([\s\S]*?)<\/select>/i)?.[2] || '';
+    const options = [...select.matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/gi)].map((match) => {
+      const value = match[1].match(/\bvalue\s*=\s*(["'])(.*?)\1/i)?.[2] || '';
+      const title = decodeHtmlAttribute(match[2].replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+      let url = '';
+      try { url = new URL(decodeHtmlAttribute(value), target).href; } catch {}
+      return { url, title };
+    }).filter((option) => option.url && option.title).reverse();
+    const index = options.findIndex((option) => option.url === target.href);
+    const backHref = html.match(/<[^>]*id\s*=\s*(["'])reader-header\1[^>]*>[\s\S]*?<a\b[^>]*href\s*=\s*(["'])(.*?)\2/i)?.[3] || '';
+    let mangaUrl = '';
+    try { mangaUrl = new URL(decodeHtmlAttribute(backHref), target).href; } catch {}
+    const initial = uniquePages.slice(0, PROXY_IMAGE_BATCH_MAX_REQUESTS);
+    const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
+    const byteBudget = createImageByteBudget();
+    let stopped = false, next = 0;
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      async start(controller) {
+        const write = (metadata, bytes = new Uint8Array()) => {
+          const data = encoder.encode(JSON.stringify(metadata));
+          const prefix = new Uint8Array(4); new DataView(prefix.buffer).setUint32(0, data.length);
+          controller.enqueue(prefix); controller.enqueue(data); if (bytes.length) controller.enqueue(bytes);
+        };
+        try {
+          write({ pages: uniquePages, label: options.find((option) => option.url === target.href)?.title || '', options, prev: index >= 0 ? options[index + 1] || null : null, next: index >= 0 ? options[index - 1] || null : null, mangaUrl, imageReferer: 'https://zonatmo.org/' });
+          await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
+            while (!stopped && next < initial.length) {
+              const i = next++;
+              const image = await fetchImageBatchItem({ url: initial[i], referer: 'https://zonatmo.org/' }, request, subrequestBudget, byteBudget);
+              if (stopped) return;
+              const bytes = image.body ? new Uint8Array(await image.body.arrayBuffer()) : new Uint8Array();
+              write({ index: i, length: bytes.length, status: image.status, contentType: image.contentType || '' }, bytes);
+            }
+          }));
+          if (!stopped) controller.close();
+        } catch (error) { if (!stopped) controller.error(error); }
+      },
+      cancel() { stopped = true; }
+    });
+    return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
+  } catch (error) {
+    return errorResponse('ZonaTMO chapter unavailable', deadline.signal.aborted ? 504 : 422, false,
+      deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
+  } finally { clearTimeout(timeout); }
+}
+
 async function handleInmangaChapter(request, target) {
   if (target.origin !== 'https://inmanga.com' || !target.pathname.startsWith('/chapter/chapterIndexControls')) {
     return errorResponse('Invalid InManga chapter', 400);
@@ -1697,6 +1766,10 @@ export async function onRequest(context) {
   if (new URL(request.url).searchParams.get('chapter') === 'onf') {
     if (method !== 'GET') return errorResponse('Method not allowed', 405);
     return handleOnfChapter(request, target);
+  }
+  if (requestUrl.searchParams.get('chapter') === 'zonatmo') {
+    if (method !== 'GET') return errorResponse('Method not allowed', 405);
+    return handleZonaTmoChapter(request, target);
   }
   if (new URL(request.url).searchParams.get('chapter') === 'inmanga') {
     if (method !== 'GET') return errorResponse('Method not allowed', 405);

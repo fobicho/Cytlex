@@ -7,6 +7,7 @@ import { tracking } from '../lib/tracking.js';
 import { extensions } from '../lib/extensions.js';
 import { isMangaCover, lib, mangaSourceUrl, storedCoverThumbnail } from '../lib/library.js';
 import { discardLibraryCover, getLibraryCover, preloadLibraryCover, preloadSearchCover, requiresImageProxy, restoreLibraryCover } from '../lib/covers.js';
+import { browserImageUrl } from '../lib/browserHttp.js';
 import { rememberMangaPreview, sourceCatalogState } from '../lib/searchState.js';
 import { SourceBadge, preloadSourceIcon } from './SourceBadge.jsx';
 import { useLibraryCover } from '../lib/useLibraryCover.js';
@@ -51,15 +52,16 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
   const aniLocal = anilistCoverOn ? (t?.coverLocal || '') : '';
   const aniCover = anilistCoverOn ? (t?.cover || '') : '';
   const preferredCover = unavailable ? unavailableCachedCover || remoteCover : aniLocal || aniCover || cachedCover || remoteCover;
-  const libraryCover = from === 'biblioteca' || useLibraryCoverCache;
+  const hasElectronImageProxy = typeof window !== 'undefined' && !!window.cytlex?.fetchImage;
+  const proxyCover = hasElectronImageProxy
+    ? requiresImageProxy(preferredCover)
+    : browserImageUrl(preferredCover) !== preferredCover;
+  const libraryCover = from === 'biblioteca' || useLibraryCoverCache || proxyCover;
   const libraryImage = useLibraryCover(unavailable ? remoteCover : preferredCover, {
     enabled: libraryCover,
     cachedOnly: unavailable,
     cachedCover: unavailable ? unavailableCachedCover : ''
   });
-  const hasElectronImageProxy = typeof window !== 'undefined' && !!window.cytlex?.fetchImage;
-  const isMangaDexCover = /^https:\/\/uploads\.mangadex\.org\//i.test(preferredCover);
-  const proxyCover = requiresImageProxy(preferredCover) && (hasElectronImageProxy || isMangaDexCover);
   const coverRef = useRef(null);
   const coverImageRef = useRef(null);
   const [coverState, setCoverState] = useState(() => {

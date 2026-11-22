@@ -292,7 +292,20 @@ export const api = {
     return catalogFiltersFor(sourceId, src);
   },
 
-  async detail(url, sourceId, { cacheResult = true, persistResult = cacheResult, allowDisabled = false } = {}) {
+  detail(url, sourceId, options = {}) {
+    const key = detailKey(url, sourceId);
+    const pending = detailRequests.get(key);
+    if (pending) return pending;
+    const request = Promise.resolve()
+      .then(() => this.loadDetail(url, sourceId, options))
+      .finally(() => {
+        if (detailRequests.get(key) === request) detailRequests.delete(key);
+      });
+    detailRequests.set(key, request);
+    return request;
+  },
+
+  async loadDetail(url, sourceId, { cacheResult = true, persistResult = cacheResult, allowDisabled = false } = {}) {
     if (!sourceId || !extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
     if (!allowDisabled) assertSourceEnabled(sourceId);
     const key = detailKey(url, sourceId);
@@ -327,16 +340,11 @@ export const api = {
     const failed = detailNotFound.get(key);
     if (failed && Date.now() - failed.at < DETAIL_NOT_FOUND_TTL_MS) throw failed.error;
     if (failed) detailNotFound.delete(key);
-    let request = detailRequests.get(key);
-    if (!request) {
-      request = withDetailDeadline((async () => {
+    try {
+      const result = await withDetailDeadline((async () => {
         const src = await resolveSource(sourceId, { allowDisabled });
         return src.detail(mangaSourceUrl(url, sourceId));
       })());
-      detailRequests.set(key, request);
-    }
-    try {
-      const result = await request;
       if (cacheResult && result?.chapters?.length) {
         if (freshEntry(key) !== result) storeDetail(key, result);
         const entry = detailCache.get(key);
@@ -353,8 +361,6 @@ export const api = {
         while (detailNotFound.size > DETAIL_CACHE_MAX) detailNotFound.delete(detailNotFound.keys().next().value);
       }
       throw error;
-    } finally {
-      if (detailRequests.get(key) === request) detailRequests.delete(key);
     }
   },
 

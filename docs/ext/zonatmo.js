@@ -15,13 +15,15 @@ export default function createSource({ fetchText, parse }) {
     const lazyCandidates = lazySrcset.split(',').map((part) => part.trim().split(/\s+/)[0]).filter(Boolean);
     if (lazyCandidates.length) return lazyCandidates.at(-1);
 
-    const attrs = ['data-src', 'data-lazy-src', 'data-original', 'data-url', 'data-bg', 'src'];
+    const attrs = ['data-src', 'data-lazy-src', 'data-original', 'data-url', 'data-bg', 'src', 'content'];
     for (const attr of attrs) {
       let value = el.getAttribute(attr) || '';
-      if (attr === 'data-bg') value = value.match(/url\(["']?(.*?)["']?\)/i)?.[1] || value;
+      if (attr === 'data-bg') value = value.match(/url\(\s*(["']?)(.*?)\1\s*\)/i)?.[2] || value;
       value = value.trim();
       if (value && !/^(?:data:|blob:|#)/i.test(value) && !/(?:default|placeholder|no-image)\.gif(?:$|[?#])/i.test(value)) return value;
     }
+    const background = el.getAttribute('style')?.match(/background(?:-image)?\s*:[^;]*?url\(\s*(["']?)(.*?)\1\s*\)/i)?.[2]?.trim();
+    if (background && !/^(?:data:|blob:|#)/i.test(background)) return background;
     const srcset = el.getAttribute('data-srcset') || el.getAttribute('srcset') || '';
     const candidates = srcset.split(',').map((part) => part.trim().split(/\s+/)[0]).filter(Boolean);
     return candidates.at(-1) || '';
@@ -162,8 +164,10 @@ export default function createSource({ fetchText, parse }) {
       .filter(Boolean)
       .sort((x, y) => (Number.isNaN(x.num) ? 1 : Number.isNaN(y.num) ? -1 : x.num - y.num));
 
-    const coverElement = doc.querySelector('.book-thumbnail');
-    const coverImage = coverElement?.matches('img') ? coverElement : coverElement?.querySelector('img') || coverElement;
+    const coverElement = doc.querySelector('.book-thumbnail')
+      || doc.querySelector('meta[property="og:image"], meta[name="twitter:image"]')
+      || doc.querySelector('img[alt*="portada" i]');
+    const coverImage = coverElement?.matches('img, meta') ? coverElement : coverElement?.querySelector('img, [style*="background"]') || coverElement;
 
     return {
       title,
