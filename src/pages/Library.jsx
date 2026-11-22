@@ -120,11 +120,11 @@ const sameLibraryFavorites = (left, right) => left.length === right.length && le
     && (manga.cats || []).join('\0') === (next.cats || []).join('\0');
 });
 
-async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, installedSourceIds = null) {
+async function backfillLibraryDetails(favorites, showAdultExtensions, isActive) {
   const pending = favorites.filter((manga) => {
     const resolvedId = sourceIdFor(manga);
     return extensions.isInstalled(resolvedId)
-      && (installedSourceIds?.has(resolvedId) || isExtensionAllowed(extensions.manifest(resolvedId), showAdultExtensions))
+      && isExtensionAllowed(extensions.manifest(resolvedId), showAdultExtensions)
       && isSourceConfigured(extensions.manifest(resolvedId));
   });
   pending.sort((a, b) => Number(isMangaDexManga(b)) - Number(isMangaDexManga(a)));
@@ -164,7 +164,7 @@ function startLibraryDetailBackfill() {
     libraryDetailBackfillPromise = (async () => {
       while (pendingLibraryDetailBackfills.length) {
         const nextJob = pendingLibraryDetailBackfills.shift();
-        await backfillLibraryDetails(nextJob.favorites, nextJob.showAdultExtensions, nextJob.isActive, nextJob.installedSourceIds);
+        await backfillLibraryDetails(nextJob.favorites, nextJob.showAdultExtensions, nextJob.isActive);
       }
     })().finally(() => {
       libraryDetailBackfillPromise = null;
@@ -407,7 +407,7 @@ const Library = memo(function Library({ active = true }) {
       const sourceIds = new Set(event.detail?.sourceIds || []);
       if (!sourceIds.size) return;
       const favorites = lib.favs().filter((manga) => sourceIds.has(sourceIdFor(manga)));
-      if (favorites.length) queueLibraryDetailBackfill(favorites, true, () => true, sourceIds);
+      if (favorites.length) queueLibraryDetailBackfill(favorites, settings.get().showAdultExtensions, () => true, sourceIds);
     };
     window.addEventListener(SOURCE_CONFIG_CHANGE_EVENT, refreshSourceConfig);
     window.addEventListener(EXTENSION_INSTALLED_EVENT, backfillInstalledSources);
