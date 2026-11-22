@@ -444,7 +444,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
   }
 
   async function detail(mangaUrl) {
-    const html = await fetchText(abs(mangaUrl));
+    const html = await fetchText(abs(mangaUrl), undefined, { onfMangaDetail: true });
     const doc = parse(html);
     const coverImg = doc.querySelector('img.manga-poster');
     const desc = doc.querySelector('meta[name="description"]')?.getAttribute('content') || '';

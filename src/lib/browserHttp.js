@@ -7,7 +7,10 @@ const HTTP_CATALOG_BATCH_WINDOW_MS = 500;
 const HTTP_GET_BATCH_MAX = 50;
 const PROXY_IMAGE_BATCH_WINDOW_MS = 30;
 const PROXY_IMAGE_BATCH_MAX = 40;
+const PROXY_IMAGE_ITEM_MAX_BYTES = 8 * 1024 * 1024;
 const PROXY_CHAPTER_IMAGE_BATCH_MAX = 40;
+const ACHY_CATALOG_MAX_IMAGES = 49;
+const ACHY_CATALOG_METADATA_MAX_BYTES = 64 * 1024 * 1024;
 const httpGetCache = new Map();
 const httpGetRequests = new Map();
 const httpGetBatchQueue = [];
@@ -16,6 +19,14 @@ const mangaDexCatalogImages = new Map();
 let httpGetBatchTimer;
 let proxyImageBatchTimer;
 let httpGetBatchWindowMs = HTTP_GET_BATCH_WINDOW_MS;
+const catalogImageKey = (value) => {
+  try {
+    const url = new URL(value);
+    if (url.hostname === 'cdn.achymanga.online') url.searchParams.delete('v');
+    url.hash = '';
+    return url.href;
+  } catch { return value; }
+};
 const batchHeaderNames = new Set([
   'accept', 'content-type', 'x-requested-with', 'user-agent', 'accept-language',
   'x-cytlex-upstream-origin', 'x-cytlex-upstream-referer'
@@ -246,7 +257,7 @@ async function runProxyBatch(entries) {
         image.done = true;
         try {
           const bytes = Uint8Array.from(atob(message.body || ''), (character) => character.charCodeAt(0));
-          image.resolve(message.status === 200 && bytes.length <= 4 * 1024 * 1024
+          image.resolve(message.status === 200 && bytes.length <= PROXY_IMAGE_ITEM_MAX_BYTES
             ? new Blob([bytes], { type: message.contentType || '' }) : null);
         } catch { image.resolve(null); }
         return;
@@ -445,7 +456,7 @@ export async function fetchImageBlobBatch(entries, signal, onResult) {
     const metadata = JSON.parse(new TextDecoder().decode(await readBytes(metadataLength)));
     const { index, length } = metadata;
     if (!Number.isInteger(index) || index < 0 || index >= entries.length || seen.has(index)
-      || !Number.isInteger(length) || length < 0 || length > 4 * 1024 * 1024) throw new Error('Respuesta de imagen no válida.');
+      || !Number.isInteger(length) || length < 0 || length > PROXY_IMAGE_ITEM_MAX_BYTES) throw new Error('Respuesta de imagen no válida.');
     seen.add(index);
     const bytes = await readBytes(length);
     const entry = entries[index];
@@ -528,7 +539,7 @@ async function fetchCombinedChapter(url, signal, chapterType, referer = url) {
       for (let i = 0; i < entries.length; i++) {
         const item = await metadata();
         if (!Number.isInteger(item.index) || !entries[item.index] || entries[item.index].done
-          || !Number.isInteger(item.length) || item.length < 0 || item.length > 4 * 1024 * 1024) throw new Error('Panel no válido.');
+          || !Number.isInteger(item.length) || item.length < 0 || item.length > PROXY_IMAGE_ITEM_MAX_BYTES) throw new Error('Panel no válido.');
         const bytes = await read(item.length);
         const entry = entries[item.index]; entry.done = true;
         entry.resolve(item.status === 200 && item.length ? new Blob([bytes], { type: item.contentType }) : null);
@@ -609,7 +620,7 @@ export async function fetchMangaLectChapter(url, signal) {
       for (let i = 0; i < entries.length; i++) {
         const item = await metadata();
         if (!Number.isInteger(item.index) || !entries[item.index] || entries[item.index].done
-          || !Number.isInteger(item.length) || item.length < 0 || item.length > 4 * 1024 * 1024) throw new Error('Panel de MangaLect no válido.');
+          || !Number.isInteger(item.length) || item.length < 0 || item.length > PROXY_IMAGE_ITEM_MAX_BYTES) throw new Error('Panel de MangaLect no válido.');
         const bytes = await read(item.length);
         const entry = entries[item.index];
         entry.done = true;
@@ -707,6 +718,10 @@ function requestImage(url, signal, referer = '', onfCookie = '') {
   return scheduleProxyImageRequest(url, signal, referer, onfCookie);
 }
 
+export function getCatalogImageBlob(url) {
+  return mangaDexCatalogImages.get(catalogImageKey(url)) || null;
+}
+
 async function fetchMangaDexCatalogRequest(url, options) {
   const endpoint = new URL(proxyUrl(url), window.location.href);
   endpoint.searchParams.set('catalog', 'mangadex');
@@ -726,6 +741,42 @@ async function fetchAchyCatalogRequest(url, options) {
 async function fetchOlympusDetailRequest(url, options) {
   const endpoint = new URL(proxyUrl(url), window.location.href);
   endpoint.searchParams.set('detail', 'olympus');
+  const response = await fetch(endpoint.href, proxyRequestOptions(url, { credentials: 'omit', ...options }));
+  assertProxyResponse(response, new URL(url), url, true, false);
+  return response.text();
+}
+
+async function fetchOnfDetailRequest(url, options) {
+  const endpoint = new URL(proxyUrl(url), window.location.href);
+  endpoint.searchParams.set('detail', 'onf');
+  const response = await fetch(endpoint.href, proxyRequestOptions(url, { credentials: 'omit', ...options }));
+  assertProxyResponse(response, new URL(url), url, true, false);
+  const payload = await response.json();
+  if (typeof payload.html !== 'string') throw new Error('Respuesta de detalle de ONF no válida.');
+  if (payload.cover?.url && payload.cover?.base64 && payload.cover?.contentType) {
+    try {
+      const bytes = Uint8Array.from(atob(payload.cover.base64), (character) => character.charCodeAt(0));
+      if (bytes.length <= PROXY_IMAGE_ITEM_MAX_BYTES) {
+        const promise = Promise.resolve(new Blob([bytes], { type: payload.cover.contentType }));
+        mangaDexCatalogImages.set(payload.cover.url, promise);
+        setTimeout(() => { if (mangaDexCatalogImages.get(payload.cover.url) === promise) mangaDexCatalogImages.delete(payload.cover.url); }, 60000);
+      }
+    } catch {}
+  }
+  return payload.html;
+}
+
+async function fetchMangaDexFeedRequest(url, options) {
+  const endpoint = new URL(proxyUrl(url), window.location.href);
+  endpoint.searchParams.set('detail', 'mangadex-feed');
+  const response = await fetch(endpoint.href, proxyRequestOptions(url, { credentials: 'omit', ...options }));
+  assertProxyResponse(response, new URL(url), url, true, false);
+  return response.text();
+}
+
+async function fetchMangaDexDetailRequest(url, options) {
+  const endpoint = new URL(proxyUrl(url), window.location.href);
+  endpoint.searchParams.set('detail', 'mangadex-detail');
   const response = await fetch(endpoint.href, proxyRequestOptions(url, { credentials: 'omit', ...options }));
   assertProxyResponse(response, new URL(url), url, true, false);
   return response.text();
@@ -769,7 +820,7 @@ async function parseMangaDexCatalogResponse(response) {
       for (let i = 0; i < entries.length; i++) {
         const result = await metadata();
         if (!Number.isInteger(result.index) || !entries[result.index] || entries[result.index].done
-          || !Number.isInteger(result.length) || result.length < 0 || result.length > 4 * 1024 * 1024) throw new Error('Portada no válida.');
+          || !Number.isInteger(result.length) || result.length < 0 || result.length > PROXY_IMAGE_ITEM_MAX_BYTES) throw new Error('Portada no válida.');
         const bytes = await read(result.length);
         const entry = entries[result.index]; entry.done = true;
         entry.resolve(result.status === 200 && result.length ? new Blob([bytes], { type: result.contentType }) : null);
@@ -800,15 +851,15 @@ async function parseAchyCatalogResponse(response) {
   const metadata = async () => {
     const prefix = await read(4);
     const size = new DataView(prefix.buffer).getUint32(0);
-    if (!size || size > 3 * 1024 * 1024) throw new Error('Metadatos de catálogo no válidos.');
+    if (!size || size > ACHY_CATALOG_METADATA_MAX_BYTES) throw new Error('Metadatos de catálogo no válidos.');
     return JSON.parse(new TextDecoder().decode(await read(size)));
   };
   const first = await metadata();
-  if (typeof first.catalog !== 'string' || !Array.isArray(first.images) || first.images.length > 40) throw new Error('Catálogo no válido.');
+  if (typeof first.catalog !== 'string' || !Array.isArray(first.images) || first.images.length > ACHY_CATALOG_MAX_IMAGES) throw new Error('Catálogo no válido.');
   const entries = first.images.map((imageUrl) => {
     let resolve;
     const promise = new Promise((done) => { resolve = done; });
-    mangaDexCatalogImages.set(imageUrl, promise);
+    mangaDexCatalogImages.set(catalogImageKey(imageUrl), promise);
     return { imageUrl, promise, resolve, done: false };
   });
   void (async () => {
@@ -816,7 +867,7 @@ async function parseAchyCatalogResponse(response) {
       for (let i = 0; i < entries.length; i++) {
         const result = await metadata();
         if (!Number.isInteger(result.index) || !entries[result.index] || entries[result.index].done
-          || !Number.isInteger(result.length) || result.length < 0 || result.length > 4 * 1024 * 1024) throw new Error('Portada no válida.');
+          || !Number.isInteger(result.length) || result.length < 0 || result.length > PROXY_IMAGE_ITEM_MAX_BYTES) throw new Error('Portada no válida.');
         const bytes = await read(result.length);
         const entry = entries[result.index]; entry.done = true;
         entry.resolve(result.status === 200 && result.length ? new Blob([bytes], { type: result.contentType }) : null);
@@ -824,7 +875,7 @@ async function parseAchyCatalogResponse(response) {
     } catch {} finally {
       entries.forEach((entry) => {
         if (!entry.done) entry.resolve(null);
-        setTimeout(() => { if (mangaDexCatalogImages.get(entry.imageUrl) === entry.promise) mangaDexCatalogImages.delete(entry.imageUrl); }, 60000);
+        setTimeout(() => { if (mangaDexCatalogImages.get(catalogImageKey(entry.imageUrl)) === entry.promise) mangaDexCatalogImages.delete(catalogImageKey(entry.imageUrl)); }, 60000);
       });
     }
   })();
@@ -926,6 +977,41 @@ export async function httpGet(url, requestId, options = {}) {
   if (bridge?.httpGet) return bridge.httpGet(url, requestId, options);
   const { includeUrl, ...requestOptions } = options;
   const target = new URL(url);
+  if (requestOptions.onfMangaDetail === true && target.origin === 'https://onfmangas.com'
+    && /^\/manga\/\d+\/[^/]+\/?$/.test(target.pathname)) {
+    const detailOptions = { ...requestOptions };
+    delete detailOptions.onfMangaDetail;
+    const key = `onf-detail:${target.href}`;
+    let request = httpGetRequests.get(key);
+    if (!request) {
+      request = fetchOnfDetailRequest(url, detailOptions);
+      httpGetRequests.set(key, request);
+    }
+    try {
+      const text = await request;
+      return includeUrl ? { text, url } : text;
+    } finally {
+      if (httpGetRequests.get(key) === request) httpGetRequests.delete(key);
+    }
+  }
+  if (requestOptions.mangaDexDetail === true && target.origin === 'https://api.mangadex.org'
+    && /^\/manga\/[0-9a-f-]{36}\/feed$/i.test(target.pathname)
+    && target.searchParams.get('limit') === '500') {
+    const detailOptions = { ...requestOptions };
+    delete detailOptions.mangaDexDetail;
+    const key = `mangadex-detail:${target.href}`;
+    let request = httpGetRequests.get(key);
+    if (!request) {
+      request = fetchMangaDexDetailRequest(url, detailOptions);
+      httpGetRequests.set(key, request);
+    }
+    try {
+      const text = await request;
+      return includeUrl ? { text, url } : text;
+    } finally {
+      if (httpGetRequests.get(key) === request) httpGetRequests.delete(key);
+    }
+  }
   if (requestOptions.achyCatalog === true && target.origin === 'https://achymanga.online' && target.pathname === '/catalogo') {
     const catalogOptions = { ...requestOptions };
     delete catalogOptions.achyCatalog;
@@ -950,6 +1036,22 @@ export async function httpGet(url, requestId, options = {}) {
     let request = httpGetRequests.get(key);
     if (!request) {
       request = fetchOlympusDetailRequest(url, detailOptions);
+      httpGetRequests.set(key, request);
+    }
+    try {
+      const text = await request;
+      return includeUrl ? { text, url } : text;
+    } finally {
+      if (httpGetRequests.get(key) === request) httpGetRequests.delete(key);
+    }
+  }
+  if (target.origin === 'https://api.mangadex.org'
+    && /^\/manga\/[0-9a-f-]{36}\/feed$/i.test(target.pathname)
+    && target.searchParams.get('limit') === '500') {
+    const key = `mangadex-feed:${target.href}`;
+    let request = httpGetRequests.get(key);
+    if (!request) {
+      request = fetchMangaDexFeedRequest(url, requestOptions);
       httpGetRequests.set(key, request);
     }
     try {

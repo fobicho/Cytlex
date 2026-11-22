@@ -7,7 +7,7 @@ import { isMangaCover, lib, mangaSourceUrl, storedCoverThumbnail } from '../lib/
 import { progress } from '../lib/progress.js';
 import { reconcileMihonProgress } from '../lib/mihonProgress.js';
 import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaSource } from '../lib/extensions.js';
-import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, markLibraryCoverLoaded, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
+import { getLibraryCover, getSearchCover, hasLibraryCoverLoaded, markLibraryCoverLoaded, persistAvailableLibraryCover, preloadLibraryCover, requiresImageProxy } from '../lib/covers.js';
 import { chapterOrder, detailScroll, recallCover, recallMangaPreview, sourceCatalogState } from '../lib/searchState.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { reconcileChapterProgress } from '../lib/mangaMigration.js';
@@ -364,7 +364,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const finalCover = coverError && knownCover && coverSrc !== knownCover ? knownCover : coverSrc;
   const sourceCover = finalCover;
   const proxyCover = requiresImageProxy(finalCover);
-  const cachedCover = getLibraryCover(finalCover) || getSearchCover(finalCover);
+  const libraryCachedCover = getLibraryCover(finalCover);
+  const cachedCover = libraryCachedCover || getSearchCover(finalCover);
   const warmCover = getLibraryCover(knownCover) || getSearchCover(knownCover)
     || (/^(data:|blob:)/i.test(knownCover) || hasLibraryCoverLoaded(knownCover) ? knownCover : '');
   const visibleCover = [displayedCover, preview?.image, cachedCover, warmCover]
@@ -373,12 +374,13 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     ? cachedCover || (resolvedCover?.key === finalCover ? resolvedCover.src : '')
     : sourceCover;
   useEffect(() => {
-    if (!active || !sourceAvailable || !proxyCover || !finalCover || cachedCover) return undefined;
+    if (sourceId === 'onfmangas' && !d?.cover) return undefined;
+    if (!active || !sourceAvailable || !proxyCover || !finalCover || libraryCachedCover) return undefined;
     let alive = true;
     const loadCover = async () => {
       const candidates = [...new Set([finalCover, knownCover].filter(Boolean))];
       for (const candidate of candidates) {
-        const local = getLibraryCover(candidate) || getSearchCover(candidate) || await preloadLibraryCover(candidate, { web: true, priority: true });
+        const local = getLibraryCover(candidate) || await preloadLibraryCover(candidate, { web: true, priority: true });
         if (!alive) return;
         if (local) {
           setResolvedCover({ key: finalCover, src: local });
@@ -390,7 +392,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     };
     loadCover();
     return () => { alive = false; };
-  }, [active, cachedCover, finalCover, knownCover, proxyCover, sourceAvailable]);
+  }, [active, d?.cover, finalCover, knownCover, libraryCachedCover, proxyCover, sourceAvailable, sourceId]);
   const hasCoverFallback = Boolean(visibleCover && visibleCover !== incomingCover);
   const coverImg = (alt, loadingError = false) => (
     <div
@@ -654,6 +656,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     const chapterUrls = (d?.chapters || []).map((chapter) => chapter.url).filter(Boolean);
     chapterIndex.set(manga.url, manga.sourceId, chapterUrls);
     lib.toggleFav({ ...manga, chapterTotal: chapterUrls.length }, catIds);
+    void persistAvailableLibraryCover(manga.cover);
     api.persistLibraryDetail(manga.url, manga.sourceId, d);
     setFav(true);
   };

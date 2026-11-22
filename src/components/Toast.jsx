@@ -51,7 +51,7 @@ export function ToastProvider({ children }) {
       {children}
       <div
         className="pointer-events-none fixed z-[100] flex flex-col"
-        style={{ top: `calc(${px(56, scale, 48)} + env(safe-area-inset-top, 0px))`, right: `calc(${px(16, scale, 12)} + env(safe-area-inset-right, 0px))`, gap: px(8, scale, 6), width: px(340, scale, 272), maxWidth: `calc(100vw - ${px(32, scale, 24)} - env(safe-area-inset-right, 0px))` }}
+        style={{ top: `calc(${px(48, scale, 40)} + env(safe-area-inset-top, 0px))`, right: `calc(${px(16, scale, 12)} + env(safe-area-inset-right, 0px))`, gap: px(8, scale, 6), width: px(340, scale, 272), maxWidth: `calc(100vw - ${px(32, scale, 24)} - env(safe-area-inset-right, 0px))` }}
       >
         <AnimatePresence initial={false}>
           {items.map((t) => {

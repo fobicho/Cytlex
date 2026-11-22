@@ -8,16 +8,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
   const types = { ja: 'Manga', ko: 'Manhwa', zh: 'Manhua', 'zh-hk': 'Manhua' };
   let blockedUntil = 0;
   let genreOptionsRequest = null;
-  const mangaMetadata = new Map();
-
-  const rememberManga = (item) => {
-    if (!item?.id || !item.attributes?.title || !item.attributes.description) return;
-    mangaMetadata.delete(item.id);
-    mangaMetadata.set(item.id, { item, at: Date.now() });
-    if (mangaMetadata.size > 80) mangaMetadata.delete(mangaMetadata.keys().next().value);
-  };
-
-  const json = (url, requestId) => {
+  const json = (url, requestId, options) => {
     const request = async () => {
       let data;
       let response = '';
@@ -26,7 +17,7 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
         const blockedSeconds = Math.ceil((blockedUntil - Date.now()) / 1000);
         if (blockedSeconds > 0) throw new Error(`HTTP 429 de MangaDex (Retry-After: ${blockedSeconds})`);
         try {
-          response = await fetchText(url, requestId);
+          response = await fetchText(url, requestId, options);
           data = JSON.parse(response);
           break;
         } catch (error) {
@@ -113,7 +104,6 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
 
       return {
         items: (data.data || []).map((item) => {
-          rememberManga(item);
           const attributes = item.attributes || {};
           const authors = (item.relationships || [])
             .filter((rel) => rel.type === 'author' || rel.type === 'artist')
@@ -173,6 +163,37 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
       }));
     }
 
+    function formatChapters(mangaId, chapters) {
+      const entries = (chapters || []).filter((chapter) => !chapter.attributes?.externalUrl).map((chapter) => {
+        const a = chapter.attributes || {};
+        return {
+          a,
+          chapterId: chapter.id,
+          group: relationship(chapter, 'scanlation_group')?.attributes?.name || '',
+          number: a.chapter != null && a.chapter !== '' ? parseFloat(a.chapter) : NaN,
+          publishAt: a.publishAt || ''
+        };
+      });
+      const collator = new Intl.Collator('es', { numeric: true });
+      const locale = (a, b) => collator.compare(String(a), String(b));
+      entries.sort((a, b) => (Number.isNaN(a.number) ? 1 : Number.isNaN(b.number) ? -1 : a.number - b.number)
+        || locale(a.a.chapter, b.a.chapter)
+        || locale(a.publishAt, b.publishAt)
+        || locale(a.a.volume, b.a.volume));
+      return entries.map((e) => {
+        const a = e.a;
+        const number = a.chapter ? `Capítulo ${a.chapter}` : a.volume ? `Volumen ${a.volume}` : '';
+        const label = [number || a.title || 'Capítulo sin título', a.title && number ? a.title : '']
+          .filter(Boolean).join(' · ');
+        return {
+          url: chapterUrl({ id: e.chapterId }, mangaId, label),
+          title: label,
+          group: e.group,
+          date: a.publishAt ? new Date(a.publishAt).toLocaleDateString('es') : ''
+        };
+      });
+    }
+
     async function fetchChapters(mangaId) {
       const loadEntries = async (languages) => {
         const entries = [];
@@ -190,41 +211,13 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
           if (languages?.length) params['translatedLanguage[]'] = languages;
           const page = await json(requestUrl(`/manga/${mangaId}/feed`, params));
           const pageData = Array.isArray(page.data) ? page.data : [];
-          const records = pageData.filter((chapter) => !chapter.attributes?.externalUrl);
           total = Number(page.total) || 0;
-          entries.push(...records.map((chapter) => {
-            const a = chapter.attributes || {};
-            return {
-              a,
-              chapterId: chapter.id,
-              group: relationship(chapter, 'scanlation_group')?.attributes?.name || '',
-              number: a.chapter != null && a.chapter !== '' ? parseFloat(a.chapter) : NaN,
-              publishAt: a.publishAt || ''
-            };
-          }));
+          entries.push(...pageData);
           if (!pageData.length) break;
           offset += pageData.length;
         }
 
-        const collator = new Intl.Collator('es', { numeric: true });
-        const locale = (a, b) => collator.compare(String(a), String(b));
-        entries.sort((a, b) => (Number.isNaN(a.number) ? 1 : Number.isNaN(b.number) ? -1 : a.number - b.number)
-          || locale(a.a.chapter, b.a.chapter)
-          || locale(a.publishAt, b.publishAt)
-          || locale(a.a.volume, b.a.volume));
-
-        return entries.map((e) => {
-          const a = e.a;
-          const number = a.chapter ? `Capítulo ${a.chapter}` : a.volume ? `Volumen ${a.volume}` : '';
-          const label = [number || a.title || 'Capítulo sin título', a.title && number ? a.title : '']
-            .filter(Boolean).join(' · ');
-          return {
-            url: chapterUrl({ id: e.chapterId }, mangaId, label),
-            title: label,
-            group: e.group,
-            date: a.publishAt ? new Date(a.publishAt).toLocaleDateString('es') : ''
-          };
-        });
+        return formatChapters(mangaId, entries);
       };
 
       const languages = getLanguages();
@@ -242,18 +235,20 @@ export default function createSource({ fetchText, id: baseId, config, languageSe
       const id = new URL(url, site).pathname.split('/').filter(Boolean).at(-1);
       if (!id) throw new Error('No se pudo identificar el manga de MangaDex.');
 
-      const cached = mangaMetadata.get(id);
-      const metadata = cached && Date.now() - cached.at < 10 * 60 * 1000
-        ? cached.item
-        : json(requestUrl(`/manga/${id}`, { 'includes[]': ['cover_art', 'author', 'artist'] }))
-          .then(({ data }) => {
-            rememberManga(data);
-            return data;
-          });
-      const [item, chapters] = await Promise.all([
-        metadata,
-        fetchChapters(id)
-      ]);
+      const languages = getLanguages();
+      const params = {
+        limit: chapterPageSize,
+        offset: 0,
+        'contentRating[]': ratings,
+        'includes[]': ['scanlation_group'],
+        'order[volume]': 'asc',
+        'order[chapter]': 'asc'
+      };
+      if (languages.length) params['translatedLanguage[]'] = languages;
+      const combined = await json(requestUrl(`/manga/${id}/feed`, params), undefined, { mangaDexDetail: true });
+      const item = combined.manga;
+      if (!item?.attributes) throw new Error('MangaDex devolvió una ficha no válida.');
+      const chapters = formatChapters(id, combined.chapters);
       const attributes = item?.attributes || {};
 
       const authors = (item?.relationships || [])

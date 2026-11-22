@@ -34,16 +34,18 @@ const ALLOWED_HOSTS = new Set([
 const ALLOWED_SUFFIXES = ['t34798ndc.com', 'mangadex.network', 'ntr-files.online', 'cdnlxd.xyz'];
 const REDIRECT_LIMIT = 5;
 const UPSTREAM_RETRIES = 2;
-const PROXY_RESPONSE_MAX_BYTES = 50 * 1024 * 1024;
+const PROXY_RESPONSE_MAX_BYTES = 64 * 1024 * 1024;
+const PROXY_ACHY_CATALOG_MAX_BYTES = 64 * 1024 * 1024;
 const PROXY_BATCH_MAX_REQUESTS = 50;
-const PROXY_BATCH_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
-const PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
-const PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES = 32 * 1024 * 1024;
+const PROXY_BATCH_RESPONSE_MAX_BYTES = 8 * 1024 * 1024;
+const PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES = 8 * 1024 * 1024;
+const PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES = 64 * 1024 * 1024;
 const PROXY_BATCH_CONCURRENCY = 6;
 const PROXY_IMAGE_BATCH_MAX_REQUESTS = 40;
-const PROXY_IMAGE_BATCH_ITEM_MAX_BYTES = 4 * 1024 * 1024;
-const PROXY_IMAGE_BATCH_TOTAL_MAX_BYTES = 80 * 1024 * 1024;
+const PROXY_IMAGE_BATCH_ITEM_MAX_BYTES = 8 * 1024 * 1024;
+const PROXY_IMAGE_BATCH_TOTAL_MAX_BYTES = 128 * 1024 * 1024;
 const PROXY_IMAGE_BATCH_MAX_SUBREQUESTS = 50;
+const PROXY_ACHY_CATALOG_MAX_IMAGES = PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1;
 const PROXY_IMAGE_BATCH_CONCURRENCY = 6;
 const MANGADEX_REQUEST_INTERVAL_MS = 200;
 const ONF_COOKIE_PAIR = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+=[^;\r\n]{1,2048}$/;
@@ -961,9 +963,57 @@ function achyCatalogImages(html, catalogUrl) {
       const target = new URL(decodeHtmlAttribute(cover), catalogUrl);
       if (target.protocol === 'https:' && target.hostname === 'cdn.achymanga.online') images.add(target.href);
     } catch {}
-    if (images.size >= 40) break;
+    if (images.size >= PROXY_ACHY_CATALOG_MAX_IMAGES) break;
   }
   return [...images];
+}
+
+function onfMangaCover(html, mangaUrl) {
+  for (const tag of html.match(/<img\b[^>]*>/gi) || []) {
+    const className = tag.match(/\bclass\s*=\s*(["'])(.*?)\1/i)?.[2] || '';
+    if (!className.split(/\s+/).includes('manga-poster')) continue;
+    for (const name of ['data-src', 'data-lazy-src', 'data-original', 'data-original-src', 'data-srcset', 'srcset', 'src']) {
+      const raw = tag.match(new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`, 'i'))?.[2]?.trim() || '';
+      const value = ['data-srcset', 'srcset'].includes(name)
+        ? raw.split(',').map((candidate) => candidate.trim().split(/\s+/)[0]).filter(Boolean).at(-1) || ''
+        : raw;
+      if (!value || /^(?:data:|javascript:|about:|#)/i.test(value)) continue;
+      try {
+        const image = new URL(decodeHtmlAttribute(value), mangaUrl);
+        if (image.protocol === 'https:' && image.hostname === 'd33y4i2dmzjqjh.cloudfront.net') return image.href;
+      } catch {}
+    }
+  }
+  return '';
+}
+
+async function handleOnfMangaDetail(request, target) {
+  if (target.origin !== 'https://onfmangas.com' || !/^\/manga\/\d+\/[^/]+\/?$/.test(target.pathname)) {
+    return errorResponse('Invalid ONF manga detail request', 400);
+  }
+  const deadline = new AbortController();
+  const timeout = setTimeout(() => deadline.abort(), 12000);
+  const signal = AbortSignal.any([request.signal, deadline.signal]);
+  try {
+    const result = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    if (result.proxyError) return result.proxyError;
+    if (!result.upstream.ok) return new Response(null, { status: result.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
+    const html = await new Response(limitResponseBody(result.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
+    const coverUrl = onfMangaCover(html, target.href);
+    let cover = null;
+    if (coverUrl) {
+      const subrequestBudget = createImageSubrequestBudget(1, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
+      const imageRequest = new Request(request.url, { method: 'GET', headers: request.headers, signal });
+      const image = await fetchImageBatchItem({ url: coverUrl, referer: 'https://onfmangas.com/' }, imageRequest, subrequestBudget, createImageByteBudget());
+      if (image.status === 200 && image.body?.size <= PROXY_IMAGE_BATCH_ITEM_MAX_BYTES) {
+        cover = { url: coverUrl, contentType: image.contentType || '', base64: bytesToBase64(new Uint8Array(await image.body.arrayBuffer())) };
+      }
+    }
+    return Response.json({ html, cover }, { headers: { 'cache-control': 'no-store', 'x-cytlex-proxy': '1' } });
+  } catch (error) {
+    return errorResponse('ONF manga detail unavailable', deadline.signal.aborted ? 504 : 502, false,
+      deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
+  } finally { clearTimeout(timeout); }
 }
 
 function achyChapterData(html, chapterUrl) {
@@ -1092,8 +1142,8 @@ async function handleAchyCatalog(request, target) {
     if (result.proxyError) return result.proxyError;
     if (!result.upstream.ok) return new Response(result.upstream.body, { status: result.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const length = Number(result.upstream.headers.get('content-length'));
-    if (length > PROXY_BATCH_RESPONSE_MAX_BYTES) return errorResponse('Catalog response too large', 502);
-    const raw = await new Response(limitResponseBody(result.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
+    if (length > PROXY_ACHY_CATALOG_MAX_BYTES) return errorResponse('Catalog response too large', 502);
+    const raw = await new Response(limitResponseBody(result.upstream.body, PROXY_ACHY_CATALOG_MAX_BYTES, () => {}, () => deadline.abort())).text();
     const images = achyCatalogImages(raw, target.href);
     const subrequestBudget = createImageSubrequestBudget(images.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
     const byteBudget = createImageByteBudget();
@@ -1171,6 +1221,84 @@ async function handleOlympusDetail(request, target) {
   } catch (error) {
     if (error?.response) return error.response;
     return errorResponse('Olympus detail unavailable', deadline.signal.aborted ? 504 : 502, false,
+      deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
+  } finally { clearTimeout(timeout); }
+}
+
+async function handleMangaDexFeed(request, target, includeManga = false) {
+  if (target.origin !== 'https://api.mangadex.org'
+    || !/^\/manga\/[0-9a-f-]{36}\/feed$/i.test(target.pathname)
+    || Number(target.searchParams.get('limit')) !== 500) {
+    return errorResponse('Invalid MangaDex feed request', 400);
+  }
+  const deadline = new AbortController();
+  const timeout = setTimeout(() => deadline.abort(), 12000);
+  const signal = AbortSignal.any([request.signal, deadline.signal]);
+  let requestsFetched = 0;
+  const readPage = async (url) => {
+    if (requestsFetched >= PROXY_BATCH_MAX_REQUESTS) throw new Error('MangaDex page limit reached');
+    requestsFetched += 1;
+    const page = validateTarget(url);
+    const result = await fetchTarget(page, 'GET', forwardedHeaders(request, page), undefined, signal, { retries: 0 });
+    if (result.proxyError) throw { response: result.proxyError };
+    if (!result.upstream.ok) throw { response: new Response(result.upstream.body, {
+      status: result.upstream.status,
+      headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' }
+    }) };
+    const raw = await new Response(limitResponseBody(result.upstream.body, PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES,
+      () => {}, () => deadline.abort())).text();
+    return JSON.parse(raw);
+  };
+  try {
+    let manga = null;
+    let mangaBytes = 0;
+    if (includeManga) {
+      const mangaId = target.pathname.match(/^\/manga\/([0-9a-f-]{36})\/feed$/i)?.[1];
+      const mangaUrl = new URL(`/manga/${mangaId}`, target.origin);
+      mangaUrl.searchParams.append('includes[]', 'cover_art');
+      mangaUrl.searchParams.append('includes[]', 'author');
+      mangaUrl.searchParams.append('includes[]', 'artist');
+      manga = await readPage(mangaUrl.href);
+      if (!manga?.data?.attributes) return errorResponse('Invalid MangaDex manga response', 502, false, 'invalid-response');
+      mangaBytes = new TextEncoder().encode(JSON.stringify(manga)).byteLength;
+      if (mangaBytes >= PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES) return errorResponse('MangaDex detail response too large', 502);
+    }
+    const collectFeed = async (feedUrl) => {
+      const first = await readPage(feedUrl);
+      if (!Array.isArray(first?.data)) throw new Error('Invalid MangaDex feed response');
+      const offset = Math.max(0, Number(new URL(feedUrl).searchParams.get('offset')) || 0);
+      const chapters = [...first.data];
+      const total = Math.max(Number(first.total) || 0, chapters.length);
+      let responseBytes = new TextEncoder().encode(JSON.stringify(first)).byteLength;
+      while (offset + chapters.length < total && requestsFetched < PROXY_BATCH_MAX_REQUESTS) {
+        const nextUrl = new URL(feedUrl);
+        nextUrl.searchParams.set('offset', String(offset + chapters.length));
+        const page = await readPage(nextUrl.href);
+        if (!Array.isArray(page?.data) || !page.data.length) break;
+        const pageBytes = new TextEncoder().encode(JSON.stringify(page)).byteLength;
+        if (responseBytes + pageBytes + mangaBytes > PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES) break;
+        chapters.push(...page.data);
+        responseBytes += pageBytes;
+      }
+      return { first, chapters };
+    };
+    let feed = await collectFeed(target.href);
+    if (includeManga && target.searchParams.getAll('translatedLanguage[]').length
+      && !feed.chapters.some((chapter) => !chapter.attributes?.externalUrl)) {
+      const fallbackUrl = new URL(target.href);
+      fallbackUrl.searchParams.delete('translatedLanguage[]');
+      fallbackUrl.searchParams.set('offset', '0');
+      feed = await collectFeed(fallbackUrl.href);
+    }
+    if (includeManga) return Response.json({ result: 'ok', manga: manga.data, chapters: feed.chapters }, {
+      headers: { 'cache-control': 'no-store', 'x-cytlex-proxy': '1' }
+    });
+    return Response.json({ ...feed.first, data: feed.chapters }, {
+      headers: { 'cache-control': 'no-store', 'x-cytlex-proxy': '1' }
+    });
+  } catch (error) {
+    if (error?.response) return error.response;
+    return errorResponse('MangaDex feed unavailable', deadline.signal.aborted ? 504 : 502, false,
       deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
   } finally { clearTimeout(timeout); }
 }
@@ -1546,9 +1674,21 @@ export async function onRequest(context) {
     if (method !== 'GET') return errorResponse('Method not allowed', 405);
     return handleAchyCatalog(request, target);
   }
+  if (requestUrl.searchParams.get('detail') === 'onf') {
+    if (method !== 'GET') return errorResponse('Method not allowed', 405);
+    return handleOnfMangaDetail(request, target);
+  }
   if (requestUrl.searchParams.get('detail') === 'olympus') {
     if (method !== 'GET') return errorResponse('Method not allowed', 405);
     return handleOlympusDetail(request, target);
+  }
+  if (requestUrl.searchParams.get('detail') === 'mangadex-feed') {
+    if (method !== 'GET') return errorResponse('Method not allowed', 405);
+    return handleMangaDexFeed(request, target);
+  }
+  if (requestUrl.searchParams.get('detail') === 'mangadex-detail') {
+    if (method !== 'GET') return errorResponse('Method not allowed', 405);
+    return handleMangaDexFeed(request, target, true);
   }
   if (requestUrl.searchParams.get('chapter') === 'achymanga') {
     if (method !== 'GET') return errorResponse('Method not allowed', 405);

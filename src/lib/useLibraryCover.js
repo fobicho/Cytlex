@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { browserImageUrl } from './browserHttp.js';
-import { discardLibraryCover, getLibraryCover, markLibraryCoverLoaded, preloadLibraryCover, restoreLibraryCover } from './covers.js';
+import { discardLibraryCover, getLibraryCover, getSearchCover, markLibraryCoverLoaded, preloadLibraryCover, restoreLibraryCover } from './covers.js';
 
 export function useLibraryCover(cover, { enabled = true, cachedOnly = false, cachedCover = '' } = {}) {
   const ref = useRef(null);
@@ -19,6 +19,10 @@ export function useLibraryCover(cover, { enabled = true, cachedOnly = false, cac
       const cached = await restoreLibraryCover(cover);
       if (!alive) return;
       let url = cached !== rejected ? cached : '';
+      if (!url) {
+        url = getSearchCover(cover);
+        if (url) url = await preloadLibraryCover(cover, { web: true, persist: true }) || url;
+      }
       if (!url && !cachedOnly && rejected !== cover) {
         const electron = Boolean(window.cytlex?.fetchImage);
         const needsProxy = !electron && browserImageUrl(cover) !== cover;

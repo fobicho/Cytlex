@@ -1,4 +1,4 @@
-import { browserImageUrl, fetchCoverBlob, fetchImage, fetchImageBlobBatch, fetchSearchCoverBlobBatch } from './browserHttp.js';
+import { browserImageUrl, fetchCoverBlob, fetchImage, fetchImageBlobBatch, fetchSearchCoverBlobBatch, getCatalogImageBlob } from './browserHttp.js';
 
 const THUMB_WIDTH = 240;
 const SEARCH_THUMB_WIDTH = 320;
@@ -337,6 +337,14 @@ export function getSearchCover(url) {
   return typeof cached === 'string' ? cached : '';
 }
 
+export async function persistAvailableLibraryCover(url) {
+  if (!url) return false;
+  const cached = libraryCoverCache.get(url) || searchCoverCache.get(url);
+  if (!cached) return false;
+  const cover = typeof cached === 'string' ? cached : await cached;
+  return cover ? persistCachedLibraryCover(url, cover, libraryCoverVersions.get(url) || 0) : false;
+}
+
 export function getLibraryCover(url) {
   const cached = libraryCoverCache.get(url || '');
   if (typeof cached !== 'string') return '';
@@ -379,9 +387,26 @@ export function preloadLibraryCoversBatch(urls, { web = false, persist = false, 
     entry.resolve(await preloadLibraryCover(entry.url, { web: true, persist: entry.persist }));
   };
   const fetchBatch = async (batch, retryBatchOverflow = true) => {
+    const remote = [];
+    await Promise.all(batch.map(async (entry) => {
+      const bundled = getCatalogImageBlob(libraryCoverBatchUrl(entry.url));
+      if (!bundled) {
+        remote.push(entry);
+        return;
+      }
+      const blob = await bundled;
+      if (!blob) {
+        remote.push(entry);
+        return;
+      }
+      const cover = await storeLibraryCoverBlob(entry.url, blob, entry.version, entry.promise, entry.persist);
+      if (cover) entry.resolve(cover);
+      else await fallback(entry);
+    }));
+    if (!remote.length) return;
     const overflow = [];
-    await fetchImageBlobBatch(batch.map(({ url }) => ({ url: libraryCoverBatchUrl(url) })), undefined, async ({ blob, error }, index) => {
-      const entry = batch[index];
+    await fetchImageBlobBatch(remote.map(({ url }) => ({ url: libraryCoverBatchUrl(url) })), undefined, async ({ blob, error }, index) => {
+      const entry = remote[index];
       if (error || !blob) {
         if (retryBatchOverflow && ['batch-response-too-large', 'subrequest-limit'].includes(error?.reason)) overflow.push(entry);
         else await fallback(entry);
@@ -427,6 +452,7 @@ export function preloadLibraryCoversBatch(urls, { web = false, persist = false, 
 export async function preloadLibraryCover(url, { web = false, priority = false, persist = false } = {}) {
   if (!url || typeof window === 'undefined') return '';
   const browserProxy = web && browserImageUrl(url) !== url;
+  const searchCover = browserProxy ? getSearchCover(url) : '';
   if (!browserProxy && !window.cytlex?.fetchImage && !/^(data:|blob:)/i.test(url)) return '';
   const host = browserProxy ? new URL(url).hostname : '';
   const cached = libraryCoverCache.get(url);
@@ -459,28 +485,32 @@ export async function preloadLibraryCover(url, { web = false, priority = false, 
       let original = url;
       if (browserProxy) {
         const now = Date.now();
-        if ((failedLibraryCovers.get(url) || 0) > now || (failedCoverHosts.get(host)?.until || 0) > now) return '';
-        const signal = AbortSignal.timeout(30000);
-        try {
-          const image = await fetchCoverBlob(url, signal);
-          if (!image) throw new Error('Invalid image');
-          failedLibraryCovers.delete(url);
-          originalObjectUrl = URL.createObjectURL(image);
-          original = originalObjectUrl;
-        } catch (error) {
-          failedLibraryCovers.delete(url);
-          failedLibraryCovers.set(url, Date.now() + 60000);
-          if (failedLibraryCovers.size > MAX_LIBRARY_COVERS) failedLibraryCovers.delete(failedLibraryCovers.keys().next().value);
-          const dnsFailure = /\bENOTFOUND\b/.test(error.message);
-          if (dnsFailure || signal.aborted || /\bHTTP (502|503|504)\b/.test(error.message)) {
-            const at = Date.now();
-            const previous = failedCoverHosts.get(host);
-            const count = previous && at - previous.at < 15000 ? previous.count + 1 : 1;
-            failedCoverHosts.delete(host);
-            failedCoverHosts.set(host, { at, count, until: dnsFailure || count >= 2 ? at + 15000 : 0 });
-            if (failedCoverHosts.size > MAX_LIBRARY_COVERS) failedCoverHosts.delete(failedCoverHosts.keys().next().value);
+        if (!searchCover && ((failedLibraryCovers.get(url) || 0) > now || (failedCoverHosts.get(host)?.until || 0) > now)) return '';
+        if (searchCover) {
+          original = searchCover;
+        } else {
+          const signal = AbortSignal.timeout(30000);
+          try {
+            const image = await fetchCoverBlob(url, signal);
+            if (!image) throw new Error('Invalid image');
+            failedLibraryCovers.delete(url);
+            originalObjectUrl = URL.createObjectURL(image);
+            original = originalObjectUrl;
+          } catch (error) {
+            failedLibraryCovers.delete(url);
+            failedLibraryCovers.set(url, Date.now() + 60000);
+            if (failedLibraryCovers.size > MAX_LIBRARY_COVERS) failedLibraryCovers.delete(failedLibraryCovers.keys().next().value);
+            const dnsFailure = /\bENOTFOUND\b/.test(error.message);
+            if (dnsFailure || signal.aborted || /\bHTTP (502|503|504)\b/.test(error.message)) {
+              const at = Date.now();
+              const previous = failedCoverHosts.get(host);
+              const count = previous && at - previous.at < 15000 ? previous.count + 1 : 1;
+              failedCoverHosts.delete(host);
+              failedCoverHosts.set(host, { at, count, until: dnsFailure || count >= 2 ? at + 15000 : 0 });
+              if (failedCoverHosts.size > MAX_LIBRARY_COVERS) failedCoverHosts.delete(failedCoverHosts.keys().next().value);
+            }
+            return '';
           }
-          return '';
         }
       } else if (!/^(data:|blob:)/i.test(url)) {
         const fetched = await fetchImage(url);
