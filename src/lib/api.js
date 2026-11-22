@@ -208,9 +208,9 @@ export const api = {
     return detailCache.get(detailKey(url, sourceId))?.value || null;
   },
 
-  async restoreDetail(url, sourceId) {
+  async restoreDetail(url, sourceId, favoriteSourceId = sourceId) {
     const key = detailKey(url, sourceId);
-    if (lib.isFav(url, sourceId)) {
+    if (lib.isFav(url, favoriteSourceId) || lib.isFav(url, sourceId)) {
       const stableKey = libraryDetailKey(url, sourceId);
       const stable = await readSourceCache('library-details', stableKey);
       if (stable?.value?.chapters?.length) return stable.value;
@@ -424,8 +424,8 @@ export const api = {
     }
   },
 
-  async persistLibraryDetail(url, sourceId, value) {
-    if (!lib.isFav(url, sourceId) || !value?.chapters?.length) return;
+  async persistLibraryDetail(url, sourceId, value, favoriteSourceId = sourceId) {
+    if ((!lib.isFav(url, favoriteSourceId) && !lib.isFav(url, sourceId)) || !value?.chapters?.length) return;
     return writeSourceCache('library-details', libraryDetailKey(url, sourceId), value, 1000);
   },
 

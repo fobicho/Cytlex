@@ -55,15 +55,20 @@ async function preloadImportedCovers(mangas, onProgress) {
 function allowedImportedMangas(mangas) {
   const showAdultExtensions = settings.get().showAdultExtensions;
   return (mangas || []).filter((manga) => {
-    const sourceId = manga?.sourceId || 'leercapitulo';
-    const resolvedId = extensions.resolveInstalledSource(sourceId, manga?.sourceName, manga?.url) || sourceId;
+    const resolvedId = importedSourceId(manga);
     return isExtensionAllowed(extensions.manifest(resolvedId), showAdultExtensions);
   });
 }
 
-function isMangaDexManga(manga) {
+function importedSourceId(manga) {
   const sourceId = manga?.sourceId || 'leercapitulo';
-  const resolvedId = extensions.resolveInstalledSource(sourceId, manga?.sourceName, manga?.url) || sourceId;
+  const savedSourceName = String(manga?.sourceName || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (savedSourceName.startsWith('mangadex') && /(?:english|ingles|mangadexen)/.test(savedSourceName)) return 'mangadex-en';
+  return extensions.resolveInstalledSource(sourceId, manga?.sourceName, manga?.url) || sourceId;
+}
+
+function isMangaDexManga(manga) {
+  const resolvedId = importedSourceId(manga);
   return resolvedId === 'mangadex' || resolvedId === 'mangadex-en';
 }
 
@@ -71,14 +76,15 @@ async function cacheImportedLibraryDetails(mangas, onProgress) {
   let failed = 0;
   const allowedMangas = allowedImportedMangas(mangas);
   const maxConcurrent = Math.min(50, allowedMangas.length);
-  const restoreBatchWindow = setHttpGetBatchWindow(250);
+  const restoreBatchWindow = setHttpGetBatchWindow(5000);
   try {
     const restored = new Array(allowedMangas.length);
     let lookupNext = 0;
     await Promise.all(Array.from({ length: maxConcurrent }, async () => {
       while (lookupNext < allowedMangas.length) {
         const index = lookupNext++;
-        try { restored[index] = await api.restoreDetail(allowedMangas[index]?.url, allowedMangas[index]?.sourceId || 'leercapitulo'); }
+        const manga = allowedMangas[index];
+        try { restored[index] = await api.restoreDetail(manga?.url, importedSourceId(manga), manga?.sourceId || 'leercapitulo'); }
         catch { restored[index] = null; }
       }
     }));
@@ -88,13 +94,14 @@ async function cacheImportedLibraryDetails(mangas, onProgress) {
     for (let index = 0; index < allowedMangas.length; index += 1) {
       const manga = allowedMangas[index];
       const sourceId = manga?.sourceId || 'leercapitulo';
+      const resolvedId = importedSourceId(manga);
       const detail = restored[index];
       if (!detail?.chapters?.length) {
         pending.push(manga);
         continue;
       }
       try {
-        if (!(await api.persistLibraryDetail(manga?.url, sourceId, detail))) failed += 1;
+        if (!(await api.persistLibraryDetail(manga?.url, resolvedId, detail, sourceId))) failed += 1;
       } catch { failed += 1; }
       current += 1;
       onProgress?.({ label: 'Guardando la información de tus mangas', current, total: allowedMangas.length, currentLabel: manga?.title || 'Manga' });
@@ -106,7 +113,7 @@ async function cacheImportedLibraryDetails(mangas, onProgress) {
       while (next < pending.length) {
         const manga = pending[next++];
         const sourceId = manga?.sourceId || 'leercapitulo';
-        const resolvedId = extensions.resolveInstalledSource(sourceId, manga?.sourceName, manga?.url) || sourceId;
+        const resolvedId = importedSourceId(manga);
         try {
           const available = extensions.isInstalled(resolvedId);
           const chaptersDetail = available
@@ -115,7 +122,7 @@ async function cacheImportedLibraryDetails(mangas, onProgress) {
           const detail = available && !chaptersDetail
             ? await api.detail(manga.url, resolvedId, { cacheResult: false, persistResult: false, allowDisabled: true })
             : chaptersDetail;
-          if (!detail?.chapters?.length || !(await api.persistLibraryDetail(manga.url, sourceId, detail))) failed += 1;
+          if (!detail?.chapters?.length || !(await api.persistLibraryDetail(manga.url, resolvedId, detail, sourceId))) failed += 1;
         } catch { failed += 1; }
         current += 1;
         onProgress?.({ label: 'Guardando la información de tus mangas', current, total: allowedMangas.length, currentLabel: manga?.title || 'Manga' });

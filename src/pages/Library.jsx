@@ -31,7 +31,7 @@ let libraryCheckCooldownUntil = 0;
 let libraryCheckProgress = { current: 0, total: 0 };
 const libraryCheckProgressListeners = new Set();
 let libraryDetailBackfillPromise = null;
-let pendingLibraryDetailBackfill = null;
+const pendingLibraryDetailBackfills = [];
 const UNREAD_CACHE_KEY = 'cytlex:libraryUnread:v2';
 const LIBRARY_CATEGORY_KEY = 'cytlex:libraryCategory';
 const LIBRARY_SEARCH_OPEN_KEY = 'cytlex:librarySearchOpen:v1';
@@ -130,7 +130,7 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
   pending.sort((a, b) => Number(isMangaDexManga(b)) - Number(isMangaDexManga(a)));
   if (!pending.length) return;
 
-  const restoreBatchWindow = setHttpGetBatchWindow(250);
+  const restoreBatchWindow = setHttpGetBatchWindow(5000);
   try {
     let next = 0;
     const concurrency = Math.min(50, pending.length);
@@ -140,7 +140,7 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
         const savedSourceId = manga.sourceId || 'leercapitulo';
         const resolvedId = sourceIdFor(manga);
         try {
-          let detail = await api.restoreDetail(manga.url, savedSourceId);
+          let detail = await api.restoreDetail(manga.url, resolvedId, savedSourceId);
           if (!detail?.chapters?.length) {
             detail = api.peekDetail(manga.url, resolvedId);
             if (!detail?.chapters?.length) {
@@ -148,7 +148,7 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
               detail = chaptersDetail || await api.detail(manga.url, resolvedId, { cacheResult: false, persistResult: false, allowDisabled: true });
             }
           }
-          if (detail?.chapters?.length) await api.persistLibraryDetail(manga.url, savedSourceId, detail);
+          if (detail?.chapters?.length) await api.persistLibraryDetail(manga.url, resolvedId, detail, savedSourceId);
         } catch {
           // Keep this manga in the library; the missing detail can be retried next time.
         }
@@ -159,25 +159,41 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
   }
 }
 
-function queueLibraryDetailBackfill(favorites, showAdultExtensions, isActive, installedSourceIds = null) {
-  pendingLibraryDetailBackfill = { favorites, showAdultExtensions, isActive, installedSourceIds };
+function startLibraryDetailBackfill() {
   if (!libraryDetailBackfillPromise) {
     libraryDetailBackfillPromise = (async () => {
-      while (pendingLibraryDetailBackfill) {
-        const job = pendingLibraryDetailBackfill;
-        pendingLibraryDetailBackfill = null;
-        await backfillLibraryDetails(job.favorites, job.showAdultExtensions, job.isActive, job.installedSourceIds);
+      while (pendingLibraryDetailBackfills.length) {
+        const nextJob = pendingLibraryDetailBackfills.shift();
+        await backfillLibraryDetails(nextJob.favorites, nextJob.showAdultExtensions, nextJob.isActive, nextJob.installedSourceIds);
       }
     })().finally(() => {
       libraryDetailBackfillPromise = null;
-      if (pendingLibraryDetailBackfill) queueLibraryDetailBackfill(
-        pendingLibraryDetailBackfill.favorites,
-        pendingLibraryDetailBackfill.showAdultExtensions,
-        pendingLibraryDetailBackfill.isActive,
-        pendingLibraryDetailBackfill.installedSourceIds
-      );
+      if (pendingLibraryDetailBackfills.length) startLibraryDetailBackfill();
     });
   }
+}
+
+function queueLibraryDetailBackfill(favorites, showAdultExtensions, isActive, installedSourceIds = null) {
+  const queuedJob = pendingLibraryDetailBackfills.find((queued) => Boolean(queued.installedSourceIds) === Boolean(installedSourceIds));
+  if (queuedJob) {
+    const mergedFavorites = new Map(queuedJob.favorites.map((manga) => [`${sourceIdFor(manga)}|${manga.url}`, manga]));
+    favorites.forEach((manga) => mergedFavorites.set(`${sourceIdFor(manga)}|${manga.url}`, manga));
+    queuedJob.favorites = [...mergedFavorites.values()];
+    queuedJob.showAdultExtensions ||= showAdultExtensions;
+    const previousIsActive = queuedJob.isActive;
+    queuedJob.isActive = () => previousIsActive() || isActive();
+    if (queuedJob.installedSourceIds && installedSourceIds) {
+      installedSourceIds.forEach((sourceId) => queuedJob.installedSourceIds.add(sourceId));
+    }
+  } else {
+    pendingLibraryDetailBackfills.push({
+      favorites: [...new Map(favorites.map((manga) => [`${sourceIdFor(manga)}|${manga.url}`, manga])).values()],
+      showAdultExtensions,
+      isActive,
+      installedSourceIds: installedSourceIds ? new Set(installedSourceIds) : null
+    });
+  }
+  startLibraryDetailBackfill();
 }
 
 const sortLibraryManga = (items, sortBy, unread) => items.sort((a, b) => {

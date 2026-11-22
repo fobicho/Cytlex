@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown, Settings as SettingsIcon, X, Check, CheckSquare } from 'lucide-react';
-import { extensions, isExtensionAllowed, isExtensionInstallable, isNewer, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed, isExtensionInstallable, isNewer, EXTENSION_INSTALLED_EVENT, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
 import { extUpdates } from '../lib/extUpdates.js';
 import { settings } from '../lib/settings.js';
 import { Card } from './ui/card.jsx';
@@ -725,7 +725,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
     if (isInstall) {
       const results = await Promise.all(selectedItems.map(async (item) => {
         try {
-          await extensions.install(item, repoUrl);
+          await extensions.install(item, repoUrl, { backfillLibrary: false });
           return { id: item.id, ok: true };
         } catch {
           return { id: item.id, ok: false };
@@ -746,6 +746,12 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
 
     const succeededIds = new Set(succeeded);
     if (isInstall) {
+      const sourceIds = selectedItems
+        .filter((manifest) => succeededIds.has(manifest.id))
+        .flatMap((manifest) => [manifest.id, ...(Array.isArray(manifest.config?.sources) ? manifest.config.sources.map((source) => source.id) : [])]);
+      if (sourceIds.length) {
+        window.dispatchEvent(new CustomEvent(EXTENSION_INSTALLED_EVENT, { detail: { sourceIds } }));
+      }
       refresh();
       setAvailable((current) => current?.filter((manifest) => !succeededIds.has(manifest.id)) ?? current);
       setUpdates((current) => current.filter((update) => !succeededIds.has(update.id)));
