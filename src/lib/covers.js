@@ -1,4 +1,4 @@
-import { browserImageUrl, fetchCoverBlob, fetchImage, fetchImageBlobBatch, fetchSearchCoverBlobBatch, getCatalogImageBlob } from './browserHttp.js';
+import { browserImageUrl, catalogImageKey, fetchCoverBlob, fetchImage, fetchImageBlobBatch, fetchSearchCoverBlobBatch, getCatalogImageBlob } from './browserHttp.js';
 
 const THUMB_WIDTH = 240;
 const SEARCH_THUMB_WIDTH = 320;
@@ -53,9 +53,11 @@ export function requiresImageProxy(url) {
 }
 
 function persistedCoverKey(url) {
-  return requiresImageProxy(url) && new URL(url).hostname.toLowerCase().endsWith('mangadex.org')
-    ? `mangadex-cover-v2:${url}`
-    : url;
+  try {
+    return requiresImageProxy(url) && new URL(url).hostname.toLowerCase().endsWith('mangadex.org')
+      ? `mangadex-cover-v2:${catalogImageKey(url)}`
+      : catalogImageKey(url);
+  } catch { return url; }
 }
 
 function pruneSearchCoverCache() {
@@ -186,7 +188,11 @@ async function readPersistedLibraryCover(url, allowedPending = null) {
   try {
     const db = await openLibraryCoverDb();
     if (!db) return null;
-    const record = await idbRequest(db.transaction(LIBRARY_COVER_STORE, 'readonly').objectStore(LIBRARY_COVER_STORE).get(persistedCoverKey(url)));
+    const key = persistedCoverKey(url);
+    let record = await idbRequest(db.transaction(LIBRARY_COVER_STORE, 'readonly').objectStore(LIBRARY_COVER_STORE).get(key));
+    if (!record && key !== url) {
+      record = await idbRequest(db.transaction(LIBRARY_COVER_STORE, 'readonly').objectStore(LIBRARY_COVER_STORE).get(url));
+    }
     if (!record?.blob) return null;
     const cached = libraryCoverCache.get(url);
     if (typeof cached === 'string') return cached;
@@ -194,7 +200,9 @@ async function readPersistedLibraryCover(url, allowedPending = null) {
     const objectUrl = URL.createObjectURL(record.blob);
     libraryCoverCache.set(url, objectUrl);
     markLibraryCoverLoaded(objectUrl);
-    db.transaction(LIBRARY_COVER_STORE, 'readwrite').objectStore(LIBRARY_COVER_STORE).put({ ...record, usedAt: Date.now() });
+    const touch = db.transaction(LIBRARY_COVER_STORE, 'readwrite').objectStore(LIBRARY_COVER_STORE);
+    touch.put({ ...record, url: key, usedAt: Date.now() });
+    if (record.url !== key) touch.delete(record.url);
     pruneLibraryCoverCache();
     return objectUrl;
   } catch {
@@ -207,7 +215,7 @@ async function storeLibraryCoverBlob(url, blob, version, expectedPending, persis
   let keepOriginal = false;
   try {
     const thumbnail = await makeCoverThumbBlob(originalObjectUrl);
-    const storedBlob = thumbnail && thumbnail.size <= MAX_DATAURL ? thumbnail : null;
+    const storedBlob = thumbnail;
     const objectUrl = storedBlob ? URL.createObjectURL(storedBlob) : originalObjectUrl;
     keepOriginal = !storedBlob;
     const decoded = await decodeCover(objectUrl);
@@ -226,7 +234,7 @@ async function storeLibraryCoverBlob(url, blob, version, expectedPending, persis
     if (storedBlob) {
       if (persist) {
         if (!await persistLibraryCover(url, storedBlob, version)) return '';
-      } else void persistLibraryCover(url, storedBlob, version);
+      } else await persistLibraryCover(url, storedBlob, version);
     } else if (persist) return '';
     return objectUrl;
   } finally {
@@ -337,9 +345,11 @@ export function getSearchCover(url) {
   return typeof cached === 'string' ? cached : '';
 }
 
-export async function persistAvailableLibraryCover(url) {
+export async function persistAvailableLibraryCover(url, availableCover = '') {
   if (!url) return false;
-  const cached = libraryCoverCache.get(url) || searchCoverCache.get(url);
+  const cached = /^(?:blob:|data:)/i.test(availableCover)
+    ? availableCover
+    : libraryCoverCache.get(url) || searchCoverCache.get(url);
   if (!cached) return false;
   const cover = typeof cached === 'string' ? cached : await cached;
   return cover ? persistCachedLibraryCover(url, cover, libraryCoverVersions.get(url) || 0) : false;
@@ -473,12 +483,12 @@ export async function preloadLibraryCover(url, { web = false, priority = false, 
   }
 
   let pending;
-  pending = (async () => {
+  pending = Promise.resolve().then(async () => {
     let acquired = false;
     let originalObjectUrl;
     const version = libraryCoverVersions.get(url) || 0;
     try {
-      const persisted = await readPersistedLibraryCover(url);
+      const persisted = await readPersistedLibraryCover(url, pending);
       if (persisted) return persisted;
       await acquireLibraryCoverSlot(url, priority || priorityLibraryCovers.has(url));
       acquired = true;
@@ -518,7 +528,7 @@ export async function preloadLibraryCover(url, { web = false, priority = false, 
         original = `data:${fetched.mime};base64,${fetched.base64}`;
       }
       const blob = await makeCoverThumbBlob(original);
-      const thumbnail = blob && blob.size <= MAX_DATAURL ? blob : null;
+      const thumbnail = blob;
       if (!thumbnail && !originalObjectUrl) return '';
       const objectUrl = thumbnail ? URL.createObjectURL(thumbnail) : originalObjectUrl;
       if (!thumbnail) originalObjectUrl = undefined;
@@ -544,7 +554,7 @@ export async function preloadLibraryCover(url, { web = false, priority = false, 
         if (persist) {
           if (!await persistLibraryCover(url, thumbnail, version)) return '';
         }
-        else void persistLibraryCover(url, thumbnail, version);
+        else await persistLibraryCover(url, thumbnail, version);
       } else if (persist) return '';
       return objectUrl;
     } catch {
@@ -555,7 +565,7 @@ export async function preloadLibraryCover(url, { web = false, priority = false, 
       if (acquired) releaseLibraryCoverSlot();
       if (libraryCoverCache.get(url) === pending) libraryCoverCache.delete(url);
     }
-  })();
+  });
   libraryCoverCache.set(url, pending);
   pruneLibraryCoverCache();
   return pending;

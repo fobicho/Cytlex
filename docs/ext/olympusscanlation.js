@@ -9,11 +9,12 @@ export default function createSource({ fetchText }) {
   const chapterListRequests = new Map();
 
   const best = (u) => (u || '').replace(/-[a-z]{1,3}\.(jpe?g|png|webp|avif)$/i, '-xl.$1');
+  const catalogCover = (u) => (u || '').replace(/-xl\.(jpe?g|png|webp|avif)$/i, '-m.$1');
 
   const toItem = (s) => ({
     url: `${base}/series/${s.slug}`,
     title: s.name || '',
-    cover: best(s.cover),
+    cover: catalogCover(s.cover),
     author: [s.author, s.artist]
       .flatMap((value) => Array.isArray(value) ? value : [value])
       .map((value) => typeof value === 'string' ? value : value?.name || '')
@@ -30,7 +31,7 @@ export default function createSource({ fetchText }) {
 
   async function catalog({ q = '', page = 1, __cytlexRequestId } = {}) {
     if (q) {
-      seriesListRequest ||= getJson(`${base}/api/series/list`, __cytlexRequestId).catch((error) => {
+      seriesListRequest ||= getJson(`${base}/api/series/list`, __cytlexRequestId, { catalogCovers: true }).catch((error) => {
         seriesListRequest = null;
         throw error;
       });
@@ -41,7 +42,7 @@ export default function createSource({ fetchText }) {
       return { items, totalPages: 1, totalText: '' };
     }
 
-    const data = await getJson(`${base}/api/rankings?page=${page}&period=total_ranking`, __cytlexRequestId);
+    const data = await getJson(`${base}/api/rankings?page=${page}&period=total_ranking`, __cytlexRequestId, { catalogCovers: true });
     const items = comicsOf(data).map(toItem);
     const last = data?.last_page || data?.meta?.last_page || 0;
     const totalPages = last || (data?.next_page_url ? page + 1 : page);

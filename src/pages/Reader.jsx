@@ -10,7 +10,7 @@ import { tracking } from '../lib/tracking.js';
 import { chapterOrder, detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
-import { browserImageUrl, fetchAchyChapter, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchMangaLectChapter, fetchMangaOniChapter, fetchOnfChapter, fetchZonaTmoChapter, sourceErrorMessage } from '../lib/browserHttp.js';
+import { browserImageUrl, fetchAchyChapter, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchLeerCapituloChapter, fetchMangaDexChapter, fetchMangaLectChapter, fetchMangaOniChapter, fetchOnfChapter, fetchZonaTmoChapter, sourceErrorMessage } from '../lib/browserHttp.js';
 import { readRecentChapter, writeRecentChapter } from '../lib/recentChapters.js';
 import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
@@ -398,6 +398,7 @@ export default function Reader() {
   const chapterUrl = params.get('u') || '';
   const mangaUrl = params.get('m') || '';
   const sourceId = params.get('s') || 'leercapitulo';
+  const mangaTitleParam = params.get('t') || '';
   const recentChapterKey = JSON.stringify([sourceId, extensions.manifest(sourceId)?.version || '0', chapterUrl]);
   const sourceName = extensions.manifest(sourceId)?.name;
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
@@ -415,13 +416,16 @@ export default function Reader() {
   }, [backHash]);
   const [ch, setCh] = useState(null);
   const [chUrl, setChUrl] = useState('');
-  const [mangaDetail, setMangaDetail] = useState(null);
+  const [mangaDetail, setMangaDetail] = useState(() => {
+    const cached = mangaUrl ? api.peekDetail(mangaUrl, sourceId) : null;
+    return cached ? { key: `${sourceId}|${mangaUrl}`, value: cached } : null;
+  });
   const currentMangaUrl = mangaUrl || ch?.mangaUrl || '';
   const mangaKey = `${sourceId}|${currentMangaUrl}`;
   const detail = mangaDetail?.key === mangaKey ? mangaDetail.value : null;
   const savedTitle = useMemo(() => currentMangaUrl ? lib.fav(currentMangaUrl, sourceId)?.title : '', [currentMangaUrl, sourceId]);
   const knownMangaTitle = detail?.title || savedTitle;
-  const mangaTitle = knownMangaTitle || 'Lector';
+  const mangaTitle = knownMangaTitle || mangaTitleParam || 'Lector';
   const [err, setErr] = useState('');
   const [retryTick, setRetryTick] = useState(0);
   const [mode, setMode] = useState(() => {
@@ -546,6 +550,20 @@ export default function Reader() {
 
   const retryChapterImages = useCallback(async () => {
     try {
+      if (sourceId.startsWith('mangadex') && extensions.isInstalled(sourceId) && !window.cytlex?.httpGet) {
+        const refreshed = await fetchMangaDexChapter(chapterUrl);
+        if (!refreshed?.pages?.length) return false;
+        preloadedPagesRef.current.clear();
+        setCh(refreshed);
+        return true;
+      }
+      if (sourceId === 'leercapitulo' && extensions.isInstalled(sourceId) && !window.cytlex?.httpGet) {
+        const refreshed = await fetchLeerCapituloChapter(chapterUrl);
+        if (!refreshed?.pages?.length) return false;
+        preloadedPagesRef.current.clear();
+        setCh(refreshed);
+        return true;
+      }
       const refreshed = await api.chapter(chapterUrl, sourceId, { fresh: true });
       if (!refreshed?.pages?.length) return false;
       preloadedPagesRef.current.clear();
@@ -579,6 +597,13 @@ export default function Reader() {
       try {
         let r = extensions.isInstalled(sourceId) && !adultExtensionDisabled ? await readRecentChapter(recentChapterKey) : null;
         if (!active) return;
+        if (!r && sourceId.startsWith('mangadex') && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
+          try { r = await fetchMangaDexChapter(chapterUrl, combinedController.signal); }
+          catch (error) {
+            if (!active) return;
+            throw error;
+          }
+        }
         if (!r && sourceId === 'achymanga' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
           try { r = await fetchAchyChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
         }
@@ -594,6 +619,13 @@ export default function Reader() {
         if (!r && sourceId === 'mangalect' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
           try { r = await fetchMangaLectChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
         }
+        if (!r && sourceId === 'leercapitulo' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
+          try { r = await fetchLeerCapituloChapter(chapterUrl, combinedController.signal); }
+          catch (error) {
+            if (!active) return;
+            if (![404, 405].includes(error?.status)) throw error;
+          }
+        }
         if (!r && sourceId === 'mangaoni' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
           try { r = await fetchMangaOniChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
         }
@@ -606,6 +638,10 @@ export default function Reader() {
         }
         setCh(r);
         setChUrl(chapterUrl);
+        if (sourceId === 'leercapitulo' && (mangaUrl || r.mangaUrl)) {
+          const mangaDetailUrl = mangaUrl || r.mangaUrl;
+          setMangaDetail({ key: `${sourceId}|${mangaDetailUrl}`, value: { title: r.mangaTitle || '' } });
+        }
         if (sourceId === 'mangaoni') {
           if (r.options?.length) {
             setMangaDetail({ key: `${sourceId}|${mangaUrl || r.mangaUrl || ''}`, value: { title: r.title || '', chapters: r.options } });
@@ -1009,6 +1045,8 @@ export default function Reader() {
 
   useEffect(() => {
     if (!currentMangaUrl || adultExtensionDisabled) return;
+    if (sourceId.startsWith('mangadex') && extensions.isInstalled(sourceId) && !window.cytlex?.httpGet) return;
+    if (sourceId === 'leercapitulo' && extensions.isInstalled(sourceId) && !window.cytlex?.httpGet) return;
     if (sourceId === 'mangaoni' && extensions.isInstalled(sourceId) && !window.cytlex?.httpGet) return;
     let alive = true;
     api.detail(currentMangaUrl, sourceId).then((value) => {
@@ -1098,7 +1136,7 @@ export default function Reader() {
     };
   }, [menu]);
 
-  const go = (url) => `#/leer?u=${encodeURIComponent(url)}&m=${encodeURIComponent(currentMangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}${detailBackQS}`;
+  const go = (url) => `#/leer?u=${encodeURIComponent(url)}&m=${encodeURIComponent(currentMangaUrl)}&s=${encodeURIComponent(sourceId)}&t=${encodeURIComponent(mangaTitle)}${fromQS}${detailBackQS}`;
 
   const openPanelMenu = (e, url, label) => {
     e.preventDefault();

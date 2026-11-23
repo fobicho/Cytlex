@@ -285,6 +285,7 @@ const Library = memo(function Library({ active = true }) {
   const [librarySearchOpen, setLibrarySearchOpen] = useState(() => {
     try { return localStorage.getItem(LIBRARY_SEARCH_OPEN_KEY) === '1'; } catch { return false; }
   });
+  const skipInitialLibrarySearchAnimation = useRef(librarySearchOpen);
   const reduceMotion = useReducedMotion();
   const scale = useScale();
   const isBrowserApp = typeof window !== 'undefined' && !window.cytlex;
@@ -347,6 +348,10 @@ const Library = memo(function Library({ active = true }) {
       else localStorage.removeItem(LIBRARY_SEARCH_OPEN_KEY);
     } catch {}
   };
+
+  useLayoutEffect(() => {
+    if (compactLibrarySearch && librarySearchOpen) skipInitialLibrarySearchAnimation.current = false;
+  }, [compactLibrarySearch, librarySearchOpen]);
 
   const revealCategoryTab = (tab, behavior = reduceMotion ? 'auto' : 'smooth') => {
     const nav = categoryTabsRef.current;
@@ -878,8 +883,8 @@ const Library = memo(function Library({ active = true }) {
       <AnimatePresence initial={false}>
         {compactLibrarySearch && librarySearchOpen && (
           <motion.div
+            initial={skipInitialLibrarySearchAnimation.current ? false : { height: 0, opacity: 0, transform: 'translateY(-4px)' }}
             id="library-search-row"
-            initial={{ height: 0, opacity: 0, transform: 'translateY(-4px)' }}
             animate={{ height: 'auto', opacity: 1, transform: 'translateY(0px)' }}
             exit={{ height: 0, opacity: 0, transform: 'translateY(-4px)' }}
             transition={reduceMotion ? { duration: 0 } : { duration: 0.18, ease: [0.23, 1, 0.32, 1] }}

@@ -138,9 +138,10 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
   while (batch.length < CATALOG_BATCH_SIZE && canFetchNextPage && pagesFetched < CATALOG_BATCH_SIZE) {
     const startPage = currentPage + 1;
     const batchPages = id === 'onfmangas' ? Math.min(4, Math.ceil((CATALOG_BATCH_SIZE - batch.length) / 12))
-      : id === 'mangaoni' || id === 'olympusscanlation' ? 3 : 2;
-    const group = !window.cytlex?.httpGet && (FIXED_PAGE_SOURCES.has(id) || id === 'mangalect')
-      && (id === 'onfmangas' ? batchPages > 1 : CATALOG_BATCH_SIZE - batch.length >= 20)
+      : id === 'mangaoni' ? (batch.length ? 4 : 3)
+        : id === 'olympusscanlation' ? 3 : 2;
+    const group = !window.cytlex?.httpGet && FIXED_PAGE_SOURCES.has(id)
+      && (id === 'onfmangas' || id === 'mangaoni' || CATALOG_BATCH_SIZE - batch.length >= 20)
       && pagesFetched + batchPages <= CATALOG_BATCH_SIZE;
     const requests = Array.from({ length: group ? batchPages : 1 }, (_, index) =>
       api.catalog({ ...params, page: startPage + index, __cytlexRequestId: requestId }, id));
@@ -156,6 +157,7 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
       canFetchNextPage = result.value.hasMore ?? currentPage < (result.value.totalPages || 1);
       while (batch.length < CATALOG_BATCH_SIZE && queued.length) batch.push(queued.shift());
     }
+    if (id === 'mangalect') break;
   }
 
   return { items: batch, queuedItems: queued, page: currentPage, apiHasMore: canFetchNextPage, hasMore: queued.length > 0 || canFetchNextPage };
@@ -212,8 +214,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const useCompactFilterFields = isZonaTmo || sourceId === 'mangalect';
   const filterPanelWidth = px(isZonaTmo ? 480 : 360, scale, 300);
   const getFilterRoot = () => filterRootRef.current;
-  const preloadCatalogCovers = (id, mangas) => {
-    if (id === 'achymanga' && !window.cytlex?.fetchImage) {
+  const preloadCatalogCovers = (mangas) => {
+    if (!window.cytlex?.fetchImage) {
       void preloadLibraryCoversBatch(mangas.map((manga) => manga.cover).filter(Boolean), { web: true });
     }
   };
@@ -385,12 +387,12 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         requestId: httpRequestId
       });
       if (runId !== requestId.current) return;
-      if (isMangaDex(id)) {
+      if (isMangaDex(id) && window.cytlex?.fetchImage) {
         for (const manga of result.items) {
           if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
         }
       }
-      preloadCatalogCovers(id, result.items);
+      preloadCatalogCovers(result.items);
       setItems((current) => append ? [...current, ...result.items] : result.items);
       setQueuedItems(result.queuedItems);
       setLoadedParams({ ...params, q: params.q?.trim?.() || '' });
@@ -459,10 +461,10 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
             }
           }
           if (!active || runId !== requestId.current) return;
-          if (isMangaDex(sourceId)) restoredItems.forEach((manga) => {
+          if (isMangaDex(sourceId) && window.cytlex?.fetchImage) restoredItems.forEach((manga) => {
             if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
           });
-          preloadCatalogCovers(sourceId, restoredItems.slice(0, CATALOG_BATCH_SIZE));
+          preloadCatalogCovers(restoredItems.slice(0, CATALOG_BATCH_SIZE));
           setItems(restoredItems.slice(0, CATALOG_BATCH_SIZE));
           setQueuedItems([...(snapshot.queuedItems || []), ...restoredItems.slice(CATALOG_BATCH_SIZE)]);
           setLoadedParams(snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) });
@@ -510,10 +512,10 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         if (!isMangaDex(sourceId)) loadCatalogFilters(sourceId);
         const result = await resultPromise;
         if (!active || runId !== requestId.current) return;
-        if (isMangaDex(sourceId)) result.items.forEach((manga) => {
+        if (isMangaDex(sourceId) && window.cytlex?.fetchImage) result.items.forEach((manga) => {
           if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
         });
-        preloadCatalogCovers(sourceId, result.items);
+        preloadCatalogCovers(result.items);
         setItems(result.items);
         setQueuedItems(result.queuedItems);
         setLoadedParams(params);

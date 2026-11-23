@@ -54,7 +54,10 @@ function configureWebProxy(server) {
         signal: controller.signal,
         ...(body ? { body } : {})
       });
-      const response = await handleWebProxy({ request });
+      const handleProxy = typeof server.ssrLoadModule === 'function'
+        ? (await server.ssrLoadModule('/functions/api/proxy.js')).onRequest
+        : handleWebProxy;
+      const response = await handleProxy({ request });
       if (res.destroyed) {
         await response.body?.cancel();
         return;
@@ -75,8 +78,8 @@ function configureWebProxy(server) {
 export default defineConfig({
   plugins: [react(), {
     name: 'cytlex-web-proxy',
-    configureServer: configureWebProxy,
-    configurePreviewServer: configureWebProxy
+    configureServer: (server) => configureWebProxy(server),
+    configurePreviewServer: (server) => configureWebProxy(server)
   }],
   base: './',
   server: { port: 5174, strictPort: true },

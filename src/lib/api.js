@@ -2,6 +2,7 @@ import { extensions, isExtensionAllowed, isSourceConfigured } from './extensions
 import { settings } from './settings.js';
 import { lib, mangaSourceUrl } from './library.js';
 import { deleteSourceCache, listSourceCache, readSourceCache, writeSourceCache } from './sourceCache.js';
+import { beginCatalogRequest, endCatalogRequest } from './browserHttp.js';
 
 function bridge() {
   if (typeof window !== 'undefined' && window.cytlex) return window.cytlex;
@@ -210,17 +211,23 @@ export const api = {
 
   async restoreDetail(url, sourceId, favoriteSourceId = sourceId) {
     const key = detailKey(url, sourceId);
+    const restore = (value) => {
+      if (!value?.chapters?.length) return null;
+      storeDetail(key, value);
+      detailCache.get(key).persisted = true;
+      return value;
+    };
     if (lib.isFav(url, favoriteSourceId) || lib.isFav(url, sourceId)) {
       const stableKey = libraryDetailKey(url, sourceId);
       const stable = await readSourceCache('library-details', stableKey);
-      if (stable?.value?.chapters?.length) return stable.value;
+      if (stable?.value?.chapters?.length) return restore(stable.value);
 
       const legacyEntries = await listSourceCache('library-details');
       const legacy = legacyEntries.find((entry) => libraryDetailIdentity(entry.key) === `${sourceId}|${mangaSourceUrl(url, sourceId)}`
         && entry.value?.chapters?.length);
       if (legacy) {
         await writeSourceCache('library-details', stableKey, legacy.value, 1000);
-        return legacy.value;
+        return restore(legacy.value);
       }
 
       const legacyDetails = (await listSourceCache('details')).find((entry) =>
@@ -231,18 +238,20 @@ export const api = {
       );
       if (legacyDetails) {
         await writeSourceCache('library-details', stableKey, legacyDetails.value, 1000);
-        return legacyDetails.value;
+        return restore(legacyDetails.value);
       }
     }
     const entry = lib.isFav(url, sourceId)
       ? await readSourceCache('library-details', key) || await readSourceCache('details', key)
       : await readSourceCache('details', key);
-    return entry?.value || null;
+    return restore(entry?.value);
   },
 
   async catalog(args, sourceId) {
     const src = await resolveSource(sourceId);
     const browser = !bridge()?.httpGet;
+    const requestId = args?.__cytlexRequestId || `catalog:${sourceId}:${Date.now()}:${Math.random()}`;
+    const catalogArgs = { ...args, __cytlexRequestId: requestId };
     const key = browser ? catalogKey(args, sourceId) : '';
     const { q = '', page = 1, genre = '', year = '', status = '', type = '', sort = '' } = args || {};
     const searchKey = isMangaDex(sourceId)
@@ -264,7 +273,9 @@ export const api = {
       const savedAge = Date.now() - (saved?.at || 0);
       if (saved?.value?.items && savedAge >= 0 && savedAge <= PERSISTED_CATALOG_TTL_MS) return saved.value;
       try {
-        return await src.catalog(args);
+        beginCatalogRequest(requestId, sourceId);
+        try { return await src.catalog(catalogArgs); }
+        finally { endCatalogRequest(requestId); }
       } catch (error) {
         if (isMangaDex(sourceId) && /\b(?:ENOTFOUND|HTTP (?:429|50[234]))\b/.test(String(error?.message || error))) {
           if (saved?.value?.items?.length && savedAge <= 7 * 24 * 60 * 60 * 1000) return saved.value;

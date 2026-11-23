@@ -8,7 +8,12 @@ export default function createSource({ fetchText, parse }) {
     try { return new URL(u, base).href; } catch { return u; }
   };
 
-  const coverUrl = (p) => (p ? (/^https?:/i.test(p) ? p : `${assets}/${p}`) : '');
+  const coverUrl = (p) => {
+    if (!p) return '';
+    const raw = String(p).trim();
+    const absolute = /^https?:/i.test(raw) || raw.startsWith('//');
+    try { return new URL(absolute ? raw : raw.replace(/^\/+/, ''), `${assets}/`).href; } catch { return ''; }
+  };
 
   const text = (el, sel) => (el.querySelector(sel)?.textContent || '').replace(/\s+/g, ' ').trim();
 

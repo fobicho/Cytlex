@@ -1,7 +1,7 @@
 import { MigrationSources } from '../components/MigrationSources.jsx';
 import { memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Play, Star, ChevronDown, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, Puzzle, Link2, ArrowRightLeft, Crosshair, RefreshCw } from 'lucide-react';
+import { ChevronLeft, Play, Star, ChevronDown, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, Puzzle, Link2, ArrowRightLeft, Crosshair, RefreshCw } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { isMangaCover, lib, mangaSourceUrl, storedCoverThumbnail } from '../lib/library.js';
 import { progress } from '../lib/progress.js';
@@ -32,6 +32,79 @@ const SYNOPSIS_CONTROL_SIZE = 24;
 const SYNOPSIS_CONTROL_GAP = 4;
 const COVER_BASE = 160;
 const FIRST_CHAPTERS = 48;
+const ACTIVE_DETAIL_CACHE_PREFIX = 'cytlex:active-detail:v2:';
+const ACTIVE_DETAIL_CACHE_INDEX = 'cytlex:active-detail-index:v2';
+const LEGACY_ACTIVE_DETAIL_CACHE = 'cytlex:active-detail:v1';
+const ACTIVE_DETAIL_CACHE_TTL = 24 * 60 * 60 * 1000;
+const ACTIVE_DETAIL_CACHE_LIMIT = 1_500_000;
+const ACTIVE_DETAIL_CACHE_TOTAL_LIMIT = 1_800_000;
+const ACTIVE_DETAIL_CACHE_COUNT = 10;
+
+const activeDetailStorageKey = (key) => `${ACTIVE_DETAIL_CACHE_PREFIX}${encodeURIComponent(key)}`;
+const activeDetailCacheIndex = () => {
+  try {
+    const index = JSON.parse(sessionStorage.getItem(ACTIVE_DETAIL_CACHE_INDEX) || '[]');
+    return Array.isArray(index) ? index.filter((key) => typeof key === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
+function readActiveDetail(key) {
+  try {
+    const storageKey = activeDetailStorageKey(key);
+    let raw = sessionStorage.getItem(storageKey);
+    if (!raw) {
+      const legacy = JSON.parse(sessionStorage.getItem(LEGACY_ACTIVE_DETAIL_CACHE) || 'null');
+      if (legacy?.key === key) {
+        raw = JSON.stringify(legacy);
+        sessionStorage.setItem(storageKey, raw);
+        sessionStorage.removeItem(LEGACY_ACTIVE_DETAIL_CACHE);
+      }
+    }
+    const cached = JSON.parse(raw || 'null');
+    if (cached?.key !== key || Date.now() - cached.at < 0 || Date.now() - cached.at > ACTIVE_DETAIL_CACHE_TTL || !cached.value?.chapters?.length) {
+      sessionStorage.removeItem(storageKey);
+      return null;
+    }
+    const index = activeDetailCacheIndex().filter((entry) => entry !== key && sessionStorage.getItem(activeDetailStorageKey(entry)));
+    index.push(key);
+    while (index.length > ACTIVE_DETAIL_CACHE_COUNT) sessionStorage.removeItem(activeDetailStorageKey(index.shift()));
+    sessionStorage.setItem(ACTIVE_DETAIL_CACHE_INDEX, JSON.stringify(index));
+    return cached.value;
+  } catch {
+    return null;
+  }
+}
+
+function writeActiveDetail(key, value) {
+  if (!value?.chapters?.length) return;
+  try {
+    const cached = JSON.stringify({ key, at: Date.now(), value });
+    if (cached.length > ACTIVE_DETAIL_CACHE_LIMIT) return;
+    const legacyRaw = sessionStorage.getItem(LEGACY_ACTIVE_DETAIL_CACHE);
+    const legacy = JSON.parse(legacyRaw || 'null');
+    const index = activeDetailCacheIndex()
+      .filter((entry) => entry !== key && sessionStorage.getItem(activeDetailStorageKey(entry)));
+    if (legacy?.key !== key && Date.now() - legacy?.at >= 0 && Date.now() - legacy?.at <= ACTIVE_DETAIL_CACHE_TTL && legacy.value?.chapters?.length && legacyRaw.length <= ACTIVE_DETAIL_CACHE_LIMIT) {
+      sessionStorage.setItem(activeDetailStorageKey(legacy.key), legacyRaw);
+      if (!index.includes(legacy.key)) index.push(legacy.key);
+    }
+    sessionStorage.removeItem(LEGACY_ACTIVE_DETAIL_CACHE);
+    index.push(key);
+    let total = index.reduce((size, entry) => size + (entry === key
+      ? cached.length
+      : sessionStorage.getItem(activeDetailStorageKey(entry))?.length || 0), 0);
+    while (index.length > 1 && (index.length > ACTIVE_DETAIL_CACHE_COUNT
+      || total + JSON.stringify(index).length > ACTIVE_DETAIL_CACHE_TOTAL_LIMIT)) {
+      const removed = index.shift();
+      total -= removed === key ? cached.length : sessionStorage.getItem(activeDetailStorageKey(removed))?.length || 0;
+      sessionStorage.removeItem(activeDetailStorageKey(removed));
+    }
+    sessionStorage.setItem(activeDetailStorageKey(key), cached);
+    sessionStorage.setItem(ACTIVE_DETAIL_CACHE_INDEX, JSON.stringify(index));
+  } catch {}
+}
 
 function DetailBackBar({ onBack, scale }) {
   const inset = px(16, scale, 12);
@@ -210,10 +283,12 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const duplicateCoverScale = useResponsiveCoverSize(coverSetting) / 160;
   const adultExtensionDisabled = !isExtensionAllowed(extensions.manifest(sourceId), showAdultExtensions);
   const detailKey = `${sourceId}|${mangaUrl}`;
-  const preloadedDetail = api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId);
+  const activeDetailKey = `${sourceId}|${sourceManifest?.version || '0'}|${mangaUrl}`;
   const [detailState, setDetailState] = useState(() => ({
     key: detailKey,
-    data: preloadedDetail
+    data: api.peekDetail(mangaUrl, sourceId)
+      || api.peekStaleDetail(mangaUrl, sourceId)
+      || readActiveDetail(activeDetailKey)
   }));
   const sourceIconKey = `${detailKey}|${sourceManifest?.icon || ''}`;
   const [sourceIconState, setSourceIconState] = useState({ key: '', failed: false });
@@ -265,6 +340,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const [catPick, setCatPick] = useState(null);
   const catMenuRef = useRef(null);
   const catPopupRef = useRef(null);
+  const categoryListRef = useRef(null);
+  const [categoryScroll, setCategoryScroll] = useState({ above: false, below: false });
   const coverRef = useRef(null);
   const synRef = useRef(null);
   const metadataRef = useRef(null);
@@ -356,7 +433,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     : sourceCover;
   useEffect(() => {
     if (sourceId === 'onfmangas' && !d?.cover) return undefined;
-    if (!active || !sourceAvailable || !proxyCover || !finalCover || libraryCachedCover) return undefined;
+    if (!active || !sourceAvailable || !proxyCover || !finalCover || libraryCachedCover || preview?.image) return undefined;
     let alive = true;
     const loadCover = async () => {
       const candidates = [...new Set([finalCover, knownCover].filter(Boolean))];
@@ -373,7 +450,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     };
     loadCover();
     return () => { alive = false; };
-  }, [active, d?.cover, finalCover, knownCover, libraryCachedCover, proxyCover, sourceAvailable, sourceId]);
+  }, [active, d?.cover, finalCover, knownCover, libraryCachedCover, preview?.image, proxyCover, sourceAvailable, sourceId]);
   const hasCoverFallback = Boolean(visibleCover && visibleCover !== incomingCover);
   const coverImg = (alt, loadingError = false) => (
     <div
@@ -500,6 +577,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     if (isFavorite) {
       let alive = true;
       if (cached?.chapters?.length) {
+        writeActiveDetail(activeDetailKey, cached);
         api.persistLibraryDetail(mangaUrl, sourceId, cached);
         return () => { alive = false; };
       }
@@ -508,6 +586,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         try { saved = await api.restoreDetail(mangaUrl, sourceId); } catch {}
         if (!alive) return;
         if (saved?.chapters?.length) {
+          writeActiveDetail(activeDetailKey, saved);
           api.persistLibraryDetail(mangaUrl, sourceId, saved);
           if (reconcileMihonProgress(mangaUrl, sourceId, saved.chapters)) {
             setProgressTick((tick) => tick + 1);
@@ -637,7 +716,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     const chapterUrls = (d?.chapters || []).map((chapter) => chapter.url).filter(Boolean);
     chapterIndex.set(manga.url, manga.sourceId, chapterUrls);
     lib.toggleFav({ ...manga, chapterTotal: chapterUrls.length }, catIds);
-    void persistAvailableLibraryCover(manga.cover);
+    void persistAvailableLibraryCover(manga.cover, visibleCover);
     api.persistLibraryDetail(manga.url, manga.sourceId, d);
     setFav(true);
   };
@@ -651,6 +730,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       if (!Array.isArray(refreshed?.chapters) || !refreshed.chapters.length) {
         throw new Error('La fuente no devolvió capítulos.');
       }
+      writeActiveDetail(activeDetailKey, refreshed);
       if (d?.chapters?.length) reconcileChapterProgress(d.chapters, refreshed.chapters, sourceId, sourceId, mangaUrl);
       reconcileMihonProgress(mangaUrl, sourceId, refreshed.chapters);
       chapterIndex.set(mangaUrl, sourceId, refreshed.chapters.map((chapter) => chapter.url).filter(Boolean));
@@ -708,7 +788,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       coverLocal: '',
       coverCached: ''
     }, existingSourceId);
-    void persistAvailableLibraryCover(manga.cover);
+    void persistAvailableLibraryCover(manga.cover, visibleCover);
     api.persistLibraryDetail(manga.url, manga.sourceId, d);
     reconcileChapterProgress(previousChapters, d?.chapters || [], existingSourceId, manga.sourceId, manga.url);
     reconcileMihonProgress(manga.url, manga.sourceId, d?.chapters || []);
@@ -770,6 +850,22 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     return () => window.removeEventListener('resize', align);
   }, [catPick?.inline]);
 
+  useLayoutEffect(() => {
+    if (!catPick?.inline) {
+      setCategoryScroll({ above: false, below: false });
+      return undefined;
+    }
+    const list = categoryListRef.current;
+    if (!list) return undefined;
+    const update = () => setCategoryScroll({
+      above: list.scrollTop > 1,
+      below: list.scrollTop + list.clientHeight < list.scrollHeight - 1
+    });
+    update();
+    list.addEventListener('scroll', update, { passive: true });
+    return () => list.removeEventListener('scroll', update);
+  }, [catPick?.inline, catPick?.list.length]);
+
   const saveCatPick = () => {
     if (!catPick?.inline) return;
     const { pending, selected } = catPick;
@@ -801,6 +897,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       type: d.facts.tipo,
       genres: d.genres,
       author,
+      description: d.sinopsis || '',
       sourceId,
       sourceName: sourceManifest.name,
       sourceIcon: sourceManifest.icon
@@ -905,6 +1002,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     () => [...new Set(d?.chapters?.map((chapter) => chapter.group).filter(Boolean))],
     [d?.chapters]
   );
+  const categoryRowHeight = Math.max(27, Math.round(32 * scale));
   const selectedGroup = chapterGroups.includes(groupFilter) ? groupFilter : 'all';
   const chaptersOldestFirst = useMemo(
     () => [...(d?.chapters || [])].sort(byNumber),
@@ -963,7 +1061,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               )}
               style={{ contentVisibility: 'auto', containIntrinsicBlockSize: `auto ${Math.round(64 * scale)}px`, minHeight: `${Math.round(52 * scale)}px` }}
               onClick={(e) => { e.currentTarget.blur(); saveDetailScroll(mangaUrl); }}
-              href={`#/leer?u=${encodeURIComponent(c.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}${readerBackParam}`}
+              href={`#/leer?u=${encodeURIComponent(c.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&t=${encodeURIComponent(d?.title || previewTitle || savedManga?.title || '')}&from=${fromParam}${readerBackParam}`}
             >
               <span className="flex-1 min-w-0">
                 <span
@@ -1133,9 +1231,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           <div className="md:row-span-4">{coverImg(previewTitle || '', Boolean(err))}</div>
           <div className="min-w-0 self-start">
             <div ref={metadataRef} className="flow-root">
-              {previewTitle ? (
+              {previewTitle || savedManga ? (
                 <h1 className="font-bold tracking-tight text-foreground break-words" style={{ fontSize: fontPx(27, scale), lineHeight: 1.15 }}>
-                  {previewTitle}
+                  {previewTitle || 'Manga'}
                 </h1>
               ) : (
                 <Skeleton style={{ height: px(32, scale, 25), width: '66%', maxWidth: px(448, scale, 350) }} />
@@ -1149,7 +1247,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                   {fav ? 'Reintentar carga' : 'Reintentar'}
                 </Button>
               </div>
-            ) : (
+            ) : savedManga ? null : (
               <div className="mt-2 flex flex-wrap items-center" style={{ gap: px(8, scale, 6) }}>
                 <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(96, scale, 75) }} />
                 <Skeleton className="rounded-full" style={{ height: px(24, scale, 19), width: px(80, scale, 63) }} />
@@ -1158,7 +1256,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               </div>
             )}
           </div>
-          {!err && (
+          {!err && !savedManga && (
             <div className="col-span-2 min-w-0 md:col-span-1 md:col-start-2" style={{ marginTop: px(4, scale, 3) }}>
               <div className="flex flex-col" style={{ gap: px(8, scale, 6) }}>
                 <Skeleton style={{ height: px(14, scale, 11) }} />
@@ -1313,7 +1411,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             onClick={(e) => {
               e.currentTarget.blur();
               saveDetailScroll(mangaUrl);
-              window.location.hash = `#/leer?u=${encodeURIComponent(currentChapter.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&from=${fromParam}${readerBackParam}`;
+              window.location.hash = `#/leer?u=${encodeURIComponent(currentChapter.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&t=${encodeURIComponent(d?.title || previewTitle || savedManga?.title || '')}&from=${fromParam}${readerBackParam}`;
             }}
             style={{
               height: px(40, scale, 33),
@@ -1416,42 +1514,59 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           </Button>
 
           {catPick?.inline && (
-            <div ref={catPopupRef} role="group" aria-label="Categorías de la biblioteca" className="absolute left-0 top-full z-40 mt-2 w-56 max-w-[calc(100vw-2rem)] rounded-[6px] border border-border/70 bg-card px-2 py-1 pb-2 shadow-lg">
-              <div className="flex max-h-[40vh] flex-col overflow-y-auto overscroll-contain">
-                {catPick.list.map((c) => {
-                  const on = catPick.selected.includes(c.id);
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      title={c.name}
-                      onClick={() =>
-                        setCatPick((p) => ({
-                          ...p,
-                          selected: on ? p.selected.filter((x) => x !== c.id) : [...p.selected, c.id]
-                        }))
-                      }
-                      aria-pressed={on}
-                      className={cn(
-                        'relative flex w-full min-w-0 items-center justify-between gap-3 rounded-md text-left font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
-                        on
-                          ? 'text-foreground'
-                          : 'text-muted-foreground'
-                      )}
-                      style={{
-                        paddingLeft: 0,
-                        paddingRight: 0,
-                        minHeight: px(32, scale, 27),
-                        fontSize: fontPx(13, scale, 11)
-                      }}
-                    >
-                      <span className="min-w-0 truncate">{c.name}</span>
-                      <span className={cn('grid shrink-0 place-items-center rounded border', on ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40 bg-background')} style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}>
-                        {on && <Check aria-hidden="true" style={{ width: px(12, scale, 10), height: px(12, scale, 10) }} />}
-                      </span>
-                    </button>
-                  );
-                })}
+            <div ref={catPopupRef} role="group" aria-label="Categorías de la biblioteca" className="absolute bottom-full left-0 z-[60] mb-2 w-56 max-w-[calc(100vw-2rem)] rounded-[6px] border border-border/70 bg-card px-2 py-1 pb-2 shadow-lg md:bottom-auto md:top-full md:mb-0 md:mt-2">
+              <div className="relative">
+                <div ref={categoryListRef} className="dd-scroll category-picker-list -mr-2 flex flex-col overflow-y-auto overscroll-contain pr-2" style={catPick.list.length > 6 ? { maxHeight: categoryRowHeight * 6 } : undefined}>
+                  {catPick.list.map((c) => {
+                    const on = catPick.selected.includes(c.id);
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        title={c.name}
+                        onClick={() =>
+                          setCatPick((p) => ({
+                            ...p,
+                            selected: on ? p.selected.filter((x) => x !== c.id) : [...p.selected, c.id]
+                          }))
+                        }
+                        aria-pressed={on}
+                        className={cn(
+                          'relative flex w-full min-w-0 shrink-0 items-center justify-between gap-3 rounded-md text-left font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+                          on
+                            ? 'text-foreground'
+                            : 'text-muted-foreground'
+                        )}
+                        style={{
+                          paddingLeft: 0,
+                          paddingRight: 0,
+                          height: categoryRowHeight,
+                          minHeight: categoryRowHeight,
+                          maxHeight: categoryRowHeight,
+                          paddingTop: 0,
+                          paddingBottom: 0,
+                          boxSizing: 'border-box',
+                          fontSize: fontPx(13, scale, 11)
+                        }}
+                      >
+                        <span className="min-w-0 truncate">{c.name}</span>
+                        <span className={cn('grid shrink-0 place-items-center rounded border', on ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40 bg-background')} style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}>
+                          {on && <Check aria-hidden="true" style={{ width: px(12, scale, 10), height: px(12, scale, 10) }} />}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {catPick.list.length > 6 && (
+                  <>
+                    <div className={cn('category-scroll-hint pointer-events-none absolute left-1/2 top-0 z-10 flex h-4 w-6 -translate-x-1/2 items-center justify-center rounded-sm bg-card/95 text-primary', categoryScroll.above ? 'opacity-80' : 'opacity-0')} data-visible={categoryScroll.above} aria-hidden="true">
+                      <ChevronsUp className="category-scroll-cue category-scroll-cue--up h-4 w-4" />
+                    </div>
+                    <div className={cn('category-scroll-hint pointer-events-none absolute bottom-0 left-1/2 z-10 flex h-4 w-6 -translate-x-1/2 items-center justify-center rounded-sm bg-card/95 text-primary', categoryScroll.below ? 'opacity-80' : 'opacity-0')} data-visible={categoryScroll.below} aria-hidden="true">
+                      <ChevronsDown className="category-scroll-cue h-4 w-4" />
+                    </div>
+                  </>
+                )}
               </div>
               <div className="mt-1 pt-1">
                 <Button

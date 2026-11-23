@@ -727,6 +727,51 @@
   scrollbar-gutter: stable;
 }
 
+.category-picker-list {
+  scrollbar-gutter: stable;
+  scrollbar-width: none;
+}
+
+.category-picker-list::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.category-scroll-cue {
+  animation: category-scroll-cue 900ms ease-in-out infinite;
+}
+
+.category-scroll-cue--up {
+  animation-name: category-scroll-cue-up;
+}
+
+.category-scroll-hint {
+  transition: opacity 180ms ease;
+}
+
+.category-scroll-hint:not([data-visible='true']) .category-scroll-cue {
+  animation-play-state: paused;
+}
+
+@keyframes category-scroll-cue {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(3px); }
+}
+
+@keyframes category-scroll-cue-up {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .category-scroll-cue,
+  .category-scroll-hint {
+    animation: none;
+    transition: none;
+  }
+}
+
 .page-content-scroll::-webkit-scrollbar {
   width: 4px;
 }

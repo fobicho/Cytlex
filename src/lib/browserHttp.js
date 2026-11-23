@@ -16,13 +16,15 @@ const httpGetRequests = new Map();
 const httpGetBatchQueue = [];
 const proxyImageBatchQueue = [];
 const mangaDexCatalogImages = new Map();
+const catalogRequestSources = new Map();
 let httpGetBatchTimer;
 let proxyImageBatchTimer;
 let httpGetBatchWindowMs = HTTP_GET_BATCH_WINDOW_MS;
-const catalogImageKey = (value) => {
+export const catalogImageKey = (value) => {
   try {
     const url = new URL(value);
     if (url.hostname === 'cdn.achymanga.online') url.searchParams.delete('v');
+    if (url.hostname === 'oni.ntr-files.online' && /^\/public\/archivos\/mangas\/.+\/cover\.jpg$/i.test(url.pathname)) url.search = '';
     url.hash = '';
     return url.href;
   } catch { return value; }
@@ -146,8 +148,23 @@ function batchDescriptor({ url, options }) {
     ...(method === 'POST' ? { body: options.body } : {}),
     referer: proxyRefererFor(target, options.onfReferer),
     headers,
+    ...(typeof options.sourceId === 'string' ? { sourceId: options.sourceId } : {}),
+    ...(options.catalogCovers === true ? { catalogCovers: true } : {}),
     ...(onfCookie ? { onfCookie } : {})
   };
+}
+
+export function beginCatalogRequest(requestId, sourceId) {
+  if (!requestId || !sourceId) return;
+  const active = catalogRequestSources.get(requestId);
+  catalogRequestSources.set(requestId, { sourceId, count: (active?.count || 0) + 1 });
+}
+
+export function endCatalogRequest(requestId) {
+  if (!requestId) return;
+  const active = catalogRequestSources.get(requestId);
+  if (active?.count > 1) catalogRequestSources.set(requestId, { ...active, count: active.count - 1 });
+  else catalogRequestSources.delete(requestId);
 }
 
 function responseFromBatchResult(result) {
@@ -217,6 +234,17 @@ async function runProxyBatch(entries) {
         if (message.result?.fallback) { fallbackEntry(entry); return; }
         const proxied = responseFromBatchResult(message.result);
         if (!proxied) { fallbackEntry(entry); return; }
+        const images = Array.isArray(message.result?.catalogImages) ? message.result.catalogImages : [];
+        if (images.length > 40 || images.some((imageUrl) => typeof imageUrl !== 'string')) { fallbackEntry(entry); return; }
+        const catalogImageEntries = images.map((imageUrl) => {
+          let resolve;
+          const promise = new Promise((done) => { resolve = done; });
+          const key = catalogImageKey(imageUrl);
+          const imageEntry = { imageUrl: key, promise, resolve, done: false };
+          mangaDexCatalogImages.set(key, promise);
+          return imageEntry;
+        });
+        if (catalogImageEntries.length) catalogImageBatches.set(`request:${message.index}`, catalogImageEntries);
         const receivedCookie = proxied.headers.get('x-cytlex-onf-cookie') || '';
         if (receivedCookie) onfCookieJar = mergeCookiePairs(onfCookieJar, receivedCookie);
         try {
@@ -251,7 +279,8 @@ async function runProxyBatch(entries) {
         return;
       }
       if (message.type === 'catalog-image') {
-        const images = catalogImageBatches.get(Number(message.catalogIndex) || 0);
+        const batchKey = Number.isInteger(message.catalogIndex) ? Number(message.catalogIndex) : `request:${message.requestIndex}`;
+        const images = catalogImageBatches.get(batchKey);
         const image = images?.[message.index];
         if (!image || image.done) return;
         image.done = true;
@@ -303,8 +332,10 @@ function queueProxyGet(entry) {
   if (httpGetBatchQueue.length >= HTTP_GET_BATCH_MAX) {
     clearTimeout(httpGetBatchTimer);
     httpGetBatchTimer = setTimeout(flushProxyGetQueue, 0);
-  } else if (!httpGetBatchTimer) {
-    const delay = Math.max(httpGetBatchWindowMs, httpGetBatchQueue.some((item) => item.catalog) ? HTTP_CATALOG_BATCH_WINDOW_MS : 0);
+  } else {
+    const hasCatalogRequest = httpGetBatchQueue.some((item) => item.catalog || item.options?.catalogCovers === true);
+    const delay = hasCatalogRequest ? HTTP_CATALOG_BATCH_WINDOW_MS : httpGetBatchWindowMs;
+    clearTimeout(httpGetBatchTimer);
     httpGetBatchTimer = setTimeout(flushProxyGetQueue, delay);
   }
 }
@@ -323,7 +354,7 @@ function scheduleProxyRequest(url, options) {
   if (preferDirectRequest(target, method)) {
     return browserRequest(url, options);
   }
-  const supportedOptions = new Set(['headers', 'onfReferer', 'onfCookie', 'method', 'body', 'sourceId', 'search']);
+  const supportedOptions = new Set(['headers', 'onfReferer', 'onfCookie', 'method', 'body', 'sourceId', 'search', 'catalogCovers']);
   if (target.origin === window.location.origin || proxyEndpoint.origin !== window.location.origin || !['GET', 'POST'].includes(method) || options.signal
     || (method === 'POST' && typeof options.body !== 'string')
     || Object.keys(options).some((key) => !supportedOptions.has(key))
@@ -509,7 +540,9 @@ async function fetchCombinedChapter(url, signal, chapterType, referer = url) {
   const response = await fetch(endpoint, { signal, headers, credentials: 'omit' });
   if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('application/vnd.cytlex.chapter-stream')) {
     const sourceName = { onf: 'ONF', inmanga: 'InManga', mangaoni: 'MangaOni', zonatmo: 'ZonaTMO' }[chapterType] || chapterType;
-    throw new Error(`No se pudo usar la carga combinada de ${sourceName}.`);
+    const error = new Error(`No se pudo usar la carga combinada de ${sourceName}.`);
+    error.status = response.status;
+    throw error;
   }
   const reader = response.body.getReader();
   let buffer = new Uint8Array();
@@ -576,6 +609,14 @@ export function fetchInmangaChapter(url, signal) {
 
 export function fetchMangaOniChapter(url, signal) {
   return fetchCombinedChapter(url, signal, 'mangaoni', url);
+}
+
+export function fetchMangaDexChapter(url, signal) {
+  return fetchCombinedChapter(url, signal, 'mangadex', 'https://mangadex.org/');
+}
+
+export function fetchLeerCapituloChapter(url, signal) {
+  return fetchCombinedChapter(url, signal, 'leercapitulo', url);
 }
 
 export async function fetchMangaLectChapter(url, signal) {
@@ -981,6 +1022,8 @@ export async function httpGet(url, requestId, options = {}) {
   const bridge = electronBridge();
   if (bridge?.httpGet) return bridge.httpGet(url, requestId, options);
   const { includeUrl, ...requestOptions } = options;
+  const catalogSourceId = requestId && catalogRequestSources.get(requestId)?.sourceId;
+  if (catalogSourceId && catalogSourceId === requestOptions.sourceId) requestOptions.catalogCovers = true;
   const target = new URL(url);
   if (requestOptions.onfMangaDetail === true && target.origin === 'https://onfmangas.com'
     && /^\/manga\/\d+\/[^/]+\/?$/.test(target.pathname)) {
@@ -1083,6 +1126,7 @@ export async function httpGet(url, requestId, options = {}) {
   }
   const headers = new Headers(requestOptions.headers || {});
   const canCache = !requestOptions.signal
+    && requestOptions.catalogCovers !== true
     && requestOptions.search !== true
     && requestOptions.cache !== 'no-store'
     && requestOptions.cache !== 'no-cache'
@@ -1148,9 +1192,11 @@ export async function httpHead(url) {
 export async function httpPost(payload, requestId) {
   const bridge = electronBridge();
   if (bridge?.httpPost) return bridge.httpPost(payload, requestId);
+  const catalogSourceId = requestId && catalogRequestSources.get(requestId)?.sourceId;
   const response = await scheduleProxyRequest(payload.url, {
     method: 'POST',
     ...(payload.search === true && typeof payload.sourceId === 'string' ? { search: true, sourceId: payload.sourceId } : {}),
+    ...(catalogSourceId && catalogSourceId === payload.sourceId ? { catalogCovers: true, sourceId: payload.sourceId } : {}),
     onfReferer: payload.onfReferer,
     onfCookie: payload.onfCookie,
     headers: { 'Content-Type': 'application/json', ...payload.headers },
