@@ -8,6 +8,7 @@ const ALLOWED_HOSTS = new Set([
   'cdn1.intomanga.com',
   'd33y4i2dmzjqjh.cloudfront.net',
   'fobicho.github.io',
+  'h9s2.komiwa.net',
   'images.mangalect.org',
   'images.komiwa.net',
   'imagesolymp.xyz',
@@ -20,6 +21,7 @@ const ALLOWED_HOSTS = new Set([
   'mangalect.org',
   'mangadex.org',
   'media.imagesolymp.xyz',
+  'n7t9.komiwa.net',
   'olympusxyz.com',
   'onfmangas.com',
   'panel.olympusxyz.com',
@@ -284,7 +286,7 @@ function forwardedHeaders(request, target) {
   if (target.hostname === 'cdn.achymanga.online') {
     headers.set('referer', achyMangaReferer(request));
   }
-  if (target.hostname === 'images.komiwa.net' || target.hostname === 's.imgfi.com' || target.hostname === 'media.mangavault.lat') {
+  if (target.hostname === 'h9s2.komiwa.net' || target.hostname === 'n7t9.komiwa.net' || target.hostname === 'images.komiwa.net' || target.hostname === 's.imgfi.com' || target.hostname === 'media.mangavault.lat') {
     headers.set('referer', komiwaImageReferer(request));
   }
   if (target.hostname === 'cdnlxd.xyz' || target.hostname.endsWith('.cdnlxd.xyz')) {
@@ -1309,7 +1311,7 @@ function decodeHtmlAttribute(value) {
   });
 }
 
-function komiwaChapterPageUrls(html, chapterUrl) {
+function komiwaChapterPageUrls(html, chapterUrl, chapterNumber = '') {
   const source = String(html || '');
   const serialized = source.replace(/\\+u002f/gi, '/').replace(/\\+\//g, '/').replace(/\\+"/g, '"');
   const pages = [];
@@ -1330,22 +1332,24 @@ function komiwaChapterPageUrls(html, chapterUrl) {
         || (host === 'images.komiwa.net' && (/^\/komiwa-images\/covers\//.test(page.pathname) || /^\/komiwa-images\/_mihon\//.test(page.pathname)))) return;
       if (host === 'blogger.googleusercontent.com' || host === 's.imgfi.com'
         || host === 'media.mangavault.lat' || host === 'images.komiwa.net'
+        || host === 'h9s2.komiwa.net' || host === 'n7t9.komiwa.net'
         || host === 'cdnlxd.xyz' || host.endsWith('.cdnlxd.xyz')
         || host === 't34798ndc.com' || host.endsWith('.t34798ndc.com')) pages.push(page.href);
     } catch {}
   };
+  const flightStream = [...source.matchAll(/self\.__next_f\.push\(\[1,\s*("(?:\\.|[^"\\])*")\]\)/g)]
+    .map(([, chunk]) => { try { return JSON.parse(chunk); } catch { return ''; } }).join('');
+  let packedPageList = false;
   const key = source.match(/--rk:\s*\\?"([^"\\]+)\\?"/)?.[1];
   if (key) {
-    const stream = [...source.matchAll(/self\.__next_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)/g)]
-      .map(([, chunk]) => { try { return JSON.parse(chunk); } catch { return ''; } }).join('');
     const keyBytes = new TextEncoder().encode(key);
-    const references = new Set([...stream.matchAll(/"__r"\s*:\s*"\$L?([0-9a-z]+)"/gi)].map(([, id]) => id));
+    const references = new Set([...flightStream.matchAll(/"__r"\s*:\s*"\$L?([0-9a-z]+)"/gi)].map(([, id]) => id));
     for (const reference of references) {
-      const row = stream.match(new RegExp(`(?:^|\\n)${reference}:T([0-9a-f]+),`, 'i'));
+      const row = flightStream.match(new RegExp(`(?:^|\\n)${reference}:T([0-9a-f]+),`, 'i'));
       if (!row) continue;
       const length = Number.parseInt(row[1], 16);
       const start = row.index + row[0].length;
-      const encoded = stream.slice(start, start + length);
+      const encoded = flightStream.slice(start, start + length);
       if (!length || encoded.length !== length || !/^[A-Za-z0-9_-]+$/.test(encoded) || length % 4 === 1) continue;
       try {
         const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - encoded.length % 4) % 4);
@@ -1356,26 +1360,87 @@ function komiwaChapterPageUrls(html, chapterUrl) {
       } catch {}
     }
   }
-  const marker = serialized.match(/"imageSigs"\s*:\s*\{/);
-  if (marker) {
-    const start = marker.index + marker[0].length - 1;
-    let depth = 0, quoted = false, escaped = false, end = -1;
-    for (let i = start; i < serialized.length; i++) {
-      const char = serialized[i];
-      if (quoted) {
-        if (escaped) escaped = false;
-        else if (char === '\\') escaped = true;
-        else if (char === '"') quoted = false;
-      } else if (char === '"') quoted = true;
-      else if (char === '{') depth++;
-      else if (char === '}' && --depth === 0) { end = i + 1; break; }
+  // Current Komiwa pages keep the complete page list in an obfuscated React Flight row.
+  try {
+    const seed = 'komiwa-r1-2026-11';
+    const hash36 = (value) => {
+      let hash = 0x811c9dc5;
+      for (let i = 0; i < value.length; i++) {
+        hash ^= value.charCodeAt(i);
+        hash = Math.imul(hash, 0x1000193) >>> 0;
+      }
+      return hash.toString(36);
+    };
+    const packField = `_${hash36(`pack|${seed}`).slice(0, 4)}`;
+    const keyField = `_${hash36(`key|${seed}`).slice(0, 4)}`;
+    const packReference = flightStream.match(new RegExp(`"${packField}"\\s*:\\s*"\\$L?([0-9a-z]+)"`, 'i'))?.[1];
+    const maskedKey = flightStream.match(new RegExp(`"${keyField}"\\s*:\\s*"([A-Za-z0-9_-]+)"`, 'i'))?.[1];
+    const chapterId = new URL(chapterUrl).pathname.match(/\/chapter\/([\da-f-]{36})/i)?.[1];
+    const embeddedNumber = chapterId
+      ? flightStream.match(new RegExp(`"id":"${chapterId}","number":(?:"([^"]+)"|(-?[\\d.]+))`, 'i'))
+      : null;
+    const number = String(embeddedNumber?.[1] ?? embeddedNumber?.[2] ?? chapterNumber ?? '');
+    if (packReference && maskedKey && chapterId && number) {
+      const row = flightStream.match(new RegExp(`(?:^|\\n)${packReference}:T([0-9a-f]+),`, 'i'));
+      if (row) {
+        const length = Number.parseInt(row[1], 16);
+        const start = row.index + row[0].length;
+        const encoded = flightStream.slice(start, start + length);
+        if (length && encoded.length === length && /^[A-Za-z0-9_-]+$/.test(encoded) && length % 4 !== 1) {
+          const decodeBase64Url = (value) => {
+            const base64 = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4);
+            return Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+          };
+          const unmaskedBytes = decodeBase64Url(maskedKey);
+          const seedBytes = new TextEncoder().encode(seed);
+          for (let i = 0; i < unmaskedBytes.length; i++) {
+            unmaskedBytes[i] ^= (seedBytes[i % seedBytes.length] ^ (31 * i + 131)) & 255;
+          }
+          const chapterKey = new TextDecoder().decode(unmaskedBytes);
+          const keyInput = `${seed}\x01${chapterKey}\x01${chapterId}|${number}`;
+          let hash = 0x811c9dc5, derivedKey = '';
+          for (let round = 0; round < 32 && derivedKey.length < 43; round++) {
+            for (let i = 0; i < keyInput.length; i++) {
+              hash ^= keyInput.charCodeAt(i);
+              hash = Math.imul(hash, 0x1000193) >>> 0;
+            }
+            hash ^= round;
+            hash = Math.imul(hash, 0x1000193) >>> 0;
+            derivedKey += hash.toString(36);
+          }
+          const keyBytes = new TextEncoder().encode((derivedKey + 'komiwa').slice(0, 43));
+          const packedBytes = decodeBase64Url(encoded);
+          for (let i = 0; i < packedBytes.length; i++) packedBytes[i] ^= keyBytes[i % keyBytes.length] ^ (255 & i);
+          const decoded = JSON.parse(new TextDecoder().decode(packedBytes));
+          if (Array.isArray(decoded?.p) && decoded.p.length) {
+            pages.length = 0;
+            collect(decoded.p);
+            packedPageList = pages.length > 0;
+          }
+        }
+      }
     }
-    if (end > start) {
-      try { Object.keys(JSON.parse(serialized.slice(start, end))).forEach(add); } catch {}
+  } catch {}
+  if (!packedPageList) {
+    const marker = serialized.match(/"imageSigs"\s*:\s*\{/);
+    if (marker) {
+      const start = marker.index + marker[0].length - 1;
+      let depth = 0, quoted = false, escaped = false, end = -1;
+      for (let i = start; i < serialized.length; i++) {
+        const char = serialized[i];
+        if (quoted) {
+          if (escaped) escaped = false;
+          else if (char === '\\') escaped = true;
+          else if (char === '"') quoted = false;
+        } else if (char === '"') quoted = true;
+        else if (char === '{') depth++;
+        else if (char === '}' && --depth === 0) { end = i + 1; break; }
+      }
+      if (end > start) {
+        try { Object.keys(JSON.parse(serialized.slice(start, end))).forEach(add); } catch {}
+      }
     }
-  }
-  for (const match of serialized.matchAll(/https?:\/\/[^\s"'<>\\]+/gi)) add(match[0]);
-  if (!pages.length) {
+    for (const match of serialized.matchAll(/https?:\/\/[^\s"'<>\\]+/gi)) add(match[0]);
     for (const tag of source.match(/<img\b[^>]*>/gi) || []) {
       const attrs = attrsOf(tag);
       add(attrs.get('data-src') || attrs.get('data-lazy-src') || attrs.get('data-original') || attrs.get('src') || '');
@@ -1544,7 +1609,7 @@ async function handleAchyChapter(request, target) {
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
             while (!stopped && next < initial.length) {
               const index = next++;
-              const image = await fetchImageBatchItem({ url: initial[index], referer: target.href }, request, subrequestBudget, byteBudget);
+              const image = await fetchImageBatchItem({ url: initial[index], referer: chapterPageUrl.href }, request, subrequestBudget, byteBudget);
               if (stopped) return;
               const bytes = image.body ? new Uint8Array(await image.body.arrayBuffer()) : new Uint8Array();
               write({ index, length: bytes.length, status: image.status, contentType: image.contentType || '' }, bytes);
@@ -1668,6 +1733,63 @@ async function handleOlympusDetail(request, target, sharedBudget = null, maxChap
   } catch (error) {
     if (error?.response) return error.response;
     return errorResponse('Olympus detail unavailable', deadline.signal.aborted ? 504 : 502, false,
+      deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
+  } finally { clearTimeout(timeout); }
+}
+
+async function handleOlympusChapter(request, target) {
+  const match = target.pathname.match(/^\/api\/capitulo\/([\w-]+)\/(-?\d+(?:\.\d+)?)$/);
+  if (target.origin !== 'https://olympusxyz.com' || !match) return errorResponse('Invalid Olympus chapter', 400);
+  const [, slug] = match;
+  const deadline = new AbortController();
+  const timeout = setTimeout(() => deadline.abort(), 12000);
+  const signal = AbortSignal.any([request.signal, deadline.signal]);
+  try {
+    const response = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    if (response.proxyError) return response.proxyError;
+    if (!response.upstream.ok) return new Response(null, { status: response.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
+    const raw = await new Response(limitResponseBody(response.upstream.body, PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
+    const data = JSON.parse(raw);
+    const chapter = data?.chapter || {};
+    const pages = (chapter.pages || []).filter((url) => typeof url === 'string' && validateTarget(url));
+    if (!pages.length || pages.length > 1000 || pages.length !== chapter.pages?.length) return errorResponse('Olympus chapter has invalid pages', 422);
+
+    const initial = pages.slice(0, PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS);
+    const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
+    const byteBudget = createImageByteBudget();
+    let stopped = false;
+    let next = 0;
+    const encoder = new TextEncoder();
+    const imageReferer = 'https://olympusxyz.com/';
+    const body = new ReadableStream({
+      async start(controller) {
+        const write = (metadata, bytes = new Uint8Array()) => {
+          const encoded = encoder.encode(JSON.stringify(metadata));
+          const prefix = new Uint8Array(4);
+          new DataView(prefix.buffer).setUint32(0, encoded.length);
+          controller.enqueue(prefix); controller.enqueue(encoded);
+          if (bytes.length) controller.enqueue(bytes);
+        };
+        try {
+          write({ label: chapter.name ? `Capítulo ${chapter.name}` : '', mangaUrl: `https://olympusxyz.com/series/${slug}`, pages, imageReferer });
+          await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
+            while (!stopped && next < initial.length) {
+              const index = next++;
+              const image = await fetchImageBatchItem({ url: initial[index], referer: imageReferer }, request, subrequestBudget, byteBudget);
+              if (stopped) return;
+              const bytes = image.body ? new Uint8Array(await image.body.arrayBuffer()) : new Uint8Array();
+              write({ index, length: bytes.length, status: image.status, contentType: image.contentType || '' }, bytes);
+            }
+          }));
+          if (!stopped) controller.close();
+        } catch (error) { if (!stopped) controller.error(error); }
+      },
+      cancel() { stopped = true; }
+    });
+    return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
+  } catch (error) {
+    if (error?.response) return error.response;
+    return errorResponse('Olympus chapter unavailable', deadline.signal.aborted ? 504 : 422, false,
       deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
   } finally { clearTimeout(timeout); }
 }
@@ -2001,9 +2123,10 @@ async function handleKomiwaChapter(request, target) {
   try {
     const mangaId = target.searchParams.get('manga') || '';
     const slug = target.searchParams.get('slug') || '';
+    const chapterPageUrl = new URL(target.pathname, target.origin);
     const chapterHeaders = forwardedHeaders(request, target);
     chapterHeaders.set('referer', 'https://www.komiwa.net/');
-    const chapterRequest = fetchTarget(target, 'GET', chapterHeaders, undefined, signal, { retries: 0 });
+    const chapterRequest = fetchTarget(chapterPageUrl, 'GET', chapterHeaders, undefined, signal, { retries: 0 });
     const chaptersUrl = /^[\da-f-]{36}$/i.test(mangaId)
       ? new URL(`/manga/${encodeURIComponent(mangaId)}/chapters?page=1&limit=99999&sort=desc`, 'https://b78sk.komiwa.net')
       : null;
@@ -2012,7 +2135,7 @@ async function handleKomiwaChapter(request, target) {
       : Promise.resolve(null);
     const [chapterResult, chaptersResult] = await Promise.all([chapterRequest, chaptersRequest]);
     if (chapterResult.proxyError) return chapterResult.proxyError;
-    if (!chapterResult.upstream.ok) return new Response(null, { status: chapterResult.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
+    if (!chapterResult.upstream.ok) return new Response(null, { status: chapterResult.upstream.status, headers: { 'cache-control': 'no-store', 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const html = await new Response(limitResponseBody(chapterResult.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
     let chapterData = null;
     if (chaptersResult?.upstream?.ok) {
@@ -2021,6 +2144,9 @@ async function handleKomiwaChapter(request, target) {
         chapterData = JSON.parse(raw)?.data?.chapters || null;
       } catch {}
     }
+    const normalizeSlug = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLocaleLowerCase('es').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const normalizedMangaSlug = normalizeSlug(slug);
     const options = (Array.isArray(chapterData) ? chapterData : [])
       .filter((item) => item?.id)
       .sort((a, b) => {
@@ -2033,12 +2159,18 @@ async function handleKomiwaChapter(request, target) {
         if (mangaId) url.searchParams.set('manga', mangaId);
         if (slug) url.searchParams.set('slug', slug);
         const title = String(item.title || '').replace(/\s+/g, ' ').trim();
-        return { url: url.href, title: title || `Capítulo ${String(item.number || '').trim()}` };
+        const mangaTitle = String(item.manga?.title || item.mangaTitle || '').replace(/\s+/g, ' ').trim();
+        const isMangaTitle = (mangaTitle && title.toLocaleLowerCase('es') === mangaTitle.toLocaleLowerCase('es'))
+          || (normalizedMangaSlug && normalizeSlug(title) === normalizedMangaSlug);
+        return { url: url.href, title: !title || isMangaTitle ? `Capítulo ${String(item.number || '').trim()}` : title };
       });
     const currentIndex = options.findIndex((item) => new URL(item.url).pathname === target.pathname);
     const heading = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || '';
     const label = decodeHtmlAttribute(heading.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ')).trim();
-    const pages = komiwaChapterPageUrls(html, target.href);
+    const currentChapter = Array.isArray(chapterData)
+      ? chapterData.find((item) => String(item?.id || '').toLowerCase() === target.pathname.match(/[\da-f-]{36}/i)?.[0]?.toLowerCase())
+      : null;
+    const pages = komiwaChapterPageUrls(html, chapterPageUrl.href, currentChapter?.number);
     if (!pages.length || pages.length > 1000) return errorResponse('Komiwa chapter has no pages', 422);
 
     const mangaUrl = slug ? `https://www.komiwa.net/manga/${encodeURIComponent(slug)}` : '';
@@ -2058,7 +2190,7 @@ async function handleKomiwaChapter(request, target) {
         };
         try {
           write({ pages, options, label: label || options[currentIndex]?.title || 'Capítulo', mangaUrl,
-            imageReferer: target.href,
+            imageReferer: chapterPageUrl.href,
             prev: currentIndex > 0 ? options[currentIndex - 1] : null,
             next: currentIndex >= 0 ? options[currentIndex + 1] || null : null });
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
@@ -2545,6 +2677,10 @@ export async function onRequest(context) {
   if (requestUrl.searchParams.get('chapter') === 'achymanga') {
     if (method !== 'GET') return errorResponse('Method not allowed', 405);
     return handleAchyChapter(request, target);
+  }
+  if (requestUrl.searchParams.get('chapter') === 'olympus') {
+    if (method !== 'GET') return errorResponse('Method not allowed', 405);
+    return handleOlympusChapter(request, target);
   }
   if (requestUrl.searchParams.get('chapter') === 'leercapitulo') {
     if (method !== 'GET') return errorResponse('Method not allowed', 405);

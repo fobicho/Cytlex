@@ -563,7 +563,7 @@ async function fetchCombinedChapter(url, signal, chapterType, referer = url) {
   if (chapterType === 'onf' && onfCookieJar) headers.set('x-cytlex-onf-cookie', onfCookieJar);
   const response = await fetch(endpoint, { signal, headers, credentials: 'omit' });
   if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('application/vnd.cytlex.chapter-stream')) {
-    const sourceName = { onf: 'ONF', inmanga: 'InManga', mangaoni: 'MangaOni', komiwa: 'Komiwa', zonatmo: 'ZonaTMO' }[chapterType] || chapterType;
+    const sourceName = { onf: 'ONF', inmanga: 'InManga', mangaoni: 'MangaOni', komiwa: 'Komiwa', zonatmo: 'ZonaTMO', olympus: 'Olympus' }[chapterType] || chapterType;
     throw Object.assign(new Error(`No se pudo usar la carga combinada de ${sourceName}.`), {
       status: response.status,
       requestOrigin: response.headers.get('x-cytlex-error-origin') || undefined,
@@ -619,6 +619,17 @@ async function fetchCombinedChapter(url, signal, chapterType, referer = url) {
 
 export function fetchAchyChapter(url, signal) {
   return fetchCombinedChapter(url, signal, 'achymanga', url);
+}
+
+export function fetchOlympusChapter(url, signal) {
+  const chapterPage = new URL(url);
+  const [, slug, id] = chapterPage.pathname.split('/').filter(Boolean);
+  const number = chapterPage.searchParams.get('number') || '';
+  if (chapterPage.origin !== 'https://olympusxyz.com' || !slug || !id || !/^-?\d+(?:\.\d+)?$/.test(number)) {
+    throw new Error('Olympus no incluyó el número de capítulo.');
+  }
+  const target = `https://olympusxyz.com/api/capitulo/${slug}/${number}`;
+  return fetchCombinedChapter(target, signal, 'olympus', 'https://olympusxyz.com/');
 }
 
 export function fetchOnfChapter(url, signal) {

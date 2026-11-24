@@ -10,7 +10,7 @@ import { tracking } from '../lib/tracking.js';
 import { chapterOrder, detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
-import { browserImageUrl, fetchAchyChapter, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchKomiwaChapter, fetchLeerCapituloChapter, fetchMangaDexChapter, fetchMangaLectChapter, fetchMangaOniChapter, fetchOnfChapter, fetchZonaTmoChapter, sourceErrorMessage } from '../lib/browserHttp.js';
+import { browserImageUrl, fetchAchyChapter, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchKomiwaChapter, fetchLeerCapituloChapter, fetchMangaDexChapter, fetchMangaLectChapter, fetchMangaOniChapter, fetchOlympusChapter, fetchOnfChapter, fetchZonaTmoChapter, sourceErrorMessage } from '../lib/browserHttp.js';
 import { readRecentChapter, writeRecentChapter } from '../lib/recentChapters.js';
 import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
@@ -400,7 +400,7 @@ export default function Reader() {
   const sourceId = params.get('s') || 'leercapitulo';
   const mangaTitleParam = params.get('t') || '';
   const recentChapterKey = JSON.stringify(sourceId === 'komiwa'
-    ? [sourceId, extensions.manifest(sourceId)?.version || '0', 'complete-page-list-v2', chapterUrl]
+    ? [sourceId, extensions.manifest(sourceId)?.version || '0', 'complete-page-list-v5', chapterUrl]
     : [sourceId, extensions.manifest(sourceId)?.version || '0', chapterUrl]);
   const sourceName = extensions.manifest(sourceId)?.name;
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
@@ -608,6 +608,9 @@ export default function Reader() {
         }
         if (!r && sourceId === 'achymanga' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
           try { r = await fetchAchyChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
+        }
+        if (!r && sourceId === 'olympusscanlation' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
+          try { r = await fetchOlympusChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
         }
         if (!r && sourceId === 'onfmangas' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
           try { r = await fetchOnfChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
@@ -1354,7 +1357,6 @@ export default function Reader() {
             </Button>
             <Dropdown
               className="min-w-0 flex-1"
-              scrollToSelectedOnOpen={false}
               menuClassName={selectorMenuClass}
               buttonClassName="rounded-none border-0 bg-transparent font-medium tabular-nums hover:bg-[color:var(--reader-control-active)] aria-expanded:bg-[color:var(--reader-control-active)] focus-visible:ring-inset"
               buttonStyle={{ ...selectorStyle, height: 'calc(var(--reader-control-height) - 2px)' }}

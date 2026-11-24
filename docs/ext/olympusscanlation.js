@@ -91,7 +91,7 @@ export default function createSource({ fetchText }) {
     }
     const s = data?.data || {};
     const chapters = entries.map((c) => ({
-      url: `${base}/capitulo/${slug}/${c.id}`,
+      url: `${base}/capitulo/${slug}/${c.id}${/^-?\d+(?:\.\d+)?$/.test(String(c.name || '')) ? `?number=${encodeURIComponent(c.name)}` : ''}`,
       title: c.name ? `Capítulo ${c.name}` : `Capítulo ${c.id}`,
       date: c.published_at || ''
     }));

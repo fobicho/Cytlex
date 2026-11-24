@@ -549,9 +549,14 @@ export async function preloadLibraryCover(url, { web = false, priority = false, 
       acquired = true;
       let original = url;
       if (browserProxy) {
+        const bundledCover = getCatalogImageBlob(libraryCoverBatchUrl(url));
+        const bundledImage = bundledCover ? await bundledCover : null;
         const now = Date.now();
-        if (!searchCover && ((failedLibraryCovers.get(url) || 0) > now || (failedCoverHosts.get(host)?.until || 0) > now)) return '';
-        if (searchCover) {
+        if (bundledImage) {
+          originalObjectUrl = URL.createObjectURL(bundledImage);
+          original = originalObjectUrl;
+        } else if (!searchCover && ((failedLibraryCovers.get(url) || 0) > now || (failedCoverHosts.get(host)?.until || 0) > now)) return '';
+        else if (searchCover) {
           original = searchCover;
         } else {
           const signal = AbortSignal.timeout(30000);

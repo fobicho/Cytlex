@@ -158,7 +158,6 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
       canFetchNextPage = result.value.hasMore ?? currentPage < (result.value.totalPages || 1);
       while (batch.length < CATALOG_BATCH_SIZE && queued.length) batch.push(queued.shift());
     }
-    if (id === 'mangalect' || id === 'leercapitulo') break;
   }
 
   return { items: batch, queuedItems: queued, page: currentPage, apiHasMore: canFetchNextPage, hasMore: queued.length > 0 || canFetchNextPage };
@@ -215,12 +214,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const useCompactFilterFields = isZonaTmo || sourceId === 'mangalect';
   const filterPanelWidth = px(isZonaTmo ? 480 : 360, scale, 300);
   const getFilterRoot = () => filterRootRef.current;
-  const preloadCatalogCovers = (mangas) => {
-    if (!window.cytlex?.fetchImage) {
-      return preloadLibraryCoversBatch(mangas.map((manga) => manga.cover).filter(Boolean), { web: true, bundledOnly: true });
-    }
-    return Promise.resolve();
-  };
+  const preloadCatalogCovers = (mangas) =>
+    preloadLibraryCoversBatch(mangas.map((manga) => manga.cover).filter(Boolean), { web: true });
 
   const selectSource = (id) => {
     sourceCatalogState.clear();
