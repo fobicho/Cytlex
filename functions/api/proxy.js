@@ -1309,6 +1309,74 @@ function decodeHtmlAttribute(value) {
   });
 }
 
+function komiwaChapterPageUrls(html, chapterUrl) {
+  const source = String(html || '');
+  const serialized = source.replace(/\\+u002f/gi, '/').replace(/\\+\//g, '/').replace(/\\+"/g, '"');
+  const pages = [];
+  const attrsOf = (tag) => new Map([...tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)]
+    .map((match) => [match[1].toLowerCase(), decodeHtmlAttribute(match[2] ?? match[3] ?? match[4] ?? '')]));
+  const add = (raw) => {
+    try {
+      const page = new URL(decodeHtmlAttribute(raw), chapterUrl);
+      const host = page.hostname.toLowerCase();
+      if (page.protocol !== 'https:' || !validateTarget(page.href)
+        || (host === 'images.komiwa.net' && (/^\/komiwa-images\/covers\//.test(page.pathname) || /^\/komiwa-images\/_mihon\//.test(page.pathname)))) return;
+      if (host === 'blogger.googleusercontent.com' || host === 's.imgfi.com'
+        || host === 'media.mangavault.lat' || host === 'images.komiwa.net'
+        || host === 'cdnlxd.xyz' || host.endsWith('.cdnlxd.xyz')
+        || host === 't34798ndc.com' || host.endsWith('.t34798ndc.com')) pages.push(page.href);
+    } catch {}
+  };
+  const key = source.match(/--rk:\s*\\?"([^"\\]+)\\?"/)?.[1];
+  if (key) {
+    const stream = [...source.matchAll(/self\.__next_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)/g)]
+      .map(([, chunk]) => { try { return JSON.parse(chunk); } catch { return ''; } }).join('');
+    const keyBytes = new TextEncoder().encode(key);
+    const references = new Set([...stream.matchAll(/"__r"\s*:\s*"\$([0-9a-z]+)"/g)].map(([, id]) => id));
+    for (const reference of references) {
+      const row = stream.match(new RegExp(`(?:^|\\n)${reference}:T([0-9a-f]+),`, 'i'));
+      if (!row) continue;
+      const length = Number.parseInt(row[1], 16);
+      const start = row.index + row[0].length;
+      const encoded = stream.slice(start, start + length);
+      if (!length || encoded.length !== length || !/^[A-Za-z0-9_-]+$/.test(encoded) || length % 4 === 1) continue;
+      try {
+        const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - encoded.length % 4) % 4);
+        const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+        for (let i = 0; i < bytes.length; i++) bytes[i] ^= keyBytes[i % keyBytes.length] ^ (255 & i);
+        const value = JSON.parse(new TextDecoder().decode(bytes));
+        if (Array.isArray(value.p)) value.p.forEach(add);
+      } catch {}
+    }
+  }
+  const marker = serialized.match(/"imageSigs"\s*:\s*\{/);
+  if (marker) {
+    const start = marker.index + marker[0].length - 1;
+    let depth = 0, quoted = false, escaped = false, end = -1;
+    for (let i = start; i < serialized.length; i++) {
+      const char = serialized[i];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') quoted = false;
+      } else if (char === '"') quoted = true;
+      else if (char === '{') depth++;
+      else if (char === '}' && --depth === 0) { end = i + 1; break; }
+    }
+    if (end > start) {
+      try { Object.keys(JSON.parse(serialized.slice(start, end))).forEach(add); } catch {}
+    }
+  }
+  for (const match of serialized.matchAll(/https?:\/\/[^\s"'<>\\]+/gi)) add(match[0]);
+  if (!pages.length) {
+    for (const tag of source.match(/<img\b[^>]*>/gi) || []) {
+      const attrs = attrsOf(tag);
+      add(attrs.get('data-src') || attrs.get('data-lazy-src') || attrs.get('data-original') || attrs.get('src') || '');
+    }
+  }
+  return [...new Set(pages)];
+}
+
 function achyCatalogImages(html, catalogUrl) {
   const images = new Set();
   const covers = html.matchAll(/\bdata-cover\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi);
@@ -1916,6 +1984,95 @@ async function handleLeerCapituloChapter(request, target) {
   } finally { clearTimeout(timeout); }
 }
 
+async function handleKomiwaChapter(request, target) {
+  if (target.origin !== 'https://www.komiwa.net' || !/^\/chapter\/[\da-f-]{36}\/?$/i.test(target.pathname)) {
+    return errorResponse('Invalid Komiwa chapter', 400);
+  }
+  const deadline = new AbortController();
+  const timeout = setTimeout(() => deadline.abort(), 12000);
+  const signal = AbortSignal.any([request.signal, deadline.signal]);
+  try {
+    const mangaId = target.searchParams.get('manga') || '';
+    const slug = target.searchParams.get('slug') || '';
+    const chapterRequest = fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    const chaptersUrl = /^[\da-f-]{36}$/i.test(mangaId)
+      ? new URL(`/manga/${encodeURIComponent(mangaId)}/chapters?page=1&limit=99999&sort=desc`, 'https://b78sk.komiwa.net')
+      : null;
+    const chaptersRequest = chaptersUrl
+      ? fetchTarget(chaptersUrl, 'GET', new Headers({ accept: 'application/json', referer: 'https://www.komiwa.net/' }), undefined, signal, { retries: 0 })
+      : Promise.resolve(null);
+    const [chapterResult, chaptersResult] = await Promise.all([chapterRequest, chaptersRequest]);
+    if (chapterResult.proxyError) return chapterResult.proxyError;
+    if (!chapterResult.upstream.ok) return new Response(null, { status: chapterResult.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
+    const html = await new Response(limitResponseBody(chapterResult.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
+    let chapterData = null;
+    if (chaptersResult?.upstream?.ok) {
+      try {
+        const raw = await new Response(limitResponseBody(chaptersResult.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
+        chapterData = JSON.parse(raw)?.data?.chapters || null;
+      } catch {}
+    }
+    const options = (Array.isArray(chapterData) ? chapterData : [])
+      .filter((item) => item?.id)
+      .sort((a, b) => {
+        const left = Number.parseFloat(a.number), right = Number.parseFloat(b.number);
+        if (Number.isFinite(left) && Number.isFinite(right) && left !== right) return left - right;
+        return String(a.number).localeCompare(String(b.number), 'es', { numeric: true });
+      })
+      .map((item) => {
+        const url = new URL(`/chapter/${encodeURIComponent(item.id)}`, 'https://www.komiwa.net');
+        if (mangaId) url.searchParams.set('manga', mangaId);
+        if (slug) url.searchParams.set('slug', slug);
+        const title = String(item.title || '').replace(/\s+/g, ' ').trim();
+        return { url: url.href, title: title || `Capítulo ${String(item.number || '').trim()}` };
+      });
+    const currentIndex = options.findIndex((item) => new URL(item.url).pathname === target.pathname);
+    const heading = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || '';
+    const label = decodeHtmlAttribute(heading.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ')).trim();
+    const pages = komiwaChapterPageUrls(html, target.href);
+    if (!pages.length || pages.length > 1000) return errorResponse('Komiwa chapter has no pages', 422);
+
+    const mangaUrl = slug ? `https://www.komiwa.net/manga/${encodeURIComponent(slug)}` : '';
+    const initial = pages.slice(0, PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS);
+    const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 2);
+    const byteBudget = createImageByteBudget();
+    let stopped = false, next = 0;
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      async start(controller) {
+        const write = (metadata, bytes = new Uint8Array()) => {
+          const data = encoder.encode(JSON.stringify(metadata));
+          const prefix = new Uint8Array(4);
+          new DataView(prefix.buffer).setUint32(0, data.length);
+          controller.enqueue(prefix); controller.enqueue(data);
+          if (bytes.length) controller.enqueue(bytes);
+        };
+        try {
+          write({ pages, options, label: label || options[currentIndex]?.title || 'Capítulo', mangaUrl,
+            imageReferer: target.href,
+            prev: currentIndex > 0 ? options[currentIndex - 1] : null,
+            next: currentIndex >= 0 ? options[currentIndex + 1] || null : null });
+          await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
+            while (!stopped && next < initial.length) {
+              const index = next++;
+              const image = await fetchImageBatchItem({ url: initial[index], referer: target.href }, request, subrequestBudget, byteBudget);
+              if (stopped) return;
+              const bytes = image.body ? new Uint8Array(await image.body.arrayBuffer()) : new Uint8Array();
+              write({ index, length: bytes.length, status: image.status, contentType: image.contentType || '' }, bytes);
+            }
+          }));
+          if (!stopped) controller.close();
+        } catch (error) { if (!stopped) controller.error(error); }
+      },
+      cancel() { stopped = true; }
+    });
+    return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
+  } catch (error) {
+    return errorResponse('Komiwa chapter unavailable', deadline.signal.aborted ? 504 : 422, false,
+      deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
+  } finally { clearTimeout(timeout); }
+}
+
 async function handleOnfChapter(request, target) {
   if (target.origin !== 'https://onfmangas.com' || !target.pathname.startsWith('/lector/')) return errorResponse('Invalid ONF chapter', 400);
   const deadline = new AbortController();
@@ -2407,6 +2564,10 @@ export async function onRequest(context) {
   if (new URL(request.url).searchParams.get('chapter') === 'mangaoni') {
     if (method !== 'GET') return errorResponse('Method not allowed', 405);
     return handleMangaOniChapter(request, target);
+  }
+  if (new URL(request.url).searchParams.get('chapter') === 'komiwa') {
+    if (method !== 'GET') return errorResponse('Method not allowed', 405);
+    return handleKomiwaChapter(request, target);
   }
   if (new URL(request.url).searchParams.get('catalog') === 'mangadex') {
     if (method !== 'GET') return errorResponse('Method not allowed', 405);

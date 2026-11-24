@@ -10,7 +10,7 @@ import { tracking } from '../lib/tracking.js';
 import { chapterOrder, detailScroll } from '../lib/searchState.js';
 import { sync } from '../lib/sync.js';
 import { appWindow } from '../lib/appWindow.js';
-import { browserImageUrl, fetchAchyChapter, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchLeerCapituloChapter, fetchMangaDexChapter, fetchMangaLectChapter, fetchMangaOniChapter, fetchOnfChapter, fetchZonaTmoChapter, sourceErrorMessage } from '../lib/browserHttp.js';
+import { browserImageUrl, fetchAchyChapter, fetchImage, fetchImageBlob, fetchImageBlobBatch, fetchInmangaChapter, fetchKomiwaChapter, fetchLeerCapituloChapter, fetchMangaDexChapter, fetchMangaLectChapter, fetchMangaOniChapter, fetchOnfChapter, fetchZonaTmoChapter, sourceErrorMessage } from '../lib/browserHttp.js';
 import { readRecentChapter, writeRecentChapter } from '../lib/recentChapters.js';
 import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
@@ -629,6 +629,9 @@ export default function Reader() {
         if (!r && sourceId === 'mangaoni' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
           try { r = await fetchMangaOniChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
         }
+        if (!r && sourceId === 'komiwa' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
+          r = await fetchKomiwaChapter(chapterUrl, combinedController.signal);
+        }
         if (!r) r = await api.chapter(chapterUrl, sourceId);
         if (!r?.pages?.length) r = await api.chapter(chapterUrl, sourceId, { fresh: true });
         if (!active) return;
@@ -1044,6 +1047,7 @@ export default function Reader() {
     if (sourceId.startsWith('mangadex') && extensions.isInstalled(sourceId) && !window.cytlex?.httpGet) return;
     if (sourceId === 'leercapitulo' && (mangaTitleParam || api.peekDetail(currentMangaUrl, sourceId)?.title)) return;
     if (sourceId === 'mangaoni' && extensions.isInstalled(sourceId) && !window.cytlex?.httpGet) return;
+    if (sourceId === 'komiwa' && extensions.isInstalled(sourceId) && !window.cytlex?.httpGet && mangaTitleParam) return;
     let alive = true;
     api.detail(currentMangaUrl, sourceId).then((value) => {
       if (alive) setMangaDetail({ key: mangaKey, value });

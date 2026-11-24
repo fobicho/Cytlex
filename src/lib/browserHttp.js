@@ -563,7 +563,7 @@ async function fetchCombinedChapter(url, signal, chapterType, referer = url) {
   if (chapterType === 'onf' && onfCookieJar) headers.set('x-cytlex-onf-cookie', onfCookieJar);
   const response = await fetch(endpoint, { signal, headers, credentials: 'omit' });
   if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('application/vnd.cytlex.chapter-stream')) {
-    const sourceName = { onf: 'ONF', inmanga: 'InManga', mangaoni: 'MangaOni', zonatmo: 'ZonaTMO' }[chapterType] || chapterType;
+    const sourceName = { onf: 'ONF', inmanga: 'InManga', mangaoni: 'MangaOni', komiwa: 'Komiwa', zonatmo: 'ZonaTMO' }[chapterType] || chapterType;
     const error = new Error(`No se pudo usar la carga combinada de ${sourceName}.`);
     error.status = response.status;
     throw error;
@@ -633,6 +633,10 @@ export function fetchInmangaChapter(url, signal) {
 
 export function fetchMangaOniChapter(url, signal) {
   return fetchCombinedChapter(url, signal, 'mangaoni', url);
+}
+
+export function fetchKomiwaChapter(url, signal) {
+  return fetchCombinedChapter(url, signal, 'komiwa', url);
 }
 
 export function fetchMangaDexChapter(url, signal) {

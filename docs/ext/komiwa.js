@@ -232,13 +232,10 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       .replace(/\\+"/g, '"');
     let embeddedUrls = encryptedChapterPages(html);
     const imageSigsMatch = serializedHtml.match(/"imageSigs"\s*:\s*(\{[^{}]*\})/);
-    if (!embeddedUrls.length && imageSigsMatch) {
-      try { embeddedUrls = Object.keys(JSON.parse(imageSigsMatch[1])); } catch {}
+    if (imageSigsMatch) {
+      try { embeddedUrls.push(...Object.keys(JSON.parse(imageSigsMatch[1]))); } catch {}
     }
-    if (!embeddedUrls.length) {
-      embeddedUrls = [...serializedHtml.matchAll(/https?:\/\/[^\s"'<>\\]+/gi)]
-        .map(([imageUrl]) => imageUrl);
-    }
+    embeddedUrls.push(...[...serializedHtml.matchAll(/https?:\/\/[^\s"'<>\\]+/gi)].map(([imageUrl]) => imageUrl));
     const imageElements = [...doc.querySelectorAll('img[src], img[data-src], img[data-lazy-src], img[data-original]')]
       .map((image) => abs(image.getAttribute('data-src') || image.getAttribute('data-lazy-src')
         || image.getAttribute('data-original') || image.getAttribute('src'), referer));
