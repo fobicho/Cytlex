@@ -1315,6 +1315,12 @@ function komiwaChapterPageUrls(html, chapterUrl) {
   const pages = [];
   const attrsOf = (tag) => new Map([...tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)]
     .map((match) => [match[1].toLowerCase(), decodeHtmlAttribute(match[2] ?? match[3] ?? match[4] ?? '')]));
+  const collect = (value, depth = 0) => {
+    if (depth > 10 || value == null) return;
+    if (typeof value === 'string') { add(value); return; }
+    if (Array.isArray(value)) { value.slice(0, 2000).forEach((item) => collect(item, depth + 1)); return; }
+    if (typeof value === 'object') Object.values(value).slice(0, 2000).forEach((item) => collect(item, depth + 1));
+  };
   const add = (raw) => {
     try {
       if (raw && typeof raw === 'object') raw = raw.url || raw.src || raw.imageUrl || raw.image || raw.path || '';
@@ -1346,7 +1352,7 @@ function komiwaChapterPageUrls(html, chapterUrl) {
         const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
         for (let i = 0; i < bytes.length; i++) bytes[i] ^= keyBytes[i % keyBytes.length] ^ (255 & i);
         const value = JSON.parse(new TextDecoder().decode(bytes));
-        if (Array.isArray(value.p)) value.p.forEach(add);
+        collect(value);
       } catch {}
     }
   }

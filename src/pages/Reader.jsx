@@ -399,7 +399,9 @@ export default function Reader() {
   const mangaUrl = params.get('m') || '';
   const sourceId = params.get('s') || 'leercapitulo';
   const mangaTitleParam = params.get('t') || '';
-  const recentChapterKey = JSON.stringify([sourceId, extensions.manifest(sourceId)?.version || '0', chapterUrl]);
+  const recentChapterKey = JSON.stringify(sourceId === 'komiwa'
+    ? [sourceId, extensions.manifest(sourceId)?.version || '0', 'complete-page-list-v2', chapterUrl]
+    : [sourceId, extensions.manifest(sourceId)?.version || '0', chapterUrl]);
   const sourceName = extensions.manifest(sourceId)?.name;
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
   const adultExtensionDisabled = !isExtensionAllowed(extensions.manifest(sourceId), showAdultExtensions);

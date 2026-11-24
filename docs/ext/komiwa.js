@@ -25,6 +25,12 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
     const keyBytes = new TextEncoder().encode(key);
     const pages = [];
+    const collect = (value, depth = 0) => {
+      if (depth > 10 || value == null) return;
+      if (typeof value === 'string') { pages.push(value); return; }
+      if (Array.isArray(value)) { value.slice(0, 2000).forEach((item) => collect(item, depth + 1)); return; }
+      if (typeof value === 'object') Object.values(value).slice(0, 2000).forEach((item) => collect(item, depth + 1));
+    };
     const references = new Set([...stream.matchAll(/"__r"\s*:\s*"\$L?([0-9a-z]+)"/gi)].map(([, id]) => id));
     for (const reference of references) {
       const row = stream.match(new RegExp(`(?:^|\\n)${reference}:T([0-9a-f]+),`, 'i'));
@@ -50,7 +56,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       }
       try {
         const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(bytes)));
-        if (Array.isArray(payload.p)) pages.push(...payload.p);
+        collect(payload);
       } catch {}
     }
     return [...new Set(pages)];
