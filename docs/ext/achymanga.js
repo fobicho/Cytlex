@@ -4,9 +4,9 @@ export default function createSource({ fetchText, parse }) {
   const readableTypes = new Set(['manga', 'manhwa', 'manhua', 'webtoon', 'comic', 'one_shot', 'doujinshi', 'oel']);
   const catalogPageRequests = new Map();
 
-  function catalogPage(url) {
+  function catalogPage(url, requestId) {
     if (!catalogPageRequests.has(url)) {
-      const request = fetchText(url, undefined, { achyCatalog: true }).then(parse);
+      const request = fetchText(url, requestId, { achyCatalog: true }).then(parse);
       catalogPageRequests.set(url, request);
       request.then(
         () => { if (catalogPageRequests.get(url) === request) catalogPageRequests.delete(url); },
@@ -56,7 +56,7 @@ export default function createSource({ fetchText, parse }) {
   }
 
   async function catalog({
-    q = '', genero = '', demografia = '', estado = '', tipo = '', idioma = 'es', orden = 'titulo'
+    q = '', genero = '', demografia = '', estado = '', tipo = '', idioma = 'es', orden = 'titulo', __cytlexRequestId
   } = {}) {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries({ q, genero, demografia, estado, tipo, idioma, orden })) {
@@ -64,7 +64,7 @@ export default function createSource({ fetchText, parse }) {
       if (value && !isDefault) params.set(key, String(value));
     }
     const query = params.toString();
-    const doc = await catalogPage(`${base}/catalogo${query ? `?${query}` : ''}`);
+    const doc = await catalogPage(`${base}/catalogo${query ? `?${query}` : ''}`, __cytlexRequestId);
     assertPublicPage(doc);
     const items = mapCards(doc);
     return { items, totalPages: 1, totalText: items.length ? String(items.length) : '' };

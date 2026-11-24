@@ -64,7 +64,7 @@ const detailKey = (url, sourceId) => `${sourceCacheKey(sourceId)}|${mangaSourceU
 const libraryDetailKey = (url, sourceId) => JSON.stringify(['library-detail', sourceId, mangaSourceUrl(url, sourceId)]);
 const chapterKey = (url, sourceId) => `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}|${url}`;
 const catalogKey = (args, sourceId) => {
-  const params = Object.fromEntries(Object.entries(args || {}).filter(([key]) => key !== '__cytlexRequestId'));
+  const params = Object.fromEntries(Object.entries(args || {}).filter(([key]) => !['__cytlexRequestId', '__cytlexForceFetch', '__cytlexGlobalSearch'].includes(key)));
   const orderedParams = Object.fromEntries(Object.entries(params).sort(([a], [b]) => a.localeCompare(b)));
   return JSON.stringify([sourceCacheKey(sourceId), orderedParams]);
 };
@@ -250,14 +250,17 @@ export const api = {
   async catalog(args, sourceId) {
     const src = await resolveSource(sourceId);
     const browser = !bridge()?.httpGet;
+    const forceFetch = args?.__cytlexForceFetch === true;
     const requestId = args?.__cytlexRequestId || `catalog:${sourceId}:${Date.now()}:${Math.random()}`;
     const catalogArgs = { ...args, __cytlexRequestId: requestId };
+    delete catalogArgs.__cytlexForceFetch;
+    delete catalogArgs.__cytlexGlobalSearch;
     const key = browser ? catalogKey(args, sourceId) : '';
     const { q = '', page = 1, genre = '', year = '', status = '', type = '', sort = '' } = args || {};
     const searchKey = isMangaDex(sourceId)
       ? JSON.stringify([sourceCacheKey(sourceId), q, page, genre, year, status, type, sort])
       : key;
-    if (browser) {
+    if (browser && !forceFetch) {
       const hit = catalogCache.get(key);
       if (hit && Date.now() - hit.at <= CATALOG_TTL_MS) {
         catalogCache.delete(key);
@@ -269,11 +272,11 @@ export const api = {
     }
 
     const request = (async () => {
-      const saved = browser ? await readSourceCache('searches', searchKey) : null;
+      const saved = browser && !forceFetch ? await readSourceCache('searches', searchKey) : null;
       const savedAge = Date.now() - (saved?.at || 0);
       if (saved?.value?.items && savedAge >= 0 && savedAge <= PERSISTED_CATALOG_TTL_MS) return saved.value;
       try {
-        beginCatalogRequest(requestId, sourceId);
+        beginCatalogRequest(requestId, sourceId, args?.__cytlexGlobalSearch === true);
         try { return await src.catalog(catalogArgs); }
         finally { endCatalogRequest(requestId); }
       } catch (error) {

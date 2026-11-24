@@ -83,6 +83,7 @@ function ActiveRouteLabel({ label, active }) {
 
 let lastLibraryListRoute = '/biblioteca';
 let lastExploreListRoute = '/explorar?tab=mangas';
+let lastExploreRoute = '/explorar?tab=mangas';
 
 function routeSection(location) {
   if (location.pathname === '/biblioteca') return '/biblioteca';
@@ -131,6 +132,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
   useEffect(() => {
     const section = routeSection(location);
     const route = `${location.pathname}${location.search}`;
+    if (section === '/explorar') lastExploreRoute = route;
     if (section === '/biblioteca' && !location.pathname.startsWith('/manga')) lastLibraryListRoute = route;
     if (section === '/explorar' && !location.pathname.startsWith('/manga')) lastExploreListRoute = route;
   }, [location.pathname, location.search]);
@@ -182,7 +184,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
           const destination = item.to === '/biblioteca'
             ? lastLibraryListRoute
             : item.to === '/explorar'
-              ? lastExploreListRoute
+              ? (isActive ? lastExploreListRoute : lastExploreRoute)
               : item.to;
           const Icon = item.icon;
           const collapsedEnter = reduceMotion ? 'scale(1)' : 'scale(0.96)';

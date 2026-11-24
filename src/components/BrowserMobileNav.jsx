@@ -63,6 +63,7 @@ function AnimatedNavIcon({ to, Icon, animate }) {
 }
 
 let lastExploreListRoute = '/explorar?tab=mangas';
+let lastExploreRoute = '/explorar?tab=mangas';
 let lastLibraryListRoute = '/biblioteca';
 
 function activeSection(location) {
@@ -101,6 +102,7 @@ export default function BrowserMobileNav({ tutorialNavOnly = false }) {
 
   useEffect(() => {
     if (activeSection(location) !== '/explorar') return;
+    lastExploreRoute = `${location.pathname}${location.search}`;
     if (!location.pathname.startsWith('/manga')) lastExploreListRoute = `${location.pathname}${location.search}`;
   }, [location.pathname, location.search]);
 
@@ -191,7 +193,7 @@ export default function BrowserMobileNav({ tutorialNavOnly = false }) {
         return (
           <Link
             key={to}
-            to={to === '/explorar' ? lastExploreListRoute : to === '/biblioteca' ? lastLibraryListRoute : to}
+            to={to === '/explorar' ? (selected ? lastExploreListRoute : lastExploreRoute) : to === '/biblioteca' ? lastLibraryListRoute : to}
             aria-current={selected ? 'page' : undefined}
             className={cn('browser-mobile-nav__item', selected && 'is-active')}
             onClick={to === '/biblioteca'

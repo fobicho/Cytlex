@@ -585,9 +585,8 @@ function catalogImageCandidates(text, contentType, sourceId, pageUrl, limit) {
           : sourceId === 'komiwa' ? 'https://www.komiwa.net/' : pageUrl;
       const url = new URL(value, base);
       if (sourceId === 'leercapitulo' && url.hostname === 'leercapitulo.co') url.hostname = 'www.leercapitulo.co';
-      // Olympus catalog cards request the medium cover even though the API
-      // payload contains the larger `-xl` variant.
-      if (sourceId === 'olympusscanlation') url.pathname = url.pathname.replace(/-xl\.(jpe?g|png|webp|avif)$/i, '-m.$1');
+      // Match Olympus's catalogCover() even when the API returns a size other than -xl.
+      if (sourceId === 'olympusscanlation') url.pathname = url.pathname.replace(/-[a-z]{1,3}\.(jpe?g|png|webp|avif)$/i, '-m.$1');
       if (!/^https?:$/.test(url.protocol) || /(?:\/logo|\/avatar|\/icon|placeholder)/i.test(url.pathname)) return;
       candidates.add(url.href);
     } catch {}
@@ -604,9 +603,11 @@ function catalogImageCandidates(text, contentType, sourceId, pageUrl, limit) {
     }
     for (const tag of html.matchAll(/<[a-z][^>]*>/gi)) {
       const tagName = tag[0].match(/^<([a-z]+)/i)?.[1]?.toLowerCase();
+      if (sourceId === 'mangaoni' && tagName !== 'img') continue;
       const attrs = imageAttributes(tag[0]);
       const className = attrs.get('class') || '';
       if (sourceId === 'leercapitulo' && tagName === 'source') continue;
+      if (sourceId === 'leercapitulo' && tagName !== 'img') continue;
       const picture = sourceId === 'leercapitulo' && tagName === 'img'
         ? pictureBlocks.find((block) => tag.index >= block.start && tag.index < block.end)?.html
         : '';
@@ -709,8 +710,12 @@ function catalogImageCandidates(text, contentType, sourceId, pageUrl, limit) {
       if (!image) continue;
       const attrs = imageAttributes(image[0]);
       if (!attrs.get('alt')?.trim()) continue;
-      const raw = ['data-original', 'data-full', 'data-zoom-image', 'data-large', 'data-src', 'data-lazy-src', 'src']
-        .map((name) => attrs.get(name)).find(Boolean);
+      const attributes = sourceId === 'onfmangas'
+        ? ['data-src', 'data-lazy-src', 'data-original', 'data-original-src', 'data-srcset', 'srcset', 'src']
+        : ['data-original', 'data-full', 'data-zoom-image', 'data-large', 'data-src', 'data-lazy-src', 'src'];
+      const attribute = attributes.find((name) => attrs.get(name));
+      let raw = attribute ? attrs.get(attribute) : '';
+      if (sourceId === 'onfmangas' && ['data-srcset', 'srcset'].includes(attribute)) raw = lastSrcsetUrl(raw);
       if (raw) add(raw, 'cover');
     }
   };
@@ -751,26 +756,67 @@ function catalogImageCandidates(text, contentType, sourceId, pageUrl, limit) {
     scanHtml(html.slice(articleRoot.index, end));
   };
 
+  const cardSegments = (html, className) => {
+    const starts = [...html.matchAll(/<[a-z][^>]*>/gi)]
+      .filter((tag) => imageAttributes(tag[0]).get('class')?.split(/\s+/).includes(className));
+    return starts.map((tag, index) => html.slice(tag.index, starts[index + 1]?.index ?? html.length));
+  };
+
   const scanOnfCards = (html) => {
     // Keep this order in sync with ONF's imageElementUrl() in onfmangas.js.
     // Selecting a different srcset candidate leaves the card's actual cover
     // out of the combined search response and makes the client fetch it again.
     const imageAttributesForSource = ['data-src', 'data-lazy-src', 'data-original', 'data-original-src', 'data-srcset', 'srcset', 'src'];
-    for (const match of html.matchAll(/<img\b[^>]*>/gi)) {
-      const attrs = imageAttributes(match[0]);
+    const cards = cardSegments(html, 'manga-card');
+    const images = cards.map((segment) => segment.match(/<img\b[^>]*>/i)?.[0]).filter(Boolean);
+    for (const image of images) {
+      const attrs = imageAttributes(image);
       for (const name of imageAttributesForSource) {
         let raw = (attrs.get(name) || '').trim();
         if (name === 'data-srcset' || name === 'srcset') raw = lastSrcsetUrl(raw);
         if (!raw || /^(?:data:|javascript:|about:|#)/i.test(raw)
           || /(?:placeholder|default|blank|spacer|pixel)\.(?:gif|png)(?:[?#]|$)/i.test(raw)) continue;
         try {
-          const image = new URL(raw, pageUrl);
-          if (!['http:', 'https:'].includes(image.protocol)) continue;
+          const imageUrl = new URL(raw, pageUrl);
+          if (!['http:', 'https:'].includes(imageUrl.protocol)) continue;
           add(raw, 'cover');
         } catch {}
-        // Match the extension's first usable image attribute exactly.
         break;
       }
+      if (candidates.size >= limit) return;
+    }
+  };
+
+  const scanZonaTmoCards = (html) => {
+    const cards = cardSegments(html, 'element');
+    for (const card of cards) {
+      const href = [...card.matchAll(/<a\b[^>]*>/gi)]
+        .map((tag) => imageAttributes(tag[0]).get('href') || '')
+        .find((value) => value.includes('/library/'));
+      let readable = false;
+      try { readable = /^\/library\/(?:manga|manhwa|manhua)\//i.test(new URL(href, pageUrl).pathname); } catch {}
+      if (!readable) continue;
+
+      const tags = [...card.matchAll(/<[a-z][^>]*>/gi)];
+      const imageTag = tags.find((tag) => tag[0].match(/^<img\b/i))
+        || tags.find((tag) => {
+          const attrs = imageAttributes(tag[0]);
+          return attrs.get('class')?.split(/\s+/).includes('lazy-cover') || attrs.has('data-bg');
+        });
+      if (!imageTag) continue;
+      const attrs = imageAttributes(imageTag[0]);
+      const rawSrcset = attrs.get('data-srcset') || '';
+      let raw = rawSrcset ? lastSrcsetUrl(rawSrcset) : '';
+      if (!raw) {
+        for (const name of ['data-src', 'data-lazy-src', 'data-original', 'data-url', 'data-bg', 'src', 'content']) {
+          raw = attrs.get(name) || '';
+          if (name === 'data-bg') raw = raw.match(/url\(\s*(["']?)(.*?)\1\s*\)/i)?.[2] || raw;
+          if (raw.trim()) break;
+        }
+      }
+      if (!raw) raw = attrs.get('style')?.match(/background(?:-image)?\s*:[^;]*?url\(\s*(["']?)(.*?)\1\s*\)/i)?.[2] || '';
+      if (!raw) raw = lastSrcsetUrl(attrs.get('srcset') || '');
+      add(raw, 'cover');
       if (candidates.size >= limit) return;
     }
   };
@@ -783,18 +829,13 @@ function catalogImageCandidates(text, contentType, sourceId, pageUrl, limit) {
     scanMangaOniCards(text);
   } else if (sourceId === 'onfmangas') {
     scanOnfCards(text);
-    if (candidates.size < limit) scanLinkedCoverImages(text);
-    if (candidates.size < limit) scanHtml(text);
   } else if (sourceId === 'zonatmo') {
-    // Keep the same attribute precedence as zonatmo.js imageUrl(); otherwise
-    // the bundled URL differs from the cover URL and the browser queues a
-    // second image batch after the catalog request.
-    scanLinkedCoverImages(text);
-    if (candidates.size < limit) scanHtml(text);
+    if (cardSegments(text, 'element').length) scanZonaTmoCards(text);
+    else scanLinkedCoverImages(text);
   } else {
     scanLinkedCoverImages(text);
-    if (candidates.size < limit) scanHtml(text);
   }
+  if (candidates.size < limit && !['onfmangas', 'zonatmo'].includes(sourceId)) scanHtml(text);
   return [...candidates].slice(0, limit);
 }
 
@@ -914,13 +955,21 @@ async function handleCombinedSearchRequest(request) {
             && ['/api/rankings', '/api/series/list'].includes(target.pathname);
           if ((catalogCoverRequest || onfCatalog || olympusCatalog || onfDetail || leerCapituloCatalog || mangaOniCatalog)
             && Number(result.status) >= 200 && Number(result.status) < 300 && !result.fallback) {
-            const remaining = Math.max(0, Math.min(40 - catalogImageUrls.size, imageSubrequestLimit - catalogImageUrls.size));
+            const remaining = Math.max(0, imageSubrequestLimit - catalogImageUrls.size);
             const detailCover = onfDetail ? onfMangaCover(result.text || '', result.url || target.href) : '';
             const imageSourceId = leerCapituloCatalog ? 'leercapitulo' : sourceId;
-            const urls = target && remaining
-              ? (detailCover ? [detailCover] : catalogImageCandidates(result.text || '', result.contentType || '', imageSourceId, result.url || target.href, remaining))
-                .slice(0, remaining)
+            const queuedCoverUrls = (onfCatalog || catalogCoverRequest || mangaOniCatalog) && Array.isArray(item.catalogCoverUrls)
+              ? [...new Set(item.catalogCoverUrls.map((url) => validateTarget(url)?.href).filter(Boolean))]
                 .filter((url) => !catalogImageUrls.has(url))
+                .slice(0, remaining)
+              : [];
+            const scanLimit = Math.max(0, remaining - queuedCoverUrls.length);
+            const scannedCoverUrls = target && scanLimit && !detailCover
+              ? catalogImageCandidates(result.text || '', result.contentType || '', imageSourceId, result.url || target.href, scanLimit)
+                .filter((url) => !catalogImageUrls.has(url) && !queuedCoverUrls.includes(url))
+              : [];
+            const urls = target && remaining
+              ? (detailCover ? [detailCover] : [...queuedCoverUrls, ...scannedCoverUrls]).slice(0, remaining)
               : [];
             urls.forEach((url) => catalogImageUrls.add(url));
             send({ type: 'result', index, result: totalResponseBytes <= PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES
@@ -1609,7 +1658,7 @@ async function handleAchyChapter(request, target) {
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
             while (!stopped && next < initial.length) {
               const index = next++;
-              const image = await fetchImageBatchItem({ url: initial[index], referer: chapterPageUrl.href }, request, subrequestBudget, byteBudget);
+              const image = await fetchImageBatchItem({ url: initial[index], referer: target.href }, request, subrequestBudget, byteBudget);
               if (stopped) return;
               const bytes = image.body ? new Uint8Array(await image.body.arrayBuffer()) : new Uint8Array();
               write({ index, length: bytes.length, status: image.status, contentType: image.contentType || '' }, bytes);

@@ -213,6 +213,7 @@ function SourceSection({ r, coverSize, scale = 1, animate = false, active = true
                   m={m}
                   sourceId={r.id}
                   from="explorar"
+                  bundledCoverOnly={!window.cytlex?.fetchImage}
                   returnTo={returnTo}
                   onSelect={(manga, sourceId) => {
                     catalogScroll.set(r.id, trackRef.current?.scrollLeft || 0);
@@ -441,7 +442,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
       if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
       const sourceJobs = list.map(async (s) => {
         try {
-          const params = { q: searchQuery, genre: '', page: 1 };
+          const params = { q: searchQuery, genre: '', page: 1, __cytlexGlobalSearch: true };
           const r = await api.catalog(params, s.manifest.id);
           if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
           const items = (r.items || []).filter((m) =>
@@ -450,6 +451,10 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
           ).slice(0, MAX_SEARCH_RESULTS);
           const coverPromises = items.map((m) => coverBatch.preload(m.cover));
           items.forEach((m) => rememberMangaPreview(m, s.manifest.id));
+          updateResults((prev) => prev ? prev.map((x) => x.id === s.manifest.id
+            ? { ...x, status: 'done', items, page: r.page || 1, totalPages: r.totalPages || 1,
+              hasMore: items.length < MAX_SEARCH_RESULTS && (r.hasMore ?? (r.totalPages > 1)), totalText: r.totalText || '' }
+            : x) : prev);
           void Promise.all(coverPromises).then((covers) => {
             if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
             const loadedItems = items.map((m, index) => covers[index] ? { ...m, coverCached: covers[index] } : m);

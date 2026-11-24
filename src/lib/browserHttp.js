@@ -7,6 +7,7 @@ const HTTP_CATALOG_BATCH_WINDOW_MS = 500;
 const HTTP_GET_BATCH_MAX = 50;
 const PROXY_IMAGE_BATCH_WINDOW_MS = 30;
 const PROXY_IMAGE_BATCH_MAX = 40;
+const PROXY_CATALOG_IMAGE_MAX = 50;
 const PROXY_IMAGE_ITEM_MAX_BYTES = 8 * 1024 * 1024;
 const PROXY_CHAPTER_IMAGE_BATCH_MAX = 40;
 const ACHY_CATALOG_MAX_IMAGES = 49;
@@ -65,8 +66,11 @@ function proxyUrl(targetUrl, referer = '') {
 export function browserImageUrl(url, referer = '') {
   if (electronBridge()?.fetchImage) return url;
   try {
-    const { hostname } = new URL(url);
+    const image = new URL(url);
+    const { hostname } = image;
     const onfCdn = hostname === 'd33y4i2dmzjqjh.cloudfront.net';
+    const mangaOniImage = hostname === 'oni.ntr-files.online'
+      && /^\/public\/archivos\/(?:mangas|novelas)\//i.test(image.pathname);
     const mangaDexImage = hostname === 'uploads.mangadex.org' || hostname.endsWith('.mangadex.network');
     const sourceImage = hostname === 'images.mangalect.org' || hostname === 'mangalect.org'
       || hostname === 'inmanga.com'
@@ -81,7 +85,8 @@ export function browserImageUrl(url, referer = '') {
       || hostname === 'zonatmo.org' || hostname.endsWith('.zonatmo.org');
     if (hostname === 'intomanga.com' || hostname.endsWith('.intomanga.com') || onfCdn || mangaDexImage || sourceImage || (hostname === 'onfmangas.com' && referer)) {
       const proxy = new URL(proxyUrl(url));
-      if (referer || onfCdn) proxy.searchParams.set('referer', referer || 'https://onfmangas.com/');
+      const imageReferer = referer || (onfCdn ? 'https://onfmangas.com/' : mangaOniImage ? 'https://manga-oni.com/' : '');
+      if (imageReferer) proxy.searchParams.set('referer', imageReferer);
       return proxy.href;
     }
   } catch {}
@@ -159,20 +164,37 @@ function batchDescriptor({ url, options }) {
     ...(options.olympusDetail === true ? { detail: 'olympus' } : {}),
     ...(options.mangaDexDetail !== undefined ? { detail: 'mangadex', includeManga: options.mangaDexDetail } : {}),
     ...(options.catalogCovers === true ? { catalogCovers: true } : {}),
+    ...(Array.isArray(options.catalogCoverUrls) && options.catalogCoverUrls.length
+      && ['leercapitulo', 'mangaoni', 'onfmangas', 'zonatmo'].includes(options.sourceId)
+      ? { catalogCoverUrls: options.catalogCoverUrls.slice(0, 40) } : {}),
     ...(onfCookie ? { onfCookie } : {})
   };
 }
 
-export function beginCatalogRequest(requestId, sourceId) {
+export function beginCatalogRequest(requestId, sourceId, globalSearch = false) {
   if (!requestId || !sourceId) return;
   const active = catalogRequestSources.get(requestId);
-  catalogRequestSources.set(requestId, { sourceId, count: (active?.count || 0) + 1 });
+  catalogRequestSources.set(requestId, { ...active, sourceId, globalSearch, count: (active?.count || 0) + 1 });
+}
+
+export function setCatalogRequestCoverUrls(requestId, urls) {
+  if (!requestId || !Array.isArray(urls)) return;
+  const active = catalogRequestSources.get(requestId);
+  catalogRequestSources.set(requestId, {
+    ...active,
+    coverUrls: [...new Set(urls.filter((url) => typeof url === 'string' && /^https:\/\//i.test(url)))].slice(0, 40)
+  });
+}
+
+export function clearCatalogRequest(requestId) {
+  if (requestId) catalogRequestSources.delete(requestId);
 }
 
 export function endCatalogRequest(requestId) {
   if (!requestId) return;
   const active = catalogRequestSources.get(requestId);
   if (active?.count > 1) catalogRequestSources.set(requestId, { ...active, count: active.count - 1 });
+  else if (active?.coverUrls?.length) catalogRequestSources.set(requestId, { ...active, count: 0 });
   else catalogRequestSources.delete(requestId);
 }
 
@@ -250,7 +272,7 @@ async function runProxyBatch(entries) {
         const proxied = responseFromBatchResult(message.result);
         if (!proxied) { fallbackEntry(entry); return; }
         const images = Array.isArray(message.result?.catalogImages) ? message.result.catalogImages : [];
-        if (images.length > 40 || images.some((imageUrl) => typeof imageUrl !== 'string')) { fallbackEntry(entry); return; }
+        if (images.length > PROXY_CATALOG_IMAGE_MAX || images.some((imageUrl) => typeof imageUrl !== 'string')) { fallbackEntry(entry); return; }
         const catalogImageEntries = images.map((imageUrl) => {
           let resolve;
           const promise = new Promise((done) => { resolve = done; });
@@ -378,7 +400,7 @@ function scheduleProxyRequest(url, options) {
   if (preferDirectRequest(target, method)) {
     return browserRequest(url, options);
   }
-  const supportedOptions = new Set(['headers', 'onfReferer', 'onfCookie', 'method', 'body', 'sourceId', 'search', 'catalogCovers', 'olympusDetail']);
+  const supportedOptions = new Set(['headers', 'onfReferer', 'onfCookie', 'method', 'body', 'sourceId', 'search', 'catalogCovers', 'catalogCoverUrls', 'olympusDetail']);
   if (target.origin === window.location.origin || proxyEndpoint.origin !== window.location.origin || !['GET', 'POST'].includes(method) || options.signal
     || (method === 'POST' && typeof options.body !== 'string')
     || Object.keys(options).some((key) => !supportedOptions.has(key))
@@ -801,7 +823,8 @@ function requestImage(url, signal, referer = '', onfCookie = '') {
     if (!blob) throw new Error('No se pudo cargar la portada de MangaDex.');
     return new Response(blob, { status: 200, headers: { 'content-type': blob.type } });
   });
-  return scheduleProxyImageRequest(url, signal, referer, onfCookie);
+  const imageReferer = referer || new URL(browserImageUrl(url), window.location.href).searchParams.get('referer') || '';
+  return scheduleProxyImageRequest(url, signal, imageReferer, onfCookie);
 }
 
 export function getCatalogImageBlob(url) {
@@ -1083,10 +1106,16 @@ export async function httpGet(url, requestId, options = {}) {
   const bridge = electronBridge();
   if (bridge?.httpGet) return bridge.httpGet(url, requestId, options);
   const { includeUrl, ...requestOptions } = options;
-  const catalogSourceId = requestId && catalogRequestSources.get(requestId)?.sourceId;
+  const catalogRequest = requestId && catalogRequestSources.get(requestId);
+  const catalogSourceId = catalogRequest?.sourceId;
   const target = new URL(url);
   if (catalogSourceId && catalogSourceId === requestOptions.sourceId
-    && (catalogSourceId !== 'leercapitulo' || target.pathname === '/manga/')) requestOptions.catalogCovers = true;
+    && (catalogSourceId !== 'leercapitulo' || target.pathname === '/manga/')) {
+    requestOptions.catalogCovers = true;
+    if (['leercapitulo', 'mangaoni', 'onfmangas', 'zonatmo'].includes(catalogSourceId) && catalogRequest.coverUrls?.length) {
+      requestOptions.catalogCoverUrls = catalogRequest.coverUrls;
+    }
+  }
   if (requestOptions.onfMangaDetail === true && target.origin === 'https://onfmangas.com'
     && /^\/manga\/\d+\/[^/]+\/?$/.test(target.pathname)) {
     const detailOptions = { ...requestOptions };
@@ -1123,6 +1152,7 @@ export async function httpGet(url, requestId, options = {}) {
       if (httpGetRequests.get(key) === request) httpGetRequests.delete(key);
     }
   }
+  if (requestOptions.achyCatalog === true && catalogRequest?.globalSearch) delete requestOptions.achyCatalog;
   if (requestOptions.achyCatalog === true && target.origin === 'https://achymanga.online' && target.pathname === '/catalogo') {
     const key = `achymanga-catalog:${target.href}`;
     let request = httpGetRequests.get(key);

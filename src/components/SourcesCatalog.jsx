@@ -7,8 +7,8 @@ import MangaCard from './MangaCard.jsx';
 import VirtualMangaGrid from './VirtualMangaGrid.jsx';
 import { SourceBadge } from './SourceBadge.jsx';
 import { api } from '../lib/api.js';
-import { sourceErrorMessage } from '../lib/browserHttp.js';
-import { preloadLibraryCover, preloadLibraryCoversBatch, requiresImageProxy } from '../lib/covers.js';
+import { clearCatalogRequest, setCatalogRequestCoverUrls, sourceErrorMessage } from '../lib/browserHttp.js';
+import { getLibraryCover, preloadLibraryCover, preloadLibraryCoversBatch, requiresImageProxy } from '../lib/covers.js';
 import { isLibraryManga } from '../lib/library.js';
 import { extensions, isSourceConfigured } from '../lib/extensions.js';
 import { settings } from '../lib/settings.js';
@@ -22,6 +22,7 @@ import { useScale, px, fontPx, toolbarButtonStyle } from '../lib/useScale.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 
 const CATALOG_BATCH_SIZE = 40;
+const OLYMPUS_CATALOG_PAGE_SIZE = 15;
 const isMangaDex = (id) => id === 'mangadex' || id === 'mangadex-en';
 const FIXED_PAGE_SOURCES = new Set(['leercapitulo', 'mangaoni', 'olympusscanlation', 'onfmangas', 'zonatmo']);
 
@@ -135,17 +136,35 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
 
   while (batch.length < CATALOG_BATCH_SIZE && queued.length) batch.push(queued.shift());
 
-  while (batch.length < CATALOG_BATCH_SIZE && canFetchNextPage && pagesFetched < CATALOG_BATCH_SIZE) {
+  if (['leercapitulo', 'mangaoni', 'zonatmo'].includes(id) && batch.length === CATALOG_BATCH_SIZE && queuedItems.length >= CATALOG_BATCH_SIZE) {
+    await api.catalog({
+      ...params,
+      page: Math.max(1, currentPage),
+      __cytlexRequestId: requestId,
+      __cytlexForceFetch: true
+    }, id);
+  }
+
+  while (batch.length < CATALOG_BATCH_SIZE && canFetchNextPage
+    && pagesFetched < (id === 'komiwa' ? 1 : CATALOG_BATCH_SIZE)) {
     const startPage = currentPage + 1;
-    const batchPages = id === 'onfmangas' ? Math.min(4, Math.ceil((CATALOG_BATCH_SIZE - batch.length) / 12))
+    const remainingItems = CATALOG_BATCH_SIZE - batch.length;
+    const batchPages = id === 'leercapitulo' ? 4
+      : id === 'onfmangas' ? Math.min(4, Math.ceil(remainingItems / 12))
       : id === 'mangaoni' ? (batch.length ? 4 : 3)
-        : id === 'olympusscanlation' ? 3 : 2;
+        : id === 'olympusscanlation' ? Math.ceil(remainingItems / OLYMPUS_CATALOG_PAGE_SIZE) : 2;
     const group = !window.cytlex?.httpGet && FIXED_PAGE_SOURCES.has(id)
-      && id !== 'leercapitulo'
-      && (id === 'onfmangas' || id === 'mangaoni' || CATALOG_BATCH_SIZE - batch.length >= 20)
+      && (id === 'onfmangas' || id === 'mangaoni'
+        || (id === 'olympusscanlation' ? remainingItems > OLYMPUS_CATALOG_PAGE_SIZE
+          : remainingItems >= 20))
       && pagesFetched + batchPages <= CATALOG_BATCH_SIZE;
     const requests = Array.from({ length: group ? batchPages : 1 }, (_, index) =>
-      api.catalog({ ...params, page: startPage + index, __cytlexRequestId: requestId }, id));
+      api.catalog({
+        ...params,
+        page: startPage + index,
+        __cytlexRequestId: requestId,
+        ...(id === 'leercapitulo' ? { __cytlexForceFetch: true } : {})
+      }, id));
     const results = await Promise.allSettled(requests);
     for (const result of results) {
       if (!canFetchNextPage) break;
@@ -215,7 +234,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const filterPanelWidth = px(isZonaTmo ? 480 : 360, scale, 300);
   const getFilterRoot = () => filterRootRef.current;
   const preloadCatalogCovers = (mangas) =>
-    preloadLibraryCoversBatch(mangas.map((manga) => manga.cover).filter(Boolean), { web: true });
+    preloadLibraryCoversBatch(mangas.map((manga) => manga.cover).filter(Boolean), { web: true, bundledOnly: true });
 
   const selectSource = (id) => {
     sourceCatalogState.clear();
@@ -331,14 +350,16 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     activeHttpRequest.current = '';
   };
 
-  const beginHttpRequest = () => {
+  const beginHttpRequest = (coverUrls = []) => {
     cancelActiveRequest();
     const request = `sources-catalog-${Date.now()}-${++requestSequence.current}`;
     activeHttpRequest.current = request;
+    if (coverUrls.length) setCatalogRequestCoverUrls(request, coverUrls);
     return request;
   };
 
   const finishHttpRequest = (request) => {
+    clearCatalogRequest(request);
     window.cytlex?.releaseHttpRequest?.(request);
     if (activeHttpRequest.current === request) activeHttpRequest.current = '';
   };
@@ -365,7 +386,12 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const loadCatalog = async (id, params, append = false) => {
     if (!id) return;
     const runId = ++requestId.current;
-    const httpRequestId = beginHttpRequest();
+    const backfillItems = id === 'mangaoni' && append
+      ? items.filter((item) => item.cover && !getLibraryCover(item.cover)).slice(-6)
+      : [];
+    const httpRequestId = beginHttpRequest(['leercapitulo', 'mangaoni', 'onfmangas', 'zonatmo'].includes(id) && append
+      ? [...queuedItems, ...backfillItems].map((item) => item.cover).filter(Boolean)
+      : []);
     setError(null);
     if (append) setLoadingMore(true);
     else {
@@ -389,9 +415,12 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
         }
       }
-      await preloadCatalogCovers(result.items);
+      await preloadCatalogCovers([...backfillItems, ...result.items]);
       if (runId !== requestId.current) return;
-      setItems((current) => append ? [...current, ...result.items] : result.items);
+      const backfilledCovers = new Set(backfillItems.map((item) => item.cover));
+      setItems((current) => append
+        ? [...current.map((item) => backfilledCovers.has(item.cover) ? { ...item } : item), ...result.items]
+        : result.items);
       setQueuedItems(result.queuedItems);
       setLoadedParams({ ...params, q: params.q?.trim?.() || '' });
       setPage(result.page);
