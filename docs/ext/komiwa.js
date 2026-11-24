@@ -25,7 +25,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
     const keyBytes = new TextEncoder().encode(key);
     const pages = [];
-    const references = new Set([...stream.matchAll(/"__r"\s*:\s*"\$([0-9a-z]+)"/g)].map(([, id]) => id));
+    const references = new Set([...stream.matchAll(/"__r"\s*:\s*"\$L?([0-9a-z]+)"/gi)].map(([, id]) => id));
     for (const reference of references) {
       const row = stream.match(new RegExp(`(?:^|\\n)${reference}:T([0-9a-f]+),`, 'i'));
       if (!row) continue;
@@ -239,7 +239,9 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const imageElements = [...doc.querySelectorAll('img[src], img[data-src], img[data-lazy-src], img[data-original]')]
       .map((image) => abs(image.getAttribute('data-src') || image.getAttribute('data-lazy-src')
         || image.getAttribute('data-original') || image.getAttribute('src'), referer));
-    const pages = [...imageElements, ...embeddedUrls]
+    const decodedUrls = embeddedUrls.map((item) => typeof item === 'string'
+      ? item : item?.url || item?.src || item?.imageUrl || item?.image || item?.path || '');
+    const pages = [...imageElements, ...decodedUrls]
       .map((src) => abs(src, referer))
       .filter((src) => {
         if (!src) return false;

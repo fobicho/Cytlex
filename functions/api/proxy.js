@@ -1317,6 +1317,7 @@ function komiwaChapterPageUrls(html, chapterUrl) {
     .map((match) => [match[1].toLowerCase(), decodeHtmlAttribute(match[2] ?? match[3] ?? match[4] ?? '')]));
   const add = (raw) => {
     try {
+      if (raw && typeof raw === 'object') raw = raw.url || raw.src || raw.imageUrl || raw.image || raw.path || '';
       const page = new URL(decodeHtmlAttribute(raw), chapterUrl);
       const host = page.hostname.toLowerCase();
       if (page.protocol !== 'https:' || !validateTarget(page.href)
@@ -1332,7 +1333,7 @@ function komiwaChapterPageUrls(html, chapterUrl) {
     const stream = [...source.matchAll(/self\.__next_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)/g)]
       .map(([, chunk]) => { try { return JSON.parse(chunk); } catch { return ''; } }).join('');
     const keyBytes = new TextEncoder().encode(key);
-    const references = new Set([...stream.matchAll(/"__r"\s*:\s*"\$([0-9a-z]+)"/g)].map(([, id]) => id));
+    const references = new Set([...stream.matchAll(/"__r"\s*:\s*"\$L?([0-9a-z]+)"/gi)].map(([, id]) => id));
     for (const reference of references) {
       const row = stream.match(new RegExp(`(?:^|\\n)${reference}:T([0-9a-f]+),`, 'i'));
       if (!row) continue;
@@ -1994,7 +1995,9 @@ async function handleKomiwaChapter(request, target) {
   try {
     const mangaId = target.searchParams.get('manga') || '';
     const slug = target.searchParams.get('slug') || '';
-    const chapterRequest = fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    const chapterHeaders = forwardedHeaders(request, target);
+    chapterHeaders.set('referer', 'https://www.komiwa.net/');
+    const chapterRequest = fetchTarget(target, 'GET', chapterHeaders, undefined, signal, { retries: 0 });
     const chaptersUrl = /^[\da-f-]{36}$/i.test(mangaId)
       ? new URL(`/manga/${encodeURIComponent(mangaId)}/chapters?page=1&limit=99999&sort=desc`, 'https://b78sk.komiwa.net')
       : null;

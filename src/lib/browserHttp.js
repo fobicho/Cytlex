@@ -564,9 +564,11 @@ async function fetchCombinedChapter(url, signal, chapterType, referer = url) {
   const response = await fetch(endpoint, { signal, headers, credentials: 'omit' });
   if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('application/vnd.cytlex.chapter-stream')) {
     const sourceName = { onf: 'ONF', inmanga: 'InManga', mangaoni: 'MangaOni', komiwa: 'Komiwa', zonatmo: 'ZonaTMO' }[chapterType] || chapterType;
-    const error = new Error(`No se pudo usar la carga combinada de ${sourceName}.`);
-    error.status = response.status;
-    throw error;
+    throw Object.assign(new Error(`No se pudo usar la carga combinada de ${sourceName}.`), {
+      status: response.status,
+      requestOrigin: response.headers.get('x-cytlex-error-origin') || undefined,
+      reason: response.headers.get('x-cytlex-upstream-error') || undefined
+    });
   }
   const reader = response.body.getReader();
   let buffer = new Uint8Array();
