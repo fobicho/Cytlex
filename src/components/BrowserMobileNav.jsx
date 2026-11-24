@@ -176,7 +176,7 @@ export default function BrowserMobileNav({ tutorialNavOnly = false }) {
   };
 
   return (
-    <nav inert={tutorialNavOnly} className="browser-mobile-nav md:hidden" aria-label="Navegación principal">
+    <nav inert={tutorialNavOnly} data-tutorial-nav-only={tutorialNavOnly || undefined} className="browser-mobile-nav md:hidden" aria-label="Navegación principal">
       {activeIndex !== -1 && (
         <motion.span
           aria-hidden="true"

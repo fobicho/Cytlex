@@ -594,7 +594,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           setDetailState({ key: detailKey, data: saved });
           return;
         }
-        void refreshLibraryDetail();
+        setErr('No hay información guardada para este manga. Puedes obtenerla manualmente con «Reintentar carga».');
       };
       loadSavedDetail();
       return () => { alive = false; };
@@ -750,6 +750,38 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         setCoverTick((tick) => tick + 1);
       }
     } catch (error) {
+      if (/\bHTTP 404\b/.test(String(error?.message || error))
+        && !mangaSourceUrl(mangaUrl, sourceId).startsWith('https://mangadex.org/title/')) {
+        const favorite = lib.fav(mangaUrl, sourceId);
+        const title = favorite?.title || d?.title || previewTitle;
+        if (title) {
+          try {
+            const recovered = await api.findManga({ url: mangaUrl, title, author: favorite?.author || d?.facts?.autor || '' }, sourceId);
+            if (recovered && activeRef.current) {
+              const recoveredDetail = recovered.detail;
+              lib.updateFav(mangaUrl, {
+                url: recovered.url,
+                ...(recoveredDetail.title ? { title: recoveredDetail.title } : {}),
+                ...(recoveredDetail.cover ? { cover: recoveredDetail.cover } : {}),
+                ...(recoveredDetail.facts?.tipo ? { type: recoveredDetail.facts.tipo } : {}),
+                ...((recoveredDetail.facts?.autor || recoveredDetail.author || recoveredDetail.artist)
+                  ? { author: recoveredDetail.facts?.autor || recoveredDetail.author || recoveredDetail.artist } : {}),
+                ...(recoveredDetail.sinopsis ? { description: recoveredDetail.sinopsis } : {}),
+                ...(recoveredDetail.genres?.length ? { genres: recoveredDetail.genres } : {}),
+                chapterTotal: recoveredDetail.chapters.length
+              }, sourceId);
+              tracking.move(mangaUrl, recovered.url, sourceId);
+              chapterOrder.move(mangaUrl, recovered.url);
+              chapterIndex.set(recovered.url, sourceId, recoveredDetail.chapters.map((chapter) => chapter.url).filter(Boolean));
+              await api.persistLibraryDetail(recovered.url, sourceId, recoveredDetail);
+              const params = new URLSearchParams(loc.search);
+              params.set('u', recovered.url);
+              navigate({ pathname: loc.pathname, search: params.toString() }, { replace: true });
+              return;
+            }
+          } catch {}
+        }
+      }
       setErr(sourceErrorMessage(error, sourceName, 'No se pudo actualizar el detalle.'));
     } finally {
       setRefreshingDetail(false);

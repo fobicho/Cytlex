@@ -59,7 +59,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
   const libraryCover = from === 'biblioteca' || useLibraryCoverCache || proxyCover;
   const libraryImage = useLibraryCover(unavailable ? remoteCover : preferredCover, {
     enabled: libraryCover,
-    cachedOnly: unavailable,
+    cachedOnly: unavailable && !canOpenUnavailable,
     cachedCover: unavailable ? unavailableCachedCover : ''
   });
   const coverRef = useRef(null);

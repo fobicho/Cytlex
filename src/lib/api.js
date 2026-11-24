@@ -85,13 +85,13 @@ function libraryDetailIdentity(key) {
   }
 }
 
-async function withDetailDeadline(request) {
+async function withDetailDeadline(request, timeoutMs = DETAIL_TIMEOUT_MS) {
   let timer;
   try {
     return await Promise.race([
       request,
       new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('Cytlex agotó el tiempo de espera al cargar el manga.')), DETAIL_TIMEOUT_MS);
+        timer = setTimeout(() => reject(new Error('Cytlex agotó el tiempo de espera al cargar el manga.')), timeoutMs);
       })
     ]);
   } finally {
@@ -316,7 +316,7 @@ export const api = {
     return request;
   },
 
-  async loadDetail(url, sourceId, { cacheResult = true, persistResult = cacheResult, allowDisabled = false } = {}) {
+  async loadDetail(url, sourceId, { cacheResult = true, persistResult = cacheResult, allowDisabled = false, timeoutMs = DETAIL_TIMEOUT_MS } = {}) {
     if (!sourceId || !extensions.isInstalled(sourceId)) throw notInstalledError(sourceId);
     if (!allowDisabled) assertSourceEnabled(sourceId);
     const key = detailKey(url, sourceId);
@@ -355,7 +355,7 @@ export const api = {
       const result = await withDetailDeadline((async () => {
         const src = await resolveSource(sourceId, { allowDisabled });
         return src.detail(mangaSourceUrl(url, sourceId));
-      })());
+      })(), timeoutMs);
       if (cacheResult && result?.chapters?.length) {
         if (freshEntry(key) !== result) storeDetail(key, result);
         const entry = detailCache.get(key);

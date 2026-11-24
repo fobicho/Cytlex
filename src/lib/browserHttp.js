@@ -65,6 +65,8 @@ export function browserImageUrl(url, referer = '') {
     const onfCdn = hostname === 'd33y4i2dmzjqjh.cloudfront.net';
     const mangaDexImage = hostname === 'uploads.mangadex.org' || hostname.endsWith('.mangadex.network');
     const sourceImage = hostname === 'images.mangalect.org' || hostname === 'mangalect.org'
+      || hostname === 'inmanga.com'
+      || hostname === 'lectorxd.com' || hostname === 'www.lectorxd.com'
       || hostname === 'cdn.achymanga.online'
       || hostname === 'images.komiwa.net' || hostname === 'blogger.googleusercontent.com' || hostname === 's.imgfi.com' || hostname === 'media.mangavault.lat'
       || hostname === 'cdnlxd.xyz' || hostname.endsWith('.cdnlxd.xyz')
@@ -149,6 +151,9 @@ function batchDescriptor({ url, options }) {
     referer: proxyRefererFor(target, options.onfReferer),
     headers,
     ...(typeof options.sourceId === 'string' ? { sourceId: options.sourceId } : {}),
+    ...(options.onfMangaDetail === true ? { detail: 'onf' } : {}),
+    ...(options.olympusDetail === true ? { detail: 'olympus' } : {}),
+    ...(options.mangaDexDetail !== undefined ? { detail: 'mangadex', includeManga: options.mangaDexDetail } : {}),
     ...(options.catalogCovers === true ? { catalogCovers: true } : {}),
     ...(onfCookie ? { onfCookie } : {})
   };
@@ -201,6 +206,12 @@ async function runProxyBatch(entries) {
     try {
       const response = entry.catalog
         ? await fetchMangaDexCatalogRequest(entry.url, entry.options)
+        : entry.options?.mangaDexDetail !== undefined
+          ? new Response(await (entry.options.mangaDexDetail ? fetchMangaDexDetailDirect(entry.url, entry.options) : fetchMangaDexFeedDirect(entry.url, entry.options)))
+        : entry.options?.onfMangaDetail === true
+          ? new Response(await fetchOnfMangaDetailDirect(entry.url, entry.options))
+        : entry.options?.olympusDetail === true
+          ? new Response(await fetchOlympusDetailRequest(entry.url, entry.options))
         : await browserRequest(entry.url, entry.options);
       resolveEntry(entry, entry.catalog ? await parseMangaDexCatalogResponse(response) : response);
     }
@@ -319,7 +330,16 @@ async function runProxyBatch(entries) {
 
 function flushProxyGetQueue() {
   httpGetBatchTimer = null;
-  const entries = httpGetBatchQueue.splice(0, HTTP_GET_BATCH_MAX);
+  let batchSize = 0;
+  let nestedDetailCount = 0;
+  while (batchSize < Math.min(httpGetBatchQueue.length, HTTP_GET_BATCH_MAX)) {
+    const nextIsMangaDex = httpGetBatchQueue[batchSize].options?.mangaDexDetail !== undefined;
+    const nextIsOlympus = httpGetBatchQueue[batchSize].options?.olympusDetail === true;
+    if (batchSize + 1 + nestedDetailCount + Number(nextIsMangaDex) + Number(nextIsOlympus) > HTTP_GET_BATCH_MAX) break;
+    nestedDetailCount += Number(nextIsMangaDex) + Number(nextIsOlympus);
+    batchSize += 1;
+  }
+  const entries = httpGetBatchQueue.splice(0, batchSize);
   void runProxyBatch(entries);
   if (httpGetBatchQueue.length) {
     const delay = httpGetBatchQueue.length >= HTTP_GET_BATCH_MAX ? 0 : httpGetBatchWindowMs;
@@ -334,7 +354,7 @@ function queueProxyGet(entry) {
     httpGetBatchTimer = setTimeout(flushProxyGetQueue, 0);
   } else {
     const hasCatalogRequest = httpGetBatchQueue.some((item) => item.catalog || item.options?.catalogCovers === true);
-    const delay = hasCatalogRequest ? HTTP_CATALOG_BATCH_WINDOW_MS : httpGetBatchWindowMs;
+    const delay = Math.max(httpGetBatchWindowMs, hasCatalogRequest ? HTTP_CATALOG_BATCH_WINDOW_MS : 0);
     clearTimeout(httpGetBatchTimer);
     httpGetBatchTimer = setTimeout(flushProxyGetQueue, delay);
   }
@@ -354,7 +374,7 @@ function scheduleProxyRequest(url, options) {
   if (preferDirectRequest(target, method)) {
     return browserRequest(url, options);
   }
-  const supportedOptions = new Set(['headers', 'onfReferer', 'onfCookie', 'method', 'body', 'sourceId', 'search', 'catalogCovers']);
+  const supportedOptions = new Set(['headers', 'onfReferer', 'onfCookie', 'method', 'body', 'sourceId', 'search', 'catalogCovers', 'olympusDetail']);
   if (target.origin === window.location.origin || proxyEndpoint.origin !== window.location.origin || !['GET', 'POST'].includes(method) || options.signal
     || (method === 'POST' && typeof options.body !== 'string')
     || Object.keys(options).some((key) => !supportedOptions.has(key))
@@ -441,9 +461,9 @@ function responseFromImageBatchResult(result, payload, dataStart) {
   return new Response(body, { status, headers });
 }
 
-export async function fetchImageBlobBatch(entries, signal, onResult) {
-  if (!Array.isArray(entries) || entries.length < 1 || entries.length > PROXY_CHAPTER_IMAGE_BATCH_MAX) {
-    throw new Error(`El capítulo supera el límite de ${PROXY_CHAPTER_IMAGE_BATCH_MAX} paneles por lote.`);
+export async function fetchImageBlobBatch(entries, signal, onResult, maxRequests = PROXY_CHAPTER_IMAGE_BATCH_MAX) {
+  if (!Array.isArray(entries) || entries.length < 1 || entries.length > maxRequests) {
+    throw new Error(`El lote supera el límite de ${maxRequests} imágenes.`);
   }
 
   const images = entries.map(({ url, referer = '', cookie = '' }) => {
@@ -791,7 +811,7 @@ async function fetchOlympusDetailRequest(url, options) {
   return response.text();
 }
 
-async function fetchOnfDetailRequest(url, options) {
+async function fetchOnfMangaDetailDirect(url, options) {
   const endpoint = new URL(proxyUrl(url), window.location.href);
   endpoint.searchParams.set('detail', 'onf');
   const response = await fetch(endpoint.href, proxyRequestOptions(url, { credentials: 'omit', ...options }));
@@ -812,7 +832,25 @@ async function fetchOnfDetailRequest(url, options) {
   return payload.html;
 }
 
+function fetchOnfDetailRequest(url, options) {
+  return new Promise((resolve, reject) => {
+    queueProxyGet({ url, options, resolve, reject });
+  });
+}
+
 async function fetchMangaDexFeedRequest(url, options) {
+  return fetchMangaDexDetailBatchRequest(url, options, false);
+}
+
+async function fetchMangaDexDetailDirect(url, options) {
+  const endpoint = new URL(proxyUrl(url), window.location.href);
+  endpoint.searchParams.set('detail', 'mangadex-detail');
+  const response = await fetch(endpoint.href, proxyRequestOptions(url, { credentials: 'omit', ...options }));
+  assertProxyResponse(response, new URL(url), url, true, false);
+  return response.text();
+}
+
+async function fetchMangaDexFeedDirect(url, options) {
   const endpoint = new URL(proxyUrl(url), window.location.href);
   endpoint.searchParams.set('detail', 'mangadex-feed');
   const response = await fetch(endpoint.href, proxyRequestOptions(url, { credentials: 'omit', ...options }));
@@ -820,12 +858,14 @@ async function fetchMangaDexFeedRequest(url, options) {
   return response.text();
 }
 
-async function fetchMangaDexDetailRequest(url, options) {
-  const endpoint = new URL(proxyUrl(url), window.location.href);
-  endpoint.searchParams.set('detail', 'mangadex-detail');
-  const response = await fetch(endpoint.href, proxyRequestOptions(url, { credentials: 'omit', ...options }));
-  assertProxyResponse(response, new URL(url), url, true, false);
-  return response.text();
+function fetchMangaDexDetailBatchRequest(url, options, includeManga = true) {
+  return new Promise((resolve, reject) => {
+    queueProxyGet({ url, options: { ...options, mangaDexDetail: includeManga }, resolve, reject });
+  }).then((response) => response.text());
+}
+
+function fetchMangaDexDetailRequest(url, options) {
+  return fetchMangaDexDetailBatchRequest(url, options, true);
 }
 
 function mangaDexCatalogRequest(url, options) {
@@ -1032,11 +1072,12 @@ export async function httpGet(url, requestId, options = {}) {
     const key = `onf-detail:${target.href}`;
     let request = httpGetRequests.get(key);
     if (!request) {
-      request = fetchOnfDetailRequest(url, detailOptions);
+      request = fetchOnfDetailRequest(url, { ...detailOptions, onfMangaDetail: true });
       httpGetRequests.set(key, request);
     }
     try {
-      const text = await request;
+      const response = await request;
+      const text = await response.text();
       return includeUrl ? { text, url } : text;
     } finally {
       if (httpGetRequests.get(key) === request) httpGetRequests.delete(key);
@@ -1083,7 +1124,12 @@ export async function httpGet(url, requestId, options = {}) {
     const key = `olympus-detail:${target.href}`;
     let request = httpGetRequests.get(key);
     if (!request) {
-      request = fetchOlympusDetailRequest(url, detailOptions);
+      request = new Promise((resolve, reject) => {
+        queueProxyGet({ url, options: { ...detailOptions, olympusDetail: true }, resolve, reject });
+      }).then(async (response) => {
+        assertProxyResponse(response, target, url, true, false);
+        return response.text();
+      });
       httpGetRequests.set(key, request);
     }
     try {

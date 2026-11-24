@@ -86,7 +86,7 @@ function decodeManga(bytes) {
     return packed;
   });
   return {
-    source: Number(valueOf(list, 1, 0)),
+    source: String(valueOf(list, 1, 0)),
     url: decoder.decode(valueOf(list, 2, new Uint8Array())),
     title: decoder.decode(valueOf(list, 3, new Uint8Array())),
     artist: decoder.decode(valueOf(list, 4, new Uint8Array())),
@@ -113,7 +113,7 @@ function decodeCategory(bytes) {
 
 function decodeSource(bytes) {
   const list = fields(bytes);
-  return { name: decoder.decode(valueOf(list, 1, new Uint8Array())), id: Number(valueOf(list, 2, 0)) };
+  return { name: decoder.decode(valueOf(list, 1, new Uint8Array())), id: String(valueOf(list, 2, 0)) };
 }
 
 function concatBytes(a, b) {
@@ -255,6 +255,16 @@ function resolveUrl(raw, manifest, fallback) {
   try { return new URL(raw, manifest?.baseUrl || fallback).href; } catch { return raw; }
 }
 
+function isValidImportedCover(cover, mangaUrl) {
+  if (typeof cover !== 'string' || !/^https?:\/\//i.test(cover)) return false;
+  try {
+    const parsed = new URL(cover);
+    return (parsed.protocol === 'https:' || parsed.protocol === 'http:') && isMangaCover(cover, mangaUrl);
+  } catch {
+    return false;
+  }
+}
+
 export async function previewMihonBackup(input, installedSources, availableExtensions = []) {
   let bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
   let stream = new Blob([bytes]).stream();
@@ -301,7 +311,7 @@ export async function previewMihonBackup(input, installedSources, availableExten
         description: manga.description,
         genres: manga.genres,
         status: manga.status,
-        cover: isMangaCover(cover, url) ? cover : '',
+        cover: isValidImportedCover(cover, url) ? cover : '',
         chapterTotal: manga.chapters.length,
         chapterReadCount: manga.chapters.filter((chapter) => chapter.read).length,
         cats: manga.categoryIds.map((index) => categoryByIndex.get(String(index))).filter(Boolean),
@@ -344,15 +354,17 @@ const mangaIdentityKey = (manga) => {
 };
 const mangaWorkKey = (manga) => {
   const title = normalizeMangaName(manga.title);
-  return title ? `${title}|${normalizeMangaName(manga.author)}` : '';
+  const author = normalizeMangaName(manga.author);
+  return title && author ? `${title}|${author}` : '';
 };
-const mangaTitleKey = (manga) => normalizeMangaName(manga.title);
+const mangaTitleKey = (manga) => mangaWorkKey(manga);
 
 function mergeDuplicateFavorite(kept, duplicate) {
   const sameEntry = kept.sourceId === duplicate.sourceId && libraryIdentityKey(kept.url) === libraryIdentityKey(duplicate.url);
-  const hasKeptCover = isMangaCover(kept.cover, kept.url);
-  const cover = (hasKeptCover && kept.cover) || (sameEntry && isMangaCover(duplicate.cover, kept.url) && duplicate.cover) || '';
-  const coverOwner = cover === kept.cover && hasKeptCover ? kept : sameEntry && cover ? duplicate : null;
+  const hasKeptCover = isValidImportedCover(kept.cover, kept.url);
+  const hasDuplicateCover = isValidImportedCover(duplicate.cover, duplicate.url);
+  const cover = (hasKeptCover && kept.cover) || (hasDuplicateCover && duplicate.cover) || '';
+  const coverOwner = cover === kept.cover && hasKeptCover ? kept : hasDuplicateCover ? duplicate : null;
   return {
     ...duplicate,
     ...kept,
@@ -524,6 +536,7 @@ export function importMihonBackup(candidate, { clearCachedCoverUrls = new Set() 
   let updated = 0;
   for (const entry of importableEntries) {
     const manga = entry.manga;
+    manga.coverRefreshPending = true;
     manga.cats = [...new Set(manga.cats.map((name) => categoryIds.get(normalizeName(name))).filter(Boolean))];
     if (!manga.cats.length && categories[0]?.id) manga.cats = [categories[0].id];
     const key = `${manga.sourceId}|${urlKey(manga.url)}`;
@@ -557,9 +570,13 @@ export function importMihonBackup(candidate, { clearCachedCoverUrls = new Set() 
       const existing = favorites[index];
       const url = matchedByWork ? existing.url : manga.url;
       const sameEntry = libraryIdentityKey(existing.url) === libraryIdentityKey(manga.url);
-      const keepExistingCover = isMangaCover(existing.cover, url) && (matchedByWork || sameEntry);
-      const incomingCover = !matchedByWork || sameEntry ? manga.cover : '';
-      const cover = (keepExistingCover && existing.cover) || incomingCover || '';
+      const keepExistingCover = isValidImportedCover(existing.cover, url) && (matchedByWork || sameEntry);
+      const incomingCover = isValidImportedCover(manga.cover, manga.url) ? manga.cover : '';
+      // A work match can keep the existing source URL. Keep its cover paired
+      // with that URL instead of attaching the incoming source's thumbnail.
+      const cover = matchedByWork && !sameEntry
+        ? (keepExistingCover ? existing.cover : '')
+        : incomingCover || (keepExistingCover && existing.cover) || '';
       const clearCachedCover = clearCachedCoverUrls.has(cover);
       const existingCats = Array.isArray(existing.cats) ? existing.cats : [];
       const keptCategories = existingCats.filter((id) => !previousMihonCategoryIds.has(id)
@@ -576,6 +593,7 @@ export function importMihonBackup(candidate, { clearCachedCoverUrls = new Set() 
         description: existing.description || manga.description,
         genres: existing.genres?.length ? existing.genres : manga.genres,
         cover,
+        coverRefreshPending: true,
         chapterTotal: Math.max(Number(existing.chapterTotal) || 0, Number(manga.chapterTotal) || 0),
         chapterReadCount: Math.max(Number(existing.chapterReadCount) || 0, Number(manga.chapterReadCount) || 0),
         coverLocal: !clearCachedCover && keepExistingCover && cover === existing.cover ? existing.coverLocal || '' : '',

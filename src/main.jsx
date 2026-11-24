@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
+import { motion } from 'framer-motion';
 import { HashRouter } from 'react-router-dom';
 import App from './App.jsx';
 import Splash from './components/Splash.jsx';
@@ -23,29 +24,46 @@ function Root() {
   const [splashExiting, setSplashExiting] = useState(false);
   const [showTutorial, setShowTutorial] = useState(() => !settings.get().tutorialSeen);
   const [appVisible, setAppVisible] = useState(false);
+  const [appMounted, setAppMounted] = useState(false);
+  const revealApp = useCallback(() => {
+    setAppMounted(true);
+    setAppVisible(true);
+  }, []);
+  const hideApp = useCallback(() => setAppVisible(false), []);
   const handleSplashDone = useCallback(() => {
     setSplashDone(true);
-    if (settings.get().tutorialSeen) setAppVisible(true);
-  }, []);
+    if (settings.get().tutorialSeen) revealApp();
+  }, [revealApp]);
   const handleSplashExitStart = useCallback(() => {
     setSplashExiting(true);
-    if (settings.get().tutorialSeen) setAppVisible(true);
-  }, []);
-  const handleTutorialDone = useCallback(() => { setAppVisible(true); setShowTutorial(false); }, []);
-  const handleTutorialExitStart = useCallback(() => setAppVisible(true), []);
+    if (settings.get().tutorialSeen) revealApp();
+  }, [revealApp]);
+  const handleTutorialDone = useCallback(() => {
+    revealApp();
+    setShowTutorial(false);
+  }, [revealApp]);
+  const handleTutorialExitStart = revealApp;
   return (
     <HashRouter>
       <ToastProvider>
-        <div style={{ visibility: appVisible ? 'visible' : 'hidden' }}>
+        <motion.div
+          initial={false}
+          animate={{ opacity: appVisible ? 1 : 0 }}
+          transition={{ duration: showTutorial && appMounted ? 0.2 : 0, ease: 'easeOut' }}
+          onAnimationComplete={() => { if (!appVisible) setAppMounted(false); }}
+          style={{ visibility: appMounted ? 'visible' : 'hidden' }}
+          inert={!appVisible}
+          aria-hidden={!appVisible}
+        >
           <App tutorialMode={showTutorial} />
-        </div>
+        </motion.div>
         {!splashDone && <Splash onDone={handleSplashDone} onExitStart={handleSplashExitStart} />}
         {showTutorial && (splashExiting || splashDone) && (
           <Onboarding
             onDone={handleTutorialDone}
             onExitStart={handleTutorialExitStart}
-            onRevealApp={() => setAppVisible(true)}
-            onHideApp={() => {}}
+            onRevealApp={revealApp}
+            onHideApp={hideApp}
             enteringWithSplash={!splashDone}
           />
         )}

@@ -6,12 +6,13 @@ import { settings } from '../lib/settings.js';
 import MangaCard from '../components/MangaCard.jsx';
 import VirtualMangaGrid from '../components/VirtualMangaGrid.jsx';
 import { SourceBadge } from '../components/SourceBadge.jsx';
-import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaSource, SOURCE_CONFIG_CHANGE_EVENT, EXTENSION_INSTALLED_EVENT } from '../lib/extensions.js';
+import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaSource, EXTENSION_INSTALLED_EVENT } from '../lib/extensions.js';
 import { checkLibrary } from '../lib/notify.js';
 import { progress } from '../lib/progress.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { tracking } from '../lib/tracking.js';
 import { api } from '../lib/api.js';
+import { preloadLibraryCoversBatch } from '../lib/covers.js';
 import { setHttpGetBatchWindow } from '../lib/browserHttp.js';
 import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
@@ -110,6 +111,7 @@ const sameLibraryFavorites = (left, right) => left.length === right.length && le
     && manga.title === next.title
     && manga.author === next.author
     && manga.cover === next.cover
+    && manga.coverRefreshPending === next.coverRefreshPending
     && manga.coverLocal === next.coverLocal
     && manga.coverCached === next.coverCached
     && manga.sourceName === next.sourceName
@@ -120,7 +122,7 @@ const sameLibraryFavorites = (left, right) => left.length === right.length && le
     && (manga.cats || []).join('\0') === (next.cats || []).join('\0');
 });
 
-async function backfillLibraryDetails(favorites, showAdultExtensions, isActive) {
+async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, installedSourceIds = null) {
   const pending = favorites.filter((manga) => {
     const resolvedId = sourceIdFor(manga);
     return extensions.isInstalled(resolvedId)
@@ -131,6 +133,8 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive) 
   if (!pending.length) return;
 
   const restoreBatchWindow = setHttpGetBatchWindow(5000);
+  let favoritesChanged = false;
+  const refreshedCoverUrls = new Set();
   try {
     let next = 0;
     const concurrency = Math.min(50, pending.length);
@@ -140,12 +144,32 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive) 
         const savedSourceId = manga.sourceId || 'leercapitulo';
         const resolvedId = sourceIdFor(manga);
         try {
-          let detail = await api.restoreDetail(manga.url, resolvedId, savedSourceId);
-          if (!detail?.chapters?.length) {
-            detail = api.peekDetail(manga.url, resolvedId);
+          let detail;
+          if (manga.coverRefreshPending) {
+            detail = await api.restoreDetail(manga.url, resolvedId, savedSourceId);
+            const cachedCover = detail?.cover && isMangaCover(detail.cover, manga.url) ? detail.cover : '';
+            if (!detail?.chapters?.length || !cachedCover) {
+              detail = await api.detail(manga.url, resolvedId, { cacheResult: false, persistResult: false, allowDisabled: true });
+            }
+            const cover = detail?.cover && isMangaCover(detail.cover, manga.url) ? detail.cover : '';
+            if (cover) refreshedCoverUrls.add(cover);
+            const patch = {
+              ...(manga.coverRefreshPending ? { coverRefreshPending: false } : {}),
+              ...(cover && cover !== manga.cover ? { cover } : {})
+            };
+            if (Object.keys(patch).length) {
+              lib.updateFav(manga.url, patch, savedSourceId);
+              favoritesChanged = true;
+            }
+          } else {
+            detail = await api.restoreDetail(manga.url, resolvedId, savedSourceId);
             if (!detail?.chapters?.length) {
-              const chaptersDetail = await api.detailFromLibraryChapters(manga.url, resolvedId, manga);
-              detail = chaptersDetail || await api.detail(manga.url, resolvedId, { cacheResult: false, persistResult: false, allowDisabled: true });
+              if (!installedSourceIds && Number(manga.chapterTotal) > 0) continue;
+              detail = api.peekDetail(manga.url, resolvedId);
+              if (!detail?.chapters?.length) {
+                const chaptersDetail = await api.detailFromLibraryChapters(manga.url, resolvedId, manga);
+                detail = chaptersDetail || await api.detail(manga.url, resolvedId, { cacheResult: false, persistResult: false, allowDisabled: true });
+              }
             }
           }
           if (detail?.chapters?.length) await api.persistLibraryDetail(manga.url, resolvedId, detail, savedSourceId);
@@ -154,8 +178,12 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive) 
         }
       }
     }));
+    if (refreshedCoverUrls.size) {
+      await preloadLibraryCoversBatch([...refreshedCoverUrls], { web: true, persist: true });
+    }
   } finally {
     restoreBatchWindow();
+    if (favoritesChanged) window.dispatchEvent(new Event('cytlex:library-updated'));
   }
 }
 
@@ -164,7 +192,7 @@ function startLibraryDetailBackfill() {
     libraryDetailBackfillPromise = (async () => {
       while (pendingLibraryDetailBackfills.length) {
         const nextJob = pendingLibraryDetailBackfills.shift();
-        await backfillLibraryDetails(nextJob.favorites, nextJob.showAdultExtensions, nextJob.isActive);
+        await backfillLibraryDetails(nextJob.favorites, nextJob.showAdultExtensions, nextJob.isActive, nextJob.installedSourceIds);
       }
     })().finally(() => {
       libraryDetailBackfillPromise = null;
@@ -242,9 +270,10 @@ chapterIndex.subscribe((change) => {
   persistUnreadCountCache();
 });
 
-function CachedLibraryCover({ cover, title, className, cachedOnly = false, cachedCover = '' }) {
+function CachedLibraryCover({ cover, title, className, cachedOnly = false, cachedCover = '', allowRemoteFallback = false }) {
   const { ref, src, onError, onLoad } = useLibraryCover(cover, {
     cachedOnly,
+    allowRemoteFallback,
     cachedCover: /^(data:|blob:)/i.test(cachedCover) ? cachedCover : ''
   });
 
@@ -272,7 +301,6 @@ const Library = memo(function Library({ active = true }) {
   const [coverSize, setCoverSize] = useState(() => settings.get().coverSize);
   const [showUnread, setShowUnread] = useState(() => settings.get().libraryShowUnread);
   const [showAdultExtensions, setShowAdultExtensions] = useState(() => !!settings.get().showAdultExtensions);
-  const [sourceConfigVersion, setSourceConfigVersion] = useState(0);
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('cytlex:librarySort') || 'title-asc');
   const [libraryQuery, setLibraryQuery] = useState('');
   const [unread, setUnread] = useState({});
@@ -407,18 +435,21 @@ const Library = memo(function Library({ active = true }) {
     []
   );
   useEffect(() => {
-    const refreshSourceConfig = () => setSourceConfigVersion((version) => version + 1);
     const backfillInstalledSources = (event) => {
       const sourceIds = new Set(event.detail?.sourceIds || []);
       if (!sourceIds.size) return;
       const favorites = lib.favs().filter((manga) => sourceIds.has(sourceIdFor(manga)));
       if (favorites.length) queueLibraryDetailBackfill(favorites, settings.get().showAdultExtensions, () => true, sourceIds);
     };
-    window.addEventListener(SOURCE_CONFIG_CHANGE_EVENT, refreshSourceConfig);
+    const reloadLibraryOnUpdate = () => {
+      const latest = lib.favs();
+      setFavs((current) => sameLibraryFavorites(current, latest) ? current : latest);
+    };
     window.addEventListener(EXTENSION_INSTALLED_EVENT, backfillInstalledSources);
+    window.addEventListener('cytlex:library-updated', reloadLibraryOnUpdate);
     return () => {
-      window.removeEventListener(SOURCE_CONFIG_CHANGE_EVENT, refreshSourceConfig);
       window.removeEventListener(EXTENSION_INSTALLED_EVENT, backfillInstalledSources);
+      window.removeEventListener('cytlex:library-updated', reloadLibraryOnUpdate);
     };
   }, []);
   useEffect(() => {
@@ -469,11 +500,6 @@ const Library = memo(function Library({ active = true }) {
     window.addEventListener('cytlex:library-unread-reset', onImport);
     return () => window.removeEventListener('cytlex:library-unread-reset', onImport);
   }, [active]);
-
-  useEffect(() => {
-    if (!active || !favs.length) return;
-    queueLibraryDetailBackfill(favs, showAdultExtensions, () => activeRef.current);
-  }, [active, favs, showAdultExtensions, sourceConfigVersion]);
 
   useEffect(() => {
     const syncProgress = (progress) => setCheckProgress(progress);
@@ -997,7 +1023,7 @@ const Library = memo(function Library({ active = true }) {
                           style={{ width: px(68 * displayCoverSize / 160, scale, 56), height: px(102 * displayCoverSize / 160, scale, 82) }}
                         >
                           {cover && (
-                            <CachedLibraryCover cover={cover} title={m.title} className="w-full h-full object-cover bg-black" cachedOnly={unavailable} cachedCover={validCover ? storedCoverThumbnail(m) : ''} />
+                            <CachedLibraryCover cover={cover} title={m.title} className="w-full h-full object-cover bg-black" cachedOnly={unavailable && !sourceNotOffered} cachedCover={validCover ? storedCoverThumbnail(m) : ''} allowRemoteFallback={m.coverRefreshPending} />
                           )}
                           {unavailable && (
                             <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 px-0.5 text-center font-semibold leading-tight text-white" style={{ fontSize: fontPx(8, scale, 7) }}>

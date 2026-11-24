@@ -62,7 +62,8 @@ export default {
       },
       fontFamily: {
         sans: ['Satoshi', 'system-ui', 'sans-serif'],
-        display: ['"Space Grotesk"', 'Satoshi', 'system-ui', 'sans-serif']
+        display: ['"Space Grotesk"', 'Satoshi', 'system-ui', 'sans-serif'],
+        brand: ['Satoshi', 'system-ui', 'sans-serif']
       },
       keyframes: {
         'fade-in': {

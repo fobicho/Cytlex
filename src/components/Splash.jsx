@@ -72,7 +72,7 @@ export default function Splash({ trigger = 0, onDone = null, onExitStart = null 
         transition={{ duration: APPEAR / 1000, ease: 'easeOut' }}
       >
         <Logo scale={scale} />
-        <span className="font-display text-3xl font-semibold tracking-tight text-foreground">Cytlex</span>
+        <span className="font-brand text-3xl font-semibold tracking-tight text-foreground">Cytlex</span>
       </motion.div>
     </motion.div>
   );

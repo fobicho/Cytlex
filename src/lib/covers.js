@@ -8,7 +8,7 @@ const MAX_SEARCH_COVERS = 300;
 const SEARCH_COVER_BATCH_SIZE = 40;
 const MAX_LIBRARY_COVERS = 240;
 const MAX_LIBRARY_COVER_LOADS = 4;
-const PROXY_COVER_BATCH_SIZE = 40;
+const PROXY_COVER_BATCH_SIZE = 50;
 const PROXY_COVER_RETRY_BATCH_SIZE = 8;
 const LIBRARY_COVER_DB = 'cytlex-library-covers';
 const LIBRARY_COVER_STORE = 'covers';
@@ -26,6 +26,7 @@ const libraryCoverWaiters = [];
 const priorityLibraryCovers = new Set();
 const failedLibraryCovers = new Map();
 const failedCoverHosts = new Map();
+const protectedLibraryCoverKeys = new Map();
 let libraryCoverDbPromise;
 let searchCoverGeneration = 0;
 let activeSearchCoverLoads = 0;
@@ -58,6 +59,45 @@ function persistedCoverKey(url) {
       ? `mangadex-cover-v2:${catalogImageKey(url)}`
       : catalogImageKey(url);
   } catch { return url; }
+}
+
+function favoriteCoverKeys() {
+  const keys = new Set();
+  try {
+    const favorites = JSON.parse(localStorage.getItem('cytlex:favs') || '[]');
+    if (Array.isArray(favorites)) {
+      for (const favorite of favorites) {
+        const url = favorite?.cover;
+        if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) continue;
+        keys.add(url);
+        keys.add(persistedCoverKey(url));
+        try {
+          const parsed = new URL(url);
+          if (requiresImageProxy(url) && parsed.hostname.toLowerCase().endsWith('mangadex.org')) {
+            keys.add(`mangadex-cover-v2:${url}`);
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+  protectedLibraryCoverKeys.forEach((_, key) => keys.add(key));
+  return keys;
+}
+
+export function protectLibraryCovers(urls) {
+  const keys = new Set((urls || []).filter((url) => typeof url === 'string' && /^https?:\/\//i.test(url)));
+  [...keys].forEach((url) => keys.add(persistedCoverKey(url)));
+  keys.forEach((key) => protectedLibraryCoverKeys.set(key, (protectedLibraryCoverKeys.get(key) || 0) + 1));
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    keys.forEach((key) => {
+      const count = (protectedLibraryCoverKeys.get(key) || 0) - 1;
+      if (count > 0) protectedLibraryCoverKeys.set(key, count);
+      else protectedLibraryCoverKeys.delete(key);
+    });
+  };
 }
 
 function pruneSearchCoverCache() {
@@ -259,7 +299,8 @@ async function persistLibraryCover(url, blob, version) {
     await transactionComplete;
     if (count <= MAX_PERSISTED_LIBRARY_COVERS) return true;
     const records = await idbRequest(db.transaction(LIBRARY_COVER_STORE, 'readonly').objectStore(LIBRARY_COVER_STORE).getAll());
-    records.sort((a, b) => a.usedAt - b.usedAt);
+    const favorites = favoriteCoverKeys();
+    records.sort((a, b) => Number(favorites.has(a.url)) - Number(favorites.has(b.url)) || a.usedAt - b.usedAt);
     const cleanupTransaction = db.transaction(LIBRARY_COVER_STORE, 'readwrite');
     const cleanupComplete = new Promise((resolve, reject) => {
       cleanupTransaction.oncomplete = resolve;
@@ -415,17 +456,19 @@ export function preloadLibraryCoversBatch(urls, { web = false, persist = false, 
     }));
     if (!remote.length) return;
     const overflow = [];
+    const fallbacks = [];
     await fetchImageBlobBatch(remote.map(({ url }) => ({ url: libraryCoverBatchUrl(url) })), undefined, async ({ blob, error }, index) => {
       const entry = remote[index];
       if (error || !blob) {
         if (retryBatchOverflow && ['batch-response-too-large', 'subrequest-limit'].includes(error?.reason)) overflow.push(entry);
-        else await fallback(entry);
+        else fallbacks.push(entry);
         return;
       }
       const cover = await storeLibraryCoverBlob(entry.url, blob, entry.version, entry.promise, entry.persist);
       if (cover) entry.resolve(cover);
-      else await fallback(entry);
-    });
+      else fallbacks.push(entry);
+    }, PROXY_COVER_BATCH_SIZE);
+    await Promise.all(fallbacks.map(fallback));
     for (let offset = 0; offset < overflow.length; offset += PROXY_COVER_RETRY_BATCH_SIZE) {
       await fetchBatch(overflow.slice(offset, offset + PROXY_COVER_RETRY_BATCH_SIZE), false);
     }

@@ -7,6 +7,7 @@ import { cn } from '../lib/utils.js';
 import { SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
 import { settings, SIDEBAR_WIDTH } from '../lib/settings.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
+import CytlexLogoMark from './CytlexLogoMark.jsx';
 
 const navItems = [
   { to: '/biblioteca', label: 'Biblioteca', icon: BookOpen },
@@ -106,10 +107,12 @@ export default function Sidebar({ tutorialNavOnly = false }) {
     + Math.max(20, Math.round(32 * scale)) / 2;
   const logoSize = Math.max(18, Math.round(24 * scale));
   const logoOffset = navIconCenter - logoSize / 2;
+  const ribbonLogoSize = Math.max(22, Math.round(30 * scale));
+  const ribbonLogoOffset = navIconCenter - ribbonLogoSize / 2;
   const renderBrand = (key) => (
     <span key={key} className="sidebar-ribbon-brand flex shrink-0 items-center" style={{ gap: px(8, scale, 6) }}>
-      <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="" className="shrink-0 rounded-md" style={{ width: logoSize, height: logoSize }} />
-      <span className="whitespace-nowrap font-display font-bold tracking-tight text-foreground" style={{ fontSize: fontPx(14, scale) }}>Cytlex</span>
+      <CytlexLogoMark decorative reduceMotion={reduceMotion} strokeWidth={0} themeColor style={{ width: ribbonLogoSize, height: ribbonLogoSize }} />
+      <span className="sidebar-ribbon-brand-name whitespace-nowrap self-center font-brand font-semibold leading-[1.2] tracking-tight" style={{ fontSize: fontPx(18, scale) }}>Cytlex</span>
     </span>
   );
   const renderRibbonSegment = (copyIndex) => (
@@ -150,15 +153,15 @@ export default function Sidebar({ tutorialNavOnly = false }) {
       <div className="relative flex shrink-0 items-center overflow-hidden border-b border-border/70" style={{ minHeight: px(38, scale, 34) }}>
         {collapsed ? (
           <div className="flex items-center" style={{ paddingLeft: logoOffset, gap: px(8, scale, 6) }}>
-            <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="" className="shrink-0 rounded-md" style={{ width: logoSize, height: logoSize }} />
-            <span aria-hidden="true" className="whitespace-nowrap font-display font-bold tracking-tight opacity-0" style={{ fontSize: fontPx(14, scale) }}>Cytlex</span>
+            <CytlexLogoMark decorative reduceMotion={reduceMotion} style={{ width: logoSize, height: logoSize }} />
+            <span aria-hidden="true" className="whitespace-nowrap font-brand font-bold tracking-tight opacity-0" style={{ fontSize: fontPx(14, scale) }}>Cytlex</span>
           </div>
         ) : reduceMotion ? (
-          <span role="img" aria-label="Cytlex" className="flex items-center" style={{ paddingLeft: logoOffset }}>
+          <span role="img" aria-label="Cytlex" className="flex items-center" style={{ paddingLeft: ribbonLogoOffset }}>
             {renderBrand('static')}
           </span>
         ) : (
-          <div className="sidebar-ribbon-viewport" style={{ paddingLeft: logoOffset }}>
+          <div className="sidebar-ribbon-viewport" style={{ paddingLeft: ribbonLogoOffset }}>
             <div className="sidebar-ribbon-track" role="img" aria-label="Cytlex">
               {[0, 1].map(renderRibbonSegment)}
             </div>

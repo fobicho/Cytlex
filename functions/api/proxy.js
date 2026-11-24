@@ -5,6 +5,7 @@ const ALLOWED_HOSTS = new Set([
   'b78sk.komiwa.net',
   'blogger.googleusercontent.com',
   'cdn.achymanga.online',
+  'cdn1.intomanga.com',
   'd33y4i2dmzjqjh.cloudfront.net',
   'fobicho.github.io',
   'images.mangalect.org',
@@ -37,11 +38,13 @@ const UPSTREAM_RETRIES = 2;
 const PROXY_RESPONSE_MAX_BYTES = 64 * 1024 * 1024;
 const PROXY_ACHY_CATALOG_MAX_BYTES = 64 * 1024 * 1024;
 const PROXY_BATCH_MAX_REQUESTS = 50;
+const PROXY_MANGADEX_DETAIL_BATCH_MAX = 20;
 const PROXY_BATCH_RESPONSE_MAX_BYTES = 8 * 1024 * 1024;
 const PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES = 8 * 1024 * 1024;
 const PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES = 64 * 1024 * 1024;
 const PROXY_BATCH_CONCURRENCY = 6;
-const PROXY_IMAGE_BATCH_MAX_REQUESTS = 40;
+const PROXY_IMAGE_BATCH_MAX_REQUESTS = 50;
+const PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS = 40;
 const PROXY_IMAGE_BATCH_ITEM_MAX_BYTES = 8 * 1024 * 1024;
 const PROXY_IMAGE_BATCH_TOTAL_MAX_BYTES = 128 * 1024 * 1024;
 const PROXY_IMAGE_BATCH_MAX_SUBREQUESTS = 50;
@@ -567,6 +570,7 @@ function catalogImageCandidates(text, contentType, sourceId, pageUrl, limit) {
     const score = descriptor.endsWith('w') ? amount : descriptor.endsWith('x') ? amount * 1000 : 0;
     return { url, score };
   })).sort((a, b) => b.score - a.score)[0]?.url;
+  const lastSrcsetUrl = (value) => value.split(',').map((candidate) => candidate.trim().split(/\s+/)[0]).filter(Boolean).at(-1) || '';
   const add = (value, key = '') => {
     if (typeof value !== 'string' || (!imageKey.test(key) && !/^\s*(?:https?:|\/\/|\/)/i.test(value))) return;
     const raw = value.trim().replace(/&amp;/gi, '&').split(/\s+/)[0].replace(/["'<>),]+$/, '');
@@ -578,6 +582,9 @@ function catalogImageCandidates(text, contentType, sourceId, pageUrl, limit) {
         : pageUrl;
       const url = new URL(value, base);
       if (sourceId === 'leercapitulo' && url.hostname === 'leercapitulo.co') url.hostname = 'www.leercapitulo.co';
+      // Olympus catalog cards request the medium cover even though the API
+      // payload contains the larger `-xl` variant.
+      if (sourceId === 'olympusscanlation') url.pathname = url.pathname.replace(/-xl\.(jpe?g|png|webp|avif)$/i, '-m.$1');
       if (!/^https?:$/.test(url.protocol) || /(?:\/logo|\/avatar|\/icon|placeholder)/i.test(url.pathname)) return;
       candidates.add(url.href);
     } catch {}
@@ -616,16 +623,64 @@ function catalogImageCandidates(text, contentType, sourceId, pageUrl, limit) {
       } else {
         const imageAttributesForSource = sourceId === 'mangaoni'
           ? ['data-src', 'src']
+          : sourceId === 'zonatmo'
+            ? ['data-srcset', 'data-src', 'data-lazy-src', 'data-original', 'data-url', 'data-bg', 'src', 'content', 'srcset']
           : ['data-original', 'data-full', 'data-zoom-image', 'data-large', 'data-src', 'data-lazy-src', 'data-srcset', 'srcset', 'data-bg', 'data-image', 'data-cover', 'data-thumbnail', 'src'];
         const selectedAttr = imageAttributesForSource
           .map((name) => [name, attrs.get(name)])
           .find(([, value]) => value);
-        selected = selectedAttr?.[0].includes('srcset') ? srcsetUrl([selectedAttr[1]]) : selectedAttr?.[1]
+        selected = selectedAttr?.[0].includes('srcset')
+          ? sourceId === 'zonatmo' ? lastSrcsetUrl(selectedAttr[1]) : srcsetUrl([selectedAttr[1]])
+          : selectedAttr?.[0] === 'data-bg' ? selectedAttr[1]?.match(/url\(\s*(["']?)(.*?)\1\s*\)/i)?.[2]
+          : selectedAttr?.[1]
           || (attrs.has('data-url') && /cover|thumbnail|element|manga|comic/i.test(className) ? attrs.get('data-url') : null)
           || attrs.get('style')?.match(/url\(["']?([^"')]+)["']?\)/i)?.[1];
       }
       if (selected) add(selected, 'cover');
       if (candidates.size >= limit) break;
+    }
+  };
+  const scanLeerCapituloCards = (html) => {
+    const tags = [...html.matchAll(/<\/?([a-z][\w:-]*)\b[^>]*>/gi)];
+    for (let index = 0; index < tags.length && candidates.size < limit; index += 1) {
+      const opening = tags[index];
+      if (opening[0][1] === '/' || !imageAttributes(opening[0]).get('class')?.split(/\s+/).includes('lc-card')) continue;
+      const tagName = opening[1].toLowerCase();
+      let depth = 1;
+      let end = html.length;
+      for (let cursor = index + 1; cursor < tags.length; cursor += 1) {
+        if (tags[cursor][1].toLowerCase() !== tagName) continue;
+        if (tags[cursor][0][1] === '/') depth -= 1;
+        else if (!/\/\s*>$/.test(tags[cursor][0])) depth += 1;
+        if (!depth) { end = tags[cursor].index + tags[cursor][0].length; break; }
+      }
+      const card = html.slice(opening.index, end);
+      const image = card.match(/<img\b[^>]*>/i);
+      if (!image) continue;
+      const attrs = imageAttributes(image[0]);
+      let linkedImage = '';
+      const anchorStack = [];
+      for (const tag of card.slice(0, image.index).matchAll(/<\/?a\b[^>]*>/gi)) {
+        if (tag[0][1] === '/') anchorStack.pop();
+        else anchorStack.push(imageAttributes(tag[0]).get('href') || '');
+      }
+      if (/\.(?:avif|gif|jpe?g|png|webp)(?:[?#]|$)/i.test(anchorStack.at(-1) || '')) {
+        linkedImage = anchorStack.at(-1);
+      }
+      const original = ['data-original', 'data-full', 'data-zoom-image', 'data-large', 'data-src', 'data-lazy-src']
+        .map((name) => attrs.get(name)).find(Boolean);
+      const picture = [...card.matchAll(/<picture\b[^>]*>[\s\S]*?<\/picture>/gi)]
+        .map((match) => match[0]).find((block) => block.includes(image[0]));
+      const srcsets = picture
+        ? [...picture.matchAll(/<(?:source|img)\b[^>]*>/gi)].flatMap((match) => {
+          const values = imageAttributes(match[0]);
+          return [values.get('srcset'), values.get('data-srcset')].filter(Boolean);
+        })
+        : [attrs.get('srcset'), attrs.get('data-srcset')].filter(Boolean);
+      const selected = linkedImage || original || (srcsets.length ? srcsetUrl(srcsets) : attrs.get('src'));
+      if (selected) add(selected, 'cover');
+      index = tags.findIndex((tag, tagIndex) => tagIndex > index && tag.index + tag[0].length === end);
+      if (index < 0) break;
     }
   };
   const scanJson = (value, key = '', depth = 0) => {
@@ -645,12 +700,9 @@ function catalogImageCandidates(text, contentType, sourceId, pageUrl, limit) {
       const attrs = imageAttributes(match[0]);
       const raw = attrs.get('data-src') || attrs.get('src') || '';
       if (!raw || !attrs.get('alt')?.trim() || /default\.gif/i.test(raw)) continue;
-      try {
-        const image = new URL(raw, pageUrl);
-        if (image.hostname !== 'oni.ntr-files.online'
-          || !/^\/public\/archivos\/mangas\/.+\/cover\.jpg$/i.test(image.pathname)) continue;
-        add(raw, 'cover');
-      } catch {}
+      // Match mangaoni.js mapCard() exactly. Its installed extension accepts
+      // the source's current cover host/path rather than only the old CDN URL.
+      add(raw, 'cover');
       if (candidates.size >= limit) return;
     }
   };
@@ -664,13 +716,13 @@ function catalogImageCandidates(text, contentType, sourceId, pageUrl, limit) {
       const attrs = imageAttributes(match[0]);
       for (const name of imageAttributesForSource) {
         let raw = (attrs.get(name) || '').trim();
-        if (name.includes('srcset')) raw = raw.split(',').map((candidate) => candidate.trim().split(/\s+/)[0]).filter(Boolean).at(-1) || '';
+        if (name === 'data-srcset' || name === 'srcset') raw = lastSrcsetUrl(raw);
         if (!raw || /^(?:data:|javascript:|about:|#)/i.test(raw)
           || /(?:placeholder|default|blank|spacer|pixel)\.(?:gif|png)(?:[?#]|$)/i.test(raw)) continue;
         try {
           const image = new URL(raw, pageUrl);
           if (!['http:', 'https:'].includes(image.protocol)) continue;
-          if (image.hostname === 'd33y4i2dmzjqjh.cloudfront.net' && image.pathname.startsWith('/thumbs/')) add(raw, 'cover');
+          add(raw, 'cover');
         } catch {}
         // Match the extension's first usable image attribute exactly.
         break;
@@ -679,13 +731,20 @@ function catalogImageCandidates(text, contentType, sourceId, pageUrl, limit) {
     }
   };
 
-  if (/json/i.test(contentType) || /^[\s\[{]/.test(text)) {
+  if (/json/i.test(contentType) || /^[\[{]/.test(text.trimStart())) {
     try { scanJson(JSON.parse(text)); } catch { scanHtml(text); }
+  } else if (sourceId === 'leercapitulo') {
+    scanLeerCapituloCards(text);
   } else if (sourceId === 'mangaoni') {
     scanMangaOniCards(text);
     if (candidates.size < limit) scanHtml(text);
   } else if (sourceId === 'onfmangas') {
     scanOnfCards(text);
+  } else if (sourceId === 'zonatmo') {
+    // Keep the same attribute precedence as zonatmo.js imageUrl(); otherwise
+    // the bundled URL differs from the cover URL and the browser queues a
+    // second image batch after the catalog request.
+    scanHtml(text);
   }
   else scanHtml(text);
   return [...candidates].slice(0, limit);
@@ -729,7 +788,62 @@ async function handleCombinedSearchRequest(request) {
           imageSubrequests += 1;
         };
         const imageSubrequestBudget = { takeInitial: takeImageSubrequest, takeAdditional: takeImageSubrequest };
-        const sourceResults = requests.map((item) => fetchBatchItem(item, request));
+        const olympusDetails = new Map();
+        const mangaDexCount = requests.filter((item) => item?.detail === 'mangadex').length;
+        const olympusCount = requests.filter((item) => {
+          const target = validateTarget(item?.url);
+          return item?.detail === 'olympus'
+            || (item?.sourceId === 'olympusscanlation' && target?.origin === 'https://olympusxyz.com'
+              && /^\/api\/series\/[\w-]+$/.test(target.pathname) && target.searchParams.get('type') === 'comic');
+        }).length;
+        const detailCount = mangaDexCount + olympusCount;
+        const detailBudget = {
+          used: 0,
+          limit: Math.max(0, PROXY_BATCH_MAX_REQUESTS - catalogUrls.length - (requests.length - detailCount)),
+          take() { if (this.used >= this.limit) return false; this.used += 1; return true; },
+          get remaining() { return this.limit - this.used; }
+        };
+        const sourceResults = requests.map(async (item) => {
+          const target = validateTarget(item?.url);
+          if (item?.detail === 'mangadex') {
+            if (!target || target.origin !== 'https://api.mangadex.org'
+              || !/^\/manga\/[0-9a-f-]{36}\/feed$/i.test(target.pathname)
+              || Number(target.searchParams.get('limit')) !== 500) {
+              return { status: 400, text: 'Invalid MangaDex detail URL', errorOrigin: 'cytlex' };
+            }
+            const response = await handleMangaDexFeed(request, target, item.includeManga !== false, detailBudget);
+            return { status: response.status, text: await response.text(), url: target.href,
+              contentType: response.headers.get('content-type') || '',
+              errorOrigin: response.headers.get('x-cytlex-error-origin') || (response.ok ? '' : 'source') };
+          }
+          const isOlympusDetail = item?.detail === 'olympus'
+            || (item?.sourceId === 'olympusscanlation' && target?.origin === 'https://olympusxyz.com'
+              && /^\/api\/series\/[\w-]+$/.test(target.pathname)
+              && target.searchParams.get('type') === 'comic');
+          if (!isOlympusDetail) return fetchBatchItem(item, request);
+          if (target?.origin !== 'https://olympusxyz.com'
+            || !/^\/api\/series\/[\w-]+$/.test(target.pathname)
+            || target.searchParams.get('type') !== 'comic') {
+            return { status: 400, text: JSON.stringify({ error: 'Invalid Olympus detail request' }), errorOrigin: 'cytlex' };
+          }
+          let result = olympusDetails.get(target.href);
+          if (!result) {
+            result = (async () => {
+              const response = await handleOlympusDetail(request, target, detailBudget, 200);
+              return {
+                status: response.status,
+                text: await response.text(),
+                url: target.href,
+                contentType: response.headers.get('content-type') || '',
+                errorOrigin: response.headers.get('x-cytlex-error-origin') || (response.ok ? '' : 'source'),
+                upstreamError: response.headers.get('x-cytlex-upstream-error') || '',
+                proxyDenied: response.headers.get('x-cytlex-proxy-denied') === '1'
+              };
+            })();
+            olympusDetails.set(target.href, result);
+          }
+          return result;
+        });
         for (let index = 0; index < sourceResults.length && !stopped; index += 1) {
           const item = requests[index];
           const result = await sourceResults[index];
@@ -738,12 +852,17 @@ async function handleCombinedSearchRequest(request) {
           const sourceId = typeof item.sourceId === 'string' ? item.sourceId : '';
           const onfCatalog = target?.origin === 'https://onfmangas.com'
             && ['/mangas.php', '/buscar.php'].includes(target.pathname);
+          const onfDetail = item?.detail === 'onf'
+            && target?.origin === 'https://onfmangas.com'
+            && /^\/manga\/\d+\/[^/]+\/?$/.test(target.pathname);
           const olympusCatalog = sourceId === 'olympusscanlation' && target?.origin === 'https://olympusxyz.com'
             && ['/api/rankings', '/api/series/list'].includes(target.pathname);
-          if ((item?.catalogCovers === true || onfCatalog || olympusCatalog) && Number(result.status) >= 200 && Number(result.status) < 300 && !result.fallback) {
+          if ((item?.catalogCovers === true || onfCatalog || olympusCatalog || onfDetail) && Number(result.status) >= 200 && Number(result.status) < 300 && !result.fallback) {
             const remaining = Math.max(0, Math.min(40 - catalogImageUrls.size, imageSubrequestLimit - catalogImageUrls.size));
+            const detailCover = onfDetail ? onfMangaCover(result.text || '', result.url || target.href) : '';
             const urls = target && remaining
-              ? catalogImageCandidates(result.text || '', result.contentType || '', sourceId, result.url || target.href, remaining)
+              ? (detailCover ? [detailCover] : catalogImageCandidates(result.text || '', result.contentType || '', sourceId, result.url || target.href, remaining))
+                .slice(0, remaining)
                 .filter((url) => !catalogImageUrls.has(url))
               : [];
             urls.forEach((url) => catalogImageUrls.add(url));
@@ -1272,7 +1391,7 @@ async function handleAchyChapter(request, target) {
     if (!result.upstream.ok) return new Response(null, { status: result.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const html = await new Response(limitResponseBody(result.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
     const chapter = achyChapterData(html, target.href);
-    const initial = chapter.pages.slice(0, PROXY_IMAGE_BATCH_MAX_REQUESTS);
+    const initial = chapter.pages.slice(0, PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS);
     const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
     const byteBudget = createImageByteBudget();
     let stopped = false;
@@ -1361,7 +1480,7 @@ async function handleAchyCatalog(request, target) {
   } finally { clearTimeout(timeout); }
 }
 
-async function handleOlympusDetail(request, target) {
+async function handleOlympusDetail(request, target, sharedBudget = null, maxChapterPages = 12) {
   const slug = target.pathname.match(/^\/api\/series\/([\w-]+)$/)?.[1] || '';
   if (target.origin !== 'https://olympusxyz.com' || !slug || target.searchParams.get('type') !== 'comic') {
     return errorResponse('Invalid Olympus detail request', 400);
@@ -1369,9 +1488,15 @@ async function handleOlympusDetail(request, target) {
   const deadline = new AbortController();
   const timeout = setTimeout(() => deadline.abort(), 12000);
   const signal = AbortSignal.any([request.signal, deadline.signal]);
-  const readJson = async (url) => {
+  const readJson = async (url, budgetReserved = false) => {
+    if (!budgetReserved && sharedBudget && !sharedBudget.take()) throw new Error('Olympus batch subrequest limit reached');
     const page = validateTarget(url);
-    const result = await fetchTarget(page, 'GET', forwardedHeaders(request, page), undefined, signal, { retries: 0 });
+    let result = await fetchTarget(page, 'GET', forwardedHeaders(request, page), undefined, signal, { retries: 0 });
+    if (url === target.href && result.upstream?.status === 404) {
+      await result.upstream.body?.cancel();
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      result = await fetchTarget(page, 'GET', forwardedHeaders(request, page), undefined, signal, { retries: 0 });
+    }
     if (result.proxyError) throw { response: result.proxyError };
     if (!result.upstream.ok) {
       throw { response: new Response(result.upstream.body, {
@@ -1384,17 +1509,27 @@ async function handleOlympusDetail(request, target) {
     return JSON.parse(raw);
   };
   try {
-    const chapterPage = (page) => `https://olympusxyz.com/api/series/${slug}/chapters?page=${page}&direction=desc&type=comic`;
-    const [series, first] = await Promise.all([readJson(target.href), readJson(chapterPage(1))]);
+    const [series, first] = await Promise.all([
+      readJson(target.href),
+      readJson(`https://olympusxyz.com/api/series/${slug}/chapters?page=1&direction=desc&type=comic`)
+    ]);
     const lastPage = Math.min(Math.max(Number(first?.meta?.last_page) || 1, 1), 200);
-    const fetchedPages = Math.min(lastPage, PROXY_BATCH_MAX_REQUESTS - 1);
+    const pageLimit = Math.min(lastPage, Math.max(1, maxChapterPages));
     const results = [first];
-    for (let start = 2; start <= fetchedPages; start += 6) {
-      const count = Math.min(6, fetchedPages - start + 1);
-      results.push(...await Promise.all(Array.from({ length: count }, (_, index) => readJson(chapterPage(start + index)))));
+    let fetchedPages = 1;
+    for (let page = 2; page <= pageLimit;) {
+      const count = Math.min(6, pageLimit - page + 1);
+      const pageUrls = [];
+      for (let index = 0; index < count; index += 1) {
+        if (sharedBudget && !sharedBudget.take()) break;
+        pageUrls.push(`https://olympusxyz.com/api/series/${slug}/chapters?page=${page + index}&direction=desc&type=comic`);
+      }
+      if (!pageUrls.length) break;
+      results.push(...await Promise.all(pageUrls.map((url) => readJson(url, true))));
+      fetchedPages += pageUrls.length;
+      page += pageUrls.length;
     }
-    const chapters = results.flatMap((result) => result?.data || []);
-    return Response.json({ ...series, chapters, chaptersLastPage: lastPage, chaptersFetchedPages: fetchedPages }, {
+    return Response.json({ ...series, chapters: results.flatMap((result) => result?.data || []), chaptersLastPage: lastPage, chaptersFetchedPages: fetchedPages }, {
       headers: { 'cache-control': 'no-store', 'x-cytlex-proxy': '1' }
     });
   } catch (error) {
@@ -1404,7 +1539,7 @@ async function handleOlympusDetail(request, target) {
   } finally { clearTimeout(timeout); }
 }
 
-async function handleMangaDexFeed(request, target, includeManga = false) {
+async function handleMangaDexFeed(request, target, includeManga = false, sharedBudget = null) {
   if (target.origin !== 'https://api.mangadex.org'
     || !/^\/manga\/[0-9a-f-]{36}\/feed$/i.test(target.pathname)
     || Number(target.searchParams.get('limit')) !== 500) {
@@ -1416,6 +1551,7 @@ async function handleMangaDexFeed(request, target, includeManga = false) {
   let requestsFetched = 0;
   const readPage = async (url) => {
     if (requestsFetched >= PROXY_BATCH_MAX_REQUESTS) throw new Error('MangaDex page limit reached');
+    if (sharedBudget && !sharedBudget.take()) throw new Error('MangaDex batch subrequest limit reached');
     requestsFetched += 1;
     const page = validateTarget(url);
     const result = await fetchTarget(page, 'GET', forwardedHeaders(request, page), undefined, signal, { retries: 0 });
@@ -1449,7 +1585,8 @@ async function handleMangaDexFeed(request, target, includeManga = false) {
       const chapters = [...first.data];
       const total = Math.max(Number(first.total) || 0, chapters.length);
       let responseBytes = new TextEncoder().encode(JSON.stringify(first)).byteLength;
-      while (offset + chapters.length < total && requestsFetched < PROXY_BATCH_MAX_REQUESTS) {
+      while (offset + chapters.length < total && requestsFetched < PROXY_BATCH_MAX_REQUESTS
+        && (!sharedBudget || sharedBudget.remaining > 0)) {
         const nextUrl = new URL(feedUrl);
         nextUrl.searchParams.set('offset', String(offset + chapters.length));
         const page = await readPage(nextUrl.href);
@@ -1462,7 +1599,8 @@ async function handleMangaDexFeed(request, target, includeManga = false) {
       return { first, chapters };
     };
     let feed = await collectFeed(target.href);
-    if (includeManga && target.searchParams.getAll('translatedLanguage[]').length
+    if (includeManga && (!sharedBudget || sharedBudget.remaining > 0)
+      && target.searchParams.getAll('translatedLanguage[]').length
       && !feed.chapters.some((chapter) => !chapter.attributes?.externalUrl)) {
       const fallbackUrl = new URL(target.href);
       fallbackUrl.searchParams.delete('translatedLanguage[]');
@@ -1480,6 +1618,64 @@ async function handleMangaDexFeed(request, target, includeManga = false) {
     return errorResponse('MangaDex feed unavailable', deadline.signal.aborted ? 504 : 502, false,
       deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
   } finally { clearTimeout(timeout); }
+}
+
+async function handleMangaDexDetailBatch(request) {
+  const contentLength = Number(request.headers.get('content-length')) || 0;
+  if (contentLength > 1_000_000) return errorResponse('Request body is too large', 413);
+  let payload;
+  try {
+    const body = await request.arrayBuffer();
+    if (body.byteLength > 1_000_000) return errorResponse('Request body is too large', 413);
+    payload = JSON.parse(new TextDecoder().decode(body));
+  } catch { return errorResponse('Invalid MangaDex detail batch payload', 400); }
+
+  const details = payload?.details;
+  if (!Array.isArray(details) || details.length < 1 || details.length > PROXY_MANGADEX_DETAIL_BATCH_MAX) {
+    return errorResponse('Invalid MangaDex detail batch size', 400);
+  }
+  const detailBudget = {
+    used: 0,
+    limit: PROXY_BATCH_MAX_REQUESTS,
+    take() { if (this.used >= this.limit) return false; this.used += 1; return true; },
+    get remaining() { return this.limit - this.used; }
+  };
+  const results = new Array(details.length);
+  let next = 0;
+  let totalBytes = 0;
+  await Promise.all(Array.from({ length: Math.min(PROXY_BATCH_CONCURRENCY, details.length) }, async () => {
+    while (next < details.length) {
+      const index = next++;
+      const detail = details[index];
+      const url = typeof detail === 'string' ? detail : detail?.url;
+      const includeManga = typeof detail === 'string' || detail?.includeManga !== false;
+      const target = validateTarget(url);
+      if (!target || target.origin !== 'https://api.mangadex.org'
+        || !/^\/manga\/[0-9a-f-]{36}\/feed$/i.test(target.pathname)
+        || Number(target.searchParams.get('limit')) !== 500) {
+        results[index] = { ok: false, status: 400, error: 'Invalid MangaDex detail URL' };
+        continue;
+      }
+      try {
+        const response = await handleMangaDexFeed(request, target, includeManga, detailBudget);
+        const body = await response.text();
+        const size = new TextEncoder().encode(body).byteLength;
+        if (totalBytes + size > PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES) {
+          results[index] = { ok: false, status: 502, error: 'MangaDex detail batch response too large' };
+          continue;
+        }
+        totalBytes += size;
+        results[index] = response.ok
+          ? { ok: true, status: response.status, body }
+          : { ok: false, status: response.status, error: body.slice(0, 2000) };
+      } catch {
+        results[index] = { ok: false, status: 502, error: 'MangaDex detail unavailable' };
+      }
+    }
+  }));
+  return Response.json({ results }, {
+    headers: { 'cache-control': 'no-store', 'x-cytlex-mangadex-detail-batch': '1' }
+  });
 }
 
 async function handleMangaDexChapter(request, target) {
@@ -1510,7 +1706,7 @@ async function handleMangaDexChapter(request, target) {
     if (pages.some((url) => !validateTarget(url)) || fallbacks.some((url) => !validateTarget(url))) {
       return errorResponse('Invalid MangaDex image URL', 502, false, 'invalid-response');
     }
-    const initial = pages.slice(0, PROXY_IMAGE_BATCH_MAX_REQUESTS);
+    const initial = pages.slice(0, PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS);
     const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
     const byteBudget = createImageByteBudget();
     let stopped = false;
@@ -1623,7 +1819,7 @@ async function handleLeerCapituloChapter(request, target) {
     }
     const pill = html.match(/<[^>]*id\s*=\s*(["'])lcChapterPill\1[^>]*>([\s\S]*?)<\//i)?.[2] || '';
     const label = decodeHtmlAttribute(pill.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
-    const initial = uniquePages.slice(0, PROXY_IMAGE_BATCH_MAX_REQUESTS);
+    const initial = uniquePages.slice(0, PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS);
     const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
     const byteBudget = createImageByteBudget();
     let stopped = false;
@@ -1765,7 +1961,7 @@ async function handleZonaTmoChapter(request, target) {
     const backHref = html.match(/<[^>]*id\s*=\s*(["'])reader-header\1[^>]*>[\s\S]*?<a\b[^>]*href\s*=\s*(["'])(.*?)\2/i)?.[3] || '';
     let mangaUrl = '';
     try { mangaUrl = new URL(decodeHtmlAttribute(backHref), target).href; } catch {}
-    const initial = uniquePages.slice(0, PROXY_IMAGE_BATCH_MAX_REQUESTS);
+    const initial = uniquePages.slice(0, PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS);
     const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
     const byteBudget = createImageByteBudget();
     let stopped = false, next = 0;
@@ -2085,6 +2281,10 @@ export async function onRequest(context) {
   if (batchMode === 'images') {
     if (method !== 'POST') return errorResponse('Method not allowed', 405);
     return handleImageBatchRequest(request);
+  }
+  if (batchMode === 'mangadex-details') {
+    if (method !== 'POST') return errorResponse('Method not allowed', 405);
+    return handleMangaDexDetailBatch(request);
   }
   if (batchMode === '1') {
     if (method !== 'POST') return errorResponse('Method not allowed', 405);

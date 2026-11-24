@@ -988,6 +988,10 @@ img.manga-cover-corners {
   background: hsl(var(--sidebar-background));
 }
 
+.browser-mobile-nav[data-tutorial-nav-only='true'] {
+  border-top-color: transparent;
+}
+
 .browser-mobile-nav__item {
   position: relative;
   display: flex;
@@ -1253,6 +1257,32 @@ img.manga-cover-corners {
   will-change: transform;
 }
 
+.sidebar-ribbon-brand {
+  --sidebar-ribbon-gradient-shift: color-mix(in hsl, hsl(var(--primary)) 70%, white);
+}
+
+[data-mode='light'] .sidebar-ribbon-brand {
+  --sidebar-ribbon-gradient-shift: color-mix(in hsl, hsl(var(--primary)) 90%, black);
+}
+
+.sidebar-ribbon-brand-name {
+  background-image: repeating-linear-gradient(
+    135deg,
+    hsl(var(--primary)) 0,
+    var(--sidebar-ribbon-gradient-shift) 7.84px,
+    hsl(var(--primary)) 15.4px,
+    var(--sidebar-ribbon-gradient-shift) 21.84px,
+    hsl(var(--primary)) 28px
+  );
+  background-size: 39.6px 39.6px;
+  background-repeat: repeat;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: 0;
+  animation: cx-sidebar-ribbon-brand-gradient 8s linear infinite;
+}
+
 .sidebar-glyph-viewport {
   display: flex;
   position: absolute;
@@ -1348,6 +1378,12 @@ img.manga-cover-corners {
   }
 }
 
+@keyframes cx-sidebar-ribbon-brand-gradient {
+  to {
+    background-position: 39.6px 39.6px;
+  }
+}
+
 @keyframes cx-sidebar-glyph-cycle {
   to {
     transform: translate3d(-25%, 0, 0);
@@ -1355,6 +1391,11 @@ img.manga-cover-corners {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .sidebar-ribbon-brand-name {
+    animation: none;
+    background-position: 0 0;
+  }
+
   .cx-update-pulse {
     animation: none;
     border-color: hsl(var(--primary));

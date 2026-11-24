@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon, Check, CheckCheck, LoaderCircle } from 'lucide-react';
@@ -8,6 +8,7 @@ import { cn } from '../lib/utils.js';
 import { useScale } from '../lib/useScale.js';
 import { Button } from './ui/button.jsx';
 import { GENTLE_FLOAT_MOTION, GENTLE_FLOAT_TRANSITION } from './ui/empty-state.jsx';
+import CytlexLogoMark from './CytlexLogoMark.jsx';
 
 const STEPS = [
   {
@@ -39,9 +40,9 @@ const WALKTHROUGH_VIEWS = [
 ];
 const SETTINGS_SECTION_IDS = ['apariencia', 'biblioteca', 'lector', 'categorias', 'extensiones', 'seguimiento', 'respaldo', 'atajos'];
 const STEP_CONTENT_VARIANTS = {
-  enter: (direction) => ({ opacity: 0, x: direction === 0 ? 0 : direction > 0 ? 24 : -24 }),
-  center: { opacity: 1, x: 0 },
-  exit: (direction) => ({ opacity: 0, x: direction === 0 ? 0 : direction > 0 ? -24 : 24 })
+  enter: (direction) => ({ opacity: 0, scale: direction === 0 ? 1 : direction > 0 ? 0.92 : 1.08 }),
+  center: { opacity: 1, scale: 1, y: 0 },
+  exit: (direction) => ({ opacity: 0, scale: direction === 0 ? 1 : direction > 0 ? 1.08 : 0.92 })
 };
 
 export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp, enteringWithSplash = false }) {
@@ -52,21 +53,28 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const [walkthroughView, setWalkthroughView] = useState('biblioteca');
   const [repoUrl, setRepoUrl] = useState(() => (settings.get().extIndexUrl || '').trim());
   const [addingRepository, setAddingRepository] = useState(false);
+  const [navigationVisible, setNavigationVisible] = useState(false);
+  const navigationTimer = useRef(null);
+  const contentRef = useRef(null);
   const previousStep = useRef(step);
   const hasMounted = useRef(false);
   const scale = useScale();
   const reduceMotion = useReducedMotion();
-  const skipDotAnimation = Math.abs(step - previousStep.current) === 1 && Math.max(step, previousStep.current) <= 2;
   const stepDirection = step < previousStep.current ? -1 : 1;
   const motionDirection = reduceMotion ? 0 : stepDirection;
   const firstCardEntrance = enteringWithSplash && !hasMounted.current;
 
   useEffect(() => {
     hasMounted.current = true;
+    return () => clearTimeout(navigationTimer.current);
   }, []);
 
   useEffect(() => {
     previousStep.current = step;
+  }, [step]);
+
+  useLayoutEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = 0;
   }, [step]);
 
   useEffect(() => {
@@ -88,17 +96,16 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
 
   useEffect(() => {
     if (step === 1) {
-      if (typeof onRevealApp === 'function') onRevealApp();
       const routes = {
         biblioteca: '#/biblioteca',
         explorar: '#/explorar?tab=mangas',
         ajustes: `#/ajustes?tutorial=1&section=${SETTINGS_SECTION_IDS[0]}`
       };
       window.location.hash = routes[walkthroughView];
-    } else {
+    } else if (!exiting) {
       if (typeof onHideApp === 'function') onHideApp();
     }
-  }, [step, walkthroughView, onRevealApp, onHideApp]);
+  }, [step, walkthroughView, exiting, onHideApp]);
 
   useEffect(() => {
     const syncWalkthroughView = () => {
@@ -164,27 +171,29 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
 
   return (
     <motion.div
-      className={`fixed inset-0 z-[60] p-3 sm:p-4 transition-colors duration-300 ${step === 1 ? 'pointer-events-none bg-transparent' : 'pointer-events-auto bg-background flex flex-col items-center overflow-hidden'}`}
+      className={`fixed inset-0 z-[60] flex flex-col items-center overflow-hidden p-3 sm:p-4 transition-colors duration-300 ${step === 1 ? 'pointer-events-none bg-transparent' : 'pointer-events-auto bg-background'}`}
       initial={{ y: '0%' }}
       animate={{ y: exiting ? '-100%' : '0%' }}
       transition={{ duration: exiting ? 0.8 : 0, ease: exiting ? [0.76, 0, 0.24, 1] : 'linear' }}
     >
       <LayoutGroup id="onboarding-surfaces">
-        <AnimatePresence mode="wait">
+        <AnimatePresence mode="wait" custom={motionDirection}>
           {step !== 1 && (
             <motion.div
-              key="step-card"
-              layoutId="onboarding-container"
-              layout="position"
+              key={`step-card-${step}`}
+              custom={motionDirection}
+              variants={STEP_CONTENT_VARIANTS}
               className="relative my-auto w-full max-w-3xl shrink-0 pointer-events-auto"
-              initial={{
-                opacity: 0,
-                transform: `translateY(${reduceMotion ? '0px' : firstCardEntrance ? '100vh' : '0px'})`
+              initial={firstCardEntrance ? { opacity: 0, y: reduceMotion ? 0 : '100vh' } : 'enter'}
+              animate="center"
+              exit="exit"
+              onAnimationComplete={(definition) => {
+                if (definition === 'center' && step === 0 && !navigationTimer.current) {
+                  navigationTimer.current = setTimeout(() => setNavigationVisible(true), 1000);
+                }
               }}
-              animate={{ opacity: 1, transform: 'translateY(0px)' }}
-              exit={{ opacity: 0 }}
               transition={{
-                duration: firstCardEntrance && !reduceMotion ? 0.8 : 0.3,
+                duration: firstCardEntrance && !reduceMotion ? 0.8 : 0.2,
                 ease: firstCardEntrance && !reduceMotion ? [0.76, 0, 0.24, 1] : [0.22, 1, 0.36, 1],
                 layout: { duration: 0.3, ease: [0.22, 1, 0.36, 1] }
               }}
@@ -192,42 +201,31 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
             >
               <motion.div
                 animate={{ transform: `scale(${scale})` }}
-                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-                className="onboarding-card relative flex h-[min(85dvh,30rem)] min-h-0 max-h-[calc(100dvh-1.5rem)] w-full flex-col overflow-hidden rounded-3xl border border-border bg-card text-card-foreground transition-colors duration-300"
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1], layout: { duration: 0.28, ease: [0.77, 0, 0.175, 1] } }}
+                className="onboarding-card relative flex h-auto min-h-0 max-h-[calc(100dvh-7rem-env(safe-area-inset-bottom))] w-full flex-col overflow-hidden rounded-3xl border border-border bg-card text-card-foreground transition-colors duration-300"
                 style={{ transformOrigin: 'center' }}
               >
-          <div className={cn(
+          <div ref={contentRef} className={cn(
             'onboarding-content min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6 md:px-10 md:pt-6 md:pb-10',
-            isTheme && 'onboarding-content--theme'
+            (isTheme || isRepository || isReady) && 'onboarding-content--theme'
           )}>
-            <AnimatePresence mode="wait" custom={motionDirection}>
-              <motion.div
-                key={step}
-                custom={motionDirection}
-                variants={STEP_CONTENT_VARIANTS}
-                initial="enter"
-                animate="center"
-                exit="exit"
-                transition={{ duration: 0.25, ease: 'easeOut' }}
+              <div
                 className="onboarding-step-body flex flex-col"
               >
                 {step === 0 ? (
                   <div className="mb-6 flex flex-wrap items-center gap-2 sm:gap-3">
                     <span className="text-xl font-semibold tracking-tight font-display sm:text-2xl">Bienvenido a</span>
                     <motion.div
-                      className="flex items-center gap-2 sm:gap-3"
+                      className="flex items-center gap-1.5 sm:gap-2"
                       animate={reduceMotion ? undefined : GENTLE_FLOAT_MOTION}
                       transition={reduceMotion ? undefined : GENTLE_FLOAT_TRANSITION}
                     >
-                      <svg viewBox="0 0 512 512" width="40" height="40" className="shrink-0 rounded-xl sm:h-12 sm:w-12" role="img" aria-label="Cytlex">
-                        <rect width="512" height="512" rx="112" fill="#ffffff" />
-                        <text x="256" y="244" fill="#ec4899" fontSize="340" fontWeight="700" textAnchor="middle" dominantBaseline="central" fontFamily="'Noto Sans CJK JP','Yu Gothic UI','Yu Gothic','Meiryo','MS Gothic',sans-serif">粘</text>
-                      </svg>
-                      <h2 className="text-xl font-semibold tracking-tight font-display sm:text-2xl">Cytlex</h2>
+                      <CytlexLogoMark className="h-10 w-10" reduceMotion={reduceMotion} />
+                      <h2 className="text-xl font-semibold tracking-tight font-brand sm:text-2xl">Cytlex</h2>
                     </motion.div>
                   </div>
                 ) : (
-                  <div className={cn('onboarding-step-heading mt-2 mb-6', step >= 2 && 'mb-2')}>
+                  <div className={cn('onboarding-step-heading mb-6', step >= 2 ? 'mb-2' : 'mt-2')}>
                     <h2 className="onboarding-step-title text-2xl font-semibold tracking-tight font-display">{STEPS[step].title}</h2>
                   </div>
                 )}
@@ -329,12 +327,10 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                   <div className="onboarding-repository-card mt-4 rounded-xl border border-border bg-muted/30 p-3 sm:mt-6 sm:p-5">
                       <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium">
-                            Repositorio oficial de{' '}
-                            <span className="inline-flex items-center gap-1 align-middle">
-                              <img src={`${import.meta.env.BASE_URL}logo.svg`} alt="" className="h-4 w-4 rounded-[4px]" />
-                              <span className="font-display font-semibold tracking-tight">Cytlex</span>
-                            </span>
+                          <p className="flex flex-wrap items-center gap-x-1 text-sm font-medium">
+                            <span>Repositorio oficial de</span>
+                            <CytlexLogoMark className="h-4 w-4" reduceMotion={reduceMotion} decorative />
+                            <span className="font-brand font-semibold tracking-tight">Cytlex</span>
                           </p>
                           <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
                             {DEFAULT_EXTENSION_REPOSITORY}
@@ -366,77 +362,28 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                       </div>
                   </div>
                 )}
-              </motion.div>
-            </AnimatePresence>
+              </div>
           </div>
 
-          <div className="onboarding-footer relative grid grid-cols-[1fr_auto] items-center gap-x-2 gap-y-2 border-t border-border px-4 py-3 sm:grid-cols-3 sm:gap-4 sm:px-10 sm:py-4">
-            <div className="flex justify-start">
-              <Button variant="outline" size="sm" className="px-1.5 sm:px-3" onClick={finish}>
-                Saltar tutorial
-              </Button>
-            </div>
 
-            <div className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-2 sm:static sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:translate-x-0 sm:translate-y-0">
-              {STEPS.map((_, i) => (
-                <motion.span
-                  key={i}
-                  animate={{ width: i === step ? 28 : 8 }}
-                  transition={{ duration: skipDotAnimation ? 0 : 0.3, ease: [0.22, 1, 0.36, 1] }}
-                  className={cn(
-                    'h-2 rounded-full',
-                    i === step ? 'bg-primary' : i < step ? 'bg-primary/40' : 'bg-muted-foreground/30'
-                  )}
-                />
-              ))}
-            </div>
-
-            <div className="col-start-2 row-start-1 flex justify-end gap-2 sm:col-start-3 sm:row-start-1">
-              {step > 0 && (
-                <Button variant="outline" size="sm" className="w-10 px-0 md:w-auto md:px-3" aria-label="Atrás" onClick={back}>
-                  <ArrowLeft className="h-4 w-4 md:mr-1" />
-                  <span className="hidden md:inline">Atrás</span>
-                </Button>
-              )}
-              <Button
-                size="sm"
-                className="w-10 px-0 md:w-28 md:px-3"
-                aria-label={step === STEPS.length - 1 ? 'Comenzar' : 'Siguiente'}
-                onClick={next}
-              >
-                {step === STEPS.length - 1 ? (
-                  <>
-                    <span className="hidden md:inline">Comenzar</span>
-                    <CheckCheck className="h-4 w-4 md:hidden" />
-                  </>
-                ) : (
-                  <>
-                    <span className="hidden md:inline">Siguiente</span>
-                    <ArrowRight className="h-4 w-4 md:ml-1" />
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
               </motion.div>
             </motion.div>
           )}
-        </AnimatePresence>
-
-        <AnimatePresence mode="wait">
           {step === 1 && (
             <motion.div
               key="walkthrough-panel"
-              layoutId="onboarding-container"
-              layout="position"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{
-                opacity: { duration: 0.25, ease: 'easeOut' },
-                layout: { duration: 0.3, ease: [0.22, 1, 0.36, 1] }
+              custom={motionDirection}
+              variants={STEP_CONTENT_VARIANTS}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              onAnimationStart={(definition) => {
+                if (definition === 'center' && typeof onRevealApp === 'function') onRevealApp();
               }}
-              className="pointer-events-auto fixed bottom-[calc(4.5rem_+_env(safe-area-inset-bottom))] left-1/2 w-[min(92vw,40rem)] md:bottom-10"
+              transition={{
+                duration: 0.2, ease: 'easeOut',
+              }}
+              className="pointer-events-auto fixed bottom-[calc(5.5rem_+_env(safe-area-inset-bottom))] left-1/2 w-[min(92vw,40rem)] md:bottom-24"
               style={{ translate: '-50% 0' }}
             >
               <motion.div
@@ -471,42 +418,60 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
               <p className="text-xs text-muted-foreground sm:text-sm">
                 {WALKTHROUGH_VIEWS.find(({ id }) => id === walkthroughView)?.desc}
               </p>
-              <div className="relative grid grid-cols-[1fr_auto] items-center gap-x-2 gap-y-2 pt-1 sm:grid-cols-3 sm:gap-3">
-                <div className="flex justify-start">
-                  <Button variant="outline" size="sm" className="px-1.5 sm:px-3" onClick={finish}>
-                    Saltar tutorial
-                  </Button>
-                </div>
-                <div className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-2 sm:static sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:translate-x-0 sm:translate-y-0">
-                  {STEPS.map((_, i) => (
-                    <motion.span
-                      key={i}
-                      animate={{ width: i === step ? 28 : 8 }}
-                      transition={{ duration: skipDotAnimation ? 0 : 0.3, ease: [0.22, 1, 0.36, 1] }}
-                      className={cn(
-                        'h-2 rounded-full',
-                        i === step ? 'bg-primary' : i < step ? 'bg-primary/40' : 'bg-muted-foreground/30'
-                      )}
-                    />
-                  ))}
-                </div>
-                <div className="col-start-2 row-start-1 flex justify-end gap-2 sm:col-start-3 sm:row-start-1">
-                  <Button variant="outline" size="sm" className="w-10 px-0 md:w-auto md:px-3" aria-label="Atrás" onClick={back}>
-                    <ArrowLeft className="h-4 w-4 md:mr-1" />
-                    <span className="hidden md:inline">Atrás</span>
-                  </Button>
-                  <Button size="sm" className="w-10 px-0 md:w-auto md:px-3" aria-label="Siguiente" onClick={next}>
-                    <span className="hidden md:inline">Siguiente</span>
-                    <ArrowRight className="h-4 w-4 md:ml-1" />
-                  </Button>
-                </div>
-              </div>
             </div>
               </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
       </LayoutGroup>
+          <motion.div initial={false} animate={{ opacity: navigationVisible ? 1 : 0, y: navigationVisible || reduceMotion ? 0 : 'calc(100% + env(safe-area-inset-bottom))' }} transition={{ duration: reduceMotion ? 0 : 0.25, ease: [0.23, 1, 0.32, 1] }} inert={!navigationVisible} className="onboarding-footer pointer-events-auto fixed bottom-[env(safe-area-inset-bottom)] inset-x-0 mx-auto z-10 grid w-full max-w-3xl grid-cols-[1fr_auto] items-center gap-x-2 gap-y-2 bg-card border border-border px-4 py-3 sm:grid-cols-3 sm:gap-4 sm:px-10 sm:py-4">
+            <div className="flex justify-start">
+              <Button variant="outline" size="sm" className="px-1.5 sm:px-3" onClick={finish}>
+                Saltar tutorial
+              </Button>
+            </div>
+
+            <div className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-2 sm:static sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:translate-x-0 sm:translate-y-0">
+              {STEPS.map((_, i) => (
+                <motion.span
+                  key={i}
+                  animate={{ width: i === step ? 28 : 8 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.3, ease: [0.22, 1, 0.36, 1] }}
+                  className={cn(
+                    'h-2 rounded-full',
+                    i === step ? 'bg-primary' : i < step ? 'bg-primary/40' : 'bg-muted-foreground/30'
+                  )}
+                />
+              ))}
+            </div>
+
+            <div className="col-start-2 row-start-1 flex justify-end gap-2 sm:col-start-3 sm:row-start-1">
+              {step > 0 && (
+                <Button variant="outline" size="sm" className="w-10 px-0 md:w-auto md:px-3" aria-label="Atrás" onClick={back}>
+                  <ArrowLeft className="h-4 w-4 md:mr-1" />
+                  <span className="hidden md:inline">Atrás</span>
+                </Button>
+              )}
+              <Button
+                size="sm"
+                className="w-10 px-0 md:w-28 md:px-3"
+                aria-label={step === STEPS.length - 1 ? 'Comenzar' : 'Siguiente'}
+                onClick={next}
+              >
+                {step === STEPS.length - 1 ? (
+                  <>
+                    <span className="hidden md:inline">Comenzar</span>
+                    <CheckCheck className="h-4 w-4 md:hidden" />
+                  </>
+                ) : (
+                  <>
+                    <span className="hidden md:inline">Siguiente</span>
+                    <ArrowRight className="h-4 w-4 md:ml-1" />
+                  </>
+                )}
+              </Button>
+            </div>
+          </motion.div>
     </motion.div>
   );
 }
