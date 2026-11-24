@@ -404,7 +404,7 @@ export function getLibraryCover(url) {
   return cached;
 }
 
-export function preloadLibraryCoversBatch(urls, { web = false, persist = false, onProgress } = {}) {
+export function preloadLibraryCoversBatch(urls, { web = false, persist = false, onProgress, bundledOnly = false } = {}) {
   const uniqueUrls = [...new Set((urls || []).filter(Boolean))];
   let current = 0;
   const reportProgress = (url) => {
@@ -435,6 +435,11 @@ export function preloadLibraryCoversBatch(urls, { web = false, persist = false, 
   if (!entries.length) return results;
   const fallback = async (entry) => {
     if (libraryCoverCache.get(entry.url) === entry.promise) libraryCoverCache.delete(entry.url);
+    if (bundledOnly) {
+      libraryCoverCache.set(entry.url, '');
+      entry.resolve('');
+      return;
+    }
     entry.resolve(await preloadLibraryCover(entry.url, { web: true, persist: entry.persist }));
   };
   const fetchBatch = async (batch, retryBatchOverflow = true) => {
@@ -455,6 +460,13 @@ export function preloadLibraryCoversBatch(urls, { web = false, persist = false, 
       else await fallback(entry);
     }));
     if (!remote.length) return;
+    if (bundledOnly) {
+      await Promise.all(remote.map(async (entry) => {
+        if (libraryCoverCache.get(entry.url) === entry.promise) libraryCoverCache.set(entry.url, '');
+        entry.resolve('');
+      }));
+      return;
+    }
     const overflow = [];
     const fallbacks = [];
     await fetchImageBlobBatch(remote.map(({ url }) => ({ url: libraryCoverBatchUrl(url) })), undefined, async ({ blob, error }, index) => {

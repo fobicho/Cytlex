@@ -22,7 +22,7 @@ function prefetch(url, sourceId) {
   api.prefetchDetail(url, sourceId);
 }
 
-function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenUnavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', returnTo = '', onSelect, coverSize, scale: uiScale = 1, chapterCount, useLibraryCoverCache = false, savedInLibrary = false }) {
+function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenUnavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', returnTo = '', onSelect, coverSize, scale: uiScale = 1, chapterCount, useLibraryCoverCache = false, bundledCoverOnly = false, savedInLibrary = false }) {
   const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}${returnTo ? `&back=${encodeURIComponent(returnTo)}` : ''}`;
   const sourceManifest = extensions.manifest(sourceId);
   const savedSourceName = String(m.sourceName || '');
@@ -60,7 +60,8 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
   const libraryImage = useLibraryCover(unavailable ? remoteCover : preferredCover, {
     enabled: libraryCover,
     cachedOnly: unavailable && !canOpenUnavailable,
-    cachedCover: unavailable ? unavailableCachedCover : ''
+    cachedCover: unavailable ? unavailableCachedCover : '',
+    bundledOnly: bundledCoverOnly
   });
   const coverRef = useRef(null);
   const coverImageRef = useRef(null);

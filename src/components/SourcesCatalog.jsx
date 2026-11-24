@@ -141,6 +141,7 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
       : id === 'mangaoni' ? (batch.length ? 4 : 3)
         : id === 'olympusscanlation' ? 3 : 2;
     const group = !window.cytlex?.httpGet && FIXED_PAGE_SOURCES.has(id)
+      && id !== 'leercapitulo'
       && (id === 'onfmangas' || id === 'mangaoni' || CATALOG_BATCH_SIZE - batch.length >= 20)
       && pagesFetched + batchPages <= CATALOG_BATCH_SIZE;
     const requests = Array.from({ length: group ? batchPages : 1 }, (_, index) =>
@@ -157,7 +158,7 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
       canFetchNextPage = result.value.hasMore ?? currentPage < (result.value.totalPages || 1);
       while (batch.length < CATALOG_BATCH_SIZE && queued.length) batch.push(queued.shift());
     }
-    if (id === 'mangalect') break;
+    if (id === 'mangalect' || id === 'leercapitulo') break;
   }
 
   return { items: batch, queuedItems: queued, page: currentPage, apiHasMore: canFetchNextPage, hasMore: queued.length > 0 || canFetchNextPage };
@@ -216,8 +217,9 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const getFilterRoot = () => filterRootRef.current;
   const preloadCatalogCovers = (mangas) => {
     if (!window.cytlex?.fetchImage) {
-      void preloadLibraryCoversBatch(mangas.map((manga) => manga.cover).filter(Boolean), { web: true });
+      return preloadLibraryCoversBatch(mangas.map((manga) => manga.cover).filter(Boolean), { web: true, bundledOnly: true });
     }
+    return Promise.resolve();
   };
 
   const selectSource = (id) => {
@@ -392,7 +394,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
         }
       }
-      preloadCatalogCovers(result.items);
+      await preloadCatalogCovers(result.items);
+      if (runId !== requestId.current) return;
       setItems((current) => append ? [...current, ...result.items] : result.items);
       setQueuedItems(result.queuedItems);
       setLoadedParams({ ...params, q: params.q?.trim?.() || '' });
@@ -464,7 +467,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           if (isMangaDex(sourceId) && window.cytlex?.fetchImage) restoredItems.forEach((manga) => {
             if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
           });
-          preloadCatalogCovers(restoredItems.slice(0, CATALOG_BATCH_SIZE));
+          await preloadCatalogCovers(restoredItems.slice(0, CATALOG_BATCH_SIZE));
+          if (!active || runId !== requestId.current) return;
           setItems(restoredItems.slice(0, CATALOG_BATCH_SIZE));
           setQueuedItems([...(snapshot.queuedItems || []), ...restoredItems.slice(CATALOG_BATCH_SIZE)]);
           setLoadedParams(snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) });
@@ -515,7 +519,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         if (isMangaDex(sourceId) && window.cytlex?.fetchImage) result.items.forEach((manga) => {
           if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
         });
-        preloadCatalogCovers(result.items);
+        await preloadCatalogCovers(result.items);
+        if (!active || runId !== requestId.current) return;
         setItems(result.items);
         setQueuedItems(result.queuedItems);
         setLoadedParams(params);
@@ -914,6 +919,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                       sourceId={sourceId}
                       from="fuentes"
                       useLibraryCoverCache={isMangaDex(sourceId) && requiresImageProxy(manga.cover)}
+                      bundledCoverOnly={!window.cytlex?.fetchImage}
                       coverSize={cardWidth}
                       showAuthor={false}
                       savedInLibrary={isLibraryManga(manga, sourceId, savedMangaKeys)}

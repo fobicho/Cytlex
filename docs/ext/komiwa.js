@@ -22,38 +22,38 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
         try { return JSON.parse(chunk); } catch { return ''; }
       })
       .join('');
-    const reference = stream.match(/"__r"\s*:\s*"\$([0-9a-z]+)"/)?.[1];
-    if (!reference) return [];
-
-    const row = stream.match(new RegExp(`(?:^|\\n)${reference}:T([0-9a-f]+),`, 'i'));
-    if (!row) return [];
-    const length = Number.parseInt(row[1], 16);
-    const start = row.index + row[0].length;
-    const encoded = stream.slice(start, start + length);
-    if (!length || encoded.length !== length || !/^[A-Za-z0-9_-]+$/.test(encoded) || length % 4 === 1) return [];
-
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-    const bytes = [];
-    for (let offset = 0; offset < encoded.length; offset += 4) {
-      const a = alphabet.indexOf(encoded[offset]);
-      const b = alphabet.indexOf(encoded[offset + 1]);
-      const c = offset + 2 < encoded.length ? alphabet.indexOf(encoded[offset + 2]) : -1;
-      const d = offset + 3 < encoded.length ? alphabet.indexOf(encoded[offset + 3]) : -1;
-      bytes.push((a << 2) | (b >> 4));
-      if (c >= 0) bytes.push(((b & 15) << 4) | (c >> 2));
-      if (d >= 0) bytes.push(((c & 3) << 6) | d);
-    }
-
     const keyBytes = new TextEncoder().encode(key);
-    for (let index = 0; index < bytes.length; index++) {
-      bytes[index] ^= keyBytes[index % keyBytes.length] ^ (255 & index);
+    const pages = [];
+    const references = new Set([...stream.matchAll(/"__r"\s*:\s*"\$([0-9a-z]+)"/g)].map(([, id]) => id));
+    for (const reference of references) {
+      const row = stream.match(new RegExp(`(?:^|\\n)${reference}:T([0-9a-f]+),`, 'i'));
+      if (!row) continue;
+      const length = Number.parseInt(row[1], 16);
+      const start = row.index + row[0].length;
+      const encoded = stream.slice(start, start + length);
+      if (!length || encoded.length !== length || !/^[A-Za-z0-9_-]+$/.test(encoded) || length % 4 === 1) continue;
+
+      const bytes = [];
+      for (let offset = 0; offset < encoded.length; offset += 4) {
+        const a = alphabet.indexOf(encoded[offset]);
+        const b = alphabet.indexOf(encoded[offset + 1]);
+        const c = offset + 2 < encoded.length ? alphabet.indexOf(encoded[offset + 2]) : -1;
+        const d = offset + 3 < encoded.length ? alphabet.indexOf(encoded[offset + 3]) : -1;
+        bytes.push((a << 2) | (b >> 4));
+        if (c >= 0) bytes.push(((b & 15) << 4) | (c >> 2));
+        if (d >= 0) bytes.push(((c & 3) << 6) | d);
+      }
+
+      for (let index = 0; index < bytes.length; index++) {
+        bytes[index] ^= keyBytes[index % keyBytes.length] ^ (255 & index);
+      }
+      try {
+        const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(bytes)));
+        if (Array.isArray(payload.p)) pages.push(...payload.p);
+      } catch {}
     }
-    try {
-      const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(bytes)));
-      return Array.isArray(payload.p) ? payload.p : [];
-    } catch {
-      return [];
-    }
+    return [...new Set(pages)];
   }
 
   async function json(path, body, requestId) {
@@ -82,8 +82,23 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
 
   function mangaResult(item) {
     rememberManga(item);
+    const url = new URL(`/manga/${encodeURIComponent(item.slug)}`, site);
+    url.searchParams.set('id', String(item.id));
+    url.searchParams.set('data', JSON.stringify({
+      id: item.id,
+      slug: item.slug,
+      title: item.title,
+      cover: item.cover,
+      type: item.type,
+      status: item.status,
+      demography: item.demography,
+      numChapters: item.numChapters,
+      ratingAvg: item.ratingAvg,
+      views: item.views,
+      year: item.year
+    }));
     return {
-      url: `${site}/manga/${encodeURIComponent(item.slug)}`,
+      url: url.href,
       title: clean(item.title),
       cover: abs(item.cover),
       author: '',
@@ -122,6 +137,13 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     const slug = slugFromUrl(url);
     if (!slug) throw new Error('No se pudo identificar el manga de Komiwa.');
     let manga = mangaCache.get(slug);
+    const params = new URL(url, site).searchParams;
+    if (!manga && params.get('data')) {
+      try {
+        const data = JSON.parse(params.get('data'));
+        if (String(data.id) === params.get('id') && data.slug === slug) manga = data;
+      } catch {}
+    }
     if (!manga) {
       const data = await json('/manga/search', { q: slug.replace(/-/g, ' '), limit: pageSize });
       manga = (data.items || []).find((item) => item.slug === slug);

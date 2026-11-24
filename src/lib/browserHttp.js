@@ -24,6 +24,10 @@ export const catalogImageKey = (value) => {
   try {
     const url = new URL(value);
     if (url.hostname === 'cdn.achymanga.online') url.searchParams.delete('v');
+    if ((url.hostname === 'www.leercapitulo.co' || url.hostname === 'leercapitulo.co') && /\/covers\//i.test(url.pathname)) {
+      url.hostname = 'www.leercapitulo.co';
+      url.search = '';
+    }
     if (url.hostname === 'oni.ntr-files.online' && /^\/public\/archivos\/mangas\/.+\/cover\.jpg$/i.test(url.pathname)) url.search = '';
     url.hash = '';
     return url.href;
@@ -297,7 +301,7 @@ async function runProxyBatch(entries) {
         image.done = true;
         try {
           const bytes = Uint8Array.from(atob(message.body || ''), (character) => character.charCodeAt(0));
-          image.resolve(message.status === 200 && bytes.length <= PROXY_IMAGE_ITEM_MAX_BYTES
+          image.resolve(message.status === 200 && bytes.length > 0 && bytes.length <= PROXY_IMAGE_ITEM_MAX_BYTES
             ? new Blob([bytes], { type: message.contentType || '' }) : null);
         } catch { image.resolve(null); }
         return;
@@ -1063,8 +1067,9 @@ export async function httpGet(url, requestId, options = {}) {
   if (bridge?.httpGet) return bridge.httpGet(url, requestId, options);
   const { includeUrl, ...requestOptions } = options;
   const catalogSourceId = requestId && catalogRequestSources.get(requestId)?.sourceId;
-  if (catalogSourceId && catalogSourceId === requestOptions.sourceId) requestOptions.catalogCovers = true;
   const target = new URL(url);
+  if (catalogSourceId && catalogSourceId === requestOptions.sourceId
+    && (catalogSourceId !== 'leercapitulo' || target.pathname === '/manga/')) requestOptions.catalogCovers = true;
   if (requestOptions.onfMangaDetail === true && target.origin === 'https://onfmangas.com'
     && /^\/manga\/\d+\/[^/]+\/?$/.test(target.pathname)) {
     const detailOptions = { ...requestOptions };
@@ -1102,11 +1107,11 @@ export async function httpGet(url, requestId, options = {}) {
     }
   }
   if (requestOptions.achyCatalog === true && target.origin === 'https://achymanga.online' && target.pathname === '/catalogo') {
-    const catalogOptions = { ...requestOptions };
-    delete catalogOptions.achyCatalog;
     const key = `achymanga-catalog:${target.href}`;
     let request = httpGetRequests.get(key);
     if (!request) {
+      const catalogOptions = { ...requestOptions };
+      delete catalogOptions.achyCatalog;
       request = fetchAchyCatalogRequest(url, catalogOptions).then(parseAchyCatalogResponse);
       httpGetRequests.set(key, request);
     }

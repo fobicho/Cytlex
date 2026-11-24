@@ -638,10 +638,6 @@ export default function Reader() {
         }
         setCh(r);
         setChUrl(chapterUrl);
-        if (sourceId === 'leercapitulo' && (mangaUrl || r.mangaUrl)) {
-          const mangaDetailUrl = mangaUrl || r.mangaUrl;
-          setMangaDetail({ key: `${sourceId}|${mangaDetailUrl}`, value: { title: r.mangaTitle || '' } });
-        }
         if (sourceId === 'mangaoni') {
           if (r.options?.length) {
             setMangaDetail({ key: `${sourceId}|${mangaUrl || r.mangaUrl || ''}`, value: { title: r.title || '', chapters: r.options } });
@@ -1046,14 +1042,14 @@ export default function Reader() {
   useEffect(() => {
     if (!currentMangaUrl || adultExtensionDisabled) return;
     if (sourceId.startsWith('mangadex') && extensions.isInstalled(sourceId) && !window.cytlex?.httpGet) return;
-    if (sourceId === 'leercapitulo' && extensions.isInstalled(sourceId) && !window.cytlex?.httpGet) return;
+    if (sourceId === 'leercapitulo' && (mangaTitleParam || api.peekDetail(currentMangaUrl, sourceId)?.title)) return;
     if (sourceId === 'mangaoni' && extensions.isInstalled(sourceId) && !window.cytlex?.httpGet) return;
     let alive = true;
     api.detail(currentMangaUrl, sourceId).then((value) => {
       if (alive) setMangaDetail({ key: mangaKey, value });
     }).catch(() => {});
     return () => { alive = false; };
-  }, [adultExtensionDisabled, currentMangaUrl, mangaKey, sourceId]);
+  }, [adultExtensionDisabled, currentMangaUrl, mangaKey, mangaTitleParam, sourceId]);
 
   const goPage = (p) => {
     if (useDouble) p = p - (p % 2);

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { browserImageUrl } from './browserHttp.js';
 import { discardLibraryCover, getLibraryCover, getSearchCover, markLibraryCoverLoaded, preloadLibraryCover, restoreLibraryCover } from './covers.js';
 
-export function useLibraryCover(cover, { enabled = true, cachedOnly = false, cachedCover = '', allowRemoteFallback = false } = {}) {
+export function useLibraryCover(cover, { enabled = true, cachedOnly = false, cachedCover = '', allowRemoteFallback = false, bundledOnly = false } = {}) {
   const ref = useRef(null);
   const [loaded, setLoaded] = useState(null);
   const [failed, setFailed] = useState(null);
@@ -21,12 +21,13 @@ export function useLibraryCover(cover, { enabled = true, cachedOnly = false, cac
       let url = cached !== rejected ? cached : '';
       if (!url) {
         url = getSearchCover(cover);
-        if (url) url = await preloadLibraryCover(cover, { web: true, persist: true }) || url;
+        if (url && !bundledOnly) url = await preloadLibraryCover(cover, { web: true, persist: true }) || url;
       }
+      if (!url && bundledOnly && browserImageUrl(cover) === cover) url = cover;
       if (!url && cachedOnly && allowRemoteFallback && rejected !== cover) {
         url = await preloadLibraryCover(cover, { web: true, persist: true });
       }
-      if (!url && !cachedOnly && rejected !== cover) {
+      if (!url && !cachedOnly && !bundledOnly && rejected !== cover) {
         const electron = Boolean(window.cytlex?.fetchImage);
         const needsProxy = !electron && browserImageUrl(cover) !== cover;
         if (electron || needsProxy) url = await preloadLibraryCover(cover, { web: true });
@@ -47,11 +48,11 @@ export function useLibraryCover(cover, { enabled = true, cachedOnly = false, cac
     }, { root: document.querySelector('main'), rootMargin: '220px 0px' });
     observer.observe(target);
     return () => { alive = false; observer.disconnect(); };
-  }, [allowRemoteFallback, cachedOnly, cover, enabled, local, rejected, remote]);
+  }, [allowRemoteFallback, bundledOnly, cachedOnly, cover, enabled, local, rejected, remote]);
 
   const onError = async () => {
     if (src && src === getLibraryCover(cover)) discardLibraryCover(cover, src);
-    if (!cachedOnly && src === cover && !window.cytlex?.fetchImage && browserImageUrl(cover) !== cover) {
+    if (!cachedOnly && !bundledOnly && src === cover && !window.cytlex?.fetchImage && browserImageUrl(cover) !== cover) {
       const local = await preloadLibraryCover(cover, { web: true });
       if (local) {
         setLoaded({ cover, cachedOnly, src: local });
