@@ -36,6 +36,8 @@ const pendingLibraryDetailBackfills = [];
 const UNREAD_CACHE_KEY = 'cytlex:libraryUnread:v2';
 const LIBRARY_CATEGORY_KEY = 'cytlex:libraryCategory';
 const LIBRARY_SEARCH_OPEN_KEY = 'cytlex:librarySearchOpen:v1';
+const TUTORIAL_EMPTY_FAVORITES = [];
+const TUTORIAL_CATEGORIES = [{ id: 'todos', name: 'Todos' }];
 const libraryScroller = () => document.querySelector('.library-page-scroll') || document.querySelector('main');
 const libraryTitleCollator = new Intl.Collator('es', { sensitivity: 'base', numeric: true });
 const initialLibraryCategory = (categories) => {
@@ -286,13 +288,16 @@ function CachedLibraryCover({ cover, title, className, cachedOnly = false, cache
   );
 }
 
-const Library = memo(function Library({ active = true }) {
+const Library = memo(function Library({ active = true, tutorialPreview = false }) {
   const activeRef = useRef(active);
   activeRef.current = active;
   const [cats, setCats] = useState(() => lib.cats());
   const [sel, setSel] = useState(() => initialLibraryCategory(lib.cats()));
   const [visitedCategoryIds, setVisitedCategoryIds] = useState(() => [initialLibraryCategory(lib.cats())]);
   const [favs, setFavs] = useState(() => lib.favs());
+  const visibleFavs = tutorialPreview ? TUTORIAL_EMPTY_FAVORITES : favs;
+  const visibleCats = tutorialPreview ? TUTORIAL_CATEGORIES : cats;
+  const visibleSel = tutorialPreview ? 'todos' : sel;
   const [view, setView] = useState(settings.get().libraryView);
   const [checking, setChecking] = useState(libraryCheckInFlight);
   const [checkProgress, setCheckProgress] = useState(libraryCheckProgress);
@@ -366,7 +371,7 @@ const Library = memo(function Library({ active = true }) {
       observer?.disconnect();
       window.removeEventListener('resize', update);
     };
-  }, [active, cats, sel, scale, checking, checkProgress.current, checkProgress.total, compactLibraryUpdates]);
+  }, [active, visibleCats, visibleSel, scale, checking, checkProgress.current, checkProgress.total, compactLibraryUpdates]);
 
   const toggleLibrarySearch = () => {
     const nextOpen = !librarySearchOpen;
@@ -401,7 +406,7 @@ const Library = memo(function Library({ active = true }) {
   useEffect(() => {
     const activeTab = categoryTabsRef.current?.querySelector('[aria-current="page"]');
     revealCategoryTab(activeTab);
-  }, [sel, reduceMotion, scale]);
+  }, [visibleSel, reduceMotion, scale]);
 
   useLayoutEffect(() => {
     const nav = categoryTabsRef.current;
@@ -436,6 +441,7 @@ const Library = memo(function Library({ active = true }) {
   );
   useEffect(() => {
     const backfillInstalledSources = (event) => {
+      if (tutorialPreview) return;
       const sourceIds = new Set(event.detail?.sourceIds || []);
       if (!sourceIds.size) return;
       const favorites = lib.favs().filter((manga) => sourceIds.has(sourceIdFor(manga)));
@@ -451,7 +457,7 @@ const Library = memo(function Library({ active = true }) {
       window.removeEventListener(EXTENSION_INSTALLED_EVENT, backfillInstalledSources);
       window.removeEventListener('cytlex:library-updated', reloadLibraryOnUpdate);
     };
-  }, []);
+  }, [tutorialPreview]);
   useEffect(() => {
     const updates = [];
     const reassigned = new Set();
@@ -511,10 +517,11 @@ const Library = memo(function Library({ active = true }) {
   const displayCoverSize = useResponsiveCoverSize(coverSize);
 
   const runCheck = async () => {
+    if (tutorialPreview) return;
     if (libraryCheckInFlight || remainingLibraryCheckCooldown() > 0) return;
     libraryCheckInFlight = true;
     setChecking(true);
-    updateLibraryCheckProgress({ current: 0, total: favs.length });
+    updateLibraryCheckProgress({ current: 0, total: visibleFavs.length });
     try {
       const found = await checkLibrary({ onProgress: updateLibraryCheckProgress });
       const n = found.length;
@@ -548,6 +555,7 @@ const Library = memo(function Library({ active = true }) {
 
   useEffect(() => settings.subscribe((s) => setView(s.libraryView)), []);
   useEffect(() => {
+    if (tutorialPreview) return;
     if (cats.some((c) => c.id === sel)) {
       sessionCategoria = sel;
       try { localStorage.setItem(LIBRARY_CATEGORY_KEY, sel); } catch {}
@@ -558,10 +566,10 @@ const Library = memo(function Library({ active = true }) {
     if (fallback) {
       setVisitedCategoryIds((current) => current.includes(fallback) ? current : [...current, fallback]);
     }
-  }, [cats, sel]);
+  }, [cats, sel, tutorialPreview]);
 
   useLayoutEffect(() => {
-    if (!active) return undefined;
+    if (!active || tutorialPreview) return undefined;
     const main = libraryScroller();
     if (!main) return undefined;
     const restore = () => { main.scrollTop = libraryScroll.get(sel); };
@@ -574,32 +582,32 @@ const Library = memo(function Library({ active = true }) {
       cancelAnimationFrame(frame);
       main.removeEventListener('scroll', save);
     };
-  }, [sel, active]);
+  }, [sel, active, tutorialPreview]);
 
-  const inCategory = useMemo(() => favs.filter((f) => (f.cats || []).includes(sel)), [favs, sel]);
+  const inCategory = useMemo(() => visibleFavs.filter((f) => (f.cats || []).includes(visibleSel)), [visibleFavs, visibleSel]);
 
   const unreadSort = sortBy === 'unread-desc' ? unread : null;
   const shown = useMemo(
     () => sortLibraryManga(inCategory.slice(), sortBy, unreadSort || {}),
     [inCategory, sortBy, unreadSort]
   );
-  const categoryName = cats.find((category) => category.id === sel)?.name || 'Biblioteca';
+  const categoryName = visibleCats.find((category) => category.id === visibleSel)?.name || 'Biblioteca';
   const searched = useMemo(() => {
     const query = normalizeLibrarySearch(libraryQuery);
     return query ? shown.filter((manga) => normalizeLibrarySearch(manga.title).includes(query)) : shown;
   }, [shown, libraryQuery]);
-  const visitedCategories = useMemo(() => cats
-    .filter((category) => visitedCategoryIds.includes(category.id))
+  const visitedCategories = useMemo(() => visibleCats
+    .filter((category) => (tutorialPreview ? category.id === 'todos' : visitedCategoryIds.includes(category.id)))
     .map((category) => ({
       ...category,
-      items: category.id === sel
+      items: category.id === visibleSel
         ? searched
         : sortLibraryManga(
-            favs.filter((manga) => (manga.cats || []).includes(category.id)),
+            visibleFavs.filter((manga) => (manga.cats || []).includes(category.id)),
             sortBy,
             unreadSort || {}
           )
-    })), [cats, visitedCategoryIds, sel, searched, favs, sortBy, unreadSort]);
+    })), [visibleCats, visitedCategoryIds, visibleSel, searched, visibleFavs, sortBy, unreadSort, tutorialPreview]);
 
   const selectCategory = (categoryId) => {
     setSel(categoryId);
@@ -787,8 +795,8 @@ const Library = memo(function Library({ active = true }) {
             className="flex w-max min-w-max items-center whitespace-nowrap"
             style={{ gap: `${Math.max(16, Math.round(24 * scale))}px`, height: '100%' }}
           >
-            {cats.map((c) => {
-              const active = c.id === sel;
+            {visibleCats.map((c) => {
+              const active = c.id === visibleSel;
               return (
                 <button
                   key={c.id}
@@ -873,7 +881,7 @@ const Library = memo(function Library({ active = true }) {
           <Button
             size="sm"
             variant="secondary"
-            disabled={!favs.length || checking || checkCooldown > 0}
+            disabled={!visibleFavs.length || checking || checkCooldown > 0}
             aria-busy={checking}
             aria-label={checking ? 'Buscando actualizaciones' : 'Buscar actualizaciones'}
             data-library-updates
@@ -940,11 +948,11 @@ const Library = memo(function Library({ active = true }) {
         <EmptyState
           face="(っ-;)"
           tone="sad"
-          title={libraryQuery.trim() ? 'No hay mangas que coincidan con la búsqueda' : favs.some((f) => (f.cats || []).includes(sel)) ? 'No hay mangas visibles con este filtro' : 'Tu biblioteca está vacía'}
+          title={libraryQuery.trim() ? 'No hay mangas que coincidan con la búsqueda' : visibleFavs.some((f) => (f.cats || []).includes(visibleSel)) ? 'No hay mangas visibles con este filtro' : 'Tu biblioteca está vacía'}
         />
       </section>
       {visitedCategories.map((category) => {
-        const selected = category.id === sel;
+        const selected = category.id === visibleSel;
         const categoryItems = category.items;
         return (
           <section key={category.id} hidden={!selected} aria-hidden={!selected}>

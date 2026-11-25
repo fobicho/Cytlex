@@ -1141,6 +1141,16 @@ img.manga-cover-corners {
   padding-block: 1rem;
 }
 
+.onboarding-import-actions {
+  container-type: inline-size;
+}
+
+@container (max-width: 28.5rem) {
+  .onboarding-import-actions > button {
+    width: 100%;
+  }
+}
+
 @layer utilities {
   .glass {
     @apply bg-card/60 backdrop-blur-xl border;

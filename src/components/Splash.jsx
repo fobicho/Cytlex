@@ -1,41 +1,15 @@
 import { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { px, useScale } from '../lib/useScale.js';
+import CytlexLogoMark from './CytlexLogoMark.jsx';
 
 const APPEAR = 400;
 const BEAT = 500;
 const EXIT = 800;
 
-function Logo({ scale }) {
-  return (
-    <svg
-      viewBox="0 0 512 512"
-      width={px(72, scale, 58)}
-      height={px(72, scale, 58)}
-      role="img"
-      aria-label="Cytlex"
-      className="shrink-0 shadow-lg shadow-black/20"
-      style={{ borderRadius: px(18, scale, 14) }}
-    >
-      <rect width="512" height="512" rx="112" fill="#ffffff" />
-      <text
-        x="256"
-        y="244"
-        fill="#ec4899"
-        fontSize="340"
-        fontWeight="700"
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontFamily="'Noto Sans CJK JP','Yu Gothic UI','Yu Gothic','Meiryo','MS Gothic',sans-serif"
-      >
-        粘
-      </text>
-    </svg>
-  );
-}
-
 export default function Splash({ trigger = 0, onDone = null, onExitStart = null }) {
   const scale = useScale();
+  const reduceMotion = useReducedMotion();
   const [exiting, setExiting] = useState(false);
   const [gone, setGone] = useState(false);
 
@@ -71,7 +45,10 @@ export default function Splash({ trigger = 0, onDone = null, onExitStart = null 
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: APPEAR / 1000, ease: 'easeOut' }}
       >
-        <Logo scale={scale} />
+        <CytlexLogoMark
+          reduceMotion={reduceMotion}
+          style={{ width: px(72, scale, 58), height: px(72, scale, 58) }}
+        />
         <span className="font-brand text-3xl font-semibold tracking-tight text-foreground">Cytlex</span>
       </motion.div>
     </motion.div>

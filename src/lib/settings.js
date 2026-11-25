@@ -13,7 +13,7 @@ export function resolveMode(mode) {
 
 const defaults = {
   theme: 'default',
-  mode: 'light',
+  mode: 'system',
   readerMode: 'paginado',
   readerZoom: 100,
   readerDoublePage: false,
@@ -51,7 +51,7 @@ function normalize(s) {
   if (theme === 'dark') theme = 'default';
   else if (theme === 'light') { theme = 'default'; mode = 'light'; }
   if (!THEME_IDS.includes(theme)) theme = 'default';
-  if (!MODE_IDS.includes(mode)) mode = 'dark';
+  if (!MODE_IDS.includes(mode)) mode = 'system';
   return { ...rest, theme, mode };
 }
 
@@ -81,6 +81,14 @@ let cache = read();
 
 export const settings = {
   get() { return { ...cache }; },
+  reload() {
+    cache = read();
+    document.documentElement.setAttribute('data-theme', cache.theme);
+    document.documentElement.setAttribute('data-mode', resolveMode(cache.mode));
+    window.cytlex?.saveTheme?.({ theme: cache.theme, mode: cache.mode, effectiveMode: resolveMode(cache.mode) });
+    window.dispatchEvent(new CustomEvent('cytlex:settings', { detail: { ...cache } }));
+    return { ...cache };
+  },
   set(patch) {
     cache = normalize({ ...cache, ...patch });
     try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch {}

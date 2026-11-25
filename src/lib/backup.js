@@ -2,6 +2,17 @@ const FORMAT = 'cytlex-backup';
 const VERSION = 1;
 const KEY_PREFIX = 'cytlex:';
 const EXTENSIONS_KEY = 'cytlex:extensions:v1';
+const BACKUP_IMPORT_SESSION_KEY = 'cytlex:backup-imported-this-session';
+export const BACKUP_IMPORT_COMPLETE_EVENT = 'cytlex:backup-import-complete';
+
+export function backupImportedThisSession() {
+  try { return sessionStorage.getItem(BACKUP_IMPORT_SESSION_KEY) === '1'; } catch { return false; }
+}
+
+export function markBackupImportedThisSession() {
+  try { sessionStorage.setItem(BACKUP_IMPORT_SESSION_KEY, '1'); } catch {}
+  window.dispatchEvent(new Event(BACKUP_IMPORT_COMPLETE_EVENT));
+}
 
 export function createBackup() {
   const data = {};

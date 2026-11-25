@@ -295,7 +295,7 @@ export default function App({ tutorialMode = false }) {
               })}
               {shouldMountLibrary && (
                 <div className={isLibraryPage ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden' : 'hidden'} aria-hidden={!isLibraryPage} inert={!isLibraryPage}>
-                  <Library key={`lib-${resetTick}`} active={isLibraryPage} />
+                  <Library key={`lib-${resetTick}`} active={isLibraryPage} tutorialPreview={tutorialMode} />
                 </div>
               )}
               <Routes>

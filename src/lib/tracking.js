@@ -27,6 +27,13 @@ const listeners = new Set();
 const notify = () => listeners.forEach((l) => l());
 
 export const tracking = {
+  reload() {
+    cachedRaw = undefined;
+    cachedData = undefined;
+    read();
+    notify();
+  },
+
   subscribe(l) {
     listeners.add(l);
     return () => listeners.delete(l);

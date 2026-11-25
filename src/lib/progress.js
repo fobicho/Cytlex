@@ -30,6 +30,13 @@ function put(url, sourceId, patch) {
 export const progress = {
   revision: () => revision,
 
+  reload() {
+    cache = null;
+    revision += 1;
+    read();
+    notify({ type: 'reset' });
+  },
+
   subscribe(l) {
     listeners.add(l);
     return () => listeners.delete(l);

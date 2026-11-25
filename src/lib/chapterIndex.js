@@ -19,6 +19,12 @@ const write = (data, change = { type: 'reset' }) => {
 const cap = (url, sourceId = 'leercapitulo') => `${sourceId}|${url}`;
 
 export const chapterIndex = {
+  reload() {
+    cache = null;
+    read();
+    listeners.forEach((l) => l({ type: 'reset' }));
+  },
+
   subscribe(l) {
     listeners.add(l);
     return () => listeners.delete(l);

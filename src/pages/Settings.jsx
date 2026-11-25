@@ -9,10 +9,11 @@ import { api } from '../lib/api.js';
 import { anilist } from '../lib/anilist.js';
 import { consumeBrowserAuthError, consumeBrowserSettingsSection, session } from '../lib/session.js';
 import { tracking } from '../lib/tracking.js';
+import { progress } from '../lib/progress.js';
 import { MODES, THEMES } from '../lib/themes.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { chapterOrder } from '../lib/searchState.js';
-import { compressBackup, createBackup, parseBackup, readBackupFile, restoreBackup } from '../lib/backup.js';
+import { compressBackup, createBackup, markBackupImportedThisSession, parseBackup, readBackupFile, restoreBackup } from '../lib/backup.js';
 import { importMihonBackup, previewMihonBackup } from '../lib/mihonBackup.js';
 import { extensions, isExtensionAllowed, isSourceConfigured } from '../lib/extensions.js';
 import { Button } from '../components/ui/button.jsx';
@@ -811,6 +812,10 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
         };
       } catch {}
       restoreBackup(data);
+      settings.reload();
+      progress.reload();
+      chapterIndex.reload();
+      tracking.reload();
       clearLibraryUnreadCache();
       setBackupProgress({ label: 'Recuperando detalles de las fuentes', current: 0, total: favorites.length });
       const detailFailures = favorites.length
@@ -823,12 +828,14 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       setBackupUnavailableSources([]);
       setBackupInstallManifests([]);
       setBackupProgress(null);
+      setCats(lib.cats());
+      window.dispatchEvent(new Event('cytlex:library-updated'));
       toast({
         title: 'Respaldo restaurado',
-        description: `Cytlex se recargará para aplicar los datos${coverFailures ? `; ${coverFailures} portadas no pudieron guardarse` : ''}${detailFailures ? `; no se pudo guardar la información de ${detailFailures} mangas` : ''}.`,
+        description: `Los datos se aplicaron correctamente${coverFailures ? `; ${coverFailures} portadas no pudieron guardarse` : ''}${detailFailures ? `; no se pudo guardar la información de ${detailFailures} mangas` : ''}.`,
         variant: 'success'
       });
-      window.setTimeout(() => window.location.reload(), 800);
+      markBackupImportedThisSession();
     } catch (error) {
       toast({ title: 'No se pudo restaurar el respaldo', description: error.message, variant: 'error' });
     } finally {
@@ -1172,6 +1179,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
         description: `${result.added + result.updated} mangas importados${omitted.size ? `, ${omitted.size} omitidos` : ''}.${detailFailures ? ` No se pudieron guardar los detalles de ${detailFailures} mangas.` : ''}${coverFailures ? ` ${coverFailures} portadas no pudieron guardarse.` : ''}${failedInstalls.length ? ` No se pudieron instalar: ${failedInstalls.map(({ name }) => name).join(', ')}.` : ''}`,
         variant: 'success'
       });
+      markBackupImportedThisSession();
     } catch (error) {
       toast({ title: 'No se pudo importar el respaldo de Mihon', description: error.message, variant: 'error' });
     } finally {

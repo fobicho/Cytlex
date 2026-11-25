@@ -10,6 +10,7 @@ import { Button } from './ui/button.jsx';
 import { GENTLE_FLOAT_MOTION, GENTLE_FLOAT_TRANSITION } from './ui/empty-state.jsx';
 import CytlexLogoMark from './CytlexLogoMark.jsx';
 import Settings from '../pages/Settings.jsx';
+import { BACKUP_IMPORT_COMPLETE_EVENT, backupImportedThisSession } from '../lib/backup.js';
 
 const STEPS = [
   {
@@ -58,6 +59,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const [walkthroughView, setWalkthroughView] = useState('biblioteca');
   const [repoUrl, setRepoUrl] = useState(() => (settings.get().extIndexUrl || '').trim());
   const [addingRepository, setAddingRepository] = useState(false);
+  const [backupImported, setBackupImported] = useState(backupImportedThisSession);
   const [navigationVisible, setNavigationVisible] = useState(false);
   const navigationTimer = useRef(null);
   const contentRef = useRef(null);
@@ -73,6 +75,12 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   useEffect(() => {
     hasMounted.current = true;
     return () => clearTimeout(navigationTimer.current);
+  }, []);
+
+  useEffect(() => {
+    const onBackupImported = () => setBackupImported(true);
+    window.addEventListener(BACKUP_IMPORT_COMPLETE_EVENT, onBackupImported);
+    return () => window.removeEventListener(BACKUP_IMPORT_COMPLETE_EVENT, onBackupImported);
   }, []);
 
   useEffect(() => {
@@ -249,9 +257,9 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 )}
 
                 {isBackup && (
-                  <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-                    <Button onClick={() => importControls.current?.importBackup()}>Importar respaldo de Cytlex</Button>
-                    <Button variant="outline" onClick={() => importControls.current?.importMihon()}>Importar respaldo de Mihon</Button>
+                  <div className="onboarding-import-actions mt-5 flex flex-row-reverse flex-wrap items-end justify-start gap-2">
+                    <Button disabled={backupImported} onClick={() => importControls.current?.importBackup()}>Importar respaldo de Cytlex</Button>
+                    <Button variant="outline" disabled={backupImported} onClick={() => importControls.current?.importMihon()}>Importar respaldo de Mihon</Button>
                   </div>
                 )}
 
