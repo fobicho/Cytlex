@@ -3,7 +3,7 @@
     "id": "leercapitulo",
     "name": "LeerCapitulo",
     "lang": "es",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "type": "module",
     "contentWarning": "MIXED",
     "main": "ext/leercapitulo.js",

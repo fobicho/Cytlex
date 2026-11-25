@@ -154,7 +154,7 @@ async function findManga(src, url, title, author) {
   return null;
 }
 
-function catalogFiltersFor(sourceId, src) {
+function catalogFiltersFor(sourceId, src, requestId) {
   if (typeof src.catalogFilters !== 'function') return Promise.resolve([]);
   const key = `${sourceId}|${extensions.manifest(sourceId)?.version || '0'}`;
   if (!catalogFiltersCache.has(key)) {
@@ -163,7 +163,7 @@ function catalogFiltersFor(sourceId, src) {
       if (Array.isArray(saved?.value) && Date.now() - saved.at >= 0 && Date.now() - saved.at <= CATALOG_FILTERS_TTL_MS) {
         return saved.value;
       }
-      const filters = await src.catalogFilters();
+      const filters = await src.catalogFilters(requestId);
       if (Array.isArray(filters)) await writeSourceCache('catalog-filters', key, filters, 100);
       return filters;
     })().catch((error) => {
@@ -254,6 +254,7 @@ export const api = {
     const catalogArgs = { ...args, __cytlexRequestId: requestId };
     delete catalogArgs.__cytlexForceFetch;
     delete catalogArgs.__cytlexGlobalSearch;
+    delete catalogArgs.__cytlexSearchBatchId;
     const key = browser ? catalogKey(args, sourceId) : '';
     const { q = '', page = 1, genre = '', year = '', status = '', type = '', sort = '' } = args || {};
     const searchKey = isMangaDex(sourceId)
@@ -275,7 +276,7 @@ export const api = {
       const savedAge = Date.now() - (saved?.at || 0);
       if (saved?.value?.items && savedAge >= 0 && savedAge <= PERSISTED_CATALOG_TTL_MS) return saved.value;
       try {
-        beginCatalogRequest(requestId, sourceId, args?.__cytlexGlobalSearch === true);
+        beginCatalogRequest(requestId, sourceId, args?.__cytlexGlobalSearch === true, args?.__cytlexSearchBatchId);
         try { return await src.catalog(catalogArgs); }
         finally { endCatalogRequest(requestId); }
       } catch (error) {
@@ -300,9 +301,11 @@ export const api = {
     }
   },
 
-  async catalogFilters(sourceId) {
+  async catalogFilters(sourceId, requestId) {
     const src = await resolveSource(sourceId);
-    return catalogFiltersFor(sourceId, src);
+    if (requestId) beginCatalogRequest(requestId, sourceId);
+    try { return await catalogFiltersFor(sourceId, src, requestId); }
+    finally { endCatalogRequest(requestId); }
   },
 
   detail(url, sourceId, options = {}) {

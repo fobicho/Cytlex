@@ -46,10 +46,12 @@ const PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES = 8 * 1024 * 1024;
 const PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES = 64 * 1024 * 1024;
 const PROXY_BATCH_CONCURRENCY = 6;
 const PROXY_IMAGE_BATCH_MAX_REQUESTS = 50;
-const PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS = 40;
+const PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS = 50;
 const PROXY_IMAGE_BATCH_ITEM_MAX_BYTES = 8 * 1024 * 1024;
 const PROXY_IMAGE_BATCH_TOTAL_MAX_BYTES = 128 * 1024 * 1024;
 const PROXY_IMAGE_BATCH_MAX_SUBREQUESTS = 50;
+const PROXY_CHAPTER_IMAGE_MAX_WITH_ONE_METADATA = Math.min(PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
+const PROXY_CHAPTER_IMAGE_MAX_WITH_TWO_METADATA = Math.min(PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 2);
 const PROXY_ACHY_CATALOG_MAX_IMAGES = PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1;
 const PROXY_IMAGE_BATCH_CONCURRENCY = 6;
 const MANGADEX_REQUEST_INTERVAL_MS = 200;
@@ -1454,7 +1456,7 @@ async function handleMangaDexCatalog(request, target) {
   let upstream;
   try {
     const result = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined,
-      AbortSignal.any([request.signal, deadline.signal]), { retries: 0 });
+      AbortSignal.any([request.signal, deadline.signal]));
     if (result.proxyError) return result.proxyError;
     upstream = result.upstream;
     if (!upstream.ok) return new Response(upstream.body, { status: upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
@@ -1791,7 +1793,7 @@ async function handleAchyChapter(request, target) {
     if (!result.upstream.ok) return new Response(null, { status: result.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const html = await new Response(limitResponseBody(result.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
     const chapter = achyChapterData(html, target.href);
-    const initial = chapter.pages.slice(0, PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS);
+    const initial = chapter.pages.slice(0, PROXY_CHAPTER_IMAGE_MAX_WITH_ONE_METADATA);
     const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
     const byteBudget = createImageByteBudget();
     let stopped = false;
@@ -1965,7 +1967,7 @@ async function handleOlympusChapter(request, target) {
     const pages = (chapter.pages || []).filter((url) => typeof url === 'string' && validateTarget(url));
     if (!pages.length || pages.length > 1000 || pages.length !== chapter.pages?.length) return errorResponse('Olympus chapter has invalid pages', 422);
 
-    const initial = pages.slice(0, PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS);
+    const initial = pages.slice(0, PROXY_CHAPTER_IMAGE_MAX_WITH_ONE_METADATA);
     const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
     const byteBudget = createImageByteBudget();
     let stopped = false;
@@ -2173,7 +2175,7 @@ async function handleMangaDexChapter(request, target) {
     if (pages.some((url) => !validateTarget(url)) || fallbacks.some((url) => !validateTarget(url))) {
       return errorResponse('Invalid MangaDex image URL', 502, false, 'invalid-response');
     }
-    const initial = pages.slice(0, PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS);
+    const initial = pages.slice(0, PROXY_CHAPTER_IMAGE_MAX_WITH_ONE_METADATA);
     const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
     const byteBudget = createImageByteBudget();
     let stopped = false;
@@ -2286,7 +2288,7 @@ async function handleLeerCapituloChapter(request, target) {
     }
     const pill = html.match(/<[^>]*id\s*=\s*(["'])lcChapterPill\1[^>]*>([\s\S]*?)<\//i)?.[2] || '';
     const label = decodeHtmlAttribute(pill.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
-    const initial = uniquePages.slice(0, PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS);
+    const initial = uniquePages.slice(0, PROXY_CHAPTER_IMAGE_MAX_WITH_ONE_METADATA);
     const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
     const byteBudget = createImageByteBudget();
     let stopped = false;
@@ -2386,7 +2388,7 @@ async function handleKomiwaChapter(request, target) {
     if (!pages.length || pages.length > 1000) return errorResponse('Komiwa chapter has no pages', 422);
 
     const mangaUrl = slug ? `https://www.komiwa.net/manga/${encodeURIComponent(slug)}` : '';
-    const initial = pages.slice(0, PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS);
+    const initial = pages.slice(0, PROXY_CHAPTER_IMAGE_MAX_WITH_TWO_METADATA);
     const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 2);
     const byteBudget = createImageByteBudget();
     let stopped = false, next = 0;
@@ -2463,7 +2465,7 @@ async function handleOnfChapter(request, target) {
       const alternate = fallback ? validateTarget(new URL(decodeHtmlAttribute(fallback), target).href) : null;
       return { url: image.href, fallback: alternate?.href || '' };
     });
-    const initial = entries.slice(0, 40);
+    const initial = entries.slice(0, PROXY_CHAPTER_IMAGE_MAX_WITH_TWO_METADATA);
     const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 2);
     const byteBudget = createImageByteBudget();
     let stopped = false, next = 0;
@@ -2534,7 +2536,7 @@ async function handleZonaTmoChapter(request, target) {
     const backHref = html.match(/<[^>]*id\s*=\s*(["'])reader-header\1[^>]*>[\s\S]*?<a\b[^>]*href\s*=\s*(["'])(.*?)\2/i)?.[3] || '';
     let mangaUrl = '';
     try { mangaUrl = new URL(decodeHtmlAttribute(backHref), target).href; } catch {}
-    const initial = uniquePages.slice(0, PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS);
+    const initial = uniquePages.slice(0, PROXY_CHAPTER_IMAGE_MAX_WITH_ONE_METADATA);
     const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
     const byteBudget = createImageByteBudget();
     let stopped = false, next = 0;
@@ -2629,7 +2631,7 @@ async function handleInmangaChapter(request, target) {
       if (!validateTarget(url) || (fallback && !validateTarget(fallback))) throw new Error('Invalid InManga image URL');
       return { url, fallback };
     });
-    const initial = entries.slice(0, 40);
+    const initial = entries.slice(0, PROXY_CHAPTER_IMAGE_MAX_WITH_TWO_METADATA);
     const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 2);
     const byteBudget = createImageByteBudget();
     let stopped = false;
@@ -2700,7 +2702,7 @@ async function handleMangaLectChapter(request, target) {
     const entries = [...new Set(pages)].map((url) => ({ url }));
     if (!entries.length || entries.length > 1000) return errorResponse('Invalid MangaLect page list', 422);
 
-    const initial = entries.slice(0, 40);
+    const initial = entries.slice(0, PROXY_CHAPTER_IMAGE_MAX_WITH_ONE_METADATA);
     const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
     const byteBudget = createImageByteBudget();
     let stopped = false;
@@ -2806,7 +2808,7 @@ async function handleMangaOniChapter(request, target) {
       return [{ url: chapter.href, title }];
     }).slice(0, 1000);
 
-    const initial = pages.slice(0, 40);
+    const initial = pages.slice(0, PROXY_CHAPTER_IMAGE_MAX_WITH_TWO_METADATA);
     const subrequestBudget = createImageSubrequestBudget(initial.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 2);
     const byteBudget = createImageByteBudget();
     let stopped = false;

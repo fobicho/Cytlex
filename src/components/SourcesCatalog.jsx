@@ -368,9 +368,9 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     if (activeHttpRequest.current === request) activeHttpRequest.current = '';
   };
 
-  const loadCatalogFilters = (id) => {
+  const loadCatalogFilters = (id, requestId) => {
     const scope = filterRequestScope.current;
-    void api.catalogFilters(id).then((nextFilters) => {
+    void api.catalogFilters(id, requestId).then((nextFilters) => {
       if (scope === filterRequestScope.current) setFilters(Array.isArray(nextFilters) ? nextFilters : []);
     }).catch(() => {});
   };
@@ -419,8 +419,6 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
         }
       }
-      await preloadCatalogCovers([...backfillItems, ...result.items]);
-      if (runId !== requestId.current) return;
       const backfilledCovers = new Set(backfillItems.map((item) => item.cover));
       setItems((current) => append
         ? [...current.map((item) => backfilledCovers.has(item.cover) ? { ...item } : item), ...result.items]
@@ -430,6 +428,9 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       setPage(result.page);
       setApiHasMore(result.apiHasMore);
       setHasMore(result.hasMore);
+      await preloadCatalogCovers([...backfillItems, ...result.items]);
+      if (runId !== requestId.current) return;
+      setItems((current) => current.map((item) => ({ ...item })));
     } catch (loadError) {
       if (runId === requestId.current) setError({ cause: loadError, params, append });
     } finally {
@@ -547,7 +548,9 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     (async () => {
       try {
         const resultPromise = fetchCatalogBatch({ id: sourceId, params, page: 0, requestId: httpRequestId });
-        if (!isMangaDex(sourceId) && sourceId !== 'zonatmo') loadCatalogFilters(sourceId);
+        if (!isMangaDex(sourceId) && sourceId !== 'zonatmo') {
+          loadCatalogFilters(sourceId, sourceId === 'leercapitulo' ? httpRequestId : undefined);
+        }
         const result = await resultPromise;
         if (!active || runId !== requestId.current) return;
         if (sourceId === 'zonatmo') {
@@ -557,14 +560,15 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         if (isMangaDex(sourceId) && window.cytlex?.fetchImage) result.items.forEach((manga) => {
           if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
         });
-        await preloadCatalogCovers(result.items);
-        if (!active || runId !== requestId.current) return;
         setItems(result.items);
         setQueuedItems(result.queuedItems);
         setLoadedParams(params);
         setPage(result.page);
         setApiHasMore(result.apiHasMore);
         setHasMore(result.hasMore);
+        await preloadCatalogCovers(result.items);
+        if (!active || runId !== requestId.current) return;
+        setItems((current) => current.map((item) => ({ ...item })));
       } catch (loadError) {
         if (active && runId === requestId.current) setError({ cause: loadError, params });
       } finally {
@@ -936,7 +940,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
               description={sourceErrorMessage(error.cause, selected.manifest.name, t('No se pudo cargar el catálogo.'))}
               action={<Button variant="secondary" onClick={() => loadCatalog(sourceId, error.params)}>{t('Reintentar')}</Button>}
             />
-          ) : loading ? (
+          ) : loading && !items.length ? (
             <div className="flex items-center justify-center text-muted-foreground" style={{ gap: px(10, scale, 8), padding: `${px(44, scale, 32)} 0` }}>
               <Loader2 className="animate-spin" style={{ width: px(20, scale, 16), height: px(20, scale, 16) }} />
               <span style={{ fontSize: fontPx(14, scale, 12) }}>{t('Cargando mangas…')}</span>

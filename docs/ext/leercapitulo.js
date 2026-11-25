@@ -278,8 +278,8 @@ export default function createSource({ fetchText, parse, head }) {
     return { items, totalPages, totalText: text(doc, '.lc-section-title .lc-more') };
   }
 
-  async function catalogFilters() {
-    const doc = parse(await fetchText(BASE));
+  async function catalogFilters(__cytlexRequestId) {
+    const doc = parse(await fetchText(BASE, __cytlexRequestId, { catalogCovers: true }));
     const genres = new Map();
     for (const link of doc.querySelectorAll('a[href*="genre="]')) {
       const url = new URL(link.getAttribute('href') || '', BASE);

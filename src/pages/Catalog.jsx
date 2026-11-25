@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, Loader2, ChevronRight, ChevronLeft } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { api } from '../lib/api.js';
-import { sourceErrorMessage } from '../lib/browserHttp.js';
+import { beginCatalogSearchBatch, finishCatalogSearchBatchSource, sourceErrorMessage } from '../lib/browserHttp.js';
 import { isLibraryManga, lib, libraryIdentityKey, libraryKey } from '../lib/library.js';
 import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaSource, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
@@ -55,6 +55,7 @@ const sourceLangSubtitle = (manifest) => {
 };
 
 function SourceSection({ r, coverSize, scale = 1, animate = false, active = true, onMangaSelect, returnTo = '', savedMangaKeys, hideSavedManga = false }) {
+  const { t: tr } = useI18n();
   const prefersReducedMotion = useReducedMotion();
   const trackRef = useRef(null);
   const mainRef = useRef(null);
@@ -422,6 +423,8 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     const main = catalogScroller();
     if (main) main.scrollTop = 0;
     const runId = migrationMode ? ++activeMigrationSearchRun : ++activeSearchRun;
+    const searchBatchId = `catalog-search:${migrationMode ? 'migration' : 'global'}:${runId}:${Date.now()}`;
+    beginCatalogSearchBatch(searchBatchId, list.map(({ manifest }) => manifest.id));
     coverBatchRef.current?.cancel();
     if (!migrationMode) {
       catalogScroll.clear();
@@ -433,6 +436,32 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     }
     const coverBatch = createSearchCoverBatch();
     coverBatchRef.current = coverBatch;
+    const pendingCoverUpdates = new Map();
+    let coverUpdateFrame = 0;
+    const flushCoverUpdates = () => {
+      coverUpdateFrame = 0;
+      if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) {
+        pendingCoverUpdates.clear();
+        return;
+      }
+      const updates = new Map();
+      pendingCoverUpdates.forEach(({ sourceId, url, cover }) => {
+        if (!updates.has(sourceId)) updates.set(sourceId, new Map());
+        updates.get(sourceId).set(url, cover);
+      });
+      pendingCoverUpdates.clear();
+      updateResults((prev) => prev ? prev.map((result) => {
+        const sourceUpdates = updates.get(result.id);
+        if (!sourceUpdates) return result;
+        return {
+          ...result,
+          items: result.items.map((item) => {
+            const cover = sourceUpdates.get(item.url);
+            return cover ? { ...item, coverCached: cover } : item;
+          })
+        };
+      }) : prev);
+    };
     const initialResults = list
       .map((s) => ({ id: s.manifest.id, manifest: s.manifest, status: 'loading', items: [], page: 1, totalPages: 1, hasMore: false }))
       .sort((a, b) => a.manifest.name.localeCompare(b.manifest.name, 'es', { sensitivity: 'base' }));
@@ -441,10 +470,13 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     setResults(initialResults);
 
     void Promise.allSettled(list.map(({ manifest }) => extensions.source(manifest.id))).then(() => {
-      if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+      if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) {
+        list.forEach(({ manifest }) => finishCatalogSearchBatchSource(searchBatchId, manifest.id));
+        return;
+      }
       const sourceJobs = list.map(async (s) => {
         try {
-          const params = { q: searchQuery, genre: '', page: 1, __cytlexGlobalSearch: true };
+          const params = { q: searchQuery, genre: '', page: 1, __cytlexGlobalSearch: true, __cytlexSearchBatchId: searchBatchId };
           const r = await api.catalog(params, s.manifest.id);
           if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
           const items = (r.items || []).filter((m) =>
@@ -454,28 +486,35 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
           const coverPromises = items.map((m) => coverBatch.preload(m.cover));
           coverBatch.flushBundled();
           items.forEach((m) => rememberMangaPreview(m, s.manifest.id));
-          void Promise.all(coverPromises).then((covers) => {
-            if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
-            const loadedItems = items.map((m, index) => covers[index] ? { ...m, coverCached: covers[index] } : m);
-            updateResults((prev) =>
-              prev ? prev.map((x) => (x.id === s.manifest.id
-                ? {
-                    ...x,
-                    status: 'done',
-                    items: loadedItems,
-                    page: r.page || 1,
-                    totalPages: r.totalPages || 1,
-                    hasMore: items.length < MAX_SEARCH_RESULTS && (r.hasMore ?? (r.totalPages > 1)),
-                    totalText: r.totalText || ''
-                  }
-                : x)) : prev
-            );
+          updateResults((prev) =>
+            prev ? prev.map((x) => (x.id === s.manifest.id
+              ? {
+                  ...x,
+                  status: 'done',
+                  items,
+                  page: r.page || 1,
+                  totalPages: r.totalPages || 1,
+                  hasMore: items.length < MAX_SEARCH_RESULTS && (r.hasMore ?? (r.totalPages > 1)),
+                  totalText: r.totalText || ''
+                }
+              : x)) : prev
+          );
+          coverPromises.forEach((coverPromise, index) => {
+            void coverPromise.then((cover) => {
+              if (!cover || runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+              const itemUrl = items[index]?.url;
+              if (!itemUrl) return;
+              pendingCoverUpdates.set(`${s.manifest.id}\u0000${itemUrl}`, { sourceId: s.manifest.id, url: itemUrl, cover });
+              if (!coverUpdateFrame) coverUpdateFrame = requestAnimationFrame(flushCoverUpdates);
+            });
           });
         } catch (e) {
           console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);
           if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
           const errorMessage = sourceErrorMessage(e, s.manifest.name);
           updateResults((prev) => (prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'error', errorMessage } : x)) : prev));
+        } finally {
+          finishCatalogSearchBatchSource(searchBatchId, s.manifest.id);
         }
       });
       void Promise.allSettled(sourceJobs).then(async () => {

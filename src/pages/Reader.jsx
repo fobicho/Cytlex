@@ -860,8 +860,8 @@ export default function Reader() {
 
       if (batchedPages.length) {
         const loadBatches = async () => {
-          for (let offset = 0; offset < batchedPages.length && !cancelled; offset += 40) {
-            const batch = batchedPages.slice(offset, offset + 40);
+          for (let offset = 0; offset < batchedPages.length && !cancelled; offset += 50) {
+            const batch = batchedPages.slice(offset, offset + 50);
             try {
               const receiveImage = async ({ blob, error: failure }, resultIndex) => {
                 const { src, index } = batch[resultIndex];
