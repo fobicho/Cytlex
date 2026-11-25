@@ -329,9 +329,9 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
   }
 
   function findReaderAccess(html, outer) {
-    const tokenPattern = /^[A-Za-z0-9_-]{128,}$/;
+    const tokenPattern = /^[A-Za-z0-9_-]{128,8192}$/;
     const readerTicket = html.match(
-      /(?:window\.)?onfReaderPagesPromise\s*=\s*[\s\S]{0,12000}?\)\s*\(\s*["']([A-Za-z0-9_-]{128,4096})["']\s*\)\s*:\s*Promise\.resolve\b/i
+      /(?:window\.)?onfReaderPagesPromise\s*=\s*[\s\S]{0,12000}?\)\s*\(\s*["']([A-Za-z0-9_-]{128,8192})["']\s*\)\s*:\s*Promise\.resolve\b/i
     );
     if (readerTicket) return readerTicket[1];
 
@@ -341,7 +341,7 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
     ].filter(Boolean);
     for (const node of new Set(readerAccessNodes)) {
       const readerAccess = node.getAttribute('data-reader-access')?.trim();
-      if (readerAccess && readerAccess.length <= 4096 && !/[\s\u0000-\u001f]/.test(readerAccess)) return readerAccess;
+      if (readerAccess && readerAccess.length <= 8192 && !/[\s\u0000-\u001f]/.test(readerAccess)) return readerAccess;
     }
 
     const candidates = [];
@@ -349,15 +349,15 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       candidates.push(node.getAttribute('value'), node.getAttribute('data-access'), node.getAttribute('content'));
     }
     const patterns = [
-      /(?:["']?(?:reader[-_]?access|access)["']?)\s*:\s*["']([A-Za-z0-9_-]{128,})["']/i,
-      /(?:["']?(?:reader[-_]?access|access)["']?)\s*=\s*["']([A-Za-z0-9_-]{128,})["']/i
+      /(?:["']?(?:reader[-_]?access|access)["']?)\s*:\s*["']([A-Za-z0-9_-]{128,8192})["']/i,
+      /(?:["']?(?:reader[-_]?access|access)["']?)\s*=\s*["']([A-Za-z0-9_-]{128,8192})["']/i
     ];
     for (const pattern of patterns) {
       const match = html.match(pattern);
       if (match) candidates.push(match[1]);
     }
     return candidates.find((candidate) => typeof candidate === 'string'
-      && candidate.length <= 4096 && tokenPattern.test(candidate)) || '';
+      && candidate.length <= 8192 && tokenPattern.test(candidate)) || '';
   }
 
   function mapCards(doc) {

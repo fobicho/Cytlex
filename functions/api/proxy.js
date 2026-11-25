@@ -2435,7 +2435,7 @@ async function handleOnfChapter(request, target) {
     if (first.proxyError) return first.proxyError;
     if (!first.upstream.ok) return new Response(null, { status: first.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const html = await new Response(limitResponseBody(first.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
-    const access = html.match(/(?:window\.)?onfReaderPagesPromise\s*=\s*[\s\S]{0,12000}?\)\s*\(\s*["']([A-Za-z0-9_-]{128,4096})["']\s*\)\s*:\s*Promise\.resolve\b/i)?.[1];
+    const access = html.match(/(?:window\.)?onfReaderPagesPromise\s*=\s*[\s\S]{0,12000}?\)\s*\(\s*["']([A-Za-z0-9_-]{128,8192})["']\s*\)\s*:\s*Promise\.resolve\b/i)?.[1];
     if (!access) return errorResponse('ONF chapter requires the standard reader', 422);
     const cookiePairs = new Map([...onfCookiePairs(request), ...responseOnfCookies(first.upstream)].map((pair) => [pair.slice(0, pair.indexOf('=')), pair]));
     let cookies = [...cookiePairs.values()].join('; ').slice(0, 4096);
