@@ -136,6 +136,7 @@ function responseOnfCookies(response) {
 function isAllowedHost(hostname) {
   const host = hostname.toLowerCase().replace(/\.$/, '');
   return ALLOWED_HOSTS.has(host)
+    || /^i[0-3]\.wp\.com$/.test(host)
     || /^cdn\d+\.intomanga\.com$/.test(host)
     || /^storage\d*\.zonatmo\.org$/.test(host)
     || ALLOWED_SUFFIXES.some(suffix => host.endsWith(`.${suffix}`) || host === suffix);
@@ -2453,12 +2454,13 @@ async function handleOnfChapter(request, target) {
     const payload = JSON.parse(raw);
     if (!Array.isArray(payload.pages) || !payload.pages.length || payload.pages.length > 1000) return errorResponse('Invalid ONF page list', 422);
     const entries = payload.pages.map((page) => {
-      const src = typeof page === 'string' ? page : page?.src || page?.url;
-      const fallback = typeof page === 'object' ? page?.fallback : '';
-      const image = new URL(src, target);
+      const src = typeof page === 'string' ? page : page?.src || page?.url || page?.proxy;
+      const fallback = page && typeof page === 'object' && !Array.isArray(page)
+        ? page.fallback || page.fallbackUrl || page.fallback_url || page.proxy || ''
+        : '';
+      const image = new URL(decodeHtmlAttribute(src), target);
       if (!validateTarget(image.href)) throw new Error('Invalid ONF image');
-      const alternate = fallback ? new URL(fallback, target) : null;
-      if (alternate && !validateTarget(alternate.href)) throw new Error('Invalid ONF image fallback');
+      const alternate = fallback ? validateTarget(new URL(decodeHtmlAttribute(fallback), target).href) : null;
       return { url: image.href, fallback: alternate?.href || '' };
     });
     const initial = entries.slice(0, 40);
@@ -2478,7 +2480,11 @@ async function handleOnfChapter(request, target) {
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
             while (!stopped && next < initial.length) {
               const index = next++;
-              const result = await fetchImageBatchItem({ url: initial[index].url, referer: target.href, onfCookie: cookies }, request, subrequestBudget, byteBudget);
+              let result = await fetchImageBatchItem({ url: initial[index].url, referer: target.href, onfCookie: cookies }, request, subrequestBudget, byteBudget);
+              if ((!result.body || result.status !== 200) && initial[index].fallback) {
+                const fallback = await fetchImageBatchItem({ url: initial[index].fallback, referer: target.href, onfCookie: cookies }, request, subrequestBudget, byteBudget);
+                if (fallback.body && fallback.status === 200) result = fallback;
+              }
               if (stopped) return;
               const bytes = result.body ? new Uint8Array(await result.body.arrayBuffer()) : new Uint8Array();
               write({ index, length: bytes.length, status: result.status, contentType: result.contentType || '' }, bytes);

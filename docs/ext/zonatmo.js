@@ -58,6 +58,29 @@ export default function createSource({ fetchText, parse }) {
       .filter((x) => x && x.title);
   }
 
+  function mapCatalogFilters(doc) {
+    const select = (id) => [...(doc.querySelector(`#${id}`)?.querySelectorAll('option') || [])]
+      .map((option) => ({ value: option.value, label: (option.textContent || '').trim() }))
+      .filter((option) => option.label);
+    const allOption = { value: '', label: 'Ver todo' };
+    const genres = [...doc.querySelectorAll('input[id^="gender_"]')].map((input) => {
+      const label = input.labels?.[0] || input.closest('label') || input.parentElement;
+      return { value: input.id.replace('gender_', ''), label: (label?.textContent || '').replace(/\s+/g, ' ').trim() };
+    }).filter((option) => option.value && option.label);
+
+    return [
+      { id: 'searchBy', label: 'Buscar por', type: 'select', defaultValue: 'title', options: select('order_field_select').filter((option) => option.value) },
+      { id: 'type', label: 'Tipo', type: 'select', options: [allOption, ...select('type').filter((option) => option.value && READABLE.has(option.value))] },
+      { id: 'demography', label: 'Demografía', type: 'select', options: [allOption, ...select('demography').filter((option) => option.value)] },
+      { id: 'status', label: 'Estado', type: 'select', options: [allOption, ...select('status').filter((option) => option.value)] },
+      { id: 'author', label: 'Autor', type: 'text', placeholder: 'Filtrar por autor' },
+      { id: 'gender', label: 'Incluir géneros', type: 'multiselect', options: genres },
+      { id: 'excludeGender', label: 'Excluir géneros', type: 'multiselect', options: genres },
+      { id: 'orderItem', label: 'Ordenar por', type: 'select', defaultValue: 'likes_count', options: select('order_item_select') },
+      { id: 'orderDirection', label: 'Dirección', type: 'select', defaultValue: 'desc', options: select('order_dir_select') }
+    ];
+  }
+
   async function catalog({
     q = '', page = 1, type = '', demography = '', status = '', author = '',
     gender = [], excludeGender = [], searchBy = 'title',
@@ -82,6 +105,7 @@ export default function createSource({ fetchText, parse }) {
     const items = mapCards(doc);
     return {
       items,
+      filters: mapCatalogFilters(doc),
       totalPages: items.length ? page + 1 : Math.max(page - 1, 1),
       totalText: ''
     };
@@ -89,26 +113,7 @@ export default function createSource({ fetchText, parse }) {
 
   async function catalogFilters() {
     const doc = parse(await fetchText(`${base}/biblioteca`));
-    const select = (id) => [...(doc.querySelector(`#${id}`)?.querySelectorAll('option') || [])]
-      .map((option) => ({ value: option.value, label: (option.textContent || '').trim() }))
-      .filter((option) => option.label);
-    const allOption = { value: '', label: 'Ver todo' };
-    const genres = [...doc.querySelectorAll('input[id^="gender_"]')].map((input) => {
-      const label = input.labels?.[0] || input.closest('label') || input.parentElement;
-      return { value: input.id.replace('gender_', ''), label: (label?.textContent || '').replace(/\s+/g, ' ').trim() };
-    }).filter((option) => option.value && option.label);
-
-    return [
-      { id: 'searchBy', label: 'Buscar por', type: 'select', defaultValue: 'title', options: select('order_field_select').filter((option) => option.value) },
-      { id: 'type', label: 'Tipo', type: 'select', options: [allOption, ...select('type').filter((option) => option.value && READABLE.has(option.value))] },
-      { id: 'demography', label: 'Demografía', type: 'select', options: [allOption, ...select('demography').filter((option) => option.value)] },
-      { id: 'status', label: 'Estado', type: 'select', options: [allOption, ...select('status').filter((option) => option.value)] },
-      { id: 'author', label: 'Autor', type: 'text', placeholder: 'Filtrar por autor' },
-      { id: 'gender', label: 'Incluir géneros', type: 'multiselect', options: genres },
-      { id: 'excludeGender', label: 'Excluir géneros', type: 'multiselect', options: genres },
-      { id: 'orderItem', label: 'Ordenar por', type: 'select', defaultValue: 'likes_count', options: select('order_item_select') },
-      { id: 'orderDirection', label: 'Dirección', type: 'select', defaultValue: 'desc', options: select('order_dir_select') }
-    ];
+    return mapCatalogFilters(doc);
   }
 
   async function detail(mangaUrl) {

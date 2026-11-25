@@ -126,6 +126,7 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
   let currentPage = page;
   let canFetchNextPage = apiHasMore;
   let pagesFetched = 0;
+  let catalogFilters = null;
 
   const addUnique = (items) => {
     for (const item of items || []) {
@@ -170,6 +171,7 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
     for (const result of results) {
       if (!canFetchNextPage) break;
       if (result.status === 'rejected') throw result.reason;
+      if (!catalogFilters && Array.isArray(result.value.filters)) catalogFilters = result.value.filters;
       currentPage += 1;
       pagesFetched += 1;
       const received = result.value.items || [];
@@ -180,7 +182,7 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
     }
   }
 
-  return { items: batch, queuedItems: queued, page: currentPage, apiHasMore: canFetchNextPage, hasMore: queued.length > 0 || canFetchNextPage };
+  return { items: batch, queuedItems: queued, page: currentPage, apiHasMore: canFetchNextPage, hasMore: queued.length > 0 || canFetchNextPage, ...(catalogFilters ? { filters: catalogFilters } : {}) };
 }
 
 export default function SourcesCatalog({ sources, initialSourceId = '', active = true, savedMangaKeys = new Set(), hideSavedManga = false }) {
@@ -475,12 +477,14 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       const params = snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) };
       (async () => {
         try {
-          if (!isMangaDex(sourceId)) loadCatalogFilters(sourceId);
+          if (!isMangaDex(sourceId) && sourceId !== 'zonatmo') loadCatalogFilters(sourceId);
           const restoredItems = [];
           const urls = new Set();
+          let catalogFilters = null;
           let result = { hasMore: false, totalPages: 1 };
           for (let nextPage = 1; nextPage <= Math.max(1, snapshot.page || 1); nextPage += 1) {
             result = await api.catalog({ ...params, page: nextPage, __cytlexRequestId: httpRequestId }, sourceId);
+            if (!catalogFilters && Array.isArray(result.filters)) catalogFilters = result.filters;
             (result.items || []).forEach((item) => rememberMangaPreview(item, sourceId));
             for (const item of result.items || []) {
               if (item.url && !urls.has(item.url)) {
@@ -490,6 +494,10 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
             }
           }
           if (!active || runId !== requestId.current) return;
+          if (sourceId === 'zonatmo') {
+            if (catalogFilters) setFilters(catalogFilters);
+            else loadCatalogFilters(sourceId);
+          }
           if (isMangaDex(sourceId) && window.cytlex?.fetchImage) restoredItems.forEach((manga) => {
             if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
           });
@@ -539,9 +547,13 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     (async () => {
       try {
         const resultPromise = fetchCatalogBatch({ id: sourceId, params, page: 0, requestId: httpRequestId });
-        if (!isMangaDex(sourceId)) loadCatalogFilters(sourceId);
+        if (!isMangaDex(sourceId) && sourceId !== 'zonatmo') loadCatalogFilters(sourceId);
         const result = await resultPromise;
         if (!active || runId !== requestId.current) return;
+        if (sourceId === 'zonatmo') {
+          if (Array.isArray(result.filters)) setFilters(result.filters);
+          else loadCatalogFilters(sourceId);
+        }
         if (isMangaDex(sourceId) && window.cytlex?.fetchImage) result.items.forEach((manga) => {
           if (requiresImageProxy(manga.cover)) void preloadLibraryCover(manga.cover, { web: true, priority: true });
         });

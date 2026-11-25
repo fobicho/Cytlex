@@ -344,10 +344,8 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
       const gap = Number.parseFloat(style.columnGap) || 0;
       // Keep the current category visible, then give the remaining width to
       // actions. The refresh control compacts before the search field does.
-      const reservedCategoryWidth = Math.max(
-        Number.parseFloat(px(96, scale, 76)),
-        subroutes.scrollWidth
-      );
+      const activeCategoryWidth = subroutes.querySelector('[aria-current="page"]')?.getBoundingClientRect().width || 0;
+      const reservedCategoryWidth = activeCategoryWidth || Number.parseFloat(px(96, scale, 76));
       const availableForActions = toolbarRow.clientWidth - padding - reservedCategoryWidth - gap;
       const actionGap = Number.parseFloat(getComputedStyle(actions).columnGap) || 0;
       const minSearchWidth = Math.max(120, Math.round(140 * scale));
@@ -791,7 +789,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
           ref={categoryTabsRef}
           aria-label={t('Categorías de Biblioteca')}
           className="flex min-w-0 flex-1 items-center overflow-x-auto overscroll-x-contain whitespace-nowrap no-scrollbar"
-          style={{ height: `calc(${px(38, scale, 34)} - 1px)`, minWidth: px(96, scale, 76) }}
+          style={{ height: `calc(${px(38, scale, 34)} - 1px)`, minWidth: 0 }}
         >
           <div
             data-catalog-subroutes

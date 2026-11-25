@@ -153,6 +153,7 @@ function OnfChapterLink({ href }) {
 }
 
 function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFailed, preloadError, sourceName, blockedChapterUrl, alternativeSourcesUrl, fallbackSrc = '', alt, loading = 'eager', imageReferer, imageCookie, imageClassName, wrapperClassName, placeholderStyle, onContextMenu, onLoaded, onRetry }) {
+  const { t } = useI18n();
   const [status, setStatus] = useState(() => displaySrc ? 'loaded' : 'loading');
   const [imageError, setImageError] = useState('');
   const [attempt, setAttempt] = useState(0);
