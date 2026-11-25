@@ -125,6 +125,7 @@ export default function App({ tutorialMode = false }) {
   const catalogLocation = isExplorePage ? location : retainedExploreLocation;
   const isLibraryPage = location.pathname === '/biblioteca';
   const isLibraryDetail = isMangaPage && new URLSearchParams(location.search).get('from') === 'biblioteca';
+  const tutorialPreview = tutorialMode;
 
   useLayoutEffect(() => {
     const previous = previousLocation.current;
@@ -277,7 +278,7 @@ export default function App({ tutorialMode = false }) {
             <PageBoundary>
               {catalogLocation && (
                 <div className={isExplorePage ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden' : 'hidden'} aria-hidden={!isExplorePage} inert={!isExplorePage}>
-                  <Catalog key={`cat-${resetTick}`} locationOverride={catalogLocation} tutorialPreview={tutorialMode} active={isExplorePage} />
+                  <Catalog key={`cat-${resetTick}`} locationOverride={catalogLocation} tutorialPreview={tutorialPreview} active={isExplorePage} />
                 </div>
               )}
               {DETAIL_ORIGINS.map((origin) => {
@@ -297,7 +298,7 @@ export default function App({ tutorialMode = false }) {
               })}
               {shouldMountLibrary && (
                 <div className={isLibraryPage ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden' : 'hidden'} aria-hidden={!isLibraryPage} inert={!isLibraryPage}>
-                  <Library key={`lib-${resetTick}`} active={isLibraryPage} tutorialPreview={tutorialMode} />
+                  <Library key={`lib-${resetTick}`} active={isLibraryPage} tutorialPreview={tutorialPreview} />
                 </div>
               )}
               <Routes>
@@ -308,7 +309,7 @@ export default function App({ tutorialMode = false }) {
                 <Route path="/catalogo" element={<Navigate to="/explorar" replace />} />
                 <Route
                   path="/ajustes"
-                  element={<Settings key={`set-${resetTick}`} tutorialPreview={tutorialMode} />}
+                  element={<Settings key={`set-${resetTick}`} tutorialPreview={tutorialPreview} />}
                 />
                 <Route path="/seguimiento" element={<Tracking />} />
                 <Route path="/manga/*" element={null} />
@@ -318,7 +319,7 @@ export default function App({ tutorialMode = false }) {
           </main>
         </div>
       </div>
-      {!isElectronApp && !isReader && <BrowserMobileNav tutorialNavOnly={tutorialMode} />}
+      {!tutorialMode && !isElectronApp && !isReader && <BrowserMobileNav />}
       <AnimatePresence>
         {quickSearchOpen && (
           <div

@@ -5,6 +5,7 @@ import { HashRouter } from 'react-router-dom';
 import App from './App.jsx';
 import Splash from './components/Splash.jsx';
 import Onboarding from './components/Onboarding.jsx';
+import BrowserMobileNav from './components/BrowserMobileNav.jsx';
 import { ToastProvider } from './components/Toast.jsx';
 import { migrateLegacyStorage } from './lib/migrate.js';
 import { resolveMode, settings } from './lib/settings.js';
@@ -25,6 +26,8 @@ function Root() {
   const [splashExiting, setSplashExiting] = useState(false);
   const [showTutorial, setShowTutorial] = useState(() => !settings.get().tutorialSeen);
   const [tutorialLanguage, setTutorialLanguage] = useState('es');
+  const [tutorialImportBusy, setTutorialImportBusy] = useState(false);
+  const [tutorialImportProgress, setTutorialImportProgress] = useState(null);
   const [appVisible, setAppVisible] = useState(false);
   const [appMounted, setAppMounted] = useState(false);
   const revealApp = useCallback(() => {
@@ -60,6 +63,9 @@ function Root() {
         >
           <App tutorialMode={showTutorial} />
         </motion.div>
+        {showTutorial && !tutorialImportBusy && appVisible && (
+          <BrowserMobileNav tutorialNavOnly />
+        )}
         {!splashDone && <Splash onDone={handleSplashDone} onExitStart={handleSplashExitStart} />}
         {showTutorial && (splashExiting || splashDone) && (
           <Onboarding
@@ -67,6 +73,10 @@ function Root() {
             onExitStart={handleTutorialExitStart}
             onRevealApp={revealApp}
             onHideApp={hideApp}
+            onTutorialImportBusyChange={setTutorialImportBusy}
+            onTutorialImportProgressChange={setTutorialImportProgress}
+            tutorialImportBusy={tutorialImportBusy}
+            tutorialImportProgress={tutorialImportProgress}
             enteringWithSplash={!splashDone}
             language={tutorialLanguage}
             onLanguageChange={setTutorialLanguage}

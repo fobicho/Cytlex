@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
-import { flushSync } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon, Check, CheckCheck, LoaderCircle } from 'lucide-react';
 import { THEMES, MODES } from '../lib/themes.js';
@@ -11,8 +11,7 @@ import { Button } from './ui/button.jsx';
 import LanguageToggle from './LanguageToggle.jsx';
 import { GENTLE_FLOAT_MOTION, GENTLE_FLOAT_TRANSITION } from './ui/empty-state.jsx';
 import CytlexLogoMark from './CytlexLogoMark.jsx';
-import Settings from '../pages/Settings.jsx';
-import { BACKUP_IMPORT_COMPLETE_EVENT, backupImportedThisSession } from '../lib/backup.js';
+import Settings, { BackupProgress } from '../pages/Settings.jsx';
 
 const STEPS = [
   {
@@ -53,7 +52,7 @@ const STEP_CONTENT_VARIANTS = {
   exit: (direction) => ({ opacity: 0, scale: direction === 0 ? 1 : direction > 0 ? 1.08 : 0.92 })
 };
 
-export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp, enteringWithSplash = false, language = 'es', onLanguageChange }) {
+export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp, onTutorialImportBusyChange, onTutorialImportProgressChange, tutorialImportBusy = false, tutorialImportProgress = null, enteringWithSplash = false, language = 'es', onLanguageChange }) {
   const { t } = useI18n();
   const [step, setStep] = useState(0);
   const [theme, setTheme] = useState(() => settings.get().theme);
@@ -62,7 +61,6 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const [walkthroughView, setWalkthroughView] = useState('biblioteca');
   const [repoUrl, setRepoUrl] = useState(() => (settings.get().extIndexUrl || '').trim());
   const [addingRepository, setAddingRepository] = useState(false);
-  const [backupImported, setBackupImported] = useState(backupImportedThisSession);
   const [navigationVisible, setNavigationVisible] = useState(false);
   const navigationTimer = useRef(null);
   const contentRef = useRef(null);
@@ -78,12 +76,6 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   useEffect(() => {
     hasMounted.current = true;
     return () => clearTimeout(navigationTimer.current);
-  }, []);
-
-  useEffect(() => {
-    const onBackupImported = () => setBackupImported(true);
-    window.addEventListener(BACKUP_IMPORT_COMPLETE_EVENT, onBackupImported);
-    return () => window.removeEventListener(BACKUP_IMPORT_COMPLETE_EVENT, onBackupImported);
   }, []);
 
   useEffect(() => {
@@ -187,7 +179,6 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const progress = ((step + 1) / STEPS.length) * 100;
   const hasOfficialRepository = repoUrl === DEFAULT_EXTENSION_REPOSITORY;
   const hasOtherRepository = !!repoUrl && !hasOfficialRepository;
-
   return (
     <motion.div
       className={`onboarding-overlay fixed inset-0 z-[60] flex flex-col items-center overflow-hidden p-3 sm:p-4 transition-colors duration-300 ${step === 1 ? 'pointer-events-none bg-transparent' : 'pointer-events-auto bg-background'}`}
@@ -215,7 +206,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
               layout={reduceMotion ? false : 'position'}
               custom={motionDirection}
               variants={STEP_CONTENT_VARIANTS}
-              className="relative my-auto w-full max-w-3xl shrink-0 pointer-events-auto"
+              className="relative my-auto flex w-full max-w-3xl shrink-0 flex-col items-center pointer-events-auto"
               initial={firstCardEntrance ? { opacity: 0, y: reduceMotion ? 0 : '100vh' } : 'enter'}
               animate="center"
               exit="exit"
@@ -231,6 +222,11 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
               }}
               style={{ transformOrigin: 'center' }}
             >
+              {isBackup && tutorialImportBusy && tutorialImportProgress && (
+                <div className="w-full max-w-md">
+                  <BackupProgress progress={tutorialImportProgress} scale={scale} />
+                </div>
+              )}
               <motion.div
                 animate={{ transform: `scale(${scale})` }}
                 transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1], layout: { duration: 0.28, ease: [0.77, 0, 0.175, 1] } }}
@@ -272,10 +268,12 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 )}
 
                 {isBackup && (
-                  <div className="onboarding-import-actions mt-5 flex flex-row-reverse flex-wrap items-end justify-start gap-2">
-                    <Button disabled={backupImported} onClick={() => importControls.current?.importBackup()}>{t('Importar respaldo de Cytlex')}</Button>
-                    <Button variant="outline" disabled={backupImported} onClick={() => importControls.current?.importMihon()}>{t('Importar respaldo de Mihon')}</Button>
-                  </div>
+                  <>
+                    <div className="onboarding-import-actions mt-5 flex flex-row-reverse flex-wrap items-end justify-start gap-2">
+                      <Button onClick={() => importControls.current?.importBackup()}>{t('Importar respaldo de Cytlex')}</Button>
+                      <Button variant="outline" onClick={() => importControls.current?.importMihon()}>{t('Importar respaldo de Mihon')}</Button>
+                    </div>
+                  </>
                 )}
 
                 {isReady && (
@@ -379,7 +377,12 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                           )}
                         </div>
                         <Button
-                          className="h-9 w-full shrink-0 sm:h-10 sm:w-auto"
+                          layout={false}
+                          aria-pressed={hasOfficialRepository}
+                          className={cn(
+                            'h-9 w-full shrink-0 transition-colors active:scale-100 disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-100 sm:h-10 sm:w-52',
+                            hasOfficialRepository && 'border border-primary/40 bg-primary/15 text-primary hover:bg-primary/15'
+                          )}
                           disabled={hasOfficialRepository || addingRepository}
                           onClick={() => {
                             setAddingRepository(true);
@@ -464,7 +467,16 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
           )}
         </AnimatePresence>
       </LayoutGroup>
-          {isBackup && <div className="fixed inset-0 z-[70] pointer-events-none [&_[role=dialog]]:pointer-events-auto [&_.fixed]:pointer-events-auto"><Settings tutorialImportControls={importControls} /></div>}
+          {isBackup && createPortal(
+            <div className="fixed inset-0 z-[70] pointer-events-none">
+              <Settings
+                tutorialImportControls={importControls}
+                onTutorialImportBusyChange={onTutorialImportBusyChange}
+                onTutorialImportProgressChange={onTutorialImportProgressChange}
+              />
+            </div>,
+            document.body
+          )}
           <motion.div initial={false} animate={{ opacity: navigationVisible ? 1 : 0, y: navigationVisible || reduceMotion ? 0 : 'calc(100% + env(safe-area-inset-bottom))' }} transition={{ duration: reduceMotion ? 0 : 0.25, ease: [0.23, 1, 0.32, 1] }} inert={!navigationVisible} className="onboarding-footer pointer-events-auto fixed bottom-[env(safe-area-inset-bottom)] inset-x-0 mx-auto z-10 grid w-full max-w-3xl grid-cols-[1fr_auto] items-center gap-x-2 gap-y-2 bg-card border border-border px-4 py-3 sm:grid-cols-3 sm:gap-4 sm:px-10 sm:py-4">
             <div className="flex justify-start">
               <Button variant="outline" size="sm" className="px-1.5 sm:px-3" onClick={finish}>

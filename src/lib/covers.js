@@ -55,10 +55,34 @@ export function requiresImageProxy(url) {
 
 function persistedCoverKey(url) {
   try {
-    return requiresImageProxy(url) && new URL(url).hostname.toLowerCase().endsWith('mangadex.org')
-      ? `mangadex-cover-v2:${catalogImageKey(url)}`
-      : catalogImageKey(url);
+    const parsed = new URL(url);
+    if (requiresImageProxy(url) && parsed.hostname.toLowerCase().endsWith('mangadex.org')) {
+      parsed.pathname = parsed.pathname.replace(/\.(?:256|512)(\.(?:jpe?g|png|webp))$/i, '$1');
+      parsed.search = '';
+      parsed.hash = '';
+      return `mangadex-cover-v2:${parsed.href}`;
+    }
+    return catalogImageKey(url);
   } catch { return url; }
+}
+
+function legacyPersistedCoverKeys(url) {
+  try {
+    const parsed = new URL(url);
+    if (!requiresImageProxy(url) || !parsed.hostname.toLowerCase().endsWith('mangadex.org')) return [];
+    const path = parsed.pathname.replace(/\.(?:256|512)(\.(?:jpe?g|png|webp))$/i, '$1');
+    return [
+      `${url}`,
+      `mangadex-cover-v2:${catalogImageKey(url)}`,
+      ...['', '.256', '.512'].flatMap((size) => {
+        const candidate = new URL(url);
+        candidate.pathname = path.replace(/\.(jpe?g|png|webp)$/i, `${size}.$1`);
+        candidate.search = '';
+        candidate.hash = '';
+        return [candidate.href, `mangadex-cover-v2:${catalogImageKey(candidate.href)}`];
+      })
+    ];
+  } catch { return []; }
 }
 
 function favoriteCoverKeys() {
@@ -71,6 +95,7 @@ function favoriteCoverKeys() {
         if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) continue;
         keys.add(url);
         keys.add(persistedCoverKey(url));
+        legacyPersistedCoverKeys(url).forEach((key) => keys.add(key));
         try {
           const parsed = new URL(url);
           if (requiresImageProxy(url) && parsed.hostname.toLowerCase().endsWith('mangadex.org')) {
@@ -85,8 +110,13 @@ function favoriteCoverKeys() {
 }
 
 export function protectLibraryCovers(urls) {
-  const keys = new Set((urls || []).filter((url) => typeof url === 'string' && /^https?:\/\//i.test(url)));
-  [...keys].forEach((url) => keys.add(persistedCoverKey(url)));
+  const coverUrls = (urls || []).filter((url) => typeof url === 'string' && /^https?:\/\//i.test(url));
+  const keys = new Set();
+  coverUrls.forEach((url) => {
+    keys.add(url);
+    keys.add(persistedCoverKey(url));
+    legacyPersistedCoverKeys(url).forEach((key) => keys.add(key));
+  });
   keys.forEach((key) => protectedLibraryCoverKeys.set(key, (protectedLibraryCoverKeys.get(key) || 0) + 1));
   let released = false;
   return () => {
@@ -229,9 +259,11 @@ async function readPersistedLibraryCover(url, allowedPending = null) {
     const db = await openLibraryCoverDb();
     if (!db) return null;
     const key = persistedCoverKey(url);
-    let record = await idbRequest(db.transaction(LIBRARY_COVER_STORE, 'readonly').objectStore(LIBRARY_COVER_STORE).get(key));
-    if (!record && key !== url) {
-      record = await idbRequest(db.transaction(LIBRARY_COVER_STORE, 'readonly').objectStore(LIBRARY_COVER_STORE).get(url));
+    const lookupKeys = [...new Set([key, ...legacyPersistedCoverKeys(url), url])];
+    let record = null;
+    for (const lookupKey of lookupKeys) {
+      record = await idbRequest(db.transaction(LIBRARY_COVER_STORE, 'readonly').objectStore(LIBRARY_COVER_STORE).get(lookupKey));
+      if (record) break;
     }
     if (!record?.blob) return null;
     const cached = libraryCoverCache.get(url);
@@ -442,7 +474,12 @@ export function preloadLibraryCoversBatch(urls, { web = false, persist = false, 
     if (entry.settled) return;
     const current = libraryCoverCache.get(entry.url);
     if (current && current !== entry.promise) {
-      entry.resolve(await current);
+      const cover = await current;
+      if (entry.persist && cover && !await persistCachedLibraryCover(entry.url, cover, entry.version)) {
+        entry.resolve('');
+        return;
+      }
+      entry.resolve(cover);
       return;
     }
     if (libraryCoverCache.get(entry.url) === entry.promise) libraryCoverCache.delete(entry.url);

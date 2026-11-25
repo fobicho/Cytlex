@@ -236,18 +236,19 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
       .replace(/\\+u002f/gi, '/')
       .replace(/\\+\//g, '/')
       .replace(/\\+"/g, '"');
-    let embeddedUrls = encryptedChapterPages(html);
+    let embeddedUrls = [];
     const imageSigsMatch = serializedHtml.match(/"imageSigs"\s*:\s*(\{[^{}]*\})/);
     if (imageSigsMatch) {
       try { embeddedUrls.push(...Object.keys(JSON.parse(imageSigsMatch[1]))); } catch {}
     }
-    embeddedUrls.push(...[...serializedHtml.matchAll(/https?:\/\/[^\s"'<>\\]+/gi)].map(([imageUrl]) => imageUrl));
+    if (!embeddedUrls.length) embeddedUrls = encryptedChapterPages(html);
+    const serializedUrls = [...serializedHtml.matchAll(/https?:\/\/[^\s"'<>\\]+/gi)].map(([imageUrl]) => imageUrl);
     const imageElements = [...doc.querySelectorAll('img[src], img[data-src], img[data-lazy-src], img[data-original]')]
       .map((image) => abs(image.getAttribute('data-src') || image.getAttribute('data-lazy-src')
         || image.getAttribute('data-original') || image.getAttribute('src'), referer));
-    const decodedUrls = embeddedUrls.map((item) => typeof item === 'string'
-      ? item : item?.url || item?.src || item?.imageUrl || item?.image || item?.path || '');
-    const pages = [...imageElements, ...decodedUrls]
+    const pageUrls = (sources) => sources
+      .map((item) => typeof item === 'string'
+        ? item : item?.url || item?.src || item?.imageUrl || item?.image || item?.path || '')
       .map((src) => abs(src, referer))
       .filter((src) => {
         if (!src) return false;
@@ -264,6 +265,9 @@ export default function createSource({ fetchText, fetchPostText, parse }) {
           || host === 't34798ndc.com' || host.endsWith('.t34798ndc.com');
       })
       .filter((src, index, list) => list.indexOf(src) === index);
+    let pages = pageUrls(embeddedUrls);
+    if (!pages.length) pages = pageUrls(imageElements);
+    if (!pages.length) pages = pageUrls(serializedUrls);
     if (!pages.length) throw new Error('Komiwa no entregó páginas legibles para este capítulo.');
 
     const index = cached?.chapterOptions?.findIndex((item) => new URL(item.url).pathname.endsWith(`/${chapterId}`)) ?? -1;

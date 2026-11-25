@@ -478,7 +478,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       const params = snapshot.loadedParams || { q: snapshot.query || '', ...(snapshot.filterValues || {}) };
       (async () => {
         try {
-          if (!isMangaDex(sourceId) && sourceId !== 'zonatmo') loadCatalogFilters(sourceId);
+          if (!isMangaDex(sourceId) && sourceId !== 'zonatmo' && sourceId !== 'mangalect') loadCatalogFilters(sourceId);
           const restoredItems = [];
           const urls = new Set();
           let catalogFilters = null;
@@ -548,7 +548,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     (async () => {
       try {
         const resultPromise = fetchCatalogBatch({ id: sourceId, params, page: 0, requestId: httpRequestId });
-        if (!isMangaDex(sourceId) && sourceId !== 'zonatmo') {
+        if (!isMangaDex(sourceId) && sourceId !== 'zonatmo' && sourceId !== 'mangalect') {
           loadCatalogFilters(sourceId, sourceId === 'leercapitulo' ? httpRequestId : undefined);
         }
         const result = await resultPromise;
@@ -700,7 +700,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
         variant="secondary"
         className="source-filters-trigger shrink-0 rounded-none"
         onClick={() => {
-          if (isMangaDex(sourceId) && !filters.length) loadCatalogFilters(sourceId);
+          if ((isMangaDex(sourceId) || sourceId === 'mangalect') && !filters.length) loadCatalogFilters(sourceId);
           setFiltersOpen((open) => !open);
         }}
         aria-label={activeFilterCount ? `Filtros, ${activeFilterCount} seleccionados` : 'Filtros'}
@@ -828,7 +828,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                 )}
               </div>
             )}
-            {sourceId !== 'leercapitulo' && (filters.length > 0 || isMangaDex(sourceId)) && (
+            {sourceId !== 'leercapitulo' && (filters.length > 0 || isMangaDex(sourceId) || sourceId === 'mangalect') && (
               <>
                 {renderFiltersButton(filterRootRef, 'ml-auto')}
                 {createPortal(

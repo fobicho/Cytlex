@@ -1564,9 +1564,9 @@ function komiwaChapterPageUrls(html, chapterUrl, chapterNumber = '') {
       } catch {}
     }
   }
-  // Current Komiwa pages keep the complete page list in an obfuscated React Flight row.
+  // Komiwa keeps the full page list in an obfuscated React Flight row.
   try {
-    const seed = 'komiwa-r1-2026-11';
+    const seed = 'srgDybi0Gl3eCeNx';
     const hash36 = (value) => {
       let hash = 0x811c9dc5;
       for (let i = 0; i < value.length; i++) {
@@ -1596,9 +1596,8 @@ function komiwaChapterPageUrls(html, chapterUrl, chapterNumber = '') {
             return Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
           };
           const unmaskedBytes = decodeBase64Url(maskedKey);
-          const seedBytes = new TextEncoder().encode(seed);
           for (let i = 0; i < unmaskedBytes.length; i++) {
-            unmaskedBytes[i] ^= (seedBytes[i % seedBytes.length] ^ (31 * i + 131)) & 255;
+            unmaskedBytes[i] ^= ((seed.charCodeAt(i % seed.length) || 0) ^ (31 * i + 131)) & 255;
           }
           const chapterKey = new TextDecoder().decode(unmaskedBytes);
           const keyInput = `${seed}\x01${chapterKey}\x01${chapterId}|${number}`;
@@ -1644,11 +1643,13 @@ function komiwaChapterPageUrls(html, chapterUrl, chapterNumber = '') {
         try { Object.keys(JSON.parse(serialized.slice(start, end))).forEach(add); } catch {}
       }
     }
-    for (const match of serialized.matchAll(/https?:\/\/[^\s"'<>\\]+/gi)) add(match[0]);
+    if (pages.length) return [...new Set(pages)];
     for (const tag of source.match(/<img\b[^>]*>/gi) || []) {
       const attrs = attrsOf(tag);
       add(attrs.get('data-src') || attrs.get('data-lazy-src') || attrs.get('data-original') || attrs.get('src') || '');
     }
+    if (pages.length) return [...new Set(pages)];
+    for (const match of serialized.matchAll(/https?:\/\/[^\s"'<>\\]+/gi)) add(match[0]);
   }
   return [...new Set(pages)];
 }
@@ -2022,7 +2023,7 @@ async function handleMangaDexFeed(request, target, includeManga = false, sharedB
     if (sharedBudget && !sharedBudget.take()) throw new Error('MangaDex batch subrequest limit reached');
     requestsFetched += 1;
     const page = validateTarget(url);
-    const result = await fetchTarget(page, 'GET', forwardedHeaders(request, page), undefined, signal, { retries: 0 });
+    const result = await fetchTarget(page, 'GET', forwardedHeaders(request, page), undefined, signal);
     if (result.proxyError) throw { response: result.proxyError };
     if (!result.upstream.ok) throw { response: new Response(result.upstream.body, {
       status: result.upstream.status,
@@ -2784,13 +2785,18 @@ async function handleMangaOniChapter(request, target) {
       return /(?:^|\s)ajp(?:\s|$)/.test(classes) ? href : '';
     }).find(Boolean);
     const mangaTarget = mangaUrl ? validateTarget(new URL(mangaUrl.replace(/&amp;/g, '&'), target).href) : null;
-    if (!mangaTarget || mangaTarget.origin !== target.origin || !mangaTarget.pathname.startsWith('/manga/')) {
+    if (!mangaTarget || mangaTarget.origin !== target.origin || !/^\/(?:manga|manhwa|manhua)\//.test(mangaTarget.pathname)) {
       return errorResponse('Invalid MangaOni manga URL', 422);
     }
-    const mangaResult = await fetchTarget(mangaTarget, 'GET', forwardedHeaders(request, mangaTarget), undefined, signal, { retries: 0 });
-    if (mangaResult.proxyError) return mangaResult.proxyError;
-    if (!mangaResult.upstream.ok) return new Response(null, { status: mangaResult.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
-    const mangaHtml = await new Response(limitResponseBody(mangaResult.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
+    let mangaHtml = '';
+    const mangaController = new AbortController();
+    try {
+      const mangaSignal = AbortSignal.any([signal, mangaController.signal, AbortSignal.timeout(3500)]);
+      const mangaResult = await fetchTarget(mangaTarget, 'GET', forwardedHeaders(request, mangaTarget), undefined, mangaSignal, { retries: 0 });
+      if (!mangaResult.proxyError && mangaResult.upstream.ok) {
+        mangaHtml = await new Response(limitResponseBody(mangaResult.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => mangaController.abort())).text();
+      }
+    } catch {}
     const decodeText = (value) => value.replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/gi, ' ')
       .replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'")
       .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))

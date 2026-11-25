@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
@@ -14,7 +14,7 @@ import { MODES, THEMES } from '../lib/themes.js';
 import { useI18n } from '../lib/i18n.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { chapterOrder } from '../lib/searchState.js';
-import { compressBackup, createBackup, markBackupImportedThisSession, parseBackup, readBackupFile, restoreBackup } from '../lib/backup.js';
+import { compressBackup, createBackup, parseBackup, readBackupFile, restoreBackup } from '../lib/backup.js';
 import { importMihonBackup, previewMihonBackup } from '../lib/mihonBackup.js';
 import { extensions, isExtensionAllowed, isSourceConfigured } from '../lib/extensions.js';
 import { Button } from '../components/ui/button.jsx';
@@ -121,8 +121,9 @@ async function prepareImportedDetails(mangas) {
   return rows;
 }
 
-async function cacheImportedLibraryDetails(mangas, onProgress) {
+async function cacheImportedLibraryDetails(mangas, onProgress, persistedCoverUrls = new Set()) {
   let failed = 0;
+  const mangadexCoversToPersist = new Map();
   const allowedMangas = allowedImportedMangas(mangas).filter((manga) => {
     const sourceId = importedSourceId(manga);
     const manifest = extensions.manifest(sourceId);
@@ -152,7 +153,7 @@ async function cacheImportedLibraryDetails(mangas, onProgress) {
               });
             } catch (error) {
               const message = String(error?.message || error);
-              const staleSourceEntry = (resolvedId !== 'olympusscanlation' && /\bHTTP 404\b/.test(message))
+              const staleSourceEntry = /\bHTTP 404\b/.test(message)
                 || (resolvedId === 'komiwa' && /No se encontraron los datos del manga en Komiwa/i.test(message));
               if (!staleSourceEntry) throw error;
               const recovered = await api.findManga({
@@ -181,13 +182,29 @@ async function cacheImportedLibraryDetails(mangas, onProgress) {
             chapterIndex.drop(manga.url, savedSourceId);
             chapterIndex.set(detailUrl, resolvedId, detail.chapters.map((chapter) => chapter.url).filter(Boolean));
           }
+          if (['mangadex', 'mangadex-en'].includes(resolvedId)
+            && !isMangaCover(manga?.cover, manga?.url)
+            && isMangaCover(detail?.cover, detailUrl)) {
+            lib.updateFav(detailUrl, { cover: detail.cover }, savedSourceId);
+          }
+          if (['mangadex', 'mangadex-en'].includes(resolvedId)
+            && isMangaCover(detail?.cover, detailUrl)
+            && needsPersistentImportedCover(detail.cover)
+            && !persistedCoverUrls.has(detail.cover)) {
+            mangadexCoversToPersist.set(detailUrl, { ...manga, url: detailUrl, cover: detail.cover, coverLocal: '', coverCached: '' });
+          }
           if (!detail?.chapters?.length || !(await api.persistLibraryDetail(detailUrl, resolvedId, detail, savedSourceId))) failed += 1;
         } catch { failed += 1; }
         current += 1;
         onProgress?.({ label: 'Recuperando detalles de las fuentes', current, total: allowedMangas.length, currentLabel: manga?.title || 'Manga' });
       }
     }));
-    return failed;
+    let coverFailedUrls = new Set();
+    if (mangadexCoversToPersist.size) {
+      const covers = await preloadImportedCovers([...mangadexCoversToPersist.values()], onProgress);
+      coverFailedUrls = covers.failedUrls;
+    }
+    return { failed, coverFailedUrls };
   } finally {
     restoreKomiwaHints();
     restoreBatchWindow();
@@ -215,15 +232,24 @@ async function refreshImportedMihonDetails(mangas, onProgress) {
         try {
           if (error) throw error;
           let detail = cached;
+          let detailUrl = manga.url;
           if (!detail?.chapters?.length || !detail.cover || !isMangaCover(detail.cover, manga.url)) {
-            detail = await api.detail(manga.url, sourceId, {
-              cacheResult: false,
-              persistResult: false,
-              allowDisabled: true,
-              timeoutMs: 120_000
-            });
+            try {
+              detail = await api.detail(manga.url, sourceId, {
+                cacheResult: false,
+                persistResult: false,
+                allowDisabled: true,
+                timeoutMs: 120_000
+              });
+            } catch (error) {
+              if (sourceId !== 'olympusscanlation' || !/\bHTTP 404\b/.test(String(error?.message || error))) throw error;
+              const recovered = await api.findManga({ url: manga.url, title: manga.title, author: manga.author || manga.artist || '' }, sourceId);
+              if (!recovered?.detail?.chapters?.length) throw error;
+              detailUrl = recovered.url;
+              detail = recovered.detail;
+            }
           }
-          if (detail) results.push({ manga, sourceId, detail });
+          if (detail) results.push({ manga, sourceId, detail, detailUrl });
         } catch {}
         current += 1;
         onProgress?.({
@@ -241,7 +267,7 @@ async function refreshImportedMihonDetails(mangas, onProgress) {
   return { results, attempted };
 }
 
-function BackupProgress({ progress, scale }) {
+export function BackupProgress({ progress, scale }) {
   const { t } = useI18n();
   if (!progress) return null;
   const determinate = progress.total > 0;
@@ -486,7 +512,7 @@ const sortByName = (items, getName = (item) => item?.name || '') => [...items].s
 
 let sessionSeccion = '';
 
-export default function Settings({ tutorialPreview = false, tutorialImportControls = null }) {
+export default function Settings({ tutorialPreview = false, tutorialImportControls = null, onTutorialImportBusyChange = null, onTutorialImportProgressChange = null }) {
   const { language, t } = useI18n();
   const location = useLocation();
   const [s, setS] = useState(settings.get());
@@ -524,6 +550,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
   const [backupUnavailableSources, setBackupUnavailableSources] = useState([]);
   const [backupInstallManifests, setBackupInstallManifests] = useState([]);
   const [backupProgress, setBackupProgress] = useState(null);
+  const [tutorialImportApplying, setTutorialImportApplying] = useState(false);
   const [mihonCandidate, setMihonCandidate] = useState(null);
   const [mihonInstallManifests, setMihonInstallManifests] = useState([]);
   const [mihonInstallCounts, setMihonInstallCounts] = useState(new Map());
@@ -547,6 +574,18 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
   const scale = useScale();
   const reduceMotion = useReducedMotion();
   const isBrowserApp = typeof window !== 'undefined' && !window.cytlex;
+  const tutorialImportRunning = Boolean(tutorialImportControls && (backupBusy || mihonBusy));
+
+  useLayoutEffect(() => {
+    onTutorialImportBusyChange?.(tutorialImportRunning);
+    onTutorialImportProgressChange?.(tutorialImportControls && tutorialImportApplying
+      ? backupProgress || mihonProgress
+      : null);
+  }, [backupProgress, mihonProgress, onTutorialImportBusyChange, onTutorialImportProgressChange, tutorialImportApplying, tutorialImportControls, tutorialImportRunning]);
+  useEffect(() => () => {
+    onTutorialImportBusyChange?.(false);
+    onTutorialImportProgressChange?.(null);
+  }, [onTutorialImportBusyChange, onTutorialImportProgressChange]);
 
   const handleSectionScroll = (event) => {
     const scrollArea = event.currentTarget;
@@ -855,6 +894,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       throw new Error(`Instala estas extensiones antes de restaurar: ${uninstalled.map(({ name, id }) => name || id).join(', ')}.`);
     }
     activeImportRef.current = true;
+    setTutorialImportApplying(true);
     setBackupBusy(true);
     let releaseCoverProtection = () => {};
     try {
@@ -871,7 +911,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       if (coversToPersist.size) {
         setBackupProgress({ label: 'Preparando las portadas', current: 0, total: coversToPersist.size });
       }
-      const { failed: coverFailures, persistedUrls: proxiedCovers } = await preloadImportedCovers(favorites, setBackupProgress);
+      const { failedUrls: initiallyFailedCoverUrls, persistedUrls: proxiedCovers } = await preloadImportedCovers(favorites, setBackupProgress);
       if (proxiedCovers.size) {
         data = {
           ...data,
@@ -900,9 +940,13 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       tracking.reload();
       clearLibraryUnreadCache();
       setBackupProgress({ label: 'Recuperando detalles de las fuentes', current: 0, total: favorites.length });
-      const detailFailures = favorites.length
-        ? await cacheImportedLibraryDetails(favorites, setBackupProgress)
-        : 0;
+      const detailResults = favorites.length
+        ? await cacheImportedLibraryDetails(favorites, setBackupProgress, proxiedCovers)
+        : { failed: 0, coverFailedUrls: new Set() };
+      const currentFavoriteCovers = new Set(lib.favs().map((manga) => manga?.cover).filter(Boolean));
+      const coverFailedUrls = new Set([...initiallyFailedCoverUrls].filter((url) => currentFavoriteCovers.has(url)));
+      detailResults.coverFailedUrls.forEach((url) => coverFailedUrls.add(url));
+      const coverFailures = coverFailedUrls.size;
       setBackupCandidate(null);
       setBackupInstallOpen(false);
       setBackupReviewOpen(false);
@@ -914,15 +958,15 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       window.dispatchEvent(new Event('cytlex:library-updated'));
       toast({
         title: 'Respaldo restaurado',
-        description: `${t('Los datos se aplicaron correctamente')}${coverFailures ? `; ${t('{count} portadas no pudieron guardarse', { count: coverFailures })}` : ''}${detailFailures ? `; ${t('No se pudo guardar la información de {count} mangas', { count: detailFailures })}` : ''}.`,
+        description: `${t('Los datos se aplicaron correctamente')}${coverFailures ? `; ${t('{count} portadas no pudieron guardarse', { count: coverFailures })}` : ''}${detailResults.failed ? `; ${t('No se pudo guardar la información de {count} mangas', { count: detailResults.failed })}` : ''}.`,
         variant: 'success'
       });
-      markBackupImportedThisSession();
     } catch (error) {
       toast({ title: 'No se pudo restaurar el respaldo', description: error.message, variant: 'error' });
     } finally {
       releaseCoverProtection();
       activeImportRef.current = false;
+      setTutorialImportApplying(false);
       setBackupBusy(false);
       setBackupProgress(null);
     }
@@ -1159,6 +1203,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
     if (blockedEntries.length) return;
     if (activeImportRef.current) return;
     activeImportRef.current = true;
+    setTutorialImportApplying(true);
     setMihonBusy(true);
     let releaseCoverProtection = () => {};
     let releaseFinalCoverProtection = () => {};
@@ -1195,10 +1240,18 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       const { results: refreshedDetails, attempted } = await refreshImportedMihonDetails(importedFavorites, setMihonProgress);
       const detailFailures = attempted.length - refreshedDetails.filter(({ detail }) => detail?.chapters?.length).length;
       const refreshedFavoriteKeys = new Set();
-      for (const { manga, sourceId, detail } of refreshedDetails) {
+      for (const { manga, sourceId, detail, detailUrl } of refreshedDetails) {
         const savedSourceId = manga.sourceId || sourceId;
         const favorite = lib.fav(manga.url, savedSourceId);
         if (!favorite) continue;
+        if (detailUrl !== favorite.url) {
+          lib.updateFav(favorite.url, { url: detailUrl }, savedSourceId);
+          tracking.move(favorite.url, detailUrl, savedSourceId);
+          chapterOrder.move(favorite.url, detailUrl);
+          chapterIndex.drop(favorite.url, savedSourceId);
+          manga.url = detailUrl;
+          favorite.url = detailUrl;
+        }
         const detailCoverValid = /^https?:\/\//i.test(detail.cover || '') && isMangaCover(detail.cover, favorite.url);
         lib.updateFav(favorite.url, {
           coverRefreshPending: false,
@@ -1261,13 +1314,13 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
         description: `${t('{count} mangas importados', { count: result.added + result.updated })}${omitted.size ? `, ${t('{count} omitidos', { count: omitted.size })}` : ''}.${detailFailures ? ` ${t('No se pudo guardar la información de {count} mangas', { count: detailFailures })}.` : ''}${coverFailures ? ` ${t('{count} portadas no pudieron guardarse', { count: coverFailures })}.` : ''}${failedInstalls.length ? ` ${t('No se pudieron instalar: {names}', { names: failedInstalls.map(({ name }) => name).join(', ') })}.` : ''}`,
         variant: 'success'
       });
-      markBackupImportedThisSession();
     } catch (error) {
       toast({ title: 'No se pudo importar el respaldo de Mihon', description: error.message, variant: 'error' });
     } finally {
       releaseCoverProtection();
       releaseFinalCoverProtection();
       activeImportRef.current = false;
+      setTutorialImportApplying(false);
       setMihonProgress(null);
       setMihonBusy(false);
     }
@@ -2357,7 +2410,8 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       </Dialog>
       <Dialog
         open={!!backupCandidate && !backupInstallOpen && !backupReviewOpen
-          && !(confirmAdultExtensions && adultImportTargetRef.current === 'backup')}
+          && !(confirmAdultExtensions && adultImportTargetRef.current === 'backup')
+          && !tutorialImportRunning}
         onClose={() => { if (!backupBusy) setBackupCandidate(null); }}
         title="Importar respaldo de Cytlex"
         description={t('Se restaurará {fileName} en Cytlex y reemplazará tus datos actuales. Las extensiones instaladas se mantendrán.', { fileName: backupCandidate?.fileName || 'el respaldo' })}
@@ -2394,7 +2448,8 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
         </div>
       </Dialog>
       <Dialog
-        open={backupReviewOpen || (confirmAdultExtensions && adultImportTargetRef.current === 'backup')}
+        open={(backupReviewOpen || (confirmAdultExtensions && adultImportTargetRef.current === 'backup'))
+          && !tutorialImportRunning}
         onClose={() => { if (!backupBusy) cancelBackupInstall(); }}
         title={backupHasBlockedSources ? 'No se puede importar este respaldo' : 'Fuentes sin extensión instalable'}
         description={backupHasBlockedSources
@@ -2478,7 +2533,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
         </div>
       </Dialog>
       <Dialog
-        open={backupInstallOpen}
+        open={backupInstallOpen && !tutorialImportRunning}
         onClose={() => { if (!backupBusy) cancelBackupInstall(); }}
         title="Mangas con extensiones disponibles"
         description="Para importar los mangas de estas fuentes, Cytlex instalará las extensiones listadas."
@@ -2537,7 +2592,8 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       </Dialog>
       <Dialog
         open={!!mihonCandidate && !mihonReviewOpen && !mihonInstallOpen
-          && !(confirmAdultExtensions && adultImportTargetRef.current === 'mihon')}
+          && !(confirmAdultExtensions && adultImportTargetRef.current === 'mihon')
+          && !tutorialImportRunning}
         onClose={() => { if (!mihonBusy) setMihonCandidate(null); }}
         title="Importar respaldo de Mihon"
         description={t('Se fusionará {fileName} con Cytlex.', { fileName: mihonCandidate?.fileName || 'este respaldo' })}
@@ -2574,7 +2630,8 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
         </div>
       </Dialog>
       <Dialog
-        open={(mihonReviewOpen || (confirmAdultExtensions && adultImportTargetRef.current === 'mihon')) && !mihonBusy}
+        open={(mihonReviewOpen || (confirmAdultExtensions && adultImportTargetRef.current === 'mihon'))
+          && !tutorialImportRunning}
         onClose={cancelMihonImportReview}
         title={mihonHasBlockedSources ? 'No se puede importar este respaldo' : 'Fuentes sin extensión instalable'}
         description={mihonHasBlockedSources
@@ -2662,7 +2719,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
         </div>
       </Dialog>
       <Dialog
-        open={mihonInstallOpen}
+        open={mihonInstallOpen && !tutorialImportRunning}
         onClose={() => {
           if (mihonBusy) cancelMihonInstallation();
           else {
