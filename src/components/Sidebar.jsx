@@ -82,6 +82,7 @@ function ActiveRouteLabel({ label, active }) {
 }
 
 let lastLibraryListRoute = '/biblioteca';
+let lastLibraryRoute = '/biblioteca';
 let lastExploreListRoute = '/explorar?tab=mangas';
 let lastExploreRoute = '/explorar?tab=mangas';
 
@@ -132,6 +133,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
   useEffect(() => {
     const section = routeSection(location);
     const route = `${location.pathname}${location.search}`;
+    if (section === '/biblioteca') lastLibraryRoute = route;
     if (section === '/explorar') lastExploreRoute = route;
     if (section === '/biblioteca' && !location.pathname.startsWith('/manga')) lastLibraryListRoute = route;
     if (section === '/explorar' && !location.pathname.startsWith('/manga')) lastExploreListRoute = route;
@@ -182,7 +184,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
         {navItems.map((item) => {
           const isActive = routeSection(location) === item.to || location.pathname === item.to;
           const destination = item.to === '/biblioteca'
-            ? lastLibraryListRoute
+            ? (isActive ? lastLibraryListRoute : lastLibraryRoute)
             : item.to === '/explorar'
               ? (isActive ? lastExploreListRoute : lastExploreRoute)
               : item.to;

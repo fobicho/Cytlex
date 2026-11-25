@@ -134,8 +134,7 @@ async function findManga(src, url, title, author) {
   const uniqueQueries = [...new Map(queries.filter(Boolean).map((query) => [titleKey(query), query])).values()];
   const seen = new Set();
   for (const query of uniqueQueries) {
-    let items = [];
-    try { items = (await src.catalog({ q: query, page: 1 })).items || []; } catch { continue; }
+    const items = (await src.catalog({ q: query, page: 1 })).items || [];
     const candidates = items.filter((item) => item.url && item.url !== url && !seen.has(item.url)).slice(0, 20);
     candidates.forEach((item) => seen.add(item.url));
     let cursor = 0;
@@ -250,7 +249,7 @@ export const api = {
   async catalog(args, sourceId) {
     const src = await resolveSource(sourceId);
     const browser = !bridge()?.httpGet;
-    const forceFetch = args?.__cytlexForceFetch === true;
+    const forceFetch = args?.__cytlexForceFetch === true || args?.__cytlexGlobalSearch === true;
     const requestId = args?.__cytlexRequestId || `catalog:${sourceId}:${Date.now()}:${Math.random()}`;
     const catalogArgs = { ...args, __cytlexRequestId: requestId };
     delete catalogArgs.__cytlexForceFetch;
@@ -411,7 +410,7 @@ export const api = {
     return (await this.refreshDetail(url, sourceId))?.chapters || [];
   },
 
-  async detailFromLibraryChapters(url, sourceId, manga) {
+  async detailFromLibraryChapters(url, sourceId, manga, { timeoutMs = DETAIL_TIMEOUT_MS } = {}) {
     const key = detailKey(url, sourceId);
     const cached = freshEntry(key);
     if (cached?.chapters?.length) return cached;
@@ -434,7 +433,7 @@ export const api = {
         };
         if (detail.chapters.length) storeDetail(key, detail);
         return detail;
-      })());
+      })(), timeoutMs);
       libraryChapterRequests.set(key, request);
     }
     try {
@@ -445,7 +444,7 @@ export const api = {
   },
 
   async persistLibraryDetail(url, sourceId, value, favoriteSourceId = sourceId) {
-    if ((!lib.isFav(url, favoriteSourceId) && !lib.isFav(url, sourceId)) || !value?.chapters?.length) return;
+    if (!lib.isFav(url, favoriteSourceId) || !value?.chapters?.length) return;
     return writeSourceCache('library-details', libraryDetailKey(url, sourceId), value, 1000);
   },
 
@@ -463,10 +462,10 @@ export const api = {
       .map((entry) => deleteSourceCache('library-details', entry.key)));
   },
 
-  async findManga({ url, title, author = '' }, sourceId) {
+  async findManga({ url, title, author = '' }, sourceId, { timeoutMs = DETAIL_TIMEOUT_MS } = {}) {
     const versionKey = sourceCacheKey(sourceId);
     const src = await resolveSource(sourceId);
-    const found = await withDetailDeadline(findManga(src, url, title, author));
+    const found = await withDetailDeadline(findManga(src, url, title, author), timeoutMs);
     if (found?.detail?.chapters?.length && versionKey === sourceCacheKey(sourceId)) {
       const key = detailKey(found.url, sourceId);
       if (!freshEntry(key)) storeDetail(key, found.detail);

@@ -53,9 +53,14 @@ export default function createSource({ fetchText }) {
     const rest = [];
     for (let start = firstPage; start <= lastPage; start += 6) {
       const count = Math.min(6, lastPage - start + 1);
-      const batch = await Promise.all(Array.from({ length: count }, (_, i) =>
+      const batch = await Promise.allSettled(Array.from({ length: count }, (_, i) =>
         getJson(`${base}/api/series/${slug}/chapters?page=${start + i}&direction=desc&type=comic`)));
-      rest.push(...batch);
+      let failed = false;
+      for (const result of batch) {
+        if (result.status === 'rejected') { failed = true; break; }
+        rest.push(result.value);
+      }
+      if (failed) break;
     }
     return rest.flatMap((res) => res?.data || []);
   }

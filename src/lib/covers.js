@@ -425,7 +425,12 @@ export function preloadLibraryCoversBatch(urls, { web = false, persist = false, 
     if (cached) return persist ? preloadLibraryCover(url, { web: true, persist }) : Promise.resolve(cached);
     let resolve;
     const promise = new Promise((done) => { resolve = done; });
-    const entry = { url, promise, resolve, version: libraryCoverVersions.get(url) || 0, persist };
+    const entry = { url, promise, version: libraryCoverVersions.get(url) || 0, persist, settled: false };
+    entry.resolve = (value) => {
+      if (entry.settled) return;
+      entry.settled = true;
+      resolve(value);
+    };
     libraryCoverCache.set(url, promise);
     entries.push(entry);
     return promise;
@@ -434,6 +439,12 @@ export function preloadLibraryCoversBatch(urls, { web = false, persist = false, 
   const results = Promise.all(tasks.map((task, index) => task.finally(() => reportProgress(uniqueUrls[index]))));
   if (!entries.length) return results;
   const fallback = async (entry) => {
+    if (entry.settled) return;
+    const current = libraryCoverCache.get(entry.url);
+    if (current && current !== entry.promise) {
+      entry.resolve(await current);
+      return;
+    }
     if (libraryCoverCache.get(entry.url) === entry.promise) libraryCoverCache.delete(entry.url);
     if (bundledOnly) {
       libraryCoverCache.set(entry.url, '');
@@ -441,6 +452,12 @@ export function preloadLibraryCoversBatch(urls, { web = false, persist = false, 
       return;
     }
     entry.resolve(await preloadLibraryCover(entry.url, { web: true, persist: entry.persist }));
+  };
+  const fail = (entry) => {
+    if (libraryCoverCache.get(entry.url) === entry.promise) libraryCoverCache.delete(entry.url);
+    failedLibraryCovers.set(entry.url, Date.now() + 60_000);
+    if (failedLibraryCovers.size > MAX_LIBRARY_COVERS) failedLibraryCovers.delete(failedLibraryCovers.keys().next().value);
+    entry.resolve('');
   };
   const fetchBatch = async (batch, retryBatchOverflow = true) => {
     const remote = [];
@@ -468,19 +485,19 @@ export function preloadLibraryCoversBatch(urls, { web = false, persist = false, 
       return;
     }
     const overflow = [];
-    const fallbacks = [];
     await fetchImageBlobBatch(remote.map(({ url }) => ({ url: libraryCoverBatchUrl(url) })), undefined, async ({ blob, error }, index) => {
       const entry = remote[index];
       if (error || !blob) {
         if (retryBatchOverflow && ['batch-response-too-large', 'subrequest-limit'].includes(error?.reason)) overflow.push(entry);
-        else fallbacks.push(entry);
+        else fail(entry);
         return;
       }
-      const cover = await storeLibraryCoverBlob(entry.url, blob, entry.version, entry.promise, entry.persist);
-      if (cover) entry.resolve(cover);
-      else fallbacks.push(entry);
+      try {
+        const cover = await storeLibraryCoverBlob(entry.url, blob, entry.version, entry.promise, entry.persist);
+        if (cover) entry.resolve(cover);
+        else fail(entry);
+      } catch { fail(entry); }
     }, PROXY_COVER_BATCH_SIZE);
-    await Promise.all(fallbacks.map(fallback));
     for (let offset = 0; offset < overflow.length; offset += PROXY_COVER_RETRY_BATCH_SIZE) {
       await fetchBatch(overflow.slice(offset, offset + PROXY_COVER_RETRY_BATCH_SIZE), false);
     }
@@ -775,6 +792,14 @@ export function createSearchCoverBatch() {
     await Promise.all([...inFlight, ...tasks]);
   };
 
+  const flushBundled = () => {
+    const bundled = [];
+    for (let index = queue.length - 1; index >= 0; index -= 1) {
+      if (getCatalogImageBlob(queue[index].url)) bundled.unshift(...queue.splice(index, 1));
+    }
+    if (bundled.length) void dispatch(bundled);
+  };
+
   const cancel = () => {
     cancelled = true;
     controllers.forEach((controller) => controller.abort());
@@ -784,7 +809,7 @@ export function createSearchCoverBatch() {
     });
   };
 
-  return { preload, flush, cancel };
+  return { preload, flush, flushBundled, cancel };
 }
 
 export async function makeCoverThumb(url, maxWidth = THUMB_WIDTH, signal) {

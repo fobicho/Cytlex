@@ -450,11 +450,8 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
             (s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim())
           ).slice(0, MAX_SEARCH_RESULTS);
           const coverPromises = items.map((m) => coverBatch.preload(m.cover));
+          coverBatch.flushBundled();
           items.forEach((m) => rememberMangaPreview(m, s.manifest.id));
-          updateResults((prev) => prev ? prev.map((x) => x.id === s.manifest.id
-            ? { ...x, status: 'done', items, page: r.page || 1, totalPages: r.totalPages || 1,
-              hasMore: items.length < MAX_SEARCH_RESULTS && (r.hasMore ?? (r.totalPages > 1)), totalText: r.totalText || '' }
-            : x) : prev);
           void Promise.all(coverPromises).then((covers) => {
             if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
             const loadedItems = items.map((m, index) => covers[index] ? { ...m, coverCached: covers[index] } : m);

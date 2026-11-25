@@ -9,6 +9,7 @@ import { useScale } from '../lib/useScale.js';
 import { Button } from './ui/button.jsx';
 import { GENTLE_FLOAT_MOTION, GENTLE_FLOAT_TRANSITION } from './ui/empty-state.jsx';
 import CytlexLogoMark from './CytlexLogoMark.jsx';
+import Settings from '../pages/Settings.jsx';
 
 const STEPS = [
   {
@@ -25,6 +26,10 @@ const STEPS = [
   {
     title: 'Repositorio de extensiones',
     body: 'Agrega el repositorio oficial para instalar extensiones desde **Explorar**. También puedes omitir este paso y agregar otro repositorio compatible más adelante, aunque en lo personal recomiendo instalar este.\n\nAlgunas extensiones pueden ofrecer contenido para adultos **(+18)**. Para mostrarlas, tendrás que confirmar que eres mayor de edad en **Ajustes -> Extensiones**.'
+  },
+  {
+    title: '¿Tienes tu respaldo preparado?',
+    body: 'Si no es primera vez que usas Cytlex y tienes preparado tu respaldo, puedes importarlo con el botón debajo.\n\n¡Los usuarios de Mihon también son bienvenidos!'
   },
   {
     title: 'Todo listo',
@@ -56,6 +61,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const [navigationVisible, setNavigationVisible] = useState(false);
   const navigationTimer = useRef(null);
   const contentRef = useRef(null);
+  const importControls = useRef(null);
   const previousStep = useRef(step);
   const hasMounted = useRef(false);
   const scale = useScale();
@@ -164,6 +170,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
 
   const isTheme = step === 2;
   const isRepository = step === 3;
+  const isBackup = step === 4;
   const isReady = step === STEPS.length - 1;
   const progress = ((step + 1) / STEPS.length) * 100;
   const hasOfficialRepository = repoUrl === DEFAULT_EXTENSION_REPOSITORY;
@@ -171,7 +178,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
 
   return (
     <motion.div
-      className={`fixed inset-0 z-[60] flex flex-col items-center overflow-hidden p-3 sm:p-4 transition-colors duration-300 ${step === 1 ? 'pointer-events-none bg-transparent' : 'pointer-events-auto bg-background'}`}
+      className={`onboarding-overlay fixed inset-0 z-[60] flex flex-col items-center overflow-hidden p-3 sm:p-4 transition-colors duration-300 ${step === 1 ? 'pointer-events-none bg-transparent' : 'pointer-events-auto bg-background'}`}
       initial={{ y: '0%' }}
       animate={{ y: exiting ? '-100%' : '0%' }}
       transition={{ duration: exiting ? 0.8 : 0, ease: exiting ? [0.76, 0, 0.24, 1] : 'linear' }}
@@ -207,7 +214,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
               >
           <div ref={contentRef} className={cn(
             'onboarding-content min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6 md:px-10 md:pt-6 md:pb-10',
-            (isTheme || isRepository || isReady) && 'onboarding-content--theme'
+            (isTheme || isRepository || isBackup || isReady) && 'onboarding-content--theme'
           )}>
               <div
                 className="onboarding-step-body flex flex-col"
@@ -236,9 +243,16 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                       if (part.startsWith('**') && part.endsWith('**')) {
                         return <strong key={i}>{part.slice(2, -2)}</strong>;
                       }
-                      return part === 'Cytlex' ? <span key={i} className="font-display font-semibold">{part}</span> : part;
+                      return part === 'Cytlex' ? <span key={i} className="font-brand font-semibold">{part}</span> : part;
                     })}
                   </p>
+                )}
+
+                {isBackup && (
+                  <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+                    <Button onClick={() => importControls.current?.importBackup()}>Importar respaldo de Cytlex</Button>
+                    <Button variant="outline" onClick={() => importControls.current?.importMihon()}>Importar respaldo de Mihon</Button>
+                  </div>
                 )}
 
                 {isReady && (
@@ -424,6 +438,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
           )}
         </AnimatePresence>
       </LayoutGroup>
+          {isBackup && <div className="fixed inset-0 z-[70] pointer-events-none [&_[role=dialog]]:pointer-events-auto [&_.fixed]:pointer-events-auto"><Settings tutorialImportControls={importControls} /></div>}
           <motion.div initial={false} animate={{ opacity: navigationVisible ? 1 : 0, y: navigationVisible || reduceMotion ? 0 : 'calc(100% + env(safe-area-inset-bottom))' }} transition={{ duration: reduceMotion ? 0 : 0.25, ease: [0.23, 1, 0.32, 1] }} inert={!navigationVisible} className="onboarding-footer pointer-events-auto fixed bottom-[env(safe-area-inset-bottom)] inset-x-0 mx-auto z-10 grid w-full max-w-3xl grid-cols-[1fr_auto] items-center gap-x-2 gap-y-2 bg-card border border-border px-4 py-3 sm:grid-cols-3 sm:gap-4 sm:px-10 sm:py-4">
             <div className="flex justify-start">
               <Button variant="outline" size="sm" className="px-1.5 sm:px-3" onClick={finish}>

@@ -575,7 +575,8 @@ function catalogImageCandidates(text, contentType, sourceId, pageUrl, limit) {
   const lastSrcsetUrl = (value) => value.split(',').map((candidate) => candidate.trim().split(/\s+/)[0]).filter(Boolean).at(-1) || '';
   const add = (value, key = '') => {
     if (typeof value !== 'string' || (!imageKey.test(key) && !/^\s*(?:https?:|\/\/|\/)/i.test(value))) return;
-    const raw = value.trim().replace(/&amp;/gi, '&').split(/\s+/)[0].replace(/["'<>),]+$/, '');
+    const normalized = value.trim().replace(/&amp;/gi, '&');
+    const raw = (sourceId === 'olympusscanlation' ? normalized : normalized.split(/\s+/)[0]).replace(/["'<>),]+$/, '');
     if (!raw || /^(?:data:|blob:|javascript:)/i.test(raw)) return;
     try {
       const value = sourceId === 'mangalect' && !/^https?:/i.test(raw) && !raw.startsWith('//') ? raw.replace(/^\/+/, '') : raw;
@@ -585,8 +586,7 @@ function catalogImageCandidates(text, contentType, sourceId, pageUrl, limit) {
           : sourceId === 'komiwa' ? 'https://www.komiwa.net/' : pageUrl;
       const url = new URL(value, base);
       if (sourceId === 'leercapitulo' && url.hostname === 'leercapitulo.co') url.hostname = 'www.leercapitulo.co';
-      // Match Olympus's catalogCover() even when the API returns a size other than -xl.
-      if (sourceId === 'olympusscanlation') url.pathname = url.pathname.replace(/-[a-z]{1,3}\.(jpe?g|png|webp|avif)$/i, '-m.$1');
+      if (sourceId === 'olympusscanlation') url.pathname = url.pathname.replace(/-xl\.(jpe?g|png|webp|avif)$/i, '-m.$1');
       if (!/^https?:$/.test(url.protocol) || /(?:\/logo|\/avatar|\/icon|placeholder)/i.test(url.pathname)) return;
       candidates.add(url.href);
     } catch {}
@@ -690,7 +690,7 @@ function catalogImageCandidates(text, contentType, sourceId, pageUrl, limit) {
   const scanJson = (value, key = '', depth = 0) => {
     if (depth > 6 || candidates.size >= limit) return;
     if (typeof value === 'string') {
-      if (imageKey.test(key)) add(value, key);
+      if (imageKey.test(key) && !(sourceId === 'olympusscanlation' && /srcset/i.test(key))) add(value, key);
       if (/<(?:img|source)\b/i.test(value)) scanHtml(value);
       if (/^[\s\[{]/.test(value)) {
         try { scanJson(JSON.parse(value), key, depth + 1); } catch {}
@@ -878,7 +878,9 @@ async function handleCombinedSearchRequest(request) {
         };
         const imageSubrequestBudget = { takeInitial: takeImageSubrequest, takeAdditional: takeImageSubrequest };
         const olympusDetails = new Map();
+        let olympusListRequest;
         const mangaDexCount = requests.filter((item) => item?.detail === 'mangadex').length;
+        let reservedMangaDex = requests.filter((item) => item?.detail === 'mangadex' && item.includeManga !== false).length;
         const olympusCount = requests.filter((item) => {
           const target = validateTarget(item?.url);
           return item?.detail === 'olympus'
@@ -886,11 +888,37 @@ async function handleCombinedSearchRequest(request) {
               && /^\/api\/series\/[\w-]+$/.test(target.pathname) && target.searchParams.get('type') === 'comic');
         }).length;
         const detailCount = mangaDexCount + olympusCount;
+        const reservedOlympus = new Set(requests.flatMap((item) => {
+          const target = validateTarget(item?.url);
+          return target?.origin === 'https://olympusxyz.com'
+            && /^\/api\/series\/[\w-]+$/.test(target.pathname)
+            && target.searchParams.get('type') === 'comic'
+            && (item?.detail === 'olympus' || item?.sourceId === 'olympusscanlation') ? [target.href] : [];
+        }));
+        const reservedKomiwaRequests = new Set(requests.filter((item) => item?.komiwaPrefetch === true
+          && item?.sourceId === 'komiwa' && item.method === 'POST'
+          && validateTarget(item.url)?.href === 'https://b78sk.komiwa.net/manga/search'));
+        let reservedKomiwa = reservedKomiwaRequests.size * 2;
+        const releaseKomiwaReservation = (item) => {
+          if (reservedKomiwaRequests.delete(item)) reservedKomiwa -= 2;
+        };
         const detailBudget = {
           used: 0,
           limit: Math.max(0, PROXY_BATCH_MAX_REQUESTS - catalogUrls.length - (requests.length - detailCount)),
           take() { if (this.used >= this.limit) return false; this.used += 1; return true; },
           get remaining() { return this.limit - this.used; }
+        };
+        let activeOlympusDetails = 0;
+        const olympusDetailWaiters = [];
+        const withOlympusDetailSlot = async (run) => {
+          if (activeOlympusDetails >= 1) await new Promise((resolve) => olympusDetailWaiters.push(resolve));
+          else activeOlympusDetails += 1;
+          try { return await run(); }
+          finally {
+            const next = olympusDetailWaiters.shift();
+            if (next) next();
+            else activeOlympusDetails -= 1;
+          }
         };
         const sourceResults = requests.map(async (item) => {
           const target = validateTarget(item?.url);
@@ -900,7 +928,15 @@ async function handleCombinedSearchRequest(request) {
               || Number(target.searchParams.get('limit')) !== 500) {
               return { status: 400, text: 'Invalid MangaDex detail URL', errorOrigin: 'cytlex' };
             }
-            const response = await handleMangaDexFeed(request, target, item.includeManga !== false, detailBudget);
+            let reserved = item.includeManga !== false;
+            const release = () => { if (reserved) { reserved = false; reservedMangaDex -= 1; } };
+            const mangaDexBudget = {
+              take() { return detailBudget.remaining > reservedKomiwa && detailBudget.take(); },
+              get remaining() { return Math.max(0, detailBudget.remaining - reservedKomiwa); }
+            };
+            let response;
+            try { response = await handleMangaDexFeed(request, target, item.includeManga !== false, mangaDexBudget, release); }
+            finally { release(); }
             return { status: response.status, text: await response.text(), url: target.href,
               contentType: response.headers.get('content-type') || '',
               errorOrigin: response.headers.get('x-cytlex-error-origin') || (response.ok ? '' : 'source') };
@@ -909,7 +945,68 @@ async function handleCombinedSearchRequest(request) {
             || (item?.sourceId === 'olympusscanlation' && target?.origin === 'https://olympusxyz.com'
               && /^\/api\/series\/[\w-]+$/.test(target.pathname)
               && target.searchParams.get('type') === 'comic');
-          if (!isOlympusDetail) return fetchBatchItem(item, request);
+          if (!isOlympusDetail) {
+            const validKomiwa = item?.komiwaPrefetch === true && item?.sourceId === 'komiwa'
+              && target?.href === 'https://b78sk.komiwa.net/manga/search' && item.method === 'POST';
+            const otherReservations = () => reservedMangaDex + reservedOlympus.size
+              + reservedKomiwa - (reservedKomiwaRequests.has(item) ? 2 : 0);
+            let titleBody = '';
+            if (validKomiwa && typeof item.komiwaFallbackTitle === 'string' && item.komiwaFallbackTitle.trim()
+              && item.komiwaFallbackTitle.length <= 500) {
+              titleBody = JSON.stringify({ q: item.komiwaFallbackTitle, limit: 40 });
+            }
+            let result = await fetchBatchItem(titleBody ? { ...item, body: titleBody } : item, request);
+            if (titleBody && result.status !== 200) return { fallback: true };
+            if (item?.komiwaPrefetch !== true || item?.sourceId !== 'komiwa'
+              || target?.href !== 'https://b78sk.komiwa.net/manga/search'
+              || item.method !== 'POST' || result.status !== 200) return result;
+            try {
+              let query = JSON.parse(titleBody || item.body)?.q;
+              let data = JSON.parse(result.text);
+              const normalize = (value) => String(value || '').normalize('NFKC').normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+              let expected = normalize(query);
+              let matches = (data?.data?.items || []).filter((entry) => typeof entry?.slug === 'string'
+                && expected && [entry.slug, entry.title].some((value) => normalize(value) === expected));
+              const prefetched = [];
+              if (titleBody && matches.length === 1) {
+                prefetched.push({ ...result, method: 'POST', body: titleBody });
+              } else if (titleBody && !matches.length && detailBudget.remaining < 3 + otherReservations()) {
+                return { fallback: true };
+              } else if (titleBody && !matches.length) {
+                detailBudget.take();
+                result = await fetchBatchItem(item, request);
+                if (result.status !== 200) return result;
+                query = JSON.parse(item.body)?.q;
+                expected = normalize(query);
+                data = JSON.parse(result.text);
+                matches = (data?.data?.items || []).filter((entry) => typeof entry?.slug === 'string'
+                  && expected && [entry.slug, entry.title].some((value) => normalize(value) === expected));
+              }
+              const manga = matches.length === 1 ? matches[0] : null;
+              if (!manga?.id || !/^[a-z0-9-]+$/i.test(manga.slug)
+                || !/^[a-z0-9-]+$/i.test(String(manga.id))) {
+                if (prefetched.length) result.prefetched = prefetched;
+                return result;
+              }
+              if (detailBudget.remaining < 2 + otherReservations()) {
+                if (prefetched.length) result.prefetched = prefetched;
+                return result;
+              }
+              releaseKomiwaReservation(item);
+              detailBudget.take();
+              detailBudget.take();
+              const urls = [
+                `https://b78sk.komiwa.net/manga/${encodeURIComponent(manga.id)}/chapters?page=1&limit=99999&sort=desc`,
+                `https://www.komiwa.net/manga/${encodeURIComponent(manga.slug)}`
+              ];
+              const fetched = await Promise.all(urls.map((url) => fetchBatchItem({ url, method: 'GET' }, request)));
+              const valid = [...prefetched, ...fetched.filter((entry) => entry.status === 200 && typeof entry.text === 'string')];
+              const size = encoder.encode(result.text).byteLength + valid.reduce((sum, entry) => sum + encoder.encode(entry.text).byteLength, 0);
+              if (size <= PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES) result.prefetched = valid;
+            } catch {}
+            return result;
+          }
           if (target?.origin !== 'https://olympusxyz.com'
             || !/^\/api\/series\/[\w-]+$/.test(target.pathname)
             || target.searchParams.get('type') !== 'comic') {
@@ -917,9 +1014,21 @@ async function handleCombinedSearchRequest(request) {
           }
           let result = olympusDetails.get(target.href);
           if (!result) {
-            result = (async () => {
-              const response = await handleOlympusDetail(request, target, detailBudget, 200);
-              return {
+            result = withOlympusDetailSlot(async () => {
+              let response;
+              let olympusBasePending = true;
+              const olympusBudget = {
+                take() {
+                  const ownReservation = olympusBasePending ? 1 : 0;
+                  const reserved = reservedMangaDex + reservedOlympus.size + reservedKomiwa - ownReservation;
+                  if (detailBudget.remaining <= reserved || !detailBudget.take()) return false;
+                  olympusBasePending = false;
+                  return true;
+                }
+              };
+              try { response = await handleOlympusDetail(request, target, olympusBudget, 200, () => reservedOlympus.delete(target.href)); }
+              finally { reservedOlympus.delete(target.href); }
+              const detailResult = {
                 status: response.status,
                 text: await response.text(),
                 url: target.href,
@@ -928,15 +1037,51 @@ async function handleCombinedSearchRequest(request) {
                 upstreamError: response.headers.get('x-cytlex-upstream-error') || '',
                 proxyDenied: response.headers.get('x-cytlex-proxy-denied') === '1'
               };
-            })();
+              if (response.status === 404 && (olympusListRequest || detailBudget.remaining > reservedMangaDex + reservedOlympus.size + reservedKomiwa)) {
+                if (!olympusListRequest) {
+                  if (detailBudget.remaining > reservedMangaDex + reservedOlympus.size + reservedKomiwa) detailBudget.take();
+                  olympusListRequest = fetchBatchItem({ url: 'https://olympusxyz.com/api/series/list', method: 'GET' }, request);
+                }
+                const list = await olympusListRequest;
+                if (list.status === 200 && encoder.encode(detailResult.text).byteLength + encoder.encode(list.text).byteLength <= PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES) {
+                  detailResult.prefetched = [list];
+                  try {
+                    const oldSlug = target.pathname.split('/').pop();
+                    const baseSlug = oldSlug.replace(/-\d{8}-\d+$/, '');
+                    const matches = (JSON.parse(list.text)?.data || []).filter((series) =>
+                      typeof series?.slug === 'string' && /^[\w-]+$/.test(series.slug)
+                      && series.slug !== oldSlug && series.slug.replace(/-\d{8}-\d+$/, '') === baseSlug);
+                    if (baseSlug !== oldSlug && matches.length === 1 && detailBudget.remaining >= 2 + reservedMangaDex + reservedOlympus.size + reservedKomiwa) {
+                      const newTarget = new URL(`/api/series/${matches[0].slug}?type=comic`, target.origin);
+                      const recoveryBudget = {
+                        take() { return detailBudget.remaining > reservedMangaDex + reservedOlympus.size + reservedKomiwa && detailBudget.take(); },
+                        get remaining() { return Math.max(0, detailBudget.remaining - reservedMangaDex - reservedOlympus.size - reservedKomiwa); }
+                      };
+                      const recovered = await handleOlympusDetail(request, newTarget, recoveryBudget, 200);
+                      if (recovered.ok) {
+                        const text = await recovered.text();
+                        if (encoder.encode(detailResult.text).byteLength + encoder.encode(list.text).byteLength + encoder.encode(text).byteLength <= PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES) {
+                          detailResult.prefetched.push({ url: newTarget.href, status: 200, text, detail: 'olympus' });
+                        }
+                      }
+                    }
+                  } catch {}
+                }
+              }
+              return detailResult;
+            });
             olympusDetails.set(target.href, result);
           }
           return result;
         });
-        for (let index = 0; index < sourceResults.length && !stopped; index += 1) {
+        const processSourceResult = async (index) => {
           const item = requests[index];
-          const result = await sourceResults[index];
-          totalResponseBytes += encoder.encode(result?.text || '').byteLength;
+          let result;
+          try { result = await sourceResults[index]; }
+          finally { releaseKomiwaReservation(item); }
+          if (stopped) return;
+          totalResponseBytes += encoder.encode(result?.text || '').byteLength
+            + (result?.prefetched || []).reduce((sum, entry) => sum + encoder.encode(entry.text || '').byteLength, 0);
           const target = validateTarget(item.url);
           const sourceId = typeof item.sourceId === 'string' ? item.sourceId : '';
           const onfCatalog = target?.origin === 'https://onfmangas.com'
@@ -951,7 +1096,7 @@ async function handleCombinedSearchRequest(request) {
             && ['/directorio', '/buscar'].includes(target.pathname);
           const catalogCoverRequest = item?.catalogCovers === true
             && (sourceId !== 'leercapitulo' || leerCapituloCatalog);
-          const olympusCatalog = sourceId === 'olympusscanlation' && target?.origin === 'https://olympusxyz.com'
+          const olympusCatalog = item?.catalogCovers === true && sourceId === 'olympusscanlation' && target?.origin === 'https://olympusxyz.com'
             && ['/api/rankings', '/api/series/list'].includes(target.pathname);
           if ((catalogCoverRequest || onfCatalog || olympusCatalog || onfDetail || leerCapituloCatalog || mangaOniCatalog)
             && Number(result.status) >= 200 && Number(result.status) < 300 && !result.fallback) {
@@ -985,6 +1130,13 @@ async function handleCombinedSearchRequest(request) {
             }
           } else {
             send({ type: 'result', index, result: totalResponseBytes <= PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES ? result : { fallback: true } });
+          }
+        };
+        if (detailCount && !requests.some((item) => item?.catalogCovers === true)) {
+          await Promise.all(sourceResults.map((_, index) => processSourceResult(index)));
+        } else {
+          for (let index = 0; index < sourceResults.length && !stopped; index += 1) {
+            await processSourceResult(index);
           }
         }
         const catalogTasks = catalogTargets.map(async (catalogTarget, catalogIndex) => {
@@ -1727,23 +1879,20 @@ async function handleAchyCatalog(request, target) {
   } finally { clearTimeout(timeout); }
 }
 
-async function handleOlympusDetail(request, target, sharedBudget = null, maxChapterPages = 12) {
+async function handleOlympusDetail(request, target, sharedBudget = null, maxChapterPages = 12, onChaptersStart = () => {}) {
   const slug = target.pathname.match(/^\/api\/series\/([\w-]+)$/)?.[1] || '';
   if (target.origin !== 'https://olympusxyz.com' || !slug || target.searchParams.get('type') !== 'comic') {
     return errorResponse('Invalid Olympus detail request', 400);
   }
-  const deadline = new AbortController();
-  const timeout = setTimeout(() => deadline.abort(), 12000);
-  const signal = AbortSignal.any([request.signal, deadline.signal]);
+  let timedOut = false;
   const readJson = async (url, budgetReserved = false) => {
     if (!budgetReserved && sharedBudget && !sharedBudget.take()) throw new Error('Olympus batch subrequest limit reached');
     const page = validateTarget(url);
-    let result = await fetchTarget(page, 'GET', forwardedHeaders(request, page), undefined, signal, { retries: 0 });
-    if (url === target.href && result.upstream?.status === 404) {
-      await result.upstream.body?.cancel();
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      result = await fetchTarget(page, 'GET', forwardedHeaders(request, page), undefined, signal, { retries: 0 });
-    }
+    const deadline = new AbortController();
+    const timeout = setTimeout(() => { timedOut = true; deadline.abort(); }, 12000);
+    const signal = AbortSignal.any([request.signal, deadline.signal]);
+    try {
+    const result = await fetchTarget(page, 'GET', forwardedHeaders(request, page), undefined, signal, { retries: 0 });
     if (result.proxyError) throw { response: result.proxyError };
     if (!result.upstream.ok) {
       throw { response: new Response(result.upstream.body, {
@@ -1754,12 +1903,18 @@ async function handleOlympusDetail(request, target, sharedBudget = null, maxChap
     const raw = await new Response(limitResponseBody(result.upstream.body, PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES,
       () => {}, () => deadline.abort())).text();
     return JSON.parse(raw);
+    } finally { clearTimeout(timeout); }
   };
   try {
-    const [series, first] = await Promise.all([
-      readJson(target.href),
-      readJson(`https://olympusxyz.com/api/series/${slug}/chapters?page=1&direction=desc&type=comic`)
-    ]);
+    const series = await readJson(target.href);
+    onChaptersStart();
+    let first;
+    try {
+      first = await readJson(`https://olympusxyz.com/api/series/${slug}/chapters?page=1&direction=desc&type=comic`);
+    } catch (error) {
+      if (request.signal.aborted) throw error;
+      return Response.json(series, { headers: { 'cache-control': 'no-store', 'x-cytlex-proxy': '1' } });
+    }
     const lastPage = Math.min(Math.max(Number(first?.meta?.last_page) || 1, 1), 200);
     const pageLimit = Math.min(lastPage, Math.max(1, maxChapterPages));
     const results = [first];
@@ -1772,8 +1927,14 @@ async function handleOlympusDetail(request, target, sharedBudget = null, maxChap
         pageUrls.push(`https://olympusxyz.com/api/series/${slug}/chapters?page=${page + index}&direction=desc&type=comic`);
       }
       if (!pageUrls.length) break;
-      results.push(...await Promise.all(pageUrls.map((url) => readJson(url, true))));
-      fetchedPages += pageUrls.length;
+      const pageResults = await Promise.allSettled(pageUrls.map((url) => readJson(url, true)));
+      let batchFailed = false;
+      for (const pageResult of pageResults) {
+        if (pageResult.status === 'rejected') { batchFailed = true; break; }
+        results.push(pageResult.value);
+        fetchedPages += 1;
+      }
+      if (batchFailed) break;
       page += pageUrls.length;
     }
     return Response.json({ ...series, chapters: results.flatMap((result) => result?.data || []), chaptersLastPage: lastPage, chaptersFetchedPages: fetchedPages }, {
@@ -1781,9 +1942,9 @@ async function handleOlympusDetail(request, target, sharedBudget = null, maxChap
     });
   } catch (error) {
     if (error?.response) return error.response;
-    return errorResponse('Olympus detail unavailable', deadline.signal.aborted ? 504 : 502, false,
-      deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
-  } finally { clearTimeout(timeout); }
+    return errorResponse('Olympus detail unavailable', timedOut ? 504 : 502, false,
+      timedOut ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
+  }
 }
 
 async function handleOlympusChapter(request, target) {
@@ -1843,7 +2004,7 @@ async function handleOlympusChapter(request, target) {
   } finally { clearTimeout(timeout); }
 }
 
-async function handleMangaDexFeed(request, target, includeManga = false, sharedBudget = null) {
+async function handleMangaDexFeed(request, target, includeManga = false, sharedBudget = null, onFeedStart = () => {}) {
   if (target.origin !== 'https://api.mangadex.org'
     || !/^\/manga\/[0-9a-f-]{36}\/feed$/i.test(target.pathname)
     || Number(target.searchParams.get('limit')) !== 500) {
@@ -1902,6 +2063,7 @@ async function handleMangaDexFeed(request, target, includeManga = false, sharedB
       }
       return { first, chapters };
     };
+    onFeedStart();
     let feed = await collectFeed(target.href);
     if (includeManga && (!sharedBudget || sharedBudget.remaining > 0)
       && target.searchParams.getAll('translatedLanguage[]').length

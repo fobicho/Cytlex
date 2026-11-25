@@ -534,6 +534,7 @@ export function importMihonBackup(candidate, { clearCachedCoverUrls = new Set() 
   const defaultCategoryId = categories.find((category) => normalizeName(category.name) === 'todos')?.id;
   let added = 0;
   let updated = 0;
+  const importedIndices = new Set();
   for (const entry of importableEntries) {
     const manga = entry.manga;
     manga.coverRefreshPending = true;
@@ -609,6 +610,7 @@ export function importMihonBackup(candidate, { clearCachedCoverUrls = new Set() 
       updated += 1;
     }
     const favorite = favorites[index === undefined ? favorites.length - 1 : index];
+    importedIndices.add(index === undefined ? favorites.length - 1 : index);
     const importedProgress = entry.chapterProgress || [];
     if (importedProgress.length) {
       favorite.mihonProgress = mergeChapterProgress(favorite.mihonProgress, importedProgress);
@@ -634,5 +636,5 @@ export function importMihonBackup(candidate, { clearCachedCoverUrls = new Set() 
     }
     throw error;
   }
-  return { added, updated };
+  return { added, updated, importedFavorites: [...importedIndices].map((index) => favorites[index]) };
 }

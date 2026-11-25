@@ -4,7 +4,7 @@ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
 import { Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Database, Download, Upload, CircleHelp, Info, Settings as SettingsIcon } from 'lucide-react';
 import { CONTENT_WARNING_RATINGS, resolveMode, settings } from '../lib/settings.js';
-import { isMangaCover, lib } from '../lib/library.js';
+import { isMangaCover, isUnresolvedMihonSource, lib } from '../lib/library.js';
 import { api } from '../lib/api.js';
 import { anilist } from '../lib/anilist.js';
 import { consumeBrowserAuthError, consumeBrowserSettingsSection, session } from '../lib/session.js';
@@ -23,7 +23,7 @@ import { Input } from '../components/ui/input.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
 import { clearPersistentLibraryCoverCache, invalidateLibraryCovers, persistAvailableLibraryCover, preloadLibraryCoversBatch, protectLibraryCovers } from '../lib/covers.js';
-import { browserImageUrl, setHttpGetBatchWindow } from '../lib/browserHttp.js';
+import { browserImageUrl, setHttpGetBatchWindow, setKomiwaImportHints } from '../lib/browserHttp.js';
 import { clearSourceCache } from '../lib/sourceCache.js';
 import { clearRecentChapters } from '../lib/recentChapters.js';
 import SubrouteTabLabel from '../components/SubrouteTabLabel.jsx';
@@ -77,8 +77,10 @@ async function preloadImportedCovers(mangas, onProgress, { refresh = false } = {
   });
   const persistedUrls = new Set(localCoverUrls);
   results.forEach((cover, index) => { if (cover) persistedUrls.add(covers[index]); });
+  const failedUrls = new Set(covers.filter((cover) => !persistedUrls.has(cover)));
   return {
-    failed: allCoverUrls.length - persistedUrls.size,
+    failed: failedUrls.size,
+    failedUrls,
     persistedUrls
   };
 }
@@ -98,6 +100,23 @@ function importedSourceId(manga) {
   return extensions.resolveInstalledSource(sourceId, manga?.sourceName, manga?.url) || sourceId;
 }
 
+async function prepareImportedDetails(mangas) {
+  const rows = await Promise.all(mangas.map(async (manga) => {
+    const sourceId = importedSourceId(manga);
+    try {
+      return { manga, sourceId, cached: await api.restoreDetail(manga.url, sourceId, manga.sourceId || 'leercapitulo') };
+    } catch (error) {
+      return { manga, sourceId, error };
+    }
+  }));
+  const sources = new Set(rows.filter(({ cached, error }) => !error && !cached?.chapters?.length).map(({ sourceId }) => sourceId));
+  await Promise.race([
+    Promise.allSettled([...sources].map((sourceId) => extensions.source(sourceId))),
+    new Promise((resolve) => setTimeout(resolve, 1500))
+  ]);
+  return rows;
+}
+
 async function cacheImportedLibraryDetails(mangas, onProgress) {
   let failed = 0;
   const allowedMangas = allowedImportedMangas(mangas).filter((manga) => {
@@ -107,15 +126,16 @@ async function cacheImportedLibraryDetails(mangas, onProgress) {
   });
   let next = 0;
   let current = 0;
-  const restoreBatchWindow = setHttpGetBatchWindow(10000);
+  const restoreBatchWindow = setHttpGetBatchWindow(allowedMangas.length > 1 ? 500 : 0);
+  const restoreKomiwaHints = setKomiwaImportHints(allowedMangas);
   try {
-    await Promise.all(Array.from({ length: Math.min(50, allowedMangas.length) }, async () => {
-      while (next < allowedMangas.length) {
-        const manga = allowedMangas[next++];
+    const prepared = await prepareImportedDetails(allowedMangas);
+    await Promise.all(Array.from({ length: Math.min(50, prepared.length) }, async () => {
+      while (next < prepared.length) {
+        const { manga, sourceId: resolvedId, cached, error } = prepared[next++];
         const savedSourceId = manga?.sourceId || 'leercapitulo';
-        const resolvedId = importedSourceId(manga);
         try {
-          const cached = await api.restoreDetail(manga?.url, resolvedId, savedSourceId);
+          if (error) throw error;
           let detailUrl = manga?.url;
           let detail = cached?.chapters?.length ? cached : null;
           if (!detail) {
@@ -128,7 +148,7 @@ async function cacheImportedLibraryDetails(mangas, onProgress) {
               });
             } catch (error) {
               const message = String(error?.message || error);
-              const staleSourceEntry = /\bHTTP 404\b/.test(message)
+              const staleSourceEntry = (resolvedId !== 'olympusscanlation' && /\bHTTP 404\b/.test(message))
                 || (resolvedId === 'komiwa' && /No se encontraron los datos del manga en Komiwa/i.test(message));
               if (!staleSourceEntry) throw error;
               const recovered = await api.findManga({
@@ -165,6 +185,7 @@ async function cacheImportedLibraryDetails(mangas, onProgress) {
     }));
     return failed;
   } finally {
+    restoreKomiwaHints();
     restoreBatchWindow();
   }
 }
@@ -179,15 +200,17 @@ async function refreshImportedMihonDetails(mangas, onProgress) {
   const attempted = [];
   let next = 0;
   let current = 0;
-  const restoreBatchWindow = setHttpGetBatchWindow(10000);
+  const restoreBatchWindow = setHttpGetBatchWindow(rows.length > 1 ? 500 : 0);
+  const restoreKomiwaHints = setKomiwaImportHints(rows);
   try {
-    await Promise.all(Array.from({ length: Math.min(50, rows.length) }, async () => {
-      while (next < rows.length) {
-        const manga = rows[next++];
-        const sourceId = importedSourceId(manga);
+    const prepared = await prepareImportedDetails(rows);
+    await Promise.all(Array.from({ length: Math.min(50, prepared.length) }, async () => {
+      while (next < prepared.length) {
+        const { manga, sourceId, cached, error } = prepared[next++];
         attempted.push(manga);
         try {
-          let detail = await api.restoreDetail(manga.url, sourceId, manga.sourceId || sourceId);
+          if (error) throw error;
+          let detail = cached;
           if (!detail?.chapters?.length || !detail.cover || !isMangaCover(detail.cover, manga.url)) {
             detail = await api.detail(manga.url, sourceId, {
               cacheResult: false,
@@ -208,6 +231,7 @@ async function refreshImportedMihonDetails(mangas, onProgress) {
       }
     }));
   } finally {
+    restoreKomiwaHints();
     restoreBatchWindow();
   }
   return { results, attempted };
@@ -402,11 +426,11 @@ const sortByName = (items, getName = (item) => item?.name || '') => [...items].s
 
 let sessionSeccion = '';
 
-export default function Settings({ tutorialPreview = false }) {
+export default function Settings({ tutorialPreview = false, tutorialImportControls = null }) {
   const location = useLocation();
   const [s, setS] = useState(settings.get());
   const [section, setSection] = useState(() => {
-    const restoredSection = consumeBrowserSettingsSection() || sessionSeccion;
+    const restoredSection = tutorialImportControls ? 'respaldo' : consumeBrowserSettingsSection() || sessionSeccion;
     return SECTIONS.some(({ id }) => id === restoredSection) ? restoredSection : 'apariencia';
   });
   const [libraryUnreadTipOpen, setLibraryUnreadTipOpen] = useState(false);
@@ -449,6 +473,7 @@ export default function Settings({ tutorialPreview = false }) {
   const [confirmWebDataReset, setConfirmWebDataReset] = useState(false);
   const [webDataResetBusy, setWebDataResetBusy] = useState(false);
   const backupFileInputRef = useRef(null);
+  const activeImportRef = useRef(false);
   const backupExportToastRef = useRef(null);
   const mihonFileInputRef = useRef(null);
   const mihonImportControllerRef = useRef(null);
@@ -538,12 +563,13 @@ export default function Settings({ tutorialPreview = false }) {
     if (tutorialPreview) sessionSeccion = '';
   }, [tutorialPreview]);
   useEffect(() => {
+    if (tutorialImportControls) return;
     const params = new URLSearchParams(location.search);
     const nextSection = params.get('tutorial') === '1' ? params.get('section') : null;
     if (!SECTIONS.some(({ id }) => id === nextSection)) return;
     setSection(nextSection);
     sessionSeccion = nextSection;
-  }, [location.search]);
+  }, [location.search, tutorialImportControls]);
   useEffect(() => tracking.subscribe(() => setLinkedCount(tracking.linkedCount())), []);
   useEffect(() => {
     if (!connectHintFor) return;
@@ -740,14 +766,17 @@ export default function Settings({ tutorialPreview = false }) {
   const finishBackupImport = async (blockedSources = backupUnavailableSources, requiredManifests = backupInstallManifests) => {
     if (!backupCandidate) return;
     if (blockedSources.some((source) => source.blockedByAge)) return;
+    if (activeImportRef.current) return;
     const uninstalled = requiredManifests.filter((manifest) => !extensions.isInstalled(manifest.id));
     if (uninstalled.length) {
       throw new Error(`Instala estas extensiones antes de restaurar: ${uninstalled.map(({ name, id }) => name || id).join(', ')}.`);
     }
+    activeImportRef.current = true;
     setBackupBusy(true);
     let releaseCoverProtection = () => {};
     try {
       setBackupProgress({ label: 'Preparando la restauración' });
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
       let data = backupCandidate.data;
       let favorites = [];
       try {
@@ -783,6 +812,7 @@ export default function Settings({ tutorialPreview = false }) {
       } catch {}
       restoreBackup(data);
       clearLibraryUnreadCache();
+      setBackupProgress({ label: 'Recuperando detalles de las fuentes', current: 0, total: favorites.length });
       const detailFailures = favorites.length
         ? await cacheImportedLibraryDetails(favorites, setBackupProgress)
         : 0;
@@ -803,6 +833,7 @@ export default function Settings({ tutorialPreview = false }) {
       toast({ title: 'No se pudo restaurar el respaldo', description: error.message, variant: 'error' });
     } finally {
       releaseCoverProtection();
+      activeImportRef.current = false;
       setBackupBusy(false);
       setBackupProgress(null);
     }
@@ -1037,6 +1068,8 @@ export default function Settings({ tutorialPreview = false }) {
   const finishMihonImport = async (failedInstalls = [], blockedEntries = mihonBlockedEntries, sourceCandidate = mihonCandidate) => {
     if (!sourceCandidate) return;
     if (blockedEntries.length) return;
+    if (activeImportRef.current) return;
+    activeImportRef.current = true;
     setMihonBusy(true);
     let releaseCoverProtection = () => {};
     let releaseFinalCoverProtection = () => {};
@@ -1064,21 +1097,23 @@ export default function Settings({ tutorialPreview = false }) {
       await new Promise((resolve) => window.setTimeout(resolve, 50));
       const result = importMihonBackup(candidate);
       clearLibraryUnreadCache();
-      const importedFavorites = lib.favs().filter((manga) => {
-        const key = mihonWorkKey(manga);
-        return key && incomingWorkKeys.has(key);
-      });
+      const importedFavorites = result.importedFavorites;
+      const backupCovers = new Map(importedFavorites.map((manga) => {
+        const favorite = lib.fav(manga.url, manga.sourceId || 'leercapitulo');
+        return [`${manga.sourceId || 'leercapitulo'}|${manga.url}`, favorite?.cover || ''];
+      }));
       setMihonProgress({ label: 'Recuperando detalles de las fuentes', current: 0, total: importedFavorites.length });
       const { results: refreshedDetails, attempted } = await refreshImportedMihonDetails(importedFavorites, setMihonProgress);
+      const detailFailures = attempted.length - refreshedDetails.filter(({ detail }) => detail?.chapters?.length).length;
       const refreshedFavoriteKeys = new Set();
       for (const { manga, sourceId, detail } of refreshedDetails) {
         const savedSourceId = manga.sourceId || sourceId;
         const favorite = lib.fav(manga.url, savedSourceId);
         if (!favorite) continue;
-        const cover = detail.cover && isMangaCover(detail.cover, favorite.url) ? detail.cover : '';
+        const detailCoverValid = /^https?:\/\//i.test(detail.cover || '') && isMangaCover(detail.cover, favorite.url);
         lib.updateFav(favorite.url, {
           coverRefreshPending: false,
-          ...(cover && cover !== favorite.cover ? { cover } : {})
+          ...(detailCoverValid && detail.cover !== favorite.cover ? { cover: detail.cover } : {})
         }, savedSourceId);
         refreshedFavoriteKeys.add(`${savedSourceId}|${favorite.url}`);
         if (detail.chapters?.length) {
@@ -1093,15 +1128,31 @@ export default function Settings({ tutorialPreview = false }) {
           lib.updateFav(favorite.url, { coverRefreshPending: false }, savedSourceId);
         }
       }
-      const finalFavorites = lib.favs().filter((manga) => {
-        const key = mihonWorkKey(manga);
-        return key && incomingWorkKeys.has(key);
-      });
+      const finalFavorites = importedFavorites.map((manga) => lib.fav(manga.url, manga.sourceId || 'leercapitulo')).filter(Boolean);
       const finalCoverUrls = finalFavorites.map((manga) => manga?.cover);
       releaseFinalCoverProtection = protectLibraryCovers(finalCoverUrls);
-      const totalCovers = new Set(finalCoverUrls.filter(needsPersistentImportedCover)).size;
+      const coverFavorites = finalFavorites.filter((manga) => {
+        const manifest = extensions.manifest(importedSourceId(manga));
+        return (isUnresolvedMihonSource(manga.sourceId) && !manifest?.contentWarning)
+          || isExtensionAllowed(manifest, settings.get().showAdultExtensions);
+      });
+      const totalCovers = new Set(coverFavorites.map((manga) => manga.cover).filter(needsPersistentImportedCover)).size;
       setMihonProgress({ label: 'Guardando las portadas', current: 0, total: totalCovers });
-      const { persistedUrls } = await preloadImportedCovers(finalFavorites, setMihonProgress);
+      const { failedUrls: initialCoverFailures, persistedUrls: initiallyPersistedUrls } = await preloadImportedCovers(coverFavorites, setMihonProgress);
+      const fallbackFavorites = [];
+      for (const manga of coverFavorites) {
+        if (!initialCoverFailures.has(manga.cover)) continue;
+        const backupCover = backupCovers.get(`${manga.sourceId || 'leercapitulo'}|${manga.url}`);
+        if (!backupCover || backupCover === manga.cover || !isMangaCover(backupCover, manga.url)) continue;
+        lib.updateFav(manga.url, { cover: backupCover }, manga.sourceId || 'leercapitulo');
+        fallbackFavorites.push(lib.fav(manga.url, manga.sourceId || 'leercapitulo'));
+      }
+      const fallbackResult = fallbackFavorites.length
+        ? await preloadImportedCovers(fallbackFavorites, setMihonProgress)
+        : { failedUrls: new Set(), persistedUrls: new Set() };
+      const persistedUrls = new Set([...initiallyPersistedUrls, ...fallbackResult.persistedUrls]);
+      const finalCoverUrlSet = new Set(coverFavorites.map((manga) => lib.fav(manga.url, manga.sourceId || 'leercapitulo')?.cover).filter(needsPersistentImportedCover));
+      const coverFailures = [...finalCoverUrlSet].filter((cover) => !persistedUrls.has(cover)).length;
       for (const manga of finalFavorites) {
         if (persistedUrls.has(manga.cover) && (manga.coverLocal || manga.coverCached)) {
           lib.updateFav(manga.url, { coverLocal: '', coverCached: '' }, manga.sourceId || 'leercapitulo');
@@ -1118,7 +1169,7 @@ export default function Settings({ tutorialPreview = false }) {
       setCats(lib.cats());
       toast({
         title: 'Respaldo de Mihon importado',
-        description: `${result.added + result.updated} mangas importados${omitted.size ? `, ${omitted.size} omitidos` : ''}.${failedInstalls.length ? ` No se pudieron instalar: ${failedInstalls.map(({ name }) => name).join(', ')}.` : ''}`,
+        description: `${result.added + result.updated} mangas importados${omitted.size ? `, ${omitted.size} omitidos` : ''}.${detailFailures ? ` No se pudieron guardar los detalles de ${detailFailures} mangas.` : ''}${coverFailures ? ` ${coverFailures} portadas no pudieron guardarse.` : ''}${failedInstalls.length ? ` No se pudieron instalar: ${failedInstalls.map(({ name }) => name).join(', ')}.` : ''}`,
         variant: 'success'
       });
     } catch (error) {
@@ -1126,6 +1177,7 @@ export default function Settings({ tutorialPreview = false }) {
     } finally {
       releaseCoverProtection();
       releaseFinalCoverProtection();
+      activeImportRef.current = false;
       setMihonProgress(null);
       setMihonBusy(false);
     }
@@ -2103,6 +2155,8 @@ export default function Settings({ tutorialPreview = false }) {
   installedBackupSources.forEach((source, id) => backupInstallRowsById.set(id, source));
   const backupInstallRows = sortByName(backupInstallRowsById.values(), (source) => source.displayManifest?.name || source.name);
 
+  if (tutorialImportControls) tutorialImportControls.current = { importBackup, importMihon };
+
   return (
     <div
       className="flex h-full min-h-0 flex-col"
@@ -2110,6 +2164,7 @@ export default function Settings({ tutorialPreview = false }) {
       <div
         className={cn(
           'relative w-full min-w-0 shrink-0 bg-sidebar',
+          tutorialImportControls && 'hidden',
           !isBrowserApp && '-mt-2 max-md:-mt-3'
         )}
         style={{ marginBottom: isBrowserApp ? 0 : px(12, scale, 8) }}
@@ -2157,7 +2212,7 @@ export default function Settings({ tutorialPreview = false }) {
       </div>
       <div
         key={section}
-        className="settings-section-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain"
+        className={cn('settings-section-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain', tutorialImportControls && 'hidden')}
         onScroll={handleSectionScroll}
       >
         <div

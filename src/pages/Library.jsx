@@ -149,7 +149,7 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
             detail = await api.restoreDetail(manga.url, resolvedId, savedSourceId);
             const cachedCover = detail?.cover && isMangaCover(detail.cover, manga.url) ? detail.cover : '';
             if (!detail?.chapters?.length || !cachedCover) {
-              detail = await api.detail(manga.url, resolvedId, { cacheResult: false, persistResult: false, allowDisabled: true });
+              detail = await api.detail(manga.url, resolvedId, { cacheResult: false, persistResult: false, allowDisabled: true, timeoutMs: 120_000 });
             }
             const cover = detail?.cover && isMangaCover(detail.cover, manga.url) ? detail.cover : '';
             if (cover) refreshedCoverUrls.add(cover);
@@ -167,8 +167,8 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
               if (!installedSourceIds && Number(manga.chapterTotal) > 0) continue;
               detail = api.peekDetail(manga.url, resolvedId);
               if (!detail?.chapters?.length) {
-                const chaptersDetail = await api.detailFromLibraryChapters(manga.url, resolvedId, manga);
-                detail = chaptersDetail || await api.detail(manga.url, resolvedId, { cacheResult: false, persistResult: false, allowDisabled: true });
+                const chaptersDetail = await api.detailFromLibraryChapters(manga.url, resolvedId, manga, { timeoutMs: 120_000 });
+                detail = chaptersDetail || await api.detail(manga.url, resolvedId, { cacheResult: false, persistResult: false, allowDisabled: true, timeoutMs: 120_000 });
               }
             }
           }

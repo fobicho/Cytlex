@@ -14,6 +14,8 @@ const ACHY_CATALOG_MAX_IMAGES = 49;
 const ACHY_CATALOG_METADATA_MAX_BYTES = 64 * 1024 * 1024;
 const httpGetCache = new Map();
 const httpGetRequests = new Map();
+const komiwaSearchCache = new Map();
+let komiwaImportHints = new Map();
 const httpGetBatchQueue = [];
 const proxyImageBatchQueue = [];
 const mangaDexCatalogImages = new Map();
@@ -162,6 +164,8 @@ function batchDescriptor({ url, options }) {
     ...(typeof options.sourceId === 'string' ? { sourceId: options.sourceId } : {}),
     ...(options.onfMangaDetail === true ? { detail: 'onf' } : {}),
     ...(options.olympusDetail === true ? { detail: 'olympus' } : {}),
+    ...(options.komiwaPrefetch === true ? { komiwaPrefetch: true } : {}),
+    ...(typeof options.komiwaFallbackTitle === 'string' ? { komiwaFallbackTitle: options.komiwaFallbackTitle } : {}),
     ...(options.mangaDexDetail !== undefined ? { detail: 'mangadex', includeManga: options.mangaDexDetail } : {}),
     ...(options.catalogCovers === true ? { catalogCovers: true } : {}),
     ...(Array.isArray(options.catalogCoverUrls) && options.catalogCoverUrls.length
@@ -268,6 +272,21 @@ async function runProxyBatch(entries) {
       if (message.type === 'result') {
         const entry = entries.filter((item) => !item.catalog)[message.index];
         if (!entry || entry.settled) return;
+        if ((entry.options?.komiwaPrefetch || entry.options?.olympusDetail) && Array.isArray(message.result?.prefetched)) {
+          for (const item of message.result.prefetched) {
+            if (typeof item?.url !== 'string' || typeof item?.text !== 'string' || item.status !== 200) continue;
+            if (item.method === 'POST' && entry.options?.komiwaPrefetch && typeof item.body === 'string') {
+              komiwaSearchCache.set(JSON.stringify([item.url, item.body]), { at: Date.now(), text: item.text });
+              while (komiwaSearchCache.size > HTTP_GET_CACHE_MAX) komiwaSearchCache.delete(komiwaSearchCache.keys().next().value);
+              continue;
+            }
+            const key = item.detail === 'olympus'
+              ? `olympus-detail:${item.url}`
+              : JSON.stringify([item.url, '', 'follow', []]);
+            httpGetCache.set(key, { at: Date.now(), text: item.text, url: item.url });
+          }
+          while (httpGetCache.size > HTTP_GET_CACHE_MAX) httpGetCache.delete(httpGetCache.keys().next().value);
+        }
         if (message.result?.fallback) { fallbackEntry(entry); return; }
         const proxied = responseFromBatchResult(message.result);
         if (!proxied) { fallbackEntry(entry); return; }
@@ -356,16 +375,26 @@ async function runProxyBatch(entries) {
 
 function flushProxyGetQueue() {
   httpGetBatchTimer = null;
+  const catalogCoverRequests = httpGetBatchQueue.filter((item) => item.options?.catalogCovers === true);
+  const candidates = catalogCoverRequests.length ? catalogCoverRequests : httpGetBatchQueue;
   let batchSize = 0;
   let nestedDetailCount = 0;
-  while (batchSize < Math.min(httpGetBatchQueue.length, HTTP_GET_BATCH_MAX)) {
-    const nextIsMangaDex = httpGetBatchQueue[batchSize].options?.mangaDexDetail !== undefined;
-    const nextIsOlympus = httpGetBatchQueue[batchSize].options?.olympusDetail === true;
+  while (batchSize < Math.min(candidates.length, HTTP_GET_BATCH_MAX)) {
+    const nextIsMangaDex = candidates[batchSize].options?.mangaDexDetail === true;
+    const nextIsOlympus = candidates[batchSize].options?.olympusDetail === true;
     if (batchSize + 1 + nestedDetailCount + Number(nextIsMangaDex) + Number(nextIsOlympus) > HTTP_GET_BATCH_MAX) break;
     nestedDetailCount += Number(nextIsMangaDex) + Number(nextIsOlympus);
     batchSize += 1;
   }
-  const entries = httpGetBatchQueue.splice(0, batchSize);
+  const entries = candidates.slice(0, batchSize);
+  if (catalogCoverRequests.length) {
+    const selected = new Set(entries);
+    for (let index = httpGetBatchQueue.length - 1; index >= 0; index -= 1) {
+      if (selected.has(httpGetBatchQueue[index])) httpGetBatchQueue.splice(index, 1);
+    }
+  } else {
+    httpGetBatchQueue.splice(0, batchSize);
+  }
   void runProxyBatch(entries);
   if (httpGetBatchQueue.length) {
     const delay = httpGetBatchQueue.length >= HTTP_GET_BATCH_MAX ? 0 : httpGetBatchWindowMs;
@@ -392,6 +421,21 @@ export function setHttpGetBatchWindow(duration) {
   return () => { httpGetBatchWindowMs = previous; };
 }
 
+export function setKomiwaImportHints(mangas) {
+  const previous = komiwaImportHints;
+  komiwaImportHints = new Map();
+  for (const manga of mangas || []) {
+    try {
+      const url = new URL(manga.url);
+      if (url.hostname !== 'www.komiwa.net' && url.hostname !== 'komiwa.net') continue;
+      const slug = decodeURIComponent(url.pathname.split('/').filter(Boolean).at(-1) || '');
+      const title = String(manga.title || '').trim();
+      if (slug && title) komiwaImportHints.set(slug.replace(/-/g, ' ').toLowerCase(), title);
+    } catch {}
+  }
+  return () => { komiwaImportHints = previous; };
+}
+
 function scheduleProxyRequest(url, options) {
   const target = new URL(url);
   const configuredProxy = import.meta.env.VITE_CYTLEX_PROXY_URL;
@@ -400,7 +444,7 @@ function scheduleProxyRequest(url, options) {
   if (preferDirectRequest(target, method)) {
     return browserRequest(url, options);
   }
-  const supportedOptions = new Set(['headers', 'onfReferer', 'onfCookie', 'method', 'body', 'sourceId', 'search', 'catalogCovers', 'catalogCoverUrls', 'olympusDetail']);
+  const supportedOptions = new Set(['headers', 'onfReferer', 'onfCookie', 'method', 'body', 'sourceId', 'search', 'catalogCovers', 'catalogCoverUrls', 'olympusDetail', 'komiwaPrefetch', 'komiwaFallbackTitle']);
   if (target.origin === window.location.origin || proxyEndpoint.origin !== window.location.origin || !['GET', 'POST'].includes(method) || options.signal
     || (method === 'POST' && typeof options.body !== 'string')
     || Object.keys(options).some((key) => !supportedOptions.has(key))
@@ -1109,6 +1153,9 @@ export async function httpGet(url, requestId, options = {}) {
   const catalogRequest = requestId && catalogRequestSources.get(requestId);
   const catalogSourceId = catalogRequest?.sourceId;
   const target = new URL(url);
+  if (requestOptions.sourceId === 'olympusscanlation' && target.pathname === '/api/series/list' && !catalogRequest) {
+    delete requestOptions.catalogCovers;
+  }
   if (catalogSourceId && catalogSourceId === requestOptions.sourceId
     && (catalogSourceId !== 'leercapitulo' || target.pathname === '/manga/')) {
     requestOptions.catalogCovers = true;
@@ -1174,6 +1221,11 @@ export async function httpGet(url, requestId, options = {}) {
     const detailOptions = { ...requestOptions };
     delete detailOptions.olympusDetail;
     const key = `olympus-detail:${target.href}`;
+    const cached = httpGetCache.get(key);
+    if (cached && Date.now() - cached.at < HTTP_GET_CACHE_TTL_MS) {
+      return includeUrl ? { text: cached.text, url: cached.url } : cached.text;
+    }
+    if (cached) httpGetCache.delete(key);
     let request = httpGetRequests.get(key);
     if (!request) {
       request = new Promise((resolve, reject) => {
@@ -1291,14 +1343,27 @@ export async function httpPost(payload, requestId) {
   const bridge = electronBridge();
   if (bridge?.httpPost) return bridge.httpPost(payload, requestId);
   const catalogSourceId = requestId && catalogRequestSources.get(requestId)?.sourceId;
+  const body = typeof payload.body === 'string' ? payload.body : JSON.stringify(payload.body);
+  const komiwaDetail = payload.sourceId === 'komiwa' && !requestId && payload.url === 'https://b78sk.komiwa.net/manga/search';
+  const cacheKey = JSON.stringify([payload.url, body]);
+  const cached = komiwaDetail && komiwaSearchCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < HTTP_GET_CACHE_TTL_MS) {
+    return payload.responseType === 'text' ? cached.text : JSON.parse(cached.text);
+  }
+  if (cached) komiwaSearchCache.delete(cacheKey);
+  let fallbackTitle = '';
+  if (komiwaDetail) {
+    try { fallbackTitle = komiwaImportHints.get(String(JSON.parse(body)?.q || '').toLowerCase()) || ''; } catch {}
+  }
   const response = await scheduleProxyRequest(payload.url, {
     method: 'POST',
+    ...(komiwaDetail ? { komiwaPrefetch: true, sourceId: 'komiwa', ...(fallbackTitle ? { komiwaFallbackTitle: fallbackTitle } : {}) } : {}),
     ...(payload.search === true && typeof payload.sourceId === 'string' ? { search: true, sourceId: payload.sourceId } : {}),
     ...(catalogSourceId && catalogSourceId === payload.sourceId ? { catalogCovers: true, sourceId: payload.sourceId } : {}),
     onfReferer: payload.onfReferer,
     onfCookie: payload.onfCookie,
     headers: { 'Content-Type': 'application/json', ...payload.headers },
-    body: typeof payload.body === 'string' ? payload.body : JSON.stringify(payload.body)
+    body
   });
   const text = await response.text();
   return payload.responseType === 'text' ? text : JSON.parse(text);

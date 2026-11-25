@@ -990,6 +990,7 @@ img.manga-cover-corners {
 
 .browser-mobile-nav[data-tutorial-nav-only='true'] {
   border-top-color: transparent;
+  background: transparent;
 }
 
 .browser-mobile-nav__item {
