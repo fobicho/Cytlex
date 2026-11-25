@@ -4,6 +4,23 @@ export const lastSearch = { q: '', genre: '', results: null };
 export const MAX_SEARCH_RESULTS = 30;
 export const SOURCE_CATALOG_HOME_EVENT = 'cytlex:source-catalog-home';
 
+export function exploreHomeRoute(location) {
+  const params = new URLSearchParams(location.search);
+  const from = location.pathname.startsWith('/manga') ? params.get('from') : '';
+  const currentTab = params.get('tab');
+  const tab = from === 'fuentes'
+    ? 'fuentes'
+    : from === 'extensiones'
+      ? 'extensiones'
+      : !from && location.pathname === '/explorar' && ['mangas', 'extensiones', 'fuentes'].includes(currentTab)
+        ? currentTab
+        : 'mangas';
+  return `/explorar?tab=${tab}`;
+}
+
+export const isExploreHomeRoute = (location, route) =>
+  location.pathname === '/explorar' && `${location.pathname}${location.search}` === route;
+
 const seenCovers = new Map();
 const MAX_SEEN_COVERS = 120;
 const mangaPreviews = new Map();

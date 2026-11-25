@@ -118,7 +118,7 @@ const messages = {
     'Importar respaldo de Cytlex': 'Import Cytlex backup', 'Importar respaldo de Mihon': 'Import Mihon backup',
     '¡Bienvenido lector, que gusto tenerte por aquí! Espero que este mini tutorial introductorio te sirva para entender el funcionamiento de Cytlex, aunque tampoco es tan difícil de usar..': 'Welcome, reader! It’s great to have you here. This quick introduction should help you learn how Cytlex works, though it’s easy to use.',
     'Agregar repositorio oficial': 'Add official repository', 'Comenzar a leer': 'Start reading',
-    'Apoyar en Ko-fi': 'Support on Ko-fi', 'Navegación principal': 'Main navigation', 'Expandir menu lateral': 'Expand sidebar',
+    'Apoyar en Ko-fi': 'Support on Ko-fi', 'Ayuda': 'Help on Ko-fi', 'Navegación principal': 'Main navigation', 'Expandir menu lateral': 'Expand sidebar',
     'Colapsar menu lateral': 'Collapse sidebar', 'Minimizar': 'Minimize', 'Restaurar': 'Restore', 'Maximizar': 'Maximize',
     'Diálogo': 'Dialog', 'Limpiar búsqueda': 'Clear search', 'Cerrar búsqueda': 'Close search', 'Buscar actualizaciones': 'Check for updates',
     'Conecta tu cuenta primero!': 'Connect your account first!', 'Buscar un manga...': 'Search for manga...',

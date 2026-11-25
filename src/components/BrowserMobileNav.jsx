@@ -4,7 +4,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { BookOpen, Compass, Settings as SettingsIcon } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { useI18n } from '../lib/i18n.js';
-import { SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
+import { exploreHomeRoute, isExploreHomeRoute, SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
 
 const RESET_PAGE_EVENT = 'cytlex:reset-page';
 
@@ -63,11 +63,6 @@ function AnimatedNavIcon({ to, Icon, animate }) {
   );
 }
 
-let lastExploreListRoute = '/explorar?tab=mangas';
-let lastExploreRoute = '/explorar?tab=mangas';
-let lastLibraryListRoute = '/biblioteca';
-let lastLibraryRoute = '/biblioteca';
-
 function activeSection(location) {
   if (location.pathname === '/biblioteca') return '/biblioteca';
   if (location.pathname === '/explorar' || location.pathname === '/resultados') return '/explorar';
@@ -80,17 +75,10 @@ function activeSection(location) {
   return '';
 }
 
-function activeScroller() {
-  const main = document.querySelector('main');
-  return Array.from(main?.querySelectorAll('.library-page-scroll, .catalog-page-scroll, .settings-section-scroll') || [])
-    .find((element) => element.offsetParent !== null) || main;
-}
-
 export default function BrowserMobileNav({ tutorialNavOnly = false }) {
   const { t } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
-  const pendingQuickSearchReset = useRef(false);
   const active = activeSection(location);
   const activeIndex = items.findIndex(({ to }) => to.split('?')[0] === active);
   const reduceMotion = useReducedMotion();
@@ -103,82 +91,36 @@ export default function BrowserMobileNav({ tutorialNavOnly = false }) {
     setActiveVisit((visit) => visit + 1);
   }, [activeIndex]);
 
-  useEffect(() => {
-    if (activeSection(location) !== '/explorar') return;
-    lastExploreRoute = `${location.pathname}${location.search}`;
-    if (!location.pathname.startsWith('/manga')) lastExploreListRoute = `${location.pathname}${location.search}`;
-  }, [location.pathname, location.search]);
-
-  useEffect(() => {
-    if (activeSection(location) !== '/biblioteca') return;
-    lastLibraryRoute = `${location.pathname}${location.search}`;
-    if (!location.pathname.startsWith('/manga')) lastLibraryListRoute = `${location.pathname}${location.search}`;
-  }, [location.pathname, location.search]);
-
-  useEffect(() => {
-    if (!pendingQuickSearchReset.current || new URLSearchParams(location.search).has('quick')) return;
-    pendingQuickSearchReset.current = false;
+  const handleRouteClick = (to, event, selected) => {
+    if (tutorialNavOnly || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const destination = to === '/explorar' ? exploreHomeRoute(location) : to;
+    const libraryDetail = location.pathname === '/manga'
+      && new URLSearchParams(location.search).get('from') === 'biblioteca';
+    if (to === '/biblioteca' && (location.pathname === '/biblioteca' || libraryDetail)) {
+      event.preventDefault();
+      resetSubrouteScroll('/biblioteca');
+      if (location.pathname === '/biblioteca') {
+        const main = document.querySelector('.library-page-scroll') || document.querySelector('main');
+        if (main?.scrollTop > 1) main.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+      } else {
+        navigate('/biblioteca', { replace: selected });
+      }
+      return;
+    }
+    if (to === '/explorar' && isExploreHomeRoute(location, destination)) {
+      event.preventDefault();
+      const main = document.querySelector('.catalog-page-scroll') || document.querySelector('main');
+      if (main?.scrollTop > 1) {
+        resetSubrouteScroll(destination);
+        main.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+      }
+      return;
+    }
+    event.preventDefault();
+    resetSubrouteScroll(destination);
+    if (destination === '/explorar?tab=fuentes') window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
     window.dispatchEvent(new Event(RESET_PAGE_EVENT));
-  }, [location.search]);
-
-  const handleExploreClick = (event, selected) => {
-    if (!selected) {
-      resetSubrouteScroll(lastExploreListRoute);
-      return;
-    }
-    const main = activeScroller();
-
-    if (location.pathname.startsWith('/manga')) {
-      event.preventDefault();
-      resetSubrouteScroll(lastExploreListRoute);
-      navigate(lastExploreListRoute);
-      return;
-    }
-
-    if (location.pathname === '/explorar' && new URLSearchParams(location.search).has('quick')) {
-      event.preventDefault();
-      pendingQuickSearchReset.current = true;
-      navigate('/explorar?tab=mangas', { replace: true });
-      return;
-    }
-
-    if (main?.querySelector('[data-source-catalog-active="true"]')) {
-      event.preventDefault();
-      window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
-      main.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-
-    if (main?.scrollTop > 1) {
-      event.preventDefault();
-      main.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-    event.preventDefault();
-  };
-
-  const handleLibraryClick = (event, selected) => {
-    if (!selected) {
-      resetSubrouteScroll(lastLibraryListRoute);
-      return;
-    }
-    event.preventDefault();
-    const main = activeScroller();
-
-    if (location.pathname.startsWith('/manga')) {
-      resetSubrouteScroll(lastLibraryListRoute);
-      navigate(lastLibraryListRoute);
-      return;
-    }
-
-    if (main?.scrollTop > 1) main.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleSettingsClick = (event, selected) => {
-    if (!selected) return;
-    event.preventDefault();
-    const main = activeScroller();
-    if (main?.scrollTop > 1) main.scrollTo({ top: 0, behavior: 'smooth' });
+    navigate(destination, { replace: selected });
   };
 
   return (
@@ -197,14 +139,10 @@ export default function BrowserMobileNav({ tutorialNavOnly = false }) {
         return (
           <Link
             key={to}
-            to={to === '/explorar' ? (selected ? lastExploreListRoute : lastExploreRoute) : to === '/biblioteca' ? (selected ? lastLibraryListRoute : lastLibraryRoute) : to}
+            to={to === '/explorar' ? exploreHomeRoute(location) : to}
             aria-current={selected ? 'page' : undefined}
             className={cn('browser-mobile-nav__item', selected && 'is-active')}
-            onClick={to === '/biblioteca'
-              ? (event) => handleLibraryClick(event, selected)
-              : to === '/explorar'
-                ? (event) => handleExploreClick(event, selected)
-                : (event) => handleSettingsClick(event, selected)}
+            onClick={(event) => handleRouteClick(to, event, selected)}
           >
             <span
               key={selected ? `active-${activeVisit}` : 'inactive'}

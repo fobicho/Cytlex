@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { BookOpen, ChevronsRight, Compass, Settings as SettingsIcon } from 'lucide-react';
 import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
-import { SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
+import { exploreHomeRoute, isExploreHomeRoute, SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
 import { settings, SIDEBAR_WIDTH } from '../lib/settings.js';
 import { useI18n } from '../lib/i18n.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
@@ -24,12 +24,6 @@ const randomSidebarGlyphs = () => Array.from({ length: 12 }, () =>
 const EASE = [0.25, 0.1, 0.25, 1];
 const DURATION = 0.3;
 const SIDEBAR_SCALE_MIN = 0.72;
-const activeScroller = () => {
-  const main = document.querySelector('main');
-  return Array.from(main?.querySelectorAll('.library-page-scroll, .catalog-page-scroll, .settings-section-scroll') || [])
-    .find((element) => element.offsetParent !== null) || main;
-};
-
 function ActiveRouteLabel({ label, active }) {
   const [glyphs] = useState(randomSidebarGlyphs);
   const reduceMotion = useReducedMotion();
@@ -82,11 +76,6 @@ function ActiveRouteLabel({ label, active }) {
   );
 }
 
-let lastLibraryListRoute = '/biblioteca';
-let lastLibraryRoute = '/biblioteca';
-let lastExploreListRoute = '/explorar?tab=mangas';
-let lastExploreRoute = '/explorar?tab=mangas';
-
 function routeSection(location) {
   if (location.pathname === '/biblioteca') return '/biblioteca';
   if (location.pathname === '/explorar' || location.pathname === '/resultados') return '/explorar';
@@ -99,11 +88,10 @@ function routeSection(location) {
 }
 
 export default function Sidebar({ tutorialNavOnly = false }) {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const [collapsed, setCollapsed] = useState(settings.get().sidebarCollapsed);
   const location = useLocation();
   const navigate = useNavigate();
-  const pendingQuickSearchReset = useRef(false);
   const scale = useScale(SIDEBAR_SCALE_MIN);
   const reduceMotion = useReducedMotion();
   const navIconCenter = Math.max(6, Math.round(12 * scale))
@@ -131,21 +119,6 @@ export default function Sidebar({ tutorialNavOnly = false }) {
   useEffect(() => settings.subscribe((s) => {
     setCollapsed(s.sidebarCollapsed);
   }), []);
-
-  useEffect(() => {
-    const section = routeSection(location);
-    const route = `${location.pathname}${location.search}`;
-    if (section === '/biblioteca') lastLibraryRoute = route;
-    if (section === '/explorar') lastExploreRoute = route;
-    if (section === '/biblioteca' && !location.pathname.startsWith('/manga')) lastLibraryListRoute = route;
-    if (section === '/explorar' && !location.pathname.startsWith('/manga')) lastExploreListRoute = route;
-  }, [location.pathname, location.search]);
-
-  useEffect(() => {
-    if (!pendingQuickSearchReset.current || new URLSearchParams(location.search).has('quick')) return;
-    pendingQuickSearchReset.current = false;
-    window.dispatchEvent(new CustomEvent(RESET_PAGE_EVENT));
-  }, [location.search]);
 
   const toggle = () => settings.set({ sidebarCollapsed: !collapsed });
 
@@ -185,11 +158,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
       >
         {navItems.map((item) => {
           const isActive = routeSection(location) === item.to || location.pathname === item.to;
-          const destination = item.to === '/biblioteca'
-            ? (isActive ? lastLibraryListRoute : lastLibraryRoute)
-            : item.to === '/explorar'
-              ? (isActive ? lastExploreListRoute : lastExploreRoute)
-              : item.to;
+          const destination = item.to === '/explorar' ? exploreHomeRoute(location) : item.to;
           const Icon = item.icon;
           const collapsedEnter = reduceMotion ? 'scale(1)' : 'scale(0.96)';
           const collapsedExit = reduceMotion ? 'scale(1)' : 'scale(0.98)';
@@ -212,45 +181,34 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                   ? '/ajustes?tutorial=1&section=apariencia'
                   : destination}
               onClick={(event) => {
-                if (tutorialNavOnly) return;
-                if (!isActive) resetSubrouteScroll(destination);
-                if (isActive) {
-                  if (location.pathname.startsWith('/manga')
-                    && (item.to === '/biblioteca' || item.to === '/explorar')) {
-                    event.preventDefault();
-                    const listRoute = item.to === '/biblioteca' ? lastLibraryListRoute : lastExploreListRoute;
-                    resetSubrouteScroll(listRoute);
-                    navigate(listRoute);
-                    return;
+                if (tutorialNavOnly || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                const libraryDetail = location.pathname === '/manga'
+                  && new URLSearchParams(location.search).get('from') === 'biblioteca';
+                if (item.to === '/biblioteca' && (location.pathname === '/biblioteca' || libraryDetail)) {
+                  event.preventDefault();
+                  resetSubrouteScroll('/biblioteca');
+                  if (location.pathname === '/biblioteca') {
+                    const main = document.querySelector('.library-page-scroll') || document.querySelector('main');
+                    if (main?.scrollTop > 1) main.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+                  } else {
+                    navigate('/biblioteca');
                   }
-                  if (item.to === '/explorar' && new URLSearchParams(location.search).has('quick')) {
-                    event.preventDefault();
-                    pendingQuickSearchReset.current = true;
-                    navigate('/explorar?tab=mangas', { replace: true });
-                    return;
-                  }
-                  if (item.to === '/explorar' || item.to === '/biblioteca') {
-                    const main = activeScroller();
-                    if (item.to === '/explorar' && main?.querySelector('[data-source-catalog-active="true"]')) {
-                      event.preventDefault();
-                      window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
-                      main.scrollTo({ top: 0, behavior: 'smooth' });
-                      return;
-                    }
-                    if (main?.scrollTop > 1) {
-                      main.scrollTo({ top: 0, behavior: 'smooth' });
-                      event.preventDefault();
-                      return;
-                    }
-                    event.preventDefault();
-                    return;
-                  }
-                  if (item.to === '/ajustes') {
-                    const main = activeScroller();
-                    if (main?.scrollTop > 1) main.scrollTo({ top: 0, behavior: 'smooth' });
-                    event.preventDefault();
-                  }
+                  return;
                 }
+                if (item.to === '/explorar' && isExploreHomeRoute(location, destination)) {
+                  event.preventDefault();
+                  const main = document.querySelector('.catalog-page-scroll') || document.querySelector('main');
+                  if (main?.scrollTop > 1) {
+                    resetSubrouteScroll(destination);
+                    main.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+                  }
+                  return;
+                }
+                event.preventDefault();
+                resetSubrouteScroll(destination);
+                if (destination === '/explorar?tab=fuentes') window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
+                window.dispatchEvent(new Event(RESET_PAGE_EVENT));
+                navigate(destination, { replace: isActive });
               }}
             >
               <div
@@ -326,9 +284,9 @@ export default function Sidebar({ tutorialNavOnly = false }) {
             title={t('Apoyar en Ko-fi')}
             aria-label={t('Apoyar en Ko-fi')}
             className={cn(
-              'w-full flex items-center rounded-md font-medium',
+              'relative w-full flex items-center rounded-md font-semibold',
               'transition-[gap,color,background-color,border-color,text-decoration-color,fill,stroke] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
-              'border border-sidebar-border/70 bg-sidebar-accent/30 text-sidebar-foreground hover:border-sidebar-border hover:bg-sidebar-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
+              'bg-primary/10 text-primary ring-1 ring-inset ring-primary/25 hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
             )}
             style={{
               justifyContent: 'flex-start',
@@ -340,6 +298,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
               fontSize: fontPx(14, scale, 11)
             }}
           >
+            <span aria-hidden="true" className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-primary" />
             <div
               className="shrink-0 grid place-items-center"
               style={{
@@ -362,7 +321,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
             </div>
             <span
               className={cn(
-                'whitespace-nowrap overflow-hidden leading-none transition-[max-width,opacity,transform,margin-left] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
+                'whitespace-nowrap overflow-hidden leading-normal transition-[max-width,opacity,transform,margin-left] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
                 collapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'opacity-100 translate-x-0'
               )}
               style={{
@@ -371,7 +330,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                 transitionDuration: collapsed ? '180ms' : '300ms'
               }}
             >
-              {t('Apoyar en Ko-fi')}
+              {language === 'en' ? t('Ayuda') : t('Apoyar en Ko-fi')}
             </span>
           </button>
         </div>
