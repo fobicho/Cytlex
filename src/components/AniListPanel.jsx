@@ -6,6 +6,7 @@ import { session } from '../lib/session.js';
 import { tracking } from '../lib/tracking.js';
 import { settings } from '../lib/settings.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
+import { useI18n, translate as t } from '../lib/i18n.js';
 import { seedFromAniList } from '../lib/sync.js';
 import { Dialog } from './ui/dialog.jsx';
 import { Badge } from './ui/badge.jsx';
@@ -78,6 +79,7 @@ const formatDate = (iso) => {
 const sameDay = (a, b) => a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
 function Calendar({ value, onChange }) {
+  const { language } = useI18n();
   const scale = useScale();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
@@ -157,18 +159,18 @@ function Calendar({ value, onChange }) {
         <button
           type="button"
           onClick={() => shift(-1)}
-          aria-label="Mes anterior"
+          aria-label={t('Mes anterior')}
           className="grid place-items-center w-7 h-7 rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
         <span className="text-sm font-medium">
-          {MONTHS_LONG[cursor.getMonth()]} {cursor.getFullYear()}
+          {new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'es', { month: 'long' }).format(cursor)} {cursor.getFullYear()}
         </span>
         <button
           type="button"
           onClick={() => shift(1)}
-          aria-label="Mes siguiente"
+          aria-label={t('Mes siguiente')}
           className="grid place-items-center w-7 h-7 rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <ChevronRight className="w-4 h-4" />
@@ -176,9 +178,9 @@ function Calendar({ value, onChange }) {
       </div>
 
       <div className="grid grid-cols-7 gap-0.5">
-        {WEEKDAYS.map((d, i) => (
-          <span key={d + i} className="grid place-items-center h-7 text-muted-foreground" style={{ fontSize: fontPx(11, scale, 9) }}>
-            {d}
+        {WEEKDAYS.map((_, i) => (
+          <span key={i} className="grid place-items-center h-7 text-muted-foreground" style={{ fontSize: fontPx(11, scale, 9) }}>
+            {new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'es', { weekday: 'short' }).format(new Date(2024, 0, 1 + i)).slice(0, 1).toLocaleUpperCase(language === 'en' ? 'en-US' : 'es')}
           </span>
         ))}
       </div>
@@ -257,7 +259,7 @@ function Stepper({ value, onChange, min = 0, max, step = 1, placeholder = '—' 
         variant="ghost"
         size="icon"
         className="h-6 w-6 shrink-0 rounded-md"
-        aria-label="Reducir"
+        aria-label={t('Reducir')}
         disabled={atMin}
         onClick={() => bump(-1)}
       >
@@ -271,7 +273,7 @@ function Stepper({ value, onChange, min = 0, max, step = 1, placeholder = '—' 
         step={step}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        aria-label="Valor"
+        aria-label={t('Valor')}
         className="flex-1 min-w-0 bg-transparent text-sm text-center outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
       <Button
@@ -279,7 +281,7 @@ function Stepper({ value, onChange, min = 0, max, step = 1, placeholder = '—' 
         variant="ghost"
         size="icon"
         className="h-6 w-6 shrink-0 rounded-md"
-        aria-label="Ampliar"
+        aria-label={t('Ampliar')}
         disabled={atMax}
         onClick={() => bump(1)}
       >
@@ -374,13 +376,13 @@ function SearchDialog({ open, onClose, mangaTitle, onPick, coverScale = 1 }) {
           <Input
             value={term}
             onChange={(e) => setTerm(e.target.value)}
-            placeholder="Título del manga…"
-            aria-label="Buscar en AniList"
+            placeholder={t('Título del manga…')}
+            aria-label={t('Buscar en AniList')}
             autoFocus
             className="h-9 bg-background border-border/70 pr-10"
             style={{ fontSize: fontPx(14, scale, 12) }}
           />
-          <button type="submit" aria-label="Buscar" disabled={busy || !term.trim()} className="absolute inset-y-0 right-0 grid w-9 place-items-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-40">
+          <button type="submit" aria-label={t('Buscar')} disabled={busy || !term.trim()} className="absolute inset-y-0 right-0 grid w-9 place-items-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-40">
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
           </button>
         </div>
@@ -406,11 +408,11 @@ function SearchDialog({ open, onClose, mangaTitle, onPick, coverScale = 1 }) {
           )}
           {!err && busy && (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="w-4 h-4 animate-spin" /> Buscando en AniList…
+              <Loader2 className="w-4 h-4 animate-spin" /> {t('Buscando en AniList…')}
             </p>
           )}
           {!err && !busy && results?.length === 0 && (
-            <p className="text-sm text-muted-foreground">Sin resultados para «{term}».</p>
+            <p className="text-sm text-muted-foreground">{t('Sin resultados para «{term}».', { term })}</p>
           )}
           {results?.map((m) => (
             <button
@@ -428,17 +430,17 @@ function SearchDialog({ open, onClose, mangaTitle, onPick, coverScale = 1 }) {
                 <div className="font-semibold text-sm truncate">{m.title}</div>
                 {m.author && <div className="text-xs text-muted-foreground truncate">{m.author}</div>}
                 <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                  {m.status && <Badge>{STATUS_ES[m.status] || m.status}</Badge>}
-                  {m.format && <Badge variant="outline">{FORMAT_ES[m.format] || m.format}</Badge>}
+                  {m.status && <Badge>{t(STATUS_ES[m.status] || m.status)}</Badge>}
+                  {m.format && <Badge variant="outline">{t(FORMAT_ES[m.format] || m.format)}</Badge>}
                   {m.startDate && <span className="text-xs text-muted-foreground">{m.startDate}</span>}
                 </div>
               </div>
               <div className="shrink-0 text-right">
-                <div className="text-sm font-semibold" title={m.averageScore == null ? 'Sin valoración' : 'Puntuación media de los usuarios en AniList, de 0 a 100'} aria-label={m.averageScore == null ? 'Sin valoración' : `Valoración ${m.averageScore} sobre 100`}>
+                <div className="text-sm font-semibold" title={t(m.averageScore == null ? 'Sin valoración' : 'Puntuación media de los usuarios en AniList, de 0 a 100')} aria-label={t(m.averageScore == null ? 'Sin valoración' : `Valoración ${m.averageScore} sobre 100`)}>
                   {m.averageScore ?? '–'}
                 </div>
                 {m.popularity != null && (
-                  <div className="text-muted-foreground" style={{ fontSize: fontPx(11, scale, 9) }} title="Personas con esta obra en su lista">
+                  <div className="text-muted-foreground" style={{ fontSize: fontPx(11, scale, 9) }} title={t('Personas con esta obra en su lista')}>
                     {compact(m.popularity)}
                   </div>
                 )}
@@ -452,6 +454,7 @@ function SearchDialog({ open, onClose, mangaTitle, onPick, coverScale = 1 }) {
 }
 
 const EntryForm = forwardRef(function EntryForm({ entry, scoreFormat = 'POINT_10', totalChapters, onSubmit, saving, err }, ref) {
+  const { t } = useI18n();
   const [form, setForm] = useState({
     status: entry?.status || 'CURRENT',
     progress: entry?.progress ?? 0,
@@ -484,7 +487,7 @@ const EntryForm = forwardRef(function EntryForm({ entry, scoreFormat = 'POINT_10
     <form onSubmit={(e) => { e.preventDefault(); onSubmit(form); }}>
       <div className="grid gap-3 grid-cols-3">
         <label className="block">
-          <span className="text-xs text-muted-foreground">Estado</span>
+          <span className="text-xs text-muted-foreground">{t('Estado')}</span>
           <div className="mt-1">
             <Dropdown
               value={form.status}
@@ -498,8 +501,8 @@ const EntryForm = forwardRef(function EntryForm({ entry, scoreFormat = 'POINT_10
         </label>
 
         <label className="block">
-          <span className="text-xs text-muted-foreground" title="Capítulos ya terminados, no el que estás leyendo">
-            Capítulos leídos
+          <span className="text-xs text-muted-foreground" title={t('Capítulos ya terminados, no el que estás leyendo')}>
+            {t('Capítulos leídos')}
           </span>
           <Stepper
             value={form.progress}
@@ -510,7 +513,7 @@ const EntryForm = forwardRef(function EntryForm({ entry, scoreFormat = 'POINT_10
         </label>
 
         <label className="block">
-          <span className="text-xs text-muted-foreground">Puntuación</span>
+          <span className="text-xs text-muted-foreground">{t('Puntuación')}</span>
           <Stepper
             value={form.score}
             min={0}
@@ -524,7 +527,7 @@ const EntryForm = forwardRef(function EntryForm({ entry, scoreFormat = 'POINT_10
 
       <div className="grid gap-3 grid-cols-2 mt-3">
         <label className="block">
-          <span className="text-xs text-muted-foreground">Inicio</span>
+          <span className="text-xs text-muted-foreground">{t('Inicio')}</span>
           <DateField
             value={form.startedAt}
             onChange={(v) => setForm({ ...form, startedAt: v })}
@@ -532,7 +535,7 @@ const EntryForm = forwardRef(function EntryForm({ entry, scoreFormat = 'POINT_10
         </label>
 
         <label className="block">
-          <span className="text-xs text-muted-foreground">Fin</span>
+          <span className="text-xs text-muted-foreground">{t('Fin')}</span>
           <DateField
             value={form.completedAt}
             onChange={(v) => setForm({ ...form, completedAt: v })}
@@ -543,7 +546,7 @@ const EntryForm = forwardRef(function EntryForm({ entry, scoreFormat = 'POINT_10
       {err && <p className="mt-3 text-sm text-destructive">{err}</p>}
 
       <div className="mt-4 flex items-center justify-between gap-3">
-        {!entry && <span className="text-xs text-muted-foreground">Se añadirá a tu lista de AniList.</span>}
+        {!entry && <span className="text-xs text-muted-foreground">{t('Se añadirá a tu lista de AniList.')}</span>}
         <Button type="submit" size="sm" disabled={saving || !isDirty} className="ml-auto">
           {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
           Guardar
@@ -658,7 +661,7 @@ function CharactersDialog({ open, onClose, mediaId, connected }) {
 
       {!busy && !err && list.length === 0 && (
         <p className="py-8 text-center text-sm text-muted-foreground">
-          No hay personajes registrados en AniList.
+          {t('No hay personajes registrados en AniList.')}
         </p>
       )}
 
@@ -670,8 +673,8 @@ function CharactersDialog({ open, onClose, mediaId, connected }) {
             size="sm"
             disabled={!connected || favBusy}
             onClick={toggleFav}
-            title={connected ? (detail?.isFavourite ? 'Quitar de favoritos' : 'Añadir a favoritos') : 'Conecta tu cuenta para dar me gusta'}
-            aria-label={detail?.isFavourite ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+            title={t(connected ? (detail?.isFavourite ? 'Quitar de favoritos' : 'Añadir a favoritos') : 'Conecta tu cuenta para dar me gusta')}
+            aria-label={t(detail?.isFavourite ? 'Quitar de favoritos' : 'Añadir a favoritos')}
             className="absolute -top-1 -right-1 h-8 gap-1.5 px-2.5 text-xs"
           >
             <Heart className={cn('w-4 h-4', detail?.isFavourite && 'fill-destructive text-destructive')} />
@@ -756,7 +759,7 @@ function CharactersDialog({ open, onClose, mediaId, connected }) {
               ) : (
                 <ChevronLeft className="w-4 h-4 mr-2 rotate-90" />
               )}
-              Cargar más
+              {t('Cargar más')}
               <span className="opacity-70 ml-2">
                 {list.length}/{total}
               </span>
@@ -769,6 +772,7 @@ function CharactersDialog({ open, onClose, mediaId, connected }) {
 }
 
 export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose }) {
+  const { t } = useI18n();
   const scale = useScale();
   const [coverSize, setCoverSize] = useState(() => settings.get().coverSize);
   const coverScale = useResponsiveCoverSize(coverSize) / 160;
@@ -906,10 +910,10 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
           <p className="text-sm text-muted-foreground">{err}</p>
           <div className="flex gap-2">
             <Button variant="secondary" size="sm" onClick={() => tracking.unlink(mangaUrl, sourceId)}>
-              <Unlink className="w-4 h-4 mr-2" /> Desvincular
+              <Unlink className="w-4 h-4 mr-2" /> {t('Desvincular')}
             </Button>
             <Button size="sm" onClick={() => { anilist.clearCache(); setData(null); setErr(''); setLinkedId(linkedId); }}>
-              <Loader2 className="w-4 h-4 mr-2" /> Reintentar
+              <Loader2 className="w-4 h-4 mr-2" /> {t('Reintentar')}
             </Button>
           </div>
         </div>
@@ -935,7 +939,7 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
                 rel="noreferrer"
                 className={cn('inline-flex items-center gap-1.5 text-xs text-primary mt-3 hover:underline')}
               >
-                <ExternalLink className="w-3.5 h-3.5" /> Ver en AniList
+              <ExternalLink className="w-3.5 h-3.5" /> {t('Ver en AniList')}
               </a>
             )}
             <button
@@ -943,7 +947,7 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
               onClick={() => setShowChars(true)}
               className="inline-flex items-center gap-1.5 text-xs text-muted-foreground mt-2 hover:text-foreground transition-colors"
             >
-              <Users className="w-3.5 h-3.5" /> Ver personajes
+              <Users className="w-3.5 h-3.5" /> {t('Ver personajes')}
             </button>
           </div>
 
@@ -956,8 +960,8 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
               <Button
                 variant="ghost"
                 size="icon"
-                title="Desvincular"
-                aria-label="Desvincular"
+                title={t('Desvincular')}
+                aria-label={t('Desvincular')}
                 onClick={() => { tracking.unlink(mangaUrl, sourceId); anilist.clearCache(); onClose(); }}
               >
                 <Unlink className="w-4 h-4" />
@@ -966,8 +970,8 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
 
             {(() => {
               const facts = [
-                data.status && STATUS_ES[data.status] || data.status,
-                data.format && FORMAT_ES[data.format] || data.format,
+                data.status && t(STATUS_ES[data.status] || data.status),
+                data.format && t(FORMAT_ES[data.format] || data.format),
                 data.startDate,
                 data.endDate
               ].filter(Boolean);
@@ -985,9 +989,9 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
 
             {(data.chapters != null || data.volumes != null) && (
               <p className="mt-2 text-xs text-muted-foreground">
-                {data.chapters != null && <>{data.chapters} capítulos</>}
+                {data.chapters != null && <>{data.chapters} {t('capítulos')}</>}
                 {data.chapters != null && data.volumes != null && ', '}
-                {data.volumes != null && <>en {data.volumes} volúmenes</>}
+                {data.volumes != null && <>{t('en')} {data.volumes} {t('volúmenes')}</>}
               </p>
             )}
 
@@ -1013,12 +1017,12 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
           open
           onClose={() => setConfirmDiscard(false)}
           scale={scale}
-          title="Guardar cambios"
+          title={t('Guardar cambios')}
           hideDivider
           bodyClassName="p-5"
         >
           <p className="text-sm text-muted-foreground">
-            Hay cambios sin guardar en tu seguimiento de AniList. ¿Quieres guardarlos?
+            {t('Hay cambios sin guardar en tu seguimiento de AniList. ¿Quieres guardarlos?')}
           </p>
           <div className="flex justify-end gap-2 mt-5">
             <Button

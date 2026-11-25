@@ -1,6 +1,7 @@
 import { motion, useReducedMotion } from 'framer-motion';
 import { cn } from '../../lib/utils.js';
 import { useScale, px, fontPx } from '../../lib/useScale.js';
+import { useI18n } from '../../lib/i18n.js';
 
 const TONES = {
   neutral: 'text-muted-foreground/55',
@@ -24,6 +25,7 @@ export function EmptyState({
 }) {
   const reduce = useReducedMotion();
   const scale = useScale();
+  const { t } = useI18n();
 
   return (
     <motion.div
@@ -56,7 +58,7 @@ export function EmptyState({
         className="font-semibold text-foreground"
         style={{ fontSize: fontPx(compact ? 14 : 16, scale, compact ? 12 : 13) }}
       >
-        {title}
+        {typeof title === 'string' ? t(title) : title}
       </h3>
 
       {description && (
@@ -68,7 +70,7 @@ export function EmptyState({
             marginBottom: action ? px(24, scale, 18) : 0
           }}
         >
-          {description}
+          {typeof description === 'string' ? t(description) : description}
         </p>
       )}
 

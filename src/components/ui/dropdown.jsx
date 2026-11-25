@@ -4,6 +4,7 @@ import { Check, ChevronDown } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
 import { px, useScale, fontPx } from '../../lib/useScale.js';
 import { Input } from './input.jsx';
+import { useI18n } from '../../lib/i18n.js';
 
 const searchText = (value) => String(value).normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase();
 
@@ -25,6 +26,7 @@ export function Dropdown({
   style,
   scale
 }) {
+  const { t } = useI18n();
   const currentScale = useScale();
   const sc = scale ?? currentScale;
   const [open, setOpen] = useState(false);
@@ -113,7 +115,7 @@ export function Dropdown({
   const visibleOptions = multiple && normalizedQuery
     ? options.filter((option) => searchText(option.label).includes(normalizedQuery))
     : options;
-  const buttonLabel = multiple && value.length ? `${placeholder} (${value.length})` : current?.buttonLabel ?? current?.label ?? placeholder;
+  const buttonLabel = multiple && value.length ? `${t(placeholder)} (${value.length})` : t(current?.buttonLabel ?? current?.label ?? placeholder);
 
   const menu = open && (
     <div
@@ -135,8 +137,8 @@ export function Dropdown({
           <Input
             ref={searchRef}
             className="h-9"
-            aria-label={`Buscar en ${ariaLabel}`}
-            placeholder="Buscar género…"
+            aria-label={t(`Buscar en ${ariaLabel}`)}
+            placeholder={t('Buscar género…')}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -145,7 +147,7 @@ export function Dropdown({
       <div
         ref={listRef}
         role="listbox"
-        aria-label={ariaLabel}
+        aria-label={t(ariaLabel)}
         aria-multiselectable={multiple || undefined}
         className="dd-scroll min-h-0 flex-auto overflow-y-auto bg-popover"
         style={{
@@ -153,7 +155,7 @@ export function Dropdown({
         }}
         data-scrollable
       >
-        {multiple && visibleOptions.length === 0 && <p className="px-2 py-2 text-muted-foreground">No se encontraron géneros.</p>}
+        {multiple && visibleOptions.length === 0 && <p className="px-2 py-2 text-muted-foreground">{t('No se encontraron géneros.')}</p>}
         {visibleOptions.map((o) => {
           const active = multiple ? value.includes(o.value) : o.value === value;
           return (
@@ -184,7 +186,7 @@ export function Dropdown({
                 fontSize: fontPx(14, sc, 12)
               }}
             >
-              {o.label}
+              {t(o.label)}
               {multiple && active && <Check aria-hidden className="ml-2 inline h-3.5 w-3.5" />}
             </button>
           );
@@ -198,7 +200,7 @@ export function Dropdown({
       <button
         ref={btnRef}
         type="button"
-        aria-label={ariaLabel}
+        aria-label={t(ariaLabel)}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => {

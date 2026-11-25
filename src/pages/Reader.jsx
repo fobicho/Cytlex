@@ -18,6 +18,7 @@ import { EmptyState } from '../components/ui/empty-state.jsx';
 import { useToast } from '../components/Toast.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
+import { useI18n } from '../lib/i18n.js';
 
 const chapterUrlKey = (value) => {
   try {
@@ -293,7 +294,7 @@ function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFa
           <span>{preloadError || imageError || `No se pudo cargar ${alt.toLowerCase()}.`}</span>
           <div className="flex flex-wrap justify-center gap-2">
             {blockedChapterUrl && alternativeSourcesUrl && (
-              <Link to={alternativeSourcesUrl} className={buttonVariants({ size: 'sm' })}>Buscar otras fuentes</Link>
+              <Link to={alternativeSourcesUrl} className={buttonVariants({ size: 'sm' })}>{t('Buscar otras fuentes')}</Link>
             )}
             {blockedChapterUrl && <OnfChapterLink href={blockedChapterUrl} />}
             <Button size="sm" variant="secondary" onClick={async () => {
@@ -319,7 +320,7 @@ function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFa
                 setAttempt((n) => n + 1);
               }
             }}>
-              Reintentar
+              {t('Reintentar')}
             </Button>
           </div>
         </div>
@@ -393,6 +394,7 @@ function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFa
 }
 
 export default function Reader() {
+  const { t } = useI18n();
   const loc = useLocation();
   const params = new URLSearchParams(loc.search);
   const chapterUrl = params.get('u') || '';
@@ -1252,8 +1254,8 @@ export default function Reader() {
         face="（・_・）"
         tone="prompt"
         title="Extensión desactivada"
-        description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para volver a usarla."
-        action={<Button onClick={() => { window.location.hash = '#/ajustes'; }}>Ir a Ajustes</Button>}
+        description={t('Activa «Mostrar extensiones +18» en Ajustes > Extensiones para volver a usarla.')}
+        action={<Button onClick={() => { window.location.hash = '#/ajustes'; }}>{t('Ir a Ajustes')}</Button>}
       />
     );
   }
@@ -1290,7 +1292,7 @@ export default function Reader() {
             variant="ghost"
             size="sm"
             className="-ml-3 min-w-0 max-w-full justify-start hover:bg-transparent hover:text-foreground"
-            title="Volver al detalle"
+            title={t('Volver al detalle')}
             aria-label={`Volver al detalle de ${mangaTitle}`}
             onClick={goBack}
             style={{
@@ -1308,7 +1310,7 @@ export default function Reader() {
         </h1>
 
         <fieldset
-          aria-label="Controles de lectura"
+          aria-label={t('Controles de lectura')}
           disabled={!chapterReady}
           className="col-start-1 row-start-2 mx-auto grid w-full min-w-0 max-w-[31rem] grid-cols-2 gap-1.5 disabled:opacity-60 min-[420px]:grid-cols-[minmax(0,1.2fr)_minmax(0,1.55fr)_minmax(0,1fr)] md:col-start-2 md:row-start-1 md:w-[31rem] md:gap-2"
         >
@@ -1348,8 +1350,8 @@ export default function Reader() {
               size="icon"
               variant="ghost"
               className={cn(chapterArrowClass, 'rounded-l-xl border-r border-border/70')}
-              title="Capítulo anterior"
-              aria-label="Capítulo anterior"
+              title={t('Capítulo anterior')}
+              aria-label={t('Capítulo anterior')}
               disabled={!previousChapter?.url}
               onClick={() => { if (previousChapter?.url) window.location.hash = go(previousChapter.url); }}
             >
@@ -1374,8 +1376,8 @@ export default function Reader() {
               size="icon"
               variant="ghost"
               className={cn(chapterArrowClass, 'rounded-r-xl border-l border-border/70')}
-              title="Capítulo siguiente"
-              aria-label="Capítulo siguiente"
+              title={t('Capítulo siguiente')}
+              aria-label={t('Capítulo siguiente')}
               disabled={!nextChapter?.url}
               onClick={() => { if (nextChapter?.url) window.location.hash = go(nextChapter.url); }}
             >
@@ -1405,21 +1407,21 @@ export default function Reader() {
         <EmptyState
           face="（╯°□°）╯︵ ┻━┻"
           tone="error"
-          title="No se pudo cargar el capítulo"
+          title={t('No se pudo cargar el capítulo')}
           description={err}
           action={
             <div className="flex flex-wrap items-center justify-center gap-2">
               {alternativeSourcesUrl && (
-                <Link to={alternativeSourcesUrl} className={buttonVariants()}>Buscar otras fuentes</Link>
+                <Link to={alternativeSourcesUrl} className={buttonVariants()}>{t('Buscar otras fuentes')}</Link>
               )}
               {onfChapterUrl && <OnfChapterLink href={onfChapterUrl} />}
-              <Button onClick={() => { setErr(''); setRetryTick((t) => t + 1); }}>Reintentar</Button>
-              <Button variant="secondary" onClick={goBack}>Volver al detalle</Button>
+              <Button onClick={() => { setErr(''); setRetryTick((t) => t + 1); }}>{t('Reintentar')}</Button>
+              <Button variant="secondary" onClick={goBack}>{t('Volver al detalle')}</Button>
             </div>
           }
         />
       ) : !chapterReady ? (
-        <div role="status" aria-label="Cargando capítulo" className="grid min-h-0 flex-1 place-items-center">
+        <div role="status" aria-label={t('Cargando capítulo')} className="grid min-h-0 flex-1 place-items-center">
           <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
         </div>
       ) : mode === 'vertical' ? (

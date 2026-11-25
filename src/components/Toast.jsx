@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { px, useScale } from '../lib/useScale.js';
+import { useI18n } from '../lib/i18n.js';
 
 const ToastCtx = createContext(null);
 
@@ -21,6 +22,7 @@ const TONES = {
 let seq = 0;
 
 export function ToastProvider({ children }) {
+  const { t: tr } = useI18n();
   const scale = useScale();
   const [items, setItems] = useState([]);
   const timers = useRef(new Map());
@@ -54,11 +56,11 @@ export function ToastProvider({ children }) {
         style={{ top: `calc(${px(48, scale, 40)} + env(safe-area-inset-top, 0px))`, right: `calc(${px(16, scale, 12)} + env(safe-area-inset-right, 0px))`, gap: px(8, scale, 6), width: px(340, scale, 272), maxWidth: `calc(100vw - ${px(32, scale, 24)} - env(safe-area-inset-right, 0px))` }}
       >
         <AnimatePresence initial={false}>
-          {items.map((t) => {
-            const Icon = t.icon || ICONS[t.variant] || Info;
+          {items.map((item) => {
+            const Icon = item.icon || ICONS[item.variant] || Info;
             return (
               <motion.div
-                key={t.id}
+                key={item.id}
                 layout
                 initial={{ opacity: 0, x: 40, scale: 0.96 }}
                 animate={{ opacity: 1, x: 0, scale: 1 }}
@@ -66,32 +68,32 @@ export function ToastProvider({ children }) {
                 transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
                 className="pointer-events-auto flex items-start gap-3 rounded-xl border border-border bg-card/95 backdrop-blur-xl shadow-2xl px-4 py-3"
               >
-                <Icon className={cn('w-4 h-4 mt-0.5 shrink-0', TONES[t.variant] || TONES.info, t.loading && 'animate-spin text-primary')} />
+                <Icon className={cn('w-4 h-4 mt-0.5 shrink-0', TONES[item.variant] || TONES.info, item.loading && 'animate-spin text-primary')} />
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium leading-snug">{t.title}</div>
-                  {t.description && (
-                    <div className="text-xs text-muted-foreground mt-0.5 leading-snug">{t.description}</div>
+                  <div className="text-sm font-medium leading-snug">{tr(item.title)}</div>
+                  {item.description && (
+                    <div className="text-xs text-muted-foreground mt-0.5 leading-snug">{tr(item.description)}</div>
                   )}
-                  {t.action && (
+                  {item.action && (
                     <button
                       type="button"
                       onClick={() => {
-                        dismiss(t.id);
-                        t.action.onClick?.();
+                        dismiss(item.id);
+                        item.action.onClick?.();
                       }}
                       className="mt-2 text-xs font-medium text-primary hover:underline"
                     >
-                      {t.action.label}
+                      {tr(item.action.label)}
                     </button>
                   )}
                 </div>
                 <button
                   type="button"
                   onClick={() => {
-                    t.onDismiss?.();
-                    dismiss(t.id);
+                    item.onDismiss?.();
+                    dismiss(item.id);
                   }}
-                  aria-label="Cerrar"
+                  aria-label={tr('Cerrar')}
                   className="shrink-0 grid place-items-center w-5 h-5 rounded-md text-muted-foreground hover:text-foreground transition-colors"
                 >
                   <X className="w-3.5 h-3.5" />

@@ -11,6 +11,7 @@ import { browserImageUrl } from '../lib/browserHttp.js';
 import { rememberMangaPreview, sourceCatalogState } from '../lib/searchState.js';
 import { SourceBadge, preloadSourceIcon } from './SourceBadge.jsx';
 import { useLibraryCover } from '../lib/useLibraryCover.js';
+import { useI18n } from '../lib/i18n.js';
 
 const prefetched = new Set();
 const MAX_PREFETCHED = 80;
@@ -23,6 +24,7 @@ function prefetch(url, sourceId) {
 }
 
 function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenUnavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', returnTo = '', onSelect, coverSize, scale: uiScale = 1, chapterCount, useLibraryCoverCache = false, bundledCoverOnly = false, savedInLibrary = false }) {
+  const { language } = useI18n();
   const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}${returnTo ? `&back=${encodeURIComponent(returnTo)}` : ''}`;
   const sourceManifest = extensions.manifest(sourceId);
   const savedSourceName = String(m.sourceName || '');
@@ -234,7 +236,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
           )}
           {chapterCount > 0 && !unavailable && (
             <span
-              title={`${chapterCount} capítulos sin leer`}
+              title={language === 'en' ? `${chapterCount} unread chapters` : `${chapterCount} capítulos sin leer`}
               style={badgeStyle}
               className="pointer-events-none absolute top-1.5 right-1.5 z-10 grid place-items-center rounded-full bg-black/75 font-semibold text-white tabular-nums"
             >
@@ -244,7 +246,7 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
           {savedInLibrary && !unavailable && (
             <span className="pointer-events-none absolute bottom-2 right-2 z-10 inline-flex max-w-[calc(100%-1rem)] items-center gap-1 rounded-full border border-border bg-background/95 px-2 py-1 font-medium text-foreground shadow-sm" style={{ fontSize: `${fontPx(11, 9)}px` }}>
               <Check aria-hidden="true" style={{ width: `${px(12, 10)}px`, height: `${px(12, 10)}px` }} />
-              <span className="truncate">En biblioteca</span>
+              <span className="truncate">{t('En biblioteca')}</span>
             </span>
           )}
         </div>

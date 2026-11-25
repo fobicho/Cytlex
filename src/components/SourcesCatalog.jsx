@@ -20,6 +20,7 @@ import { EmptyState } from './ui/empty-state.jsx';
 import { Input } from './ui/input.jsx';
 import { useScale, px, fontPx, toolbarButtonStyle } from '../lib/useScale.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
+import { useI18n } from '../lib/i18n.js';
 
 const CATALOG_BATCH_SIZE = 40;
 const OLYMPUS_CATALOG_PAGE_SIZE = 15;
@@ -183,6 +184,7 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
 }
 
 export default function SourcesCatalog({ sources, initialSourceId = '', active = true, savedMangaKeys = new Set(), hideSavedManga = false }) {
+  const { t } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
   const scale = useScale();
@@ -702,10 +704,10 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
     return (
       <EmptyState
         face={hidden ? '（・_・;）' : '(；ω；)'}
-        title={hidden ? 'No hay fuentes visibles' : noneConfigured ? 'No hay fuentes disponibles' : 'No hay fuentes instaladas'}
+        title={t(hidden ? 'No hay fuentes visibles' : noneConfigured ? 'No hay fuentes disponibles' : 'No hay fuentes instaladas')}
         description={hidden
-          ? 'Activa «Mostrar extensiones +18» en Ajustes > Extensiones para verlas.'
-          : noneConfigured ? 'Activa al menos un idioma en la configuración de sus extensiones.' : undefined}
+          ? t('Activa «Mostrar extensiones +18» en Ajustes > Extensiones para verlas.')
+          : noneConfigured ? t('Activa al menos un idioma en la configuración de sus extensiones.') : undefined}
       />
     );
   }
@@ -722,8 +724,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
             variant="secondary"
             size="sm"
             className="source-sort-trigger rounded-none"
-            title="Ordenar fuentes"
-            aria-label={`Ordenar fuentes: ${sourceSort === 'title-desc' ? 'Z-A' : sourceSort === 'added' ? 'Adición' : 'A-Z'}`}
+            title={t('Ordenar fuentes')}
+            aria-label={t('Ordenar fuentes: {order}', { order: sourceSort === 'title-desc' ? 'Z-A' : sourceSort === 'added' ? t('Adición') : 'A-Z' })}
             onClick={() => {
               const modes = ['title-asc', 'title-desc', 'added'];
               const next = modes[(modes.indexOf(sourceSort) + 1) % modes.length];
@@ -733,7 +735,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
             style={toolbarButtonStyle(scale)}
           >
             <ArrowUpDown className="mr-2" style={{ width: px(14, scale, 11), height: px(14, scale, 11) }} />
-            {sourceSort === 'title-desc' ? 'Z-A' : sourceSort === 'added' ? 'Adición' : 'A-Z'}
+            {sourceSort === 'title-desc' ? 'Z-A' : sourceSort === 'added' ? t('Adición') : 'A-Z'}
           </Button>,
           toolbarTarget
         )}
@@ -748,7 +750,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                 onClick={() => selectSource(manifest.id)}
                 className="flex w-full items-center rounded-lg text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 style={{ minHeight: px(68, scale, 56), padding: px(14, scale, 11), gap: px(12, scale, 9) }}
-                aria-label={`Abrir catálogo de ${manifest.name}`}
+                aria-label={t('Abrir catálogo de {name}', { name: manifest.name })}
               >
                 <SourceBadge m={manifest} style={{ width: px(40, scale, 32), height: px(40, scale, 32), borderRadius: px(12, scale, 9) }} />
                 <span className="min-w-0 flex-1">
@@ -768,7 +770,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
       {selected && (
         <>
           <div className="flex min-w-0 items-center" style={{ gap: px(10, scale, 8), minHeight: px(36, scale, 30) }}>
-            <Button type="button" variant="ghost" size="icon" className="hover:bg-transparent hover:text-foreground" onClick={showSourceList} title="Volver a Fuentes" aria-label="Volver a Fuentes" style={{ width: px(34, scale, 28), height: px(34, scale, 28) }}>
+            <Button type="button" variant="ghost" size="icon" className="hover:bg-transparent hover:text-foreground" onClick={showSourceList} title={t('Volver a Fuentes')} aria-label={t('Volver a Fuentes')} style={{ width: px(34, scale, 28), height: px(34, scale, 28) }}>
               <ArrowLeft style={{ width: px(18, scale, 15), height: px(18, scale, 15) }} />
             </Button>
             <SourceBadge m={selected.manifest} style={{ width: px(30, scale, 24), height: px(30, scale, 24) }} />
@@ -886,8 +888,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                   <Input
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder={`Buscar en ${selected.manifest.name}…`}
-                    aria-label={`Buscar mangas en ${selected.manifest.name}`}
+                  placeholder={t('Buscar en {name}', { name: selected.manifest.name })}
+                  aria-label={t('Buscar mangas en {name}', { name: selected.manifest.name })}
                     className="bg-muted/50 border-none"
                     style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(36, scale, 30), paddingRight: px(canRestoreCatalog ? 40 : 12, scale, canRestoreCatalog ? 32 : 9) }}
                   />
@@ -896,8 +898,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                       type="button"
                       variant="ghost"
                       size="icon"
-                      aria-label={`Mostrar catálogo principal de ${selected.manifest.name}`}
-                      title="Mostrar catálogo principal"
+                      aria-label={t('Mostrar catálogo principal de {name}', { name: selected.manifest.name })}
+                      title={t('Mostrar catálogo principal')}
                       onClick={reset}
                       disabled={loading}
                       className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
@@ -909,7 +911,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                 </div>
                 <Button type="submit" disabled={loading || !query.trim()} style={{ width: px(96, scale, 88), height: px(36, scale, 30), fontSize: fontPx(14, scale, 12) }}>
                   <Search className="mr-2" style={{ width: px(15, scale, 12), height: px(15, scale, 12) }} />
-                  Buscar
+                  {t('Buscar')}
                 </Button>
               </form>
           </div>
@@ -918,14 +920,14 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
             <EmptyState
               face="(；_；)"
               tone="error"
-              title="No se pudo cargar esta fuente"
-              description={sourceErrorMessage(error.cause, selected.manifest.name, 'No se pudo cargar el catálogo.')}
-              action={<Button variant="secondary" onClick={() => loadCatalog(sourceId, error.params)}>Reintentar</Button>}
+              title={t('No se pudo cargar esta fuente')}
+              description={sourceErrorMessage(error.cause, selected.manifest.name, t('No se pudo cargar el catálogo.'))}
+              action={<Button variant="secondary" onClick={() => loadCatalog(sourceId, error.params)}>{t('Reintentar')}</Button>}
             />
           ) : loading ? (
             <div className="flex items-center justify-center text-muted-foreground" style={{ gap: px(10, scale, 8), padding: `${px(44, scale, 32)} 0` }}>
               <Loader2 className="animate-spin" style={{ width: px(20, scale, 16), height: px(20, scale, 16) }} />
-              <span style={{ fontSize: fontPx(14, scale, 12) }}>Cargando mangas…</span>
+              <span style={{ fontSize: fontPx(14, scale, 12) }}>{t('Cargando mangas…')}</span>
             </div>
           ) : visibleItems.length || (hideSavedManga && hasMore) ? (
             <>
@@ -951,14 +953,14 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
                   )}
                 />
               ) : (
-                <EmptyState face="（・_・）" title="No hay mangas nuevos" description="Los mangas guardados están ocultos en Explorar." />
+                <EmptyState face="（・_・）" title={t('No hay mangas nuevos')} description={t('Los mangas guardados están ocultos en Explorar.')} />
               )}
               {hasMore && (
                 <div className="flex flex-col items-center" style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 8) }}>
-                  {error?.append && <p role="status" className="max-w-full text-center text-sm text-muted-foreground [overflow-wrap:anywhere]">{sourceErrorMessage(error.cause, selected.manifest.name, 'No se pudo cargar más mangas.')}</p>}
+                  {error?.append && <p role="status" className="max-w-full text-center text-sm text-muted-foreground [overflow-wrap:anywhere]">{sourceErrorMessage(error.cause, selected.manifest.name, t('No se pudo cargar más mangas.'))}</p>}
                   <Button variant="secondary" onClick={() => loadCatalog(sourceId, loadedParams, true)} disabled={loadingMore} style={{ height: px(40, scale, 33), fontSize: fontPx(14, scale, 12), paddingLeft: px(16, scale, 12), paddingRight: px(16, scale, 12), gap: px(8, scale, 6) }}>
                     {loadingMore && <Loader2 className="animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />}
-                    {loadingMore ? 'Cargando…' : error?.append ? 'Reintentar' : 'Cargar más mangas'}
+                    {t(loadingMore ? 'Cargando…' : error?.append ? 'Reintentar' : 'Cargar más mangas')}
                   </Button>
                 </div>
               )}
@@ -966,8 +968,8 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
           ) : (
             <EmptyState
               face="¯\\_(ツ)_/¯"
-              title={hideSavedManga && items.length ? 'No hay mangas nuevos' : 'No se encontraron mangas'}
-              description={hideSavedManga && items.length ? 'Los mangas guardados están ocultos en Explorar.' : undefined}
+              title={t(hideSavedManga && items.length ? 'No hay mangas nuevos' : 'No se encontraron mangas')}
+              description={hideSavedManga && items.length ? t('Los mangas guardados están ocultos en Explorar.') : undefined}
             />
           )}
         </>

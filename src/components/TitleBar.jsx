@@ -3,11 +3,13 @@ import { Minus, Square, Copy, X } from 'lucide-react';
 import { appWindow } from '../lib/appWindow.js';
 import { cn } from '../lib/utils.js';
 import { px, useScale, fontPx } from '../lib/useScale.js';
+import { useI18n } from '../lib/i18n.js';
 
 const DRAG = { WebkitAppRegion: 'drag' };
 const NO_DRAG = { WebkitAppRegion: 'no-drag' };
 
 export default function TitleBar() {
+  const { t } = useI18n();
   const scale = useScale();
   const [maximized, setMaximized] = useState(false);
 
@@ -37,8 +39,8 @@ export default function TitleBar() {
         <button
           type="button"
           className={cn(btn, 'hover:bg-accent hover:text-accent-foreground')}
-          aria-label="Minimizar"
-          title="Minimizar"
+          aria-label={t('Minimizar')}
+          title={t('Minimizar')}
           onClick={() => appWindow.minimize()}
         >
           <Minus className="w-4 h-4" />
@@ -46,8 +48,8 @@ export default function TitleBar() {
         <button
           type="button"
           className={cn(btn, 'hover:bg-accent hover:text-accent-foreground')}
-          aria-label={maximized ? 'Restaurar' : 'Maximizar'}
-          title={maximized ? 'Restaurar' : 'Maximizar'}
+          aria-label={t(maximized ? 'Restaurar' : 'Maximizar')}
+          title={t(maximized ? 'Restaurar' : 'Maximizar')}
           onClick={() => appWindow.toggleMaximize()}
         >
           {maximized ? <Copy className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
@@ -55,8 +57,8 @@ export default function TitleBar() {
         <button
           type="button"
           className={cn(btn, 'hover:bg-destructive hover:text-destructive-foreground')}
-          aria-label="Cerrar"
-          title="Cerrar"
+          aria-label={t('Cerrar')}
+          title={t('Cerrar')}
           onClick={() => appWindow.close()}
         >
           <X className="w-4 h-4" />

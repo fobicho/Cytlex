@@ -14,6 +14,7 @@ export function resolveMode(mode) {
 const defaults = {
   theme: 'default',
   mode: 'system',
+  language: 'system',
   readerMode: 'paginado',
   readerZoom: 100,
   readerDoublePage: false,
@@ -52,6 +53,7 @@ function normalize(s) {
   else if (theme === 'light') { theme = 'default'; mode = 'light'; }
   if (!THEME_IDS.includes(theme)) theme = 'default';
   if (!MODE_IDS.includes(mode)) mode = 'system';
+  if (!['system', 'es', 'en'].includes(rest.language)) rest.language = 'system';
   return { ...rest, theme, mode };
 }
 

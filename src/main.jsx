@@ -9,6 +9,7 @@ import { ToastProvider } from './components/Toast.jsx';
 import { migrateLegacyStorage } from './lib/migrate.js';
 import { resolveMode, settings } from './lib/settings.js';
 import { consumeBrowserOAuthCallback } from './lib/session.js';
+import { I18nProvider } from './lib/i18n.js';
 import './index.css';
 
 consumeBrowserOAuthCallback();
@@ -23,6 +24,7 @@ function Root() {
   const [splashDone, setSplashDone] = useState(false);
   const [splashExiting, setSplashExiting] = useState(false);
   const [showTutorial, setShowTutorial] = useState(() => !settings.get().tutorialSeen);
+  const [tutorialLanguage, setTutorialLanguage] = useState('es');
   const [appVisible, setAppVisible] = useState(false);
   const [appMounted, setAppMounted] = useState(false);
   const revealApp = useCallback(() => {
@@ -45,6 +47,7 @@ function Root() {
   const handleTutorialExitStart = revealApp;
   return (
     <HashRouter>
+      <I18nProvider languageOverride={showTutorial ? tutorialLanguage : null}>
       <ToastProvider>
         <motion.div
           initial={false}
@@ -65,9 +68,12 @@ function Root() {
             onRevealApp={revealApp}
             onHideApp={hideApp}
             enteringWithSplash={!splashDone}
+            language={tutorialLanguage}
+            onLanguageChange={setTutorialLanguage}
           />
         )}
       </ToastProvider>
+      </I18nProvider>
     </HashRouter>
   );
 }

@@ -27,6 +27,7 @@ import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
 import { browserImageUrl, sourceErrorMessage } from '../lib/browserHttp.js';
 import Catalog from './Catalog.jsx';
+import { useI18n } from '../lib/i18n.js';
 
 const SYNOPSIS_CONTROL_SIZE = 24;
 const SYNOPSIS_CONTROL_GAP = 4;
@@ -107,17 +108,18 @@ function writeActiveDetail(key, value) {
 }
 
 function DetailBackBar({ onBack, scale }) {
+  const { t } = useI18n();
   const inset = px(16, scale, 12);
   return (
     <div className="sticky top-0 z-20 flex shrink-0 items-center border-b border-border/70 bg-sidebar" style={{ minHeight: px(38, scale, 34), marginLeft: `-${inset}`, marginRight: 'calc(-1 * var(--detail-right-padding, 15px))', paddingLeft: inset, paddingRight: inset, marginBottom: px(12, scale, 10) }}>
       <Button size="sm" variant="ghost" className="subroute-back-button -ml-3 text-muted-foreground hover:bg-transparent hover:text-foreground" onClick={(event) => { event.currentTarget.blur(); onBack(); }} style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(8, scale, 6), paddingRight: px(8, scale, 6) }}>
-        <ChevronLeft className="mr-1" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Volver
+        <ChevronLeft className="mr-1" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> {t('Volver')}
       </Button>
     </div>
   );
 }
 const CHAPTER_ACTION_HOVER = 'chapter-action-hover rounded-none hover:bg-transparent hover:text-foreground active:font-bold transition-[opacity,color]';
-const chapterDateFormat = new Intl.DateTimeFormat('es');
+const chapterDateFormat = (language) => new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'es');
 const compareChapterGroups = new Intl.Collator('es', { sensitivity: 'base', numeric: true }).compare;
 const compareChapterDates = new Intl.Collator('es', { numeric: true }).compare;
 
@@ -126,10 +128,10 @@ function saveDetailScroll(mangaUrl) {
   if (main) detailScroll.set(mangaUrl, main.scrollTop);
 }
 
-function formatChapterDate(value) {
+function formatChapterDate(value, language) {
   if (!/^\d{4}-\d{2}-\d{2}T/.test(value)) return value;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : chapterDateFormat.format(date);
+  return Number.isNaN(date.getTime()) ? value : chapterDateFormat(language).format(date);
 }
 
 const norm = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -245,6 +247,7 @@ function backToFor(loc) {
 }
 
 const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
+  const { language, t } = useI18n();
   const navigate = useNavigate();
   const loc = locationOverride;
   const mangaUrl = queryUrl(loc);
@@ -1110,10 +1113,10 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                     minHeight: `${Math.round(20 * scale)}px`
                   }}
                 >
-                  {formatChapterDate(c.date)}
+                  {formatChapterDate(c.date, language)}
                   {c.group ? ` · ${c.group}` : ''}
                   {inCourse && Number.isInteger(cap.total) && cap.total > 0
-                    ? ` · pág. ${cap.page + 1}/${cap.total}`
+                    ? ` · ${language === 'en' ? 'p.' : 'pág.'} ${cap.page + 1}/${cap.total}`
                     : ''}
                 </span>
               </span>
@@ -1121,8 +1124,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 <span className="relative">
                   <button
                     type="button"
-                    title="Marcar todos los anteriores como leídos"
-                    aria-label={`Marcar anteriores a ${c.title} como leídos`}
+                    title={t('Marcar todos los anteriores como leídos')}
+                    aria-label={t('Marcar anteriores a {title} como leídos', { title: c.title })}
                     className={cn('flex size-8 shrink-0 items-center justify-center gap-0 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:size-11 max-md:opacity-100', CHAPTER_ACTION_HOVER)}
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMarkBefore({ chapter: c }); }}
                   >
@@ -1134,8 +1137,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                   <span
                     role="button"
                     tabIndex={0}
-                    title="Marcar como no leído"
-                    aria-label={`Marcar ${c.title} como no leído`}
+                    title={t('Marcar como no leído')}
+                    aria-label={t('Marcar {title} como no leído', { title: c.title })}
                     className={cn('flex size-8 shrink-0 items-center justify-center text-primary max-md:size-11', CHAPTER_ACTION_HOVER)}
                     style={{ fontSize: fontPx(13, scale) }}
                     onClick={(e) => { e.preventDefault(); progress.markUnread(c.url, sourceId, mangaUrl); setProgressTick((t) => t + 1); }}
@@ -1152,8 +1155,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                   <span
                     role="button"
                     tabIndex={0}
-                    title="Marcar como leído"
-                    aria-label={`Marcar ${c.title} como leído`}
+                    title={t('Marcar como leído')}
+                    aria-label={t('Marcar {title} como leído', { title: c.title })}
                     className={cn('flex size-8 shrink-0 items-center justify-center text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:size-11 max-md:opacity-100', CHAPTER_ACTION_HOVER)}
                     style={{ fontSize: fontPx(13, scale) }}
                     onClick={(e) => { e.preventDefault(); progress.markRead(c.url, sourceId, cap?.total || 0, mangaUrl); setProgressTick((t) => t + 1); }}
@@ -1198,8 +1201,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     const canMigrate = Boolean(saved?.title && targets.length);
     return (
       <EmptyState
-        title={saved?.title || 'Extensión no disponible'}
-        description={canMigrate ? 'La extensión no se encuentra disponible. Puedes buscar este manga en otra extensión.' : 'La extensión no se encuentra disponible.'}
+        title={saved?.title || t('Extensión no disponible')}
+        description={t(canMigrate ? 'La extensión no se encuentra disponible. Puedes buscar este manga en otra extensión.' : 'La extensión no se encuentra disponible.')}
         action={
           <div className="flex flex-wrap justify-center gap-2">
             {canMigrate && (
@@ -1210,9 +1213,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 params.set('migrationQuery', saved.title);
                 params.set('migrationSearchId', String(Date.now()));
                 navigate({ pathname: loc.pathname, search: params.toString() });
-              }}>Migrar fuente</Button>
+              }}>{t('Migrar fuente')}</Button>
             )}
-            <Button variant="secondary" onClick={() => navigate(backTo)}>Volver</Button>
+            <Button variant="secondary" onClick={() => navigate(backTo)}>{t('Volver')}</Button>
           </div>
         }
       />
@@ -1223,9 +1226,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       <EmptyState
         face="（・_・）"
         tone="prompt"
-        title="Extensión desactivada"
-        description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para volver a usarla."
-        action={<Button onClick={() => { window.location.hash = '#/ajustes'; }}>Ir a Ajustes</Button>}
+        title={t('Extensión desactivada')}
+        description={t('Activa «Mostrar extensiones +18» en Ajustes > Extensiones para volver a usarla.')}
+        action={<Button onClick={() => { window.location.hash = '#/ajustes'; }}>{t('Ir a Ajustes')}</Button>}
       />
     );
   if (!sourceAvailable)
@@ -1236,7 +1239,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         title="Fuente no instalada"
         action={
           <Button onClick={() => { window.location.hash = '#/explorar?tab=extensiones'; }}>
-            Ir a Extensiones
+            {t('Ir a Extensiones')}
           </Button>
         }
       />
@@ -1248,7 +1251,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         tone="error"
         title="No se pudo cargar"
         description={err}
-        action={<Button variant="secondary" onClick={() => setDetailRetry((attempt) => attempt + 1)}>Reintentar</Button>}
+        action={<Button variant="secondary" onClick={() => setDetailRetry((attempt) => attempt + 1)}>{t('Reintentar')}</Button>}
       />
     );
   if (!d)
@@ -1273,10 +1276,10 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             </div>
             {err ? (
               <div className="mt-5 text-sm text-muted-foreground" role="status">
-                <p className="font-medium text-foreground">No se pudieron cargar los capítulos.</p>
-                <p className="mt-1 break-words">{err}</p>
+                <p className="font-medium text-foreground">{t('No se pudieron cargar los capítulos.')}</p>
+                <p className="mt-1 break-words">{t(err)}</p>
                 <Button className="mt-3" variant="secondary" disabled={refreshingDetail} onClick={() => fav ? void refreshLibraryDetail() : setDetailRetry((attempt) => attempt + 1)}>
-                  {fav ? 'Reintentar carga' : 'Reintentar'}
+                  {t(fav ? 'Reintentar carga' : 'Reintentar')}
                 </Button>
               </div>
             ) : savedManga ? null : (
@@ -1360,7 +1363,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           </h1>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
             <span className="min-w-0 truncate text-muted-foreground" style={{ fontSize: fontPx(15, scale) }}>
-              Por {author || 'Autor desconocido'}
+              {t('Por')} {author || t('Autor desconocido')}
             </span>
             <span aria-hidden="true" className="text-muted-foreground">·</span>
             <SourceLine key={sourceId} sourceId={sourceId} manifest={sourceManifest} scale={scale} iconFailed={sourceIconFailed} />
@@ -1381,9 +1384,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         {(d.facts.publicacion || d.facts.periodicidad || d.facts.proximo) && (
           <div className="col-span-2 min-w-0 md:col-span-1 md:col-start-2">
             <div className="flex flex-wrap gap-x-2 text-muted-foreground" style={{ fontSize: fontPx(13, scale) }}>
-              {d.facts.publicacion && <span>Publicado: {d.facts.publicacion}</span>}
-              {d.facts.periodicidad && <span>Periodicidad: {d.facts.periodicidad}</span>}
-              {d.facts.proximo && <span>Próximo capítulo: {d.facts.proximo}</span>}
+              {d.facts.publicacion && <span>{t('Publicado')}: {d.facts.publicacion}</span>}
+              {d.facts.periodicidad && <span>{t('Periodicidad')}: {d.facts.periodicidad}</span>}
+              {d.facts.proximo && <span>{t('Próximo capítulo: {chapter}', { chapter: d.facts.proximo })}</span>}
             </div>
           </div>
         )}
@@ -1415,7 +1418,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                     setAnimate(true);
                     setExpanded((v) => !v);
                   }}
-                  aria-label={expanded ? 'Ver menos' : 'Ver más'}
+                  aria-label={t(expanded ? 'Ver menos' : 'Ver más')}
                   aria-expanded={expanded}
                   className="grid place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent"
                   style={{ width: SYNOPSIS_CONTROL_SIZE, height: SYNOPSIS_CONTROL_SIZE }}
@@ -1473,8 +1476,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             variant="secondary"
             className="detail-square-control"
             disabled={refreshingDetail}
-            title="Actualizar detalle desde la fuente"
-            aria-label="Actualizar detalle desde la fuente"
+            title={t('Actualizar detalle desde la fuente')}
+            aria-label={t('Actualizar detalle desde la fuente')}
             onClick={(event) => { event.currentTarget.blur(); void refreshLibraryDetail(); }}
             style={{
               height: px(40, scale, 33),
@@ -1546,7 +1549,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           </Button>
 
           {catPick?.inline && (
-            <div ref={catPopupRef} role="group" aria-label="Categorías de la biblioteca" className="absolute bottom-full left-0 z-[60] mb-2 w-56 max-w-[calc(100vw-2rem)] rounded-[6px] border border-border/70 bg-card px-2 py-1 pb-2 shadow-lg md:bottom-auto md:top-full md:mb-0 md:mt-2">
+            <div ref={catPopupRef} role="group" aria-label={t('Categorías de la biblioteca')} className="absolute bottom-full left-0 z-[60] mb-2 w-56 max-w-[calc(100vw-2rem)] rounded-[6px] border border-border/70 bg-card px-2 py-1 pb-2 shadow-lg md:bottom-auto md:top-full md:mb-0 md:mt-2">
               <div className="relative">
                 <div ref={categoryListRef} className="dd-scroll category-picker-list -mr-2 flex flex-col overflow-y-auto overscroll-contain pr-2" style={catPick.list.length > 6 ? { maxHeight: categoryRowHeight * 6 } : undefined}>
                   {catPick.list.map((c) => {
@@ -1644,7 +1647,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             }}
           >
             <ArrowRightLeft className="mr-2 shrink-0" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
-            Migrar fuente
+            {t('Migrar fuente')}
           </Button>
         )}
         <Button
@@ -1682,7 +1685,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           <p className="min-w-0 break-words text-sm text-muted-foreground">
             {err}{d.chapters.length ? ' Se muestran los capítulos guardados.' : ''}
           </p>
-          <Button size="sm" variant="secondary" onClick={() => setDetailRetry((attempt) => attempt + 1)}>Reintentar</Button>
+          <Button size="sm" variant="secondary" onClick={() => setDetailRetry((attempt) => attempt + 1)}>{t('Reintentar')}</Button>
         </div>
       )}
       {chapters.length > 0 && <div className="border-t border-border pt-3" style={{ marginTop: px(20, scale, 14) }}>
@@ -1829,7 +1832,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 style={{ height: px(36, scale, 30), padding: `${px(4, scale, 3)}px ${px(12, scale, 10)}px`, fontSize: fontPx(14, scale, 12), lineHeight: px(20, scale, 17) }}
                 onClick={() => setMarkBefore(null)}
               >
-                Cancelar
+                {t('Cancelar')}
               </Button>
               <Button
                 size="sm"
@@ -1898,7 +1901,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 {replacingDuplicate ? 'Reemplazando…' : 'Reemplazar'}
               </Button>
               <Button disabled={replacingDuplicate} onClick={() => { setDup(null); setDuplicateReplaceError(''); }} style={{ height: px(40, scale, 33), padding: `0 ${px(16, scale, 12)}`, fontSize: fontPx(14, scale, 12) }}>
-                Cancelar
+                {t('Cancelar')}
               </Button>
             </div>
           </>
@@ -1930,7 +1933,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 onClick={() => setMigration(null)}
                 style={{ height: px(36, scale, 30), padding: `0 ${px(12, scale, 10)}`, fontSize: fontPx(14, scale, 12) }}
               >
-                Cancelar
+                {t('Cancelar')}
               </Button>
               <Button
                 onClick={() => {

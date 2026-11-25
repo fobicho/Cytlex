@@ -22,6 +22,7 @@ import { cn } from '../lib/utils.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
 import SubrouteTabLabel from '../components/SubrouteTabLabel.jsx';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
+import { useI18n } from '../lib/i18n.js';
 import { migrateSavedManga } from '../lib/mangaMigration.js';
 import { attachHorizontalScrollFade } from '../lib/horizontalScrollFade.js';
 
@@ -231,7 +232,7 @@ function SourceSection({ r, coverSize, scale = 1, animate = false, active = true
             <div className="pointer-events-none absolute inset-0 z-10 hidden md:block">
               <AnimatePresence initial={false}>
                 {canLeft && (
-                  <motion.button key="left" type="button" onClick={() => step(-1)} aria-label="Desplazar resultados a la izquierda" aria-controls={`source-results-${r.id}`} title="Ver mangas anteriores"
+                  <motion.button key="left" type="button" onClick={() => step(-1)} aria-label={tr('Desplazar resultados a la izquierda')} aria-controls={`source-results-${r.id}`} title={tr('Ver mangas anteriores')}
                     initial={{ opacity: 0, transform: `translateY(-50%) translateX(${prefersReducedMotion ? 0 : -4}px)` }}
                     animate={{ opacity: 1, transform: 'translateY(-50%) translateX(0)' }}
                     exit={{ opacity: 0, transform: `translateY(-50%) translateX(${prefersReducedMotion ? 0 : -4}px)` }}
@@ -244,7 +245,7 @@ function SourceSection({ r, coverSize, scale = 1, animate = false, active = true
                   </motion.button>
                 )}
                 {canRight && (
-                  <motion.button key="right" type="button" onClick={() => step(1)} aria-label="Desplazar resultados a la derecha" aria-controls={`source-results-${r.id}`} title="Ver más mangas"
+                  <motion.button key="right" type="button" onClick={() => step(1)} aria-label={tr('Desplazar resultados a la derecha')} aria-controls={`source-results-${r.id}`} title={tr('Ver más mangas')}
                     initial={{ opacity: 0, transform: `translateY(-50%) translateX(${prefersReducedMotion ? 0 : 4}px)` }}
                     animate={{ opacity: 1, transform: 'translateY(-50%) translateX(0)' }}
                     exit={{ opacity: 0, transform: `translateY(-50%) translateX(${prefersReducedMotion ? 0 : 4}px)` }}
@@ -273,6 +274,7 @@ let migrationSearchSnapshot = null;
 let activeSearchKey = '';
 
 const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = false, active = true, migrationInline = null }) {
+  const { language, t: tr } = useI18n();
   const loc = locationOverride;
   const navigate = useNavigate();
   const searchParams = new URLSearchParams(loc.search);
@@ -704,7 +706,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
               style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(8, scale, 6), paddingRight: px(8, scale, 6) }}
             >
               <ChevronLeft className="mr-1" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
-              Volver
+              {tr('Volver')}
             </Button>
           ) : TABS.map((t) => {
             const active = tab === t.id;
@@ -731,7 +733,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                 aria-current={active ? 'page' : undefined}
                 style={{ fontSize: fontPx(14, scale), scrollMarginInline: px(16, scale, 12) }}
               >
-                <SubrouteTabLabel active={active}>{t.label}</SubrouteTabLabel>
+                <SubrouteTabLabel active={active}>{tr(t.label)}</SubrouteTabLabel>
               </button>
             );
           })}
@@ -767,7 +769,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
             <div className="relative min-w-0 flex-1">
               <Input
                 className="bg-card border-border/70"
-                placeholder="Buscar en todas las extensiones..."
+                placeholder={tr('Buscar en todas las extensiones...')}
                 value={q}
                 onChange={(e) => { setQ(e.target.value); lastSearch.q = e.target.value; }}
                 enterKeyHint="search"
@@ -787,7 +789,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
               />
               <button
                 type="button"
-                aria-label="Buscar en todas las extensiones"
+                aria-label={tr('Buscar en todas las extensiones')}
                 onClick={() => runSearch()}
                 disabled={!q.trim()}
                 className="absolute inset-y-0 right-0 grid place-items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-40"
@@ -815,7 +817,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
         catalogSources.length === 0 ? (
           <EmptyState
             face="（눈﹏눈）"
-            title="No hay extensiones instaladas"
+            title={tr('No hay extensiones instaladas')}
           />
         ) : (
           <>
@@ -823,7 +825,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
               <EmptyState
                 face="(・_・)？"
                 tone="prompt"
-                title="Busca un manga para empezar"
+                title={tr('Busca un manga para empezar')}
               />
             )}
 
@@ -840,7 +842,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                   >
                     <Loader2 className="animate-spin" style={{ width: px(20, scale, 16), height: px(20, scale, 16) }} />
                     <p className="text-sm">
-                      Buscando en {catalogSources.length} {catalogSources.length === 1 ? 'extensión' : 'extensiones'}...
+                      {language === 'en' ? `Searching ${catalogSources.length} ${catalogSources.length === 1 ? 'extension' : 'extensions'}...` : `Buscando en ${catalogSources.length} ${catalogSources.length === 1 ? 'extensión' : 'extensiones'}...`}
                     </p>
                   </div>
                 )}
@@ -848,14 +850,14 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                 {done && completed.length > 0 && visibleCompleted.length === 0 ? (
                   <EmptyState
                     face="（・_・）"
-                    title="No hay extensiones visibles"
-                    description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para mostrarlas."
+                    title={tr('No hay extensiones visibles')}
+                    description={tr('Activa «Mostrar extensiones +18» en Ajustes > Extensiones para mostrarlas.')}
                   />
                 ) : !migrationMode && hideSavedManga && done && searchItems.length > 0 && visibleSearchItemCount === 0 ? (
                   <EmptyState
                     face="（・_・）"
-                    title="No hay mangas nuevos"
-                    description="Los mangas encontrados ya están en Biblioteca. Puedes desactivar «Ocultar mangas ya guardados» en Ajustes > Biblioteca."
+                    title={tr('No hay mangas nuevos')}
+                    description={tr('Los mangas encontrados ya están en Biblioteca. Puedes desactivar «Ocultar mangas ya guardados» en Ajustes > Biblioteca.')}
                   />
                 ) : visibleCompleted.map((r) => (
                   <SourceSection
@@ -902,8 +904,8 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
         onClose={() => { if (!migrationBusy) { setMigrationSelection(null); setMigrationError(''); } }}
         scale={scale}
         dialogStyle={{ maxWidth: px(480, scale, 380) }}
-        title="Manga encontrado"
-        description="Confirma que es el manga que quieres migrar o abre su ficha para revisarlo."
+        title={tr('Manga encontrado')}
+        description={tr('Confirma que es el manga que quieres migrar o abre su ficha para revisarlo.')}
       >
         {migrationSelection && (
           <>
@@ -925,14 +927,14 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                 onClick={() => openMangaDetail(migrationSelection.manga, migrationSelection.sourceId)}
                 style={{ height: px(38, scale, 31), padding: `0 ${px(12, scale, 10)}`, fontSize: fontPx(14, scale, 12) }}
               >
-                Ver manga
+                {tr('Ver manga')}
               </Button>
               <Button
                 disabled={migrationBusy}
                 onClick={confirmMigration}
                 style={{ height: px(38, scale, 31), padding: `0 ${px(12, scale, 10)}`, fontSize: fontPx(14, scale, 12) }}
               >
-                {migrationBusy ? 'Migrando…' : 'Confirmar migración'}
+                {tr(migrationBusy ? 'Migrando…' : 'Confirmar migración')}
               </Button>
             </div>
           </>

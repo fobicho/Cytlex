@@ -2,11 +2,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useId, useLayoutEffect, useRef } from 'react';
 import { cn } from '../../lib/utils.js';
 import { useScale, px, fontPx } from '../../lib/useScale.js';
+import { useI18n } from '../../lib/i18n.js';
 
 const activeDialogs = [];
 const FOCUSABLE_SELECTOR = '[autofocus], button:not([disabled]), a[href], input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="option"], [tabindex]:not([tabindex="-1"])';
 
 function DialogContent({ onClose, title, ariaLabel, description, children, className, dialogStyle, hideDivider, bodyClassName, headerPaddingTop = 24, headerPaddingBottom = 12, bodyPaddingTop = 12, bodyPaddingBottom = 24, bodyPaddingX = 24, descriptionMarginTop = 4, scrollableBody = true, scale }) {
+  const { t } = useI18n();
   const currentScale = useScale();
   const sc = scale ?? currentScale;
   const dialogRef = useRef(null);
@@ -115,7 +117,7 @@ function DialogContent({ onClose, title, ariaLabel, description, children, class
         data-dialog-id={id}
         role="dialog"
         aria-modal="true"
-        aria-label={title ? undefined : ariaLabel || 'Diálogo'}
+        aria-label={title ? undefined : t(ariaLabel || 'Diálogo')}
         aria-labelledby={title ? `${id}-title` : undefined}
         aria-describedby={description ? `${id}-description` : undefined}
         tabIndex={-1}
@@ -131,8 +133,8 @@ function DialogContent({ onClose, title, ariaLabel, description, children, class
       >
         {(title || description) && (
           <div className={cn('shrink-0', !hideDivider && 'border-b border-border')} style={{ padding: `${px(headerPaddingTop, sc, headerPaddingTop * 0.75)} ${px(24, sc, 18)} ${px(headerPaddingBottom, sc, headerPaddingBottom * 0.75)}` }}>
-            {title && <h2 id={`${id}-title`} className="font-semibold tracking-tight" style={{ fontSize: fontPx(18, sc, 15) }}>{title}</h2>}
-            {description && <p id={`${id}-description`} className="text-muted-foreground mt-1" style={{ fontSize: fontPx(13, sc, 11), marginTop: px(descriptionMarginTop, sc, descriptionMarginTop * 0.75) }}>{description}</p>}
+            {title && <h2 id={`${id}-title`} className="font-semibold tracking-tight" style={{ fontSize: fontPx(18, sc, 15) }}>{typeof title === 'string' ? t(title) : title}</h2>}
+            {description && <p id={`${id}-description`} className="text-muted-foreground mt-1" style={{ fontSize: fontPx(13, sc, 11), marginTop: px(descriptionMarginTop, sc, descriptionMarginTop * 0.75) }}>{typeof description === 'string' ? t(description) : description}</p>}
           </div>
         )}
         <div

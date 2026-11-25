@@ -4,9 +4,11 @@ import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-m
 import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon, Check, CheckCheck, LoaderCircle } from 'lucide-react';
 import { THEMES, MODES } from '../lib/themes.js';
 import { resolveMode, settings } from '../lib/settings.js';
+import { useI18n } from '../lib/i18n.js';
 import { cn } from '../lib/utils.js';
 import { useScale } from '../lib/useScale.js';
 import { Button } from './ui/button.jsx';
+import LanguageToggle from './LanguageToggle.jsx';
 import { GENTLE_FLOAT_MOTION, GENTLE_FLOAT_TRANSITION } from './ui/empty-state.jsx';
 import CytlexLogoMark from './CytlexLogoMark.jsx';
 import Settings from '../pages/Settings.jsx';
@@ -51,7 +53,8 @@ const STEP_CONTENT_VARIANTS = {
   exit: (direction) => ({ opacity: 0, scale: direction === 0 ? 1 : direction > 0 ? 1.08 : 0.92 })
 };
 
-export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp, enteringWithSplash = false }) {
+export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp, enteringWithSplash = false, language = 'es', onLanguageChange }) {
+  const { t } = useI18n();
   const [step, setStep] = useState(0);
   const [theme, setTheme] = useState(() => settings.get().theme);
   const [mode, setMode] = useState(() => settings.get().mode);
@@ -180,6 +183,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const isRepository = step === 3;
   const isBackup = step === 4;
   const isReady = step === STEPS.length - 1;
+  const showLanguageToggle = step !== 1 && navigationVisible;
   const progress = ((step + 1) / STEPS.length) * 100;
   const hasOfficialRepository = repoUrl === DEFAULT_EXTENSION_REPOSITORY;
   const hasOtherRepository = !!repoUrl && !hasOfficialRepository;
@@ -191,11 +195,24 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
       animate={{ y: exiting ? '-100%' : '0%' }}
       transition={{ duration: exiting ? 0.8 : 0, ease: exiting ? [0.76, 0, 0.24, 1] : 'linear' }}
     >
+      <motion.div
+        initial={false}
+        animate={{ y: showLanguageToggle ? 0 : '-110vh' }}
+        transition={{ duration: 0.25, ease: [0.23, 1, 0.32, 1] }}
+        className={`absolute left-3 top-[calc(env(safe-area-inset-top)+0.75rem)] z-[80] sm:left-4 sm:top-[calc(env(safe-area-inset-top)+1rem)] ${step === 1 ? 'pointer-events-none' : 'pointer-events-auto'}`}
+      >
+        <LanguageToggle
+          value={language}
+          onChange={onLanguageChange}
+          className="shadow-md"
+        />
+      </motion.div>
       <LayoutGroup id="onboarding-surfaces">
         <AnimatePresence mode="wait" custom={motionDirection}>
           {step !== 1 && (
             <motion.div
               key={`step-card-${step}`}
+              layout={reduceMotion ? false : 'position'}
               custom={motionDirection}
               variants={STEP_CONTENT_VARIANTS}
               className="relative my-auto w-full max-w-3xl shrink-0 pointer-events-auto"
@@ -210,7 +227,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
               transition={{
                 duration: firstCardEntrance && !reduceMotion ? 0.8 : 0.2,
                 ease: firstCardEntrance && !reduceMotion ? [0.76, 0, 0.24, 1] : [0.22, 1, 0.36, 1],
-                layout: { duration: 0.3, ease: [0.22, 1, 0.36, 1] }
+                layout: { duration: reduceMotion ? 0 : 0.24, ease: [0.23, 1, 0.32, 1] }
               }}
               style={{ transformOrigin: 'center' }}
             >
@@ -224,12 +241,10 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
             'onboarding-content min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6 md:px-10 md:pt-6 md:pb-10',
             (isTheme || isRepository || isBackup || isReady) && 'onboarding-content--theme'
           )}>
-              <div
-                className="onboarding-step-body flex flex-col"
-              >
+            <div className="onboarding-step-body flex flex-col">
                 {step === 0 ? (
                   <div className="mb-6 flex flex-wrap items-center gap-2 sm:gap-3">
-                    <span className="text-xl font-semibold tracking-tight font-display sm:text-2xl">Bienvenido a</span>
+                    <span className="text-xl font-semibold tracking-tight font-display sm:text-2xl">{t('Bienvenido a')}</span>
                     <motion.div
                       className="flex items-center gap-1.5 sm:gap-2"
                       animate={reduceMotion ? undefined : GENTLE_FLOAT_MOTION}
@@ -241,13 +256,13 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                   </div>
                 ) : (
                   <div className={cn('onboarding-step-heading mb-6', step >= 2 ? 'mb-2' : 'mt-2')}>
-                    <h2 className="onboarding-step-title text-2xl font-semibold tracking-tight font-display">{STEPS[step].title}</h2>
+                    <h2 className="onboarding-step-title text-2xl font-semibold tracking-tight font-display">{t(STEPS[step].title)}</h2>
                   </div>
                 )}
 
                 {STEPS[step].body && (
                   <p className={cn('onboarding-step-description text-base text-muted-foreground whitespace-pre-line', isRepository ? 'leading-normal' : 'leading-relaxed')}>
-                    {STEPS[step].body.split(/(\*\*[^*]+\*\*|Cytlex)/g).map((part, i) => {
+                    {t(STEPS[step].body).split(/(\*\*[^*]+\*\*|Cytlex)/g).map((part, i) => {
                       if (part.startsWith('**') && part.endsWith('**')) {
                         return <strong key={i}>{part.slice(2, -2)}</strong>;
                       }
@@ -258,8 +273,8 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
 
                 {isBackup && (
                   <div className="onboarding-import-actions mt-5 flex flex-row-reverse flex-wrap items-end justify-start gap-2">
-                    <Button disabled={backupImported} onClick={() => importControls.current?.importBackup()}>Importar respaldo de Cytlex</Button>
-                    <Button variant="outline" disabled={backupImported} onClick={() => importControls.current?.importMihon()}>Importar respaldo de Mihon</Button>
+                    <Button disabled={backupImported} onClick={() => importControls.current?.importBackup()}>{t('Importar respaldo de Cytlex')}</Button>
+                    <Button variant="outline" disabled={backupImported} onClick={() => importControls.current?.importMihon()}>{t('Importar respaldo de Mihon')}</Button>
                   </div>
                 )}
 
@@ -276,7 +291,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="h-4 w-4 mr-1.5">
                       <path d="M11.351 2.715c-2.7 0-4.986.025-6.83.26C2.078 3.285 0 5.154 0 8.61c0 3.506.182 6.13 1.585 8.493 1.584 2.701 4.233 4.182 7.662 4.182h.83c4.209 0 6.494-2.234 7.637-4a9.5 9.5 0 0 0 1.091-2.338C21.792 14.688 24 12.22 24 9.208v-.415c0-3.247-2.13-5.507-5.792-5.87-1.558-.156-2.65-.208-6.857-.208m0 1.947c4.208 0 5.09.052 6.571.182 2.624.311 4.13 1.584 4.13 4v.39c0 2.156-1.792 3.844-3.87 3.844h-.935l-.156.649c-.208 1.013-.597 1.818-1.039 2.546-.909 1.428-2.545 3.064-5.922 3.064h-.805c-2.571 0-4.831-.883-6.078-3.195-1.09-2-1.298-4.155-1.298-7.506 0-2.181.857-3.402 3.012-3.714 1.533-.233 3.559-.26 6.39-.26m6.547 2.287c-.416 0-.65.234-.65.546v2.935c0 .311.234.545.65.545 1.324 0 2.051-.754 2.051-2s-.727-2.026-2.052-2.026m-10.39.182c-1.818 0-3.013 1.48-3.013 3.142 0 1.533.858 2.857 1.949 3.897.727.701 1.87 1.429 2.649 1.896a1.47 1.47 0 0 0 1.507 0c.78-.467 1.922-1.195 2.623-1.896 1.117-1.039 1.974-2.364 1.974-3.897 0-1.662-1.247-3.142-3.039-3.142-1.065 0-1.792.545-2.338 1.298-.493-.753-1.246-1.298-2.312-1.298" />
                     </svg>
-                    Apoyar en Ko-fi
+                    {t('Apoyar en Ko-fi')}
                   </Button>
                 )}
 
@@ -311,18 +326,18 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                               : 'border-border text-muted-foreground hover:bg-muted/40'
                           )}
                         >
-                          {m.name}
+                          {t(m.name)}
                         </button>
                       ))}
                     </div>
                     <div className="grid grid-cols-2 gap-2 min-[480px]:grid-cols-3">
-                      {THEMES.map((t) => {
-                        const sw = t.swatch[resolveMode(mode)] || t.swatch.dark;
-                        const selected = theme === t.id;
+                      {THEMES.map((themeOption) => {
+                        const sw = themeOption.swatch[resolveMode(mode)] || themeOption.swatch.dark;
+                        const selected = theme === themeOption.id;
                         return (
                           <button
-                            key={t.id}
-                            onClick={() => applyTheme(t.id, mode)}
+                            key={themeOption.id}
+                            onClick={() => applyTheme(themeOption.id, mode)}
                             className={cn(
                               'group flex min-w-0 items-center gap-2 rounded-xl border px-2 py-1.5 text-left transition-all sm:gap-3 sm:px-3 sm:py-1.5',
                               selected
@@ -335,8 +350,8 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                               <span className="flex-1" style={{ background: sw[1] }} />
                             </div>
                             <div className="min-w-0">
-                              <p className="break-words text-xs font-medium leading-tight sm:text-sm">{t.name}</p>
-                              <p className="break-words text-[11px] leading-tight text-muted-foreground sm:text-xs">{t.desc}</p>
+                              <p className="break-words text-xs font-medium leading-tight sm:text-sm">{t(themeOption.name)}</p>
+                              <p className="break-words text-[11px] leading-tight text-muted-foreground sm:text-xs">{t(themeOption.desc)}</p>
                             </div>
                           </button>
                         );
@@ -350,7 +365,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                       <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
                         <div className="min-w-0 flex-1">
                           <p className="flex flex-wrap items-center gap-x-1 text-sm font-medium">
-                            <span>Repositorio oficial de</span>
+                            <span>{t('Repositorio oficial de')}</span>
                             <CytlexLogoMark className="h-4 w-4" reduceMotion={reduceMotion} decorative />
                             <span className="font-brand font-semibold tracking-tight">Cytlex</span>
                           </p>
@@ -359,7 +374,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                           </p>
                           {hasOtherRepository && (
                             <p className="mt-2 text-xs text-muted-foreground">
-                              Ya hay otro repositorio configurado; al continuar con este se reemplazará.
+                              {t('Ya hay otro repositorio configurado; al continuar con este se reemplazará.')}
                             </p>
                           )}
                         </div>
@@ -384,7 +399,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                       </div>
                   </div>
                 )}
-              </div>
+            </div>
           </div>
 
 
@@ -394,6 +409,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
           {step === 1 && (
             <motion.div
               key="walkthrough-panel"
+              layout={reduceMotion ? false : 'position'}
               custom={motionDirection}
               variants={STEP_CONTENT_VARIANTS}
               initial="enter"
@@ -403,7 +419,9 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 if (definition === 'center' && typeof onRevealApp === 'function') onRevealApp();
               }}
               transition={{
-                duration: 0.2, ease: 'easeOut',
+                duration: 0.2,
+                ease: 'easeOut',
+                layout: { duration: reduceMotion ? 0 : 0.24, ease: [0.23, 1, 0.32, 1] }
               }}
               className="pointer-events-auto fixed bottom-[calc(5.5rem_+_env(safe-area-inset-bottom))] left-1/2 w-[min(92vw,40rem)] md:bottom-24"
               style={{ translate: '-50% 0' }}
@@ -432,13 +450,13 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                       )}
                     >
                       <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
-                      <span className="text-xs font-medium sm:text-sm">{label}</span>
+                      <span className="text-xs font-medium sm:text-sm">{t(label)}</span>
                     </button>
                   );
                 })}
               </div>
               <p className="text-xs text-muted-foreground sm:text-sm">
-                {WALKTHROUGH_VIEWS.find(({ id }) => id === walkthroughView)?.desc}
+                {t(WALKTHROUGH_VIEWS.find(({ id }) => id === walkthroughView)?.desc || '')}
               </p>
             </div>
               </motion.div>
@@ -450,7 +468,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
           <motion.div initial={false} animate={{ opacity: navigationVisible ? 1 : 0, y: navigationVisible || reduceMotion ? 0 : 'calc(100% + env(safe-area-inset-bottom))' }} transition={{ duration: reduceMotion ? 0 : 0.25, ease: [0.23, 1, 0.32, 1] }} inert={!navigationVisible} className="onboarding-footer pointer-events-auto fixed bottom-[env(safe-area-inset-bottom)] inset-x-0 mx-auto z-10 grid w-full max-w-3xl grid-cols-[1fr_auto] items-center gap-x-2 gap-y-2 bg-card border border-border px-4 py-3 sm:grid-cols-3 sm:gap-4 sm:px-10 sm:py-4">
             <div className="flex justify-start">
               <Button variant="outline" size="sm" className="px-1.5 sm:px-3" onClick={finish}>
-                Saltar tutorial
+                {t('Saltar tutorial')}
               </Button>
             </div>
 
@@ -470,25 +488,25 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
 
             <div className="col-start-2 row-start-1 flex justify-end gap-2 sm:col-start-3 sm:row-start-1">
               {step > 0 && (
-                <Button variant="outline" size="sm" className="w-10 px-0 md:w-auto md:px-3" aria-label="Atrás" onClick={back}>
+                <Button variant="outline" size="sm" className="w-10 px-0 md:w-auto md:px-3" aria-label={t('Atrás')} onClick={back}>
                   <ArrowLeft className="h-4 w-4 md:mr-1" />
-                  <span className="hidden md:inline">Atrás</span>
+                  <span className="hidden md:inline">{t('Atrás')}</span>
                 </Button>
               )}
               <Button
                 size="sm"
                 className="w-10 px-0 md:w-28 md:px-3"
-                aria-label={step === STEPS.length - 1 ? 'Comenzar' : 'Siguiente'}
+                aria-label={t(step === STEPS.length - 1 ? 'Comenzar' : 'Siguiente')}
                 onClick={next}
               >
                 {step === STEPS.length - 1 ? (
                   <>
-                    <span className="hidden md:inline">Comenzar</span>
+                    <span className="hidden md:inline">{t('Comenzar')}</span>
                     <CheckCheck className="h-4 w-4 md:hidden" />
                   </>
                 ) : (
                   <>
-                    <span className="hidden md:inline">Siguiente</span>
+                    <span className="hidden md:inline">{t('Siguiente')}</span>
                     <ArrowRight className="h-4 w-4 md:ml-1" />
                   </>
                 )}

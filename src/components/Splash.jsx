@@ -10,25 +10,39 @@ const EXIT = 800;
 export default function Splash({ trigger = 0, onDone = null, onExitStart = null }) {
   const scale = useScale();
   const reduceMotion = useReducedMotion();
+  const [ready, setReady] = useState(false);
   const [exiting, setExiting] = useState(false);
   const [gone, setGone] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+    let toExit;
+    let toDone;
+    setReady(false);
     setExiting(false);
     setGone(false);
-    const toExit = setTimeout(() => {
-      setExiting(true);
-      if (typeof onExitStart === 'function') onExitStart();
-    }, APPEAR + BEAT);
-    const toDone = setTimeout(() => {
-      setGone(true);
-      if (typeof onDone === 'function') onDone();
-    }, APPEAR + BEAT + EXIT);
+
+    Promise.resolve(document.fonts?.load(`600 ${px(37, scale, 30)} Satoshi`, 'Cytlex'))
+      .catch(() => [])
+      .then(() => {
+        if (cancelled) return;
+        setReady(true);
+        toExit = setTimeout(() => {
+          setExiting(true);
+          if (typeof onExitStart === 'function') onExitStart();
+        }, APPEAR + BEAT);
+        toDone = setTimeout(() => {
+          setGone(true);
+          if (typeof onDone === 'function') onDone();
+        }, APPEAR + BEAT + EXIT);
+      });
+
     return () => {
+      cancelled = true;
       clearTimeout(toExit);
       clearTimeout(toDone);
     };
-  }, [trigger, onDone, onExitStart]);
+  }, [trigger, onDone, onExitStart, scale]);
 
   if (gone) return null;
 
@@ -40,16 +54,17 @@ export default function Splash({ trigger = 0, onDone = null, onExitStart = null 
       transition={{ duration: EXIT / 1000, ease: [0.76, 0, 0.24, 1] }}
     >
       <motion.div
-        className="flex items-center gap-4"
+        className="flex items-center"
         initial={{ opacity: 0, scale: 0.92 }}
-        animate={{ opacity: 1, scale: 1 }}
+        animate={{ opacity: ready ? 1 : 0, scale: ready ? 1 : 0.92 }}
         transition={{ duration: APPEAR / 1000, ease: 'easeOut' }}
+        style={{ gap: px(12, scale, 12) }}
       >
         <CytlexLogoMark
           reduceMotion={reduceMotion}
-          style={{ width: px(72, scale, 58), height: px(72, scale, 58) }}
+          style={{ width: px(84, scale, 68), height: px(84, scale, 68) }}
         />
-        <span className="font-brand text-3xl font-semibold tracking-tight text-foreground">Cytlex</span>
+        <span className="font-brand text-3xl font-semibold tracking-tight text-foreground" style={{ fontSize: px(37, scale, 30) }}>Cytlex</span>
       </motion.div>
     </motion.div>
   );

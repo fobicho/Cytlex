@@ -25,6 +25,7 @@ import { useLibraryCover } from '../lib/useLibraryCover.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 import { libraryScroll, recallCover, rememberMangaPreview } from '../lib/searchState.js';
 import { attachHorizontalScrollFade } from '../lib/horizontalScrollFade.js';
+import { useI18n } from '../lib/i18n.js';
 
 let sessionCategoria = '';
 let libraryCheckInFlight = false;
@@ -289,6 +290,7 @@ function CachedLibraryCover({ cover, title, className, cachedOnly = false, cache
 }
 
 const Library = memo(function Library({ active = true, tutorialPreview = false }) {
+  const { language, t } = useI18n();
   const activeRef = useRef(active);
   activeRef.current = active;
   const [cats, setCats] = useState(() => lib.cats());
@@ -526,16 +528,16 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
       const found = await checkLibrary({ onProgress: updateLibraryCheckProgress });
       const n = found.length;
       if (n === 0) {
-        toast({ title: 'Todo está al día', description: 'No hay capítulos nuevos en tu biblioteca.', variant: 'info' });
+        toast({ title: t('Todo está al día'), description: t('No hay capítulos nuevos en tu biblioteca.'), variant: 'info' });
       } else {
         toast({
-          title: n === 1 ? '1 obra actualizada' : `${n} obras actualizadas`,
-          description: 'Hay capítulos nuevos disponibles.',
+          title: language === 'en' ? `${n} ${n === 1 ? 'title' : 'titles'} updated` : n === 1 ? '1 obra actualizada' : `${n} obras actualizadas`,
+          description: t('Hay capítulos nuevos disponibles.'),
           variant: 'success'
         });
       }
     } catch {
-      toast({ title: 'No se pudo comprobar', description: 'Revisa tu conexión e inténtalo de nuevo.', variant: 'error' });
+      toast({ title: t('No se pudo comprobar'), description: t('Revisa tu conexión e inténtalo de nuevo.'), variant: 'error' });
     } finally {
       libraryCheckInFlight = false;
       libraryCheckCooldownUntil = Date.now() + 3_000;
@@ -591,7 +593,8 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
     () => sortLibraryManga(inCategory.slice(), sortBy, unreadSort || {}),
     [inCategory, sortBy, unreadSort]
   );
-  const categoryName = visibleCats.find((category) => category.id === visibleSel)?.name || 'Biblioteca';
+  const selectedCategory = visibleCats.find((category) => category.id === visibleSel);
+  const categoryName = selectedCategory?.id === 'todos' ? t('Todos') : selectedCategory?.name || t('Biblioteca');
   const searched = useMemo(() => {
     const query = normalizeLibrarySearch(libraryQuery);
     return query ? shown.filter((manga) => normalizeLibrarySearch(manga.title).includes(query)) : shown;
@@ -720,8 +723,8 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
       <Input
         ref={librarySearchInputRef}
         className="bg-card border-border/70"
-        placeholder={`Buscar en ${truncateCategoryName(categoryName, 10)}`}
-        aria-label={`Buscar en ${categoryName}`}
+        placeholder={t('Buscar en {category}', { category: truncateCategoryName(categoryName, 10) })}
+        aria-label={t('Buscar en {category}', { category: categoryName })}
         value={libraryQuery}
         onChange={(event) => {
           setLibraryQuery(event.target.value);
@@ -741,7 +744,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
       />
       <button
         type="button"
-        aria-label={libraryQuery ? 'Limpiar búsqueda' : `Buscar en ${categoryName}`}
+        aria-label={libraryQuery ? t('Limpiar búsqueda') : t('Buscar en {category}', { category: categoryName })}
         onClick={() => libraryQuery ? setLibraryQuery('') : librarySearchInputRef.current?.focus()}
         className="absolute inset-y-0 right-0 grid place-items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
         style={{ width: px(36, scale, 30) }}
@@ -786,7 +789,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
       >
         <nav
           ref={categoryTabsRef}
-          aria-label="Categorías de Biblioteca"
+          aria-label={t('Categorías de Biblioteca')}
           className="flex min-w-0 flex-1 items-center overflow-x-auto overscroll-x-contain whitespace-nowrap no-scrollbar"
           style={{ height: `calc(${px(38, scale, 34)} - 1px)`, minWidth: px(96, scale, 76) }}
         >
@@ -802,8 +805,8 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
                   key={c.id}
                   type="button"
                   aria-current={active ? 'page' : undefined}
-                  aria-label={c.name}
-                  title={c.name}
+                  aria-label={c.id === 'todos' ? t('Todos') : c.name}
+                  title={c.id === 'todos' ? t('Todos') : c.name}
                   onClick={(event) => {
                     if (active) {
                       const main = libraryScroller();
@@ -822,7 +825,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
                   )}
                   style={{ fontSize: fontPx(14, scale), scrollMarginInline: px(16, scale, 12) }}
                 >
-                  <SubrouteTabLabel active={active}>{truncateCategoryName(c.name, 15)}</SubrouteTabLabel>
+                  <SubrouteTabLabel active={active}>{truncateCategoryName(c.id === 'todos' ? t('Todos') : c.name, 15)}</SubrouteTabLabel>
                 </button>
               );
             })}
@@ -835,7 +838,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
                 type="button"
                 size="sm"
                 variant="secondary"
-                aria-label={librarySearchOpen ? 'Cerrar búsqueda' : `Abrir búsqueda en ${categoryName}`}
+                aria-label={librarySearchOpen ? t('Cerrar búsqueda') : t('Abrir búsqueda en {category}', { category: categoryName })}
                 aria-expanded={librarySearchOpen}
                 aria-controls="library-search-row"
                 onClick={toggleLibrarySearch}
@@ -861,7 +864,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
           <Button
             size="sm"
             variant="secondary"
-            title="Ordenar"
+            title={t('Ordenar')}
             data-library-sort
             className="library-sort-trigger shrink-0 rounded-none disabled:opacity-100"
             onClick={() => {
@@ -883,10 +886,10 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
             variant="secondary"
             disabled={!visibleFavs.length || checking || checkCooldown > 0}
             aria-busy={checking}
-            aria-label={checking ? 'Buscando actualizaciones' : 'Buscar actualizaciones'}
+            aria-label={t(checking ? 'Buscando actualizaciones' : 'Buscar actualizaciones')}
             data-library-updates
             onClick={runCheck}
-            title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
+            title={checkCooldown ? t('Puedes volver a buscar en {seconds} s', { seconds: checkCooldown }) : t('Buscar actualizaciones')}
             className={cn('library-updates-trigger extensions-refresh-button shrink-0 rounded-none', compactLibraryUpdates && 'is-compact')}
             style={toolbarButtonStyle(scale)}
           >
@@ -904,12 +907,12 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
             <span className="extensions-button-label">
               {checking ? (
                 <>
-                  Buscando
+                  {t('Buscando')}
                   <span className="ml-2 tabular-nums opacity-75" aria-live="polite">
                     {checkProgress.current}/{checkProgress.total}
                   </span>
                 </>
-              ) : 'Buscar actualizaciones'}
+              ) : t('Buscar actualizaciones')}
             </span>
           </Button>
         </div>
@@ -948,7 +951,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
         <EmptyState
           face="(っ-;)"
           tone="sad"
-          title={libraryQuery.trim() ? 'No hay mangas que coincidan con la búsqueda' : visibleFavs.some((f) => (f.cats || []).includes(visibleSel)) ? 'No hay mangas visibles con este filtro' : 'Tu biblioteca está vacía'}
+          title={t(libraryQuery.trim() ? 'No hay mangas que coincidan con la búsqueda' : visibleFavs.some((f) => (f.cats || []).includes(visibleSel)) ? 'No hay mangas visibles con este filtro' : 'Tu biblioteca está vacía')}
         />
       </section>
       {visitedCategories.map((category) => {
@@ -980,7 +983,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
                       sourceId={sid}
                       unavailable={sourceUnavailable}
                       canOpenUnavailable={sourceNotOffered}
-                      unavailableLabel={sourceNotOffered ? 'Extensión no disponible' : adultBlocked ? 'Fuente bloqueada' : !extensions.isInstalled(sid) ? 'Fuente no instalada' : 'Fuente desactivada'}
+                      unavailableLabel={t(sourceNotOffered ? 'Extensión no disponible' : adultBlocked ? 'Fuente bloqueada' : !extensions.isInstalled(sid) ? 'Fuente no instalada' : 'Fuente desactivada')}
                       minimal
                       from="biblioteca"
                       coverSize={cardWidth}
@@ -1016,7 +1019,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
                   const unavailable = !installed || adultBlocked || sourceNotConfigured;
                   const sourceNotOffered = isUnavailableMangaSource(sid);
                   const linkDisabled = unavailable && !sourceNotOffered;
-                  const unavailableLabel = sourceNotOffered ? 'Extensión no disponible' : adultBlocked ? 'Fuente bloqueada' : !installed ? 'Fuente no instalada' : 'Fuente desactivada';
+                  const unavailableLabel = t(sourceNotOffered ? 'Extensión no disponible' : adultBlocked ? 'Fuente bloqueada' : !installed ? 'Fuente no instalada' : 'Fuente desactivada');
                   return (
                     <div key={`${sid}|${m.url}`} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5">
                       <a
@@ -1047,7 +1050,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
                           <span className="block font-semibold truncate" style={{ fontSize: fontPx(16, scale, 13) }}>{m.title}</span>
                           {showUnread && unreadCount != null && (
                             <span className="mt-1 block truncate text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10) }}>
-                              {unreadCount > 0 ? `${unreadCount} sin leer` : 'Lectura al día'}
+                              {unreadCount > 0 ? (language === 'en' ? `${unreadCount} unread` : `${unreadCount} sin leer`) : t('Lectura al día')}
                             </span>
                           )}
                         </span>

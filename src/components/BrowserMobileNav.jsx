@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import { BookOpen, Compass, Settings as SettingsIcon } from 'lucide-react';
 import { cn } from '../lib/utils.js';
+import { useI18n } from '../lib/i18n.js';
 import { SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
 
 const RESET_PAGE_EVENT = 'cytlex:reset-page';
@@ -86,6 +87,7 @@ function activeScroller() {
 }
 
 export default function BrowserMobileNav({ tutorialNavOnly = false }) {
+  const { t } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
   const pendingQuickSearchReset = useRef(false);
@@ -180,7 +182,7 @@ export default function BrowserMobileNav({ tutorialNavOnly = false }) {
   };
 
   return (
-    <nav inert={tutorialNavOnly} data-tutorial-nav-only={tutorialNavOnly || undefined} className="browser-mobile-nav md:hidden" aria-label="Navegación principal">
+    <nav inert={tutorialNavOnly} data-tutorial-nav-only={tutorialNavOnly || undefined} className="browser-mobile-nav md:hidden" aria-label={t('Navegación principal')}>
       {activeIndex !== -1 && (
         <motion.span
           aria-hidden="true"
@@ -211,7 +213,7 @@ export default function BrowserMobileNav({ tutorialNavOnly = false }) {
             >
               <AnimatedNavIcon to={to} Icon={Icon} animate={selected && activeVisit > 0 && !reduceMotion} />
             </span>
-            <span>{label}</span>
+            <span>{t(label)}</span>
           </Link>
         );
       })}

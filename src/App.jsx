@@ -19,6 +19,7 @@ import { px, useScale } from './lib/useScale.js';
 import { Search } from 'lucide-react';
 import { Input } from './components/ui/input.jsx';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { useI18n } from './lib/i18n.js';
 
 function quickSearchPosition(x, y, scale = 1) {
   const width = Math.min(420 * scale, Math.max(0, window.innerWidth - 32 * scale));
@@ -67,6 +68,7 @@ function useResetPage(onReset) {
 }
 
 export default function App({ tutorialMode = false }) {
+  const { t } = useI18n();
   const { toast } = useToast();
   const [theme, setTheme] = useState(() => settings.get().theme);
   const [mode, setMode] = useState(() => resolveMode(settings.get().mode));
@@ -327,7 +329,7 @@ export default function App({ tutorialMode = false }) {
               <motion.div
                 ref={quickSearchPanel}
                 role="search"
-                aria-label="Búsqueda rápida de mangas"
+                aria-label={t('Búsqueda rápida de mangas')}
                 initial={{ opacity: 0, transform: reduceMotion ? 'scale(1)' : 'scale(.94)' }}
                 animate={{ opacity: 1, transform: 'scale(1)' }}
                 exit={{ opacity: 0, transform: reduceMotion ? 'scale(1)' : 'scale(.94)' }}
@@ -343,8 +345,8 @@ export default function App({ tutorialMode = false }) {
                     ref={quickSearchInput}
                     value={quickSearchQuery}
                     onChange={(e) => setQuickSearchQuery(e.target.value)}
-                    placeholder="Buscar un manga..."
-                    aria-label="Buscar un manga"
+                    placeholder={t('Buscar un manga...')}
+                    aria-label={t('Buscar un manga')}
                     autoComplete="off"
                     className="h-7 min-w-0 border-0 bg-transparent px-0 py-1 shadow-none focus:border-0"
                   />

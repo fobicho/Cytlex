@@ -11,6 +11,7 @@ import { cn } from '../lib/utils.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
 import { settings } from '../lib/settings.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
+import { useI18n } from '../lib/i18n.js';
 
 const STATUS_ES = {
   CURRENT: 'Leyendo',
@@ -31,6 +32,7 @@ const SCORE_DENOMINATOR = {
 };
 
 export default function Tracking() {
+  const { language, t } = useI18n();
   const [auth, setAuth] = useState(null);
   const [viewer, setViewer] = useState(null);
   const [entries, setEntries] = useState(null);
@@ -94,7 +96,7 @@ export default function Tracking() {
         <EmptyState
           face="（・_・）"
           tone="prompt"
-          title="Conecta tu cuenta de AniList"
+          title={t('Conecta tu cuenta de AniList')}
           action={
             <Button
               onClick={() => { window.location.hash = '#/ajustes'; }}
@@ -105,7 +107,7 @@ export default function Tracking() {
                 paddingRight: px(16, scale, 12)
               }}
             >
-              Ir a Ajustes
+              {t('Ir a Ajustes')}
             </Button>
           }
         />
@@ -134,7 +136,7 @@ export default function Tracking() {
           )}
           <div>
             <h1 className="font-bold tracking-tight leading-tight" style={{ fontSize: fontPx(18, scale) }}>
-              Tu lista en AniList
+              {language === 'en' ? 'Your AniList list' : 'Tu lista en AniList'}
             </h1>
             {viewer?.name && (
               <p className="text-muted-foreground" style={{ fontSize: fontPx(12, scale) }}>
@@ -145,11 +147,11 @@ export default function Tracking() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={() => { window.location.hash = '#/ajustes'; }}>
-            Ajustes
+            {t('Ajustes')}
           </Button>
           <Button variant="secondary" size="sm" onClick={load} disabled={busy}>
             <Loader2 className="w-4 h-4 mr-2" />
-            Actualizar
+            {t('Actualizar')}
           </Button>
           <Button
             variant="ghost"
@@ -161,7 +163,7 @@ export default function Tracking() {
               setViewer(null);
             }}
           >
-            <LogOut className="w-4 h-4 mr-2" /> Desconectar
+            <LogOut className="w-4 h-4 mr-2" /> {t('Desconectar')}
           </Button>
         </div>
       </div>
@@ -169,7 +171,7 @@ export default function Tracking() {
       {auth?.expired && (
         <p className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
           <AlertTriangle className="w-4 h-4 shrink-0" />
-          La sesión anterior caducó. Vuelve a conectar tu cuenta en Ajustes.
+          {t('La sesión anterior caducó. Vuelve a conectar tu cuenta en Ajustes.')}
         </p>
       )}
 
@@ -190,10 +192,10 @@ export default function Tracking() {
         <EmptyState
           face="（・_・）"
           tone="error"
-          title="No se pudo cargar tu lista"
+          title={t('No se pudo cargar tu lista')}
           action={
             <Button variant="secondary" onClick={load} disabled={busy}>
-              Reintentar
+              {t('Reintentar')}
             </Button>
           }
         />
@@ -203,14 +205,14 @@ export default function Tracking() {
         <EmptyState
           face="（　´_ゝ`）"
           tone="prompt"
-          title="Tu lista de manga está vacía"
+          title={t('Tu lista de manga está vacía')}
         />
       )}
 
       {grouped.map((g) => (
         <section key={g.status} className="mb-8">
           <div className="flex items-center gap-2 mb-3">
-            <h2 className="text-sm font-semibold">{STATUS_ES[g.status] || g.status}</h2>
+            <h2 className="text-sm font-semibold">{t(STATUS_ES[g.status] || g.status)}</h2>
             <span className="text-xs text-muted-foreground">· {g.items.length}</span>
           </div>
           <div className="flex flex-col gap-2">
@@ -237,7 +239,7 @@ export default function Tracking() {
                       {e.title}
                     </div>
                     <div className="text-muted-foreground" style={{ fontSize: fontPx(12, scale) }}>
-                      {e.progress} {e.progress === 1 ? 'capítulo' : 'capítulos'}
+                      {e.progress} {e.progress === 1 ? t('capítulo') : t('capítulos')}
                       {e.startedAt && ` · desde ${e.startedAt}`}
                     </div>
                   </div>

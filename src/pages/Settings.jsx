@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
-import { Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Database, Download, Upload, CircleHelp, Info, Settings as SettingsIcon } from 'lucide-react';
+import { Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Database, Download, Upload, CircleHelp, Info, Settings as SettingsIcon, Monitor, Sun, Moon } from 'lucide-react';
 import { CONTENT_WARNING_RATINGS, resolveMode, settings } from '../lib/settings.js';
 import { isMangaCover, isUnresolvedMihonSource, lib } from '../lib/library.js';
 import { api } from '../lib/api.js';
@@ -11,12 +11,15 @@ import { consumeBrowserAuthError, consumeBrowserSettingsSection, session } from 
 import { tracking } from '../lib/tracking.js';
 import { progress } from '../lib/progress.js';
 import { MODES, THEMES } from '../lib/themes.js';
+import { useI18n } from '../lib/i18n.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { chapterOrder } from '../lib/searchState.js';
 import { compressBackup, createBackup, markBackupImportedThisSession, parseBackup, readBackupFile, restoreBackup } from '../lib/backup.js';
 import { importMihonBackup, previewMihonBackup } from '../lib/mihonBackup.js';
 import { extensions, isExtensionAllowed, isSourceConfigured } from '../lib/extensions.js';
 import { Button } from '../components/ui/button.jsx';
+import LanguageToggle from '../components/LanguageToggle.jsx';
+import { LanguageLayoutMotionProvider, useLanguageLayoutMotion } from '../lib/languageLayoutMotion.js';
 import { Dropdown } from '../components/ui/dropdown.jsx';
 import { Dialog } from '../components/ui/dialog.jsx';
 import { useToast } from '../components/Toast.jsx';
@@ -239,19 +242,20 @@ async function refreshImportedMihonDetails(mangas, onProgress) {
 }
 
 function BackupProgress({ progress, scale }) {
+  const { t } = useI18n();
   if (!progress) return null;
   const determinate = progress.total > 0;
   const value = determinate ? Math.round((progress.current / progress.total) * 100) : 0;
   return (
     <div className="space-y-2 rounded-lg border bg-secondary/40" style={{ padding: px(12, scale, 10), marginBottom: px(16, scale, 12) }} role="status" aria-live="polite">
       <div className="flex items-center justify-between gap-3">
-        <span className="font-medium text-foreground" style={{ fontSize: fontPx(13, scale, 11) }}>{progress.label}</span>
-        {determinate && <span className="shrink-0 text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10) }}>{progress.current} de {progress.total}</span>}
+        <span className="font-medium text-foreground" style={{ fontSize: fontPx(13, scale, 11) }}>{t(progress.label)}</span>
+        {determinate && <span className="shrink-0 text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10) }}>{progress.current} {t('de')} {progress.total}</span>}
       </div>
       <div
         className="h-2 overflow-hidden rounded-full bg-muted"
         role="progressbar"
-        aria-label={progress.label}
+        aria-label={t(progress.label)}
         aria-valuemin={0}
         aria-valuemax={determinate ? 100 : undefined}
         aria-valuenow={determinate ? value : undefined}
@@ -274,12 +278,13 @@ function throwIfAborted(signal) {
 }
 
 function Switch({ on, onChange, label, disabled = false, scale = 1 }) {
+  const { t } = useI18n();
   return (
     <button
       type="button"
       role="switch"
       aria-checked={!!on}
-      aria-label={label}
+      aria-label={t(label)}
       disabled={disabled}
       onClick={() => onChange(!on)}
       className={cn(
@@ -305,8 +310,17 @@ function Switch({ on, onChange, label, disabled = false, scale = 1 }) {
 }
 
 function Row({ title, desc, right, first, last, className, stackOnMobile = false, scale = 1 }) {
+  const { t, isLanguagePreview } = useI18n();
+  const reduceMotion = useReducedMotion();
+  const languageLayoutMotion = useLanguageLayoutMotion();
+  const animateLanguageLayout = isLanguagePreview || languageLayoutMotion;
+  const layoutTransition = animateLanguageLayout && !reduceMotion
+    ? { layout: { duration: 0.24, ease: [0.23, 1, 0.32, 1] } }
+    : undefined;
   return (
-    <div
+    <motion.div
+      layout={animateLanguageLayout && !reduceMotion ? 'size' : false}
+      transition={layoutTransition}
       className={cn(
         'flex min-w-0 items-center justify-between',
         stackOnMobile && 'max-md:flex-wrap',
@@ -320,27 +334,32 @@ function Row({ title, desc, right, first, last, className, stackOnMobile = false
     >
       <div className={cn('min-w-0 flex-1', stackOnMobile && 'max-md:min-w-[10rem]')}>
         <div className="font-medium leading-tight" style={{ fontSize: fontPx(14, scale, 12) }}>
-          {title}
+          {typeof title === 'string' ? t(title) : title}
         </div>
         {desc && (
           <div
             className="text-muted-foreground leading-snug"
             style={{ fontSize: fontPx(12, scale, 10), marginTop: px(4, scale, 3) }}
           >
-            {desc}
+            {typeof desc === 'string' ? t(desc) : desc}
           </div>
         )}
       </div>
       {right && (
-        <div className={cn('shrink-0 flex items-center', stackOnMobile && 'max-md:ml-auto max-md:justify-end')}>
+        <motion.div
+          layout={animateLanguageLayout && !reduceMotion ? 'size' : false}
+          transition={layoutTransition}
+          className={cn('shrink-0 flex items-center', stackOnMobile && 'max-md:ml-auto max-md:justify-end')}
+        >
           {right}
-        </div>
+        </motion.div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
 function ConnectHint({ open, hintRef, scale, reduceMotion, className, message = '¡Conecta tu cuenta primero!' }) {
+  const { t } = useI18n();
   return (
     <AnimatePresence>
       {open && (
@@ -360,7 +379,7 @@ function ConnectHint({ open, hintRef, scale, reduceMotion, className, message = 
           className={cn('absolute right-0 top-full z-20 mt-2 rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground shadow-lg whitespace-nowrap', className)}
           style={{ fontSize: fontPx(12, scale, 10) }}
         >
-          {message}
+          {t(message)}
         </motion.div>
       )}
     </AnimatePresence>
@@ -368,6 +387,7 @@ function ConnectHint({ open, hintRef, scale, reduceMotion, className, message = 
 }
 
 function Segmented({ value, options, onChange, scale = 1, stableLayout = false }) {
+  const { t } = useI18n();
   return (
     <div className="flex" style={{ gap: px(8, scale, 5) }}>
       {options.map(([val, label]) => (
@@ -389,9 +409,48 @@ function Segmented({ value, options, onChange, scale = 1, stableLayout = false }
             justifyContent: 'center'
           }}
         >
-          {label}
+          {t(label)}
         </Button>
       ))}
+    </div>
+  );
+}
+
+function ModeToggle({ value, options, onChange }) {
+  const { t } = useI18n();
+  const ModeIcon = value === 'light' ? Sun : value === 'dark' ? Moon : Monitor;
+
+  return (
+    <div
+      role="group"
+      aria-label={t('Modo')}
+      className="inline-flex items-center gap-1 rounded-xl border border-border bg-card p-1 text-card-foreground shadow-sm"
+    >
+      <ModeIcon aria-hidden="true" className="ml-1 h-4 w-4 text-muted-foreground" />
+      <div className="relative grid grid-cols-3 rounded-lg p-0.5">
+        <span
+          aria-hidden="true"
+          className={cn(
+            'pointer-events-none absolute inset-y-0.5 left-0.5 w-16 rounded-md bg-primary transition-transform duration-200 ease-out motion-reduce:transition-none',
+            value === 'light' && 'translate-x-full',
+            value === 'dark' && 'translate-x-[200%]'
+          )}
+        />
+        {options.map(([mode, label]) => (
+          <button
+            key={mode}
+            type="button"
+            aria-pressed={value === mode}
+            onClick={() => onChange(mode)}
+            className={cn(
+              'relative z-10 w-16 rounded-lg px-1 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
+              value === mode ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            {t(label)}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -428,8 +487,12 @@ const sortByName = (items, getName = (item) => item?.name || '') => [...items].s
 let sessionSeccion = '';
 
 export default function Settings({ tutorialPreview = false, tutorialImportControls = null }) {
+  const { language, t } = useI18n();
   const location = useLocation();
   const [s, setS] = useState(settings.get());
+  const [languageLayoutMotion, setLanguageLayoutMotion] = useState(false);
+  const languageLayoutTimerRef = useRef(null);
+  const languageLayoutFrameRef = useRef(null);
   const [section, setSection] = useState(() => {
     const restoredSection = tutorialImportControls ? 'respaldo' : consumeBrowserSettingsSection() || sessionSeccion;
     return SECTIONS.some(({ id }) => id === restoredSection) ? restoredSection : 'apariencia';
@@ -561,6 +624,10 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
 
   useEffect(() => settings.subscribe(setS), []);
   useEffect(() => () => {
+    cancelAnimationFrame(languageLayoutFrameRef.current);
+    clearTimeout(languageLayoutTimerRef.current);
+  }, []);
+  useEffect(() => () => {
     if (tutorialPreview) sessionSeccion = '';
   }, [tutorialPreview]);
   useEffect(() => {
@@ -623,6 +690,19 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
   };
 
   const set = (patch) => setS(settings.set(patch));
+  const changeLanguage = (nextLanguage) => {
+    clearTimeout(languageLayoutTimerRef.current);
+    cancelAnimationFrame(languageLayoutFrameRef.current);
+    if (nextLanguage === language) {
+      set({ language: nextLanguage });
+      return;
+    }
+    flushSync(() => setLanguageLayoutMotion(true));
+    languageLayoutFrameRef.current = requestAnimationFrame(() => {
+      set({ language: nextLanguage });
+      languageLayoutTimerRef.current = setTimeout(() => setLanguageLayoutMotion(false), 320);
+    });
+  };
   const adjustCoverSize = (amount) => {
     const next = Math.min(240, Math.max(100, s.coverSize + amount));
     if (next !== s.coverSize) set({ coverSize: next });
@@ -668,8 +748,10 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
     lib.removeFavs(pendingCat.inside);
     setCats(lib.removeCat(pendingCat.id));
     toast({
-      title: `Categoría "${pendingCat.name}" eliminada`,
-      description: `${pendingCat.inside.length} ${pendingCat.inside.length === 1 ? 'manga eliminado' : 'mangas eliminados'} de la biblioteca`,
+      title: t('Categoría "{name}" eliminada', { name: pendingCat.name }),
+      description: t(pendingCat.inside.length === 1
+        ? '{count} manga eliminado de la biblioteca'
+        : '{count} mangas eliminados de la biblioteca', { count: pendingCat.inside.length }),
       variant: 'info'
     });
     setPendingCat(null);
@@ -832,7 +914,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       window.dispatchEvent(new Event('cytlex:library-updated'));
       toast({
         title: 'Respaldo restaurado',
-        description: `Los datos se aplicaron correctamente${coverFailures ? `; ${coverFailures} portadas no pudieron guardarse` : ''}${detailFailures ? `; no se pudo guardar la información de ${detailFailures} mangas` : ''}.`,
+        description: `${t('Los datos se aplicaron correctamente')}${coverFailures ? `; ${t('{count} portadas no pudieron guardarse', { count: coverFailures })}` : ''}${detailFailures ? `; ${t('No se pudo guardar la información de {count} mangas', { count: detailFailures })}` : ''}.`,
         variant: 'success'
       });
       markBackupImportedThisSession();
@@ -1176,7 +1258,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       setCats(lib.cats());
       toast({
         title: 'Respaldo de Mihon importado',
-        description: `${result.added + result.updated} mangas importados${omitted.size ? `, ${omitted.size} omitidos` : ''}.${detailFailures ? ` No se pudieron guardar los detalles de ${detailFailures} mangas.` : ''}${coverFailures ? ` ${coverFailures} portadas no pudieron guardarse.` : ''}${failedInstalls.length ? ` No se pudieron instalar: ${failedInstalls.map(({ name }) => name).join(', ')}.` : ''}`,
+        description: `${t('{count} mangas importados', { count: result.added + result.updated })}${omitted.size ? `, ${t('{count} omitidos', { count: omitted.size })}` : ''}.${detailFailures ? ` ${t('No se pudo guardar la información de {count} mangas', { count: detailFailures })}.` : ''}${coverFailures ? ` ${t('{count} portadas no pudieron guardarse', { count: coverFailures })}.` : ''}${failedInstalls.length ? ` ${t('No se pudieron instalar: {names}', { names: failedInstalls.map(({ name }) => name).join(', ') })}.` : ''}`,
         variant: 'success'
       });
       markBackupImportedThisSession();
@@ -1328,29 +1410,36 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
         <Row
           scale={scale}
           first
-          title="Modo"
-          desc="Cambia los colores que se ven en la aplicación"
+          stackOnMobile
+          title={t('Idioma')}
+          desc={t('Selecciona el idioma de la interfaz de Cytlex.')}
           right={
-            <Segmented
-              scale={scale}
-              stableLayout
+            <LanguageToggle value={language} onChange={changeLanguage} />
+          }
+        />
+        <Row
+          scale={scale}
+          title={t('Modo')}
+          desc={language === 'en' ? 'Choose the app color scheme.' : 'Cambia los colores que se ven en la aplicación'}
+          right={
+            <ModeToggle
               value={s.mode}
-              onChange={(m) => setAppearance({ mode: m })}
-              options={MODES.map(({ id, name }) => [id, name])}
+              onChange={(m) => set({ mode: m })}
+              options={MODES.map(({ id, name }) => [id, t(name)])}
             />
           }
         />
         <Row
           scale={scale}
-          title="Tamaño de portadas"
-          desc="Ajusta las portadas en Biblioteca, Explorar, Fuentes y fichas de manga"
+          title={t('Tamaño de portadas')}
+          desc={t('Muestra las portadas en Biblioteca, Explorar, Fuentes y fichas de manga')}
           right={
             <div className="flex items-center" style={{ gap: px(6, scale, 4) }}>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label="Reducir tamaño de portadas"
+                aria-label={t('Reducir tamaño de portadas')}
                 className="hover:bg-transparent hover:text-foreground"
                 disabled={s.coverSize <= 100}
                 onClick={() => adjustCoverSize(-10)}
@@ -1372,7 +1461,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label="Aumentar tamaño de portadas"
+                aria-label={t('Aumentar tamaño de portadas')}
                 className="hover:bg-transparent hover:text-foreground"
                 disabled={s.coverSize >= 240}
                 onClick={() => adjustCoverSize(10)}
@@ -1385,18 +1474,20 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
         />
         <div style={{ paddingTop: px(14, scale, 10) }}>
           <h3 className="mb-3 font-medium leading-tight md:mb-2" style={{ fontSize: fontPx(14, scale, 12) }}>
-            Tema
+            {t('Tema')}
           </h3>
           <div className="grid grid-cols-2 min-[440px]:grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
-            {THEMES.map((t) => {
-              const on = s.theme === t.id;
-              const sw = t.swatch[resolveMode(s.mode)] || t.swatch.dark;
+            {THEMES.map((theme) => {
+              const on = s.theme === theme.id;
+              const sw = theme.swatch[resolveMode(s.mode)] || theme.swatch.dark;
               return (
-                <button
-                  key={t.id}
+                <motion.button
+                  key={theme.id}
                   type="button"
                   aria-pressed={on}
-                  onClick={() => setAppearance({ theme: t.id })}
+                  layout={languageLayoutMotion && !reduceMotion ? 'size' : false}
+                  transition={{ layout: { duration: reduceMotion ? 0 : 0.24, ease: [0.23, 1, 0.32, 1] } }}
+                  onClick={() => setAppearance({ theme: theme.id })}
                   className={cn(
                     'rounded-xl border-2 p-4 text-left transition-colors md:p-3',
                     on ? 'border-primary bg-card shadow-[inset_0_0_0_1px_hsl(var(--primary))]' : 'border-border/40 bg-card hover:bg-accent/30'
@@ -1413,12 +1504,12 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                     />
                   </div>
                   <div className="font-medium" style={{ fontSize: fontPx(14, scale, 12) }}>
-                    {t.name}
+                    {t(theme.name)}
                   </div>
                   <div className="text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10) }}>
-                    {t.desc}
+                    {t(theme.desc)}
                   </div>
-                </button>
+                </motion.button>
               );
             })}
           </div>
@@ -1446,12 +1537,12 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
           scale={scale}
           title={
             <>
-              Capítulos por fila{' '}
+              {t('Capítulos por fila')}{' '}
               <button
                 ref={chaptersPerRowTipRef}
                 type="button"
                 className="group relative inline-flex align-middle rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="Información sobre capítulos por fila"
+                aria-label={t('Información sobre capítulos por fila')}
                 aria-describedby="chapters-per-row-tip"
                 onClick={() => {
                   if (window.innerWidth < 768) setChaptersPerRowTipOpen((open) => !open);
@@ -1466,15 +1557,15 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                     chaptersPerRowTipOpen && 'max-md:opacity-100'
                   )}
                 >
-                  Pro Tip: En celulares se fuerza a un solo capítulo por fila para evitar el desbordamiento de la información.
+                  {t('Pro Tip: En celulares se fuerza a un solo capítulo por fila para evitar el desbordamiento de la información.')}
                 </span>
               </button>
             </>
           }
-          desc="Cantidad de capítulos por fila en la ficha de un manga"
+          desc={t('Cantidad de capítulos por fila en la ficha de un manga')}
           right={
             <>
-              <span className="rounded-lg border border-border bg-muted px-3 py-2 text-sm md:hidden">1 por fila</span>
+              <span className="rounded-lg border border-border bg-muted px-3 py-2 text-sm md:hidden">{t('1 por fila')}</span>
               <div className="hidden md:block">
                 <Segmented
                   scale={scale}
@@ -1490,12 +1581,12 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
           scale={scale}
           title={
             <>
-              Mostrar capítulos sin leer{' '}
+              {t('Mostrar capítulos sin leer')}{' '}
               <button
                 ref={libraryUnreadTipRef}
                 type="button"
                 className="group relative inline-flex align-middle rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="Información sobre capítulos sin leer"
+                aria-label={t('Información sobre capítulos sin leer')}
                 aria-describedby="library-unread-tip"
                 onClick={() => {
                   if (window.innerWidth < 768) setLibraryUnreadTipOpen((open) => !open);
@@ -1510,7 +1601,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                     libraryUnreadTipOpen && 'max-md:opacity-100'
                   )}
                 >
-                  Pro Tip: Desactivar esta opción podría mejorar el rendimiento en dispositivos de gama baja-media. Desactivala si ves que el desplazamiento en la biblioteca es muy lento.
+                  {t('Pro Tip: Desactivar esta opción podría mejorar el rendimiento en dispositivos de gama baja-media. Desactivala si ves que el desplazamiento en la biblioteca es muy lento.')}
                 </span>
               </button>
             </>
@@ -1598,7 +1689,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                   onChange={(e) => renameLocal(c.id, e.target.value)}
                   onBlur={() => commitRename(c.id)}
                   className="min-w-0 flex-1 border-none bg-transparent transition-colors focus:bg-background"
-                  aria-label={`Nombre de la categoría ${c.name}`}
+                  aria-label={t(`Nombre de la categoría ${c.name}`)}
                   style={{
                     height: px(36, scale, 30),
                     fontSize: fontPx(14, scale, 12),
@@ -1613,15 +1704,15 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                     padding: `${px(4, scale, 3)} ${px(7, scale, 5)}`,
                     fontSize: fontPx(12, scale, 10)
                   }}
-                  title={`${counts.get(c.id) || 0} mangas en esta categoría`}
+                  title={t(`${counts.get(c.id) || 0} mangas en esta categoría`)}
                 >
                   {counts.get(c.id) || 0}
                 </span>
                 <Button
                   variant="ghost"
                   size="icon"
-                  title={`Eliminar categoría ${c.name}`}
-                  aria-label={`Eliminar categoría ${c.name}`}
+                  title={t(`Eliminar categoría ${c.name}`)}
+                  aria-label={t(`Eliminar categoría ${c.name}`)}
                   onClick={() => removeCat(c.id)}
                   className="shrink-0 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                   style={{ width: px(34, scale, 29), height: px(34, scale, 29) }}
@@ -1636,7 +1727,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             className="rounded-xl border border-dashed border-border px-4 py-5 text-muted-foreground"
             style={{ fontSize: fontPx(14, scale, 12) }}
           >
-            No hay categorías. Crea la primera para organizar tu biblioteca.
+            {t('No hay categorías. Crea la primera para organizar tu biblioteca.')}
           </p>
         )}
 
@@ -1645,12 +1736,12 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
           style={{ gap: px(8, scale, 6), marginTop: px(12, scale, 10) }}
         >
           <Input
-            placeholder="Nueva categoría…"
+            placeholder={t('Nueva categoría…')}
             value={newCat}
             onChange={(e) => setNewCat(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addCat()}
             className="rounded-none"
-            aria-label="Nueva categoría"
+            aria-label={t('Nueva categoría')}
             style={{
               height: px(38, scale, 32),
               fontSize: fontPx(14, scale, 12),
@@ -1670,7 +1761,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             }}
           >
             <Plus style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />
-            Añadir
+            {t('Añadir')}
           </Button>
         </div>
       </div>
@@ -1691,8 +1782,8 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                   variant="ghost"
                   size="icon"
                   className="hover:bg-transparent"
-                  title="Configurar calificaciones de contenido"
-                  aria-label="Configurar calificaciones de contenido"
+                  title={t('Configurar calificaciones de contenido')}
+                  aria-label={t('Configurar calificaciones de contenido')}
                   onClick={() => {
                     setAdultRatingsDraft([...s.adultContentRatings]);
                     setAdultRatingsDialog(true);
@@ -1716,7 +1807,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
         />
         <div style={{ marginTop: px(18, scale, 12) }}>
           <div className="font-medium leading-tight mb-2" style={{ fontSize: fontPx(14, scale, 12) }}>
-            Repositorio de extensiones
+            {t('Repositorio de extensiones')}
           </div>
         </div>
         <div className="flex items-center" style={{ gap: px(8, scale, 6) }}>
@@ -1727,7 +1818,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             placeholder="https://…/index.json"
             spellCheck={false}
             className="bg-muted/50 border-none font-mono"
-            aria-label="Repositorio de extensiones"
+            aria-label={t('Repositorio de extensiones')}
             style={{
               height: px(34, scale, 28),
               fontSize: fontPx(13, scale, 11),
@@ -1737,8 +1828,8 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
           />
           <Button
             size="icon"
-            title="Añadir repositorio"
-            aria-label="Añadir repositorio"
+            title={t('Añadir repositorio')}
+            aria-label={t('Añadir repositorio')}
             onClick={addRepo}
             className="shrink-0 rounded-lg"
             style={{ width: px(34, scale, 28), height: px(34, scale, 28) }}
@@ -1766,8 +1857,8 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
               <Button
                 variant="ghost"
                 size="icon"
-                title="Quitar repositorio"
-                aria-label="Quitar repositorio"
+                title={t('Quitar repositorio')}
+                aria-label={t('Quitar repositorio')}
                 onClick={() => setConfirmRemoveRepo(true)}
                 className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
                 style={{ width: px(34, scale, 28), height: px(34, scale, 28) }}
@@ -1794,7 +1885,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                       }}
                       style={{ height: px(28, scale, 24), fontSize: fontPx(12, scale, 10), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                     >
-                      Quitar
+                      {t('Quitar')}
                     </Button>
                   </motion.div>
                 )}
@@ -1837,7 +1928,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                 }}
               >
                 <LogOut className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                Desconectar
+                {t('Desconectar')}
               </Button>
             ) : (
               <Button
@@ -1856,7 +1947,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                 ) : (
                   <Link2 className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
                 )}
-                Conectar
+                {t('Conectar')}
               </Button>
             )
           }
@@ -1929,7 +2020,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                   }}
                 >
                   <RefreshCw className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                  Refrescar caché
+                  {t('Refrescar caché')}
                 </Button>
                 <ConnectHint
                   open={connectHintFor === 'refresh'}
@@ -1957,7 +2048,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                     paddingRight: px(12, scale, 9)
                   }}
                 >
-                  Ver mi lista
+                  {t('Ver mi lista')}
                 </Button>
                 <ConnectHint
                   open={connectHintFor === 'list'}
@@ -2033,7 +2124,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
               style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
             >
               <Download className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-              Exportar
+              {t('Exportar')}
             </Button>
           }
         />
@@ -2051,7 +2142,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                 style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
               >
                 <Upload className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                Importar
+                {t('Importar')}
               </Button>
             </div>
           }
@@ -2071,7 +2162,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                 style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
               >
                 <Upload className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                Importar Mihon
+                {t('Importar Mihon')}
               </Button>
             </div>
           }
@@ -2091,7 +2182,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                 style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
               >
                 <Trash2 className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                Restablecer
+                {t('Restablecer')}
               </Button>
             }
           />
@@ -2166,9 +2257,11 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
   if (tutorialImportControls) tutorialImportControls.current = { importBackup, importMihon };
 
   return (
-    <div
-      className="flex h-full min-h-0 flex-col"
-    >
+    <LanguageLayoutMotionProvider value={languageLayoutMotion}>
+      <LayoutGroup id="settings-language-layout">
+        <div
+          className="flex h-full min-h-0 flex-col"
+        >
       <div
         className={cn(
           'relative w-full min-w-0 shrink-0 bg-sidebar',
@@ -2191,9 +2284,11 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
         {SECTIONS.map((sec) => {
           const on = sec.id === section;
           return (
-            <button
+            <motion.button
               key={sec.id}
               type="button"
+              layout={languageLayoutMotion && !reduceMotion ? 'size' : false}
+              transition={{ layout: { duration: reduceMotion ? 0 : 0.24, ease: [0.23, 1, 0.32, 1] } }}
               aria-current={on ? 'page' : undefined}
               onClick={(event) => {
                 if (on) {
@@ -2211,8 +2306,8 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
               className="group relative shrink-0 p-0 transition-colors"
               style={{ fontSize: fontPx(14, scale), scrollMarginInline: px(16, scale, 12) }}
             >
-              <SubrouteTabLabel active={on}>{sec.label}</SubrouteTabLabel>
-            </button>
+              <SubrouteTabLabel active={on}>{t(sec.label)}</SubrouteTabLabel>
+            </motion.button>
           );
         })}
         </nav>
@@ -2248,7 +2343,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             disabled={webDataResetBusy}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button
             variant="destructive"
@@ -2256,7 +2351,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             disabled={webDataResetBusy}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            {webDataResetBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Restableciendo</> : 'Borrar datos'}
+            {webDataResetBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />{t('Restableciendo')}</> : t('Borrar datos')}
           </Button>
         </div>
       </Dialog>
@@ -2265,7 +2360,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
           && !(confirmAdultExtensions && adultImportTargetRef.current === 'backup')}
         onClose={() => { if (!backupBusy) setBackupCandidate(null); }}
         title="Importar respaldo de Cytlex"
-        description={`Se restaurará ${backupCandidate?.fileName || 'el respaldo'} en Cytlex y reemplazará tus datos actuales. Las extensiones instaladas se mantendrán.`}
+        description={t('Se restaurará {fileName} en Cytlex y reemplazará tus datos actuales. Las extensiones instaladas se mantendrán.', { fileName: backupCandidate?.fileName || 'el respaldo' })}
         hideDivider
         bodyClassName="pb-6"
         scrollableBody={false}
@@ -2273,9 +2368,9 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       >
         <BackupProgress progress={backupProgress} scale={scale} />
         <div className="text-muted-foreground" style={{ fontSize: fontPx(13, scale, 11), marginBottom: px(18, scale, 14) }}>
-          <div>{backupMangas.length} mangas · {backupCategoryCount} categorías</div>
+          <div>{backupMangas.length} {t('manga')} · {backupCategoryCount} {t('categorías')}</div>
           <div style={{ marginTop: px(6, scale, 4) }}>
-            {uninstalledBackupExtensionIds.size} extensiones sin instalar.
+            {t('{count} extensiones sin instalar.', { count: uninstalledBackupExtensionIds.size })}
           </div>
         </div>
         <div className="flex flex-col-reverse items-stretch justify-end sm:flex-row sm:items-center" style={{ gap: px(8, scale, 6) }}>
@@ -2286,7 +2381,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             disabled={backupBusy}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button
             className="w-full sm:w-auto"
@@ -2294,7 +2389,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             disabled={backupBusy}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            {backupBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Restaurando</> : 'Restaurar'}
+            {backupBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />{t('Restaurando')}</> : t('Restaurar')}
           </Button>
         </div>
       </Dialog>
@@ -2330,7 +2425,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                         </span>
                       )}
                     </div>
-                    <span className="shrink-0">{source.count} mangas</span>
+                    <span className="shrink-0">{source.count} {t('manga')}</span>
                   </div>
                 ))}
               </div>
@@ -2345,7 +2440,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             disabled={backupBusy}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            Cancelar
+            {t('Cancelar')}
           </Button>
           {backupHasBlockedSources ? (
             <Button
@@ -2357,7 +2452,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
               disabled={backupBusy}
               style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
             >
-              Habilitar +18 y continuar
+              {t('Habilitar +18 y continuar')}
             </Button>
           ) : (
             <>
@@ -2368,7 +2463,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                 disabled={backupBusy}
                 style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
               >
-                Omitir mangas
+                {t('Omitir mangas')}
               </Button>
               <Button
                 className="w-full sm:w-auto"
@@ -2376,7 +2471,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                 disabled={backupBusy}
                 style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
               >
-                Conservar mangas
+                {t('Conservar mangas')}
               </Button>
             </>
           )}
@@ -2410,14 +2505,14 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                   {source.displayManifest?.name || source.name || source.id}
                 </span>
                 {source.installed && (
-                  <span className="shrink-0 text-muted-foreground">· INSTALADA</span>
+                    <span className="shrink-0 text-muted-foreground">· {t('INSTALADA')}</span>
                 )}
               </div>
-              <span className="shrink-0">{source.count} mangas</span>
+              <span className="shrink-0">{source.count} {t('manga')}</span>
             </div>
           ))}
           {!backupInstallRows.length && (
-            <p>No se encontraron extensiones instalables en el repositorio configurado.</p>
+            <p>{t('No se encontraron extensiones instalables en el repositorio configurado.')}</p>
           )}
         </div>
         <div className="flex flex-col-reverse items-stretch justify-end sm:flex-row sm:items-center" style={{ gap: px(8, scale, 6) }}>
@@ -2428,7 +2523,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             disabled={backupBusy}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button
             className="w-full sm:w-auto"
@@ -2436,7 +2531,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             disabled={backupBusy}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            {backupBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Preparando</> : backupInstallManifests.length ? 'Instalar y restaurar' : 'Restaurar'}
+            {backupBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />{t('Preparando')}</> : backupInstallManifests.length ? t('Instalar y restaurar') : t('Restaurar')}
           </Button>
         </div>
       </Dialog>
@@ -2445,7 +2540,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
           && !(confirmAdultExtensions && adultImportTargetRef.current === 'mihon')}
         onClose={() => { if (!mihonBusy) setMihonCandidate(null); }}
         title="Importar respaldo de Mihon"
-        description={`Se fusionará ${mihonCandidate?.fileName || 'este respaldo'} con Cytlex.`}
+        description={t('Se fusionará {fileName} con Cytlex.', { fileName: mihonCandidate?.fileName || 'este respaldo' })}
         hideDivider
         bodyClassName="pb-6"
         scrollableBody={false}
@@ -2453,9 +2548,9 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       >
         {mihonBusy && mihonProgress && <BackupProgress progress={mihonProgress} scale={scale} />}
         <div className="text-muted-foreground" style={{ fontSize: fontPx(13, scale, 11), marginBottom: px(18, scale, 14) }}>
-          <div>{mihonCandidate?.mangaCount || 0} mangas · {mihonCandidate?.categoryNames?.length || 0} categorías</div>
+          <div>{mihonCandidate?.mangaCount || 0} {t('manga')} · {mihonCandidate?.categoryNames?.length || 0} {t('categorías')}</div>
           <div style={{ marginTop: px(6, scale, 4) }}>
-            {mihonCandidate?.uninstalledExtensionCount || 0} extensiones sin instalar.
+            {t('{count} extensiones sin instalar.', { count: mihonCandidate?.uninstalledExtensionCount || 0 })}
           </div>
         </div>
         <div className="flex flex-col-reverse items-stretch justify-end sm:flex-row sm:items-center" style={{ gap: px(8, scale, 6) }}>
@@ -2466,7 +2561,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             disabled={mihonBusy}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button
             className="w-full sm:w-auto"
@@ -2474,7 +2569,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             disabled={mihonBusy}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            {mihonBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Cargando</> : 'Fusionar'}
+            {mihonBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />{t('Cargando')}</> : t('Fusionar')}
           </Button>
         </div>
       </Dialog>
@@ -2509,7 +2604,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                         </span>
                       )}
                     </div>
-                    <span className="shrink-0">{source.count} mangas</span>
+                    <span className="shrink-0">{source.count} {t('manga')}</span>
                   </div>
                 ))}
               </div>
@@ -2529,7 +2624,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             disabled={mihonBusy}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            Cancelar
+            {t('Cancelar')}
           </Button>
           {mihonHasBlockedSources ? (
             <Button
@@ -2541,7 +2636,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
               disabled={mihonBusy}
               style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
             >
-              Habilitar +18 y continuar
+              {t('Habilitar +18 y continuar')}
             </Button>
           ) : (
             <>
@@ -2552,7 +2647,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                 disabled={mihonBusy}
                 style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
               >
-                Omitir mangas
+                {t('Omitir mangas')}
               </Button>
               <Button
                 className="w-full sm:w-auto"
@@ -2560,7 +2655,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                 disabled={mihonBusy}
                 style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
               >
-                Conservar mangas
+                {t('Conservar mangas')}
               </Button>
             </>
           )}
@@ -2603,7 +2698,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                 </span>
                 <span className="truncate text-foreground" title={manifest.name || manifest.id}>{manifest.name || manifest.id}</span>
               </div>
-              <span className="shrink-0">{mihonInstallCounts.get(manifest.id) || 0} mangas</span>
+              <span className="shrink-0">{mihonInstallCounts.get(manifest.id) || 0} {t('manga')}</span>
             </div>
           ))}
         </div>
@@ -2618,7 +2713,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             disabled={mihonBusy && mihonProgress?.label === 'Cancelando instalación'}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            {mihonBusy ? 'Cancelar instalación' : 'Cancelar'}
+            {t(mihonBusy ? 'Cancelar instalación' : 'Cancelar')}
           </Button>
           <Button
             className="w-full sm:w-auto"
@@ -2626,7 +2721,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             disabled={mihonBusy}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            {mihonBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />Instalando</> : 'Instalar y continuar'}
+            {mihonBusy ? <><Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />{t('Instalando')}</> : t('Instalar y continuar')}
           </Button>
         </div>
       </Dialog>
@@ -2642,13 +2737,13 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       >
         <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
           <Button variant="outline" onClick={cancelAdultExtensionConfirmation} style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}>
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button
             onClick={enableAdultExtensionsForImport}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            Tengo 18 años o más
+            {t('Tengo 18 años o más')}
           </Button>
         </div>
       </Dialog>
@@ -2676,11 +2771,11 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
               <span className="font-medium" style={{ fontSize: fontPx(14, scale, 12) }}>
                 {rating}{' '}
                 <span className="font-normal text-muted-foreground">
-                  ({rating === 'SAFE'
+                  ({t(rating === 'SAFE'
                     ? 'sin contenido para adultos'
                     : rating === 'MIXED'
                       ? 'puede incluir contenido para adultos'
-                      : 'contenido sexual explícito para adultos'})
+                      : 'contenido sexual explícito para adultos')})
                 </span>
               </span>
             </label>
@@ -2692,7 +2787,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             onClick={() => setAdultRatingsDialog(false)}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button
             onClick={() => {
@@ -2701,7 +2796,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             }}
             style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}
           >
-            Guardar
+            {t('Guardar')}
           </Button>
         </div>
       </Dialog>
@@ -2721,13 +2816,15 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       >
         <div className="flex justify-end" style={{ gap: px(8, scale, 6) }}>
           <Button variant="outline" onClick={() => setPendingCat(null)} style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}>
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button variant="destructive" onClick={confirmRemoveCat} style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}>
             Eliminar
           </Button>
         </div>
       </Dialog>
-    </div>
+        </div>
+      </LayoutGroup>
+    </LanguageLayoutMotionProvider>
   );
 }

@@ -14,19 +14,22 @@ import { Button } from '../components/ui/button.jsx';
 import { EmptyState } from '../components/ui/empty-state.jsx';
 import { useScale, px, fontPx } from '../lib/useScale.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
+import { useI18n } from '../lib/i18n.js';
 
 function ResultsBackBar({ onBack, scale }) {
+  const { t } = useI18n();
   const inset = px(16, scale, 12);
   return (
     <div className="sticky top-0 z-20 flex shrink-0 items-center border-b border-border/70 bg-sidebar" style={{ minHeight: px(38, scale, 34), marginLeft: `-${inset}`, marginRight: `-${inset}`, paddingLeft: inset, paddingRight: inset, marginBottom: px(12, scale, 10) }}>
       <Button size="sm" variant="ghost" className="subroute-back-button -ml-3 hover:bg-transparent hover:text-foreground" onClick={(event) => { event.currentTarget.blur(); onBack(); }} style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(8, scale, 6), paddingRight: px(8, scale, 6) }}>
-        <ChevronLeft className="mr-1" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> Volver
+        <ChevronLeft className="mr-1" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} /> {t('Volver')}
       </Button>
     </div>
   );
 }
 
 export default function Results() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const loc = useLocation();
   const sourceId = new URLSearchParams(loc.search).get('s') || '';
@@ -144,15 +147,15 @@ export default function Results() {
     return (
       <EmptyState
         face="（・_・）"
-        title="Extensión oculta"
-        description="Activa «Mostrar extensiones +18» en Ajustes > Extensiones para ver fuentes MIXED, NSFW o sin clasificación."
+        title={t('Extensión oculta')}
+        description={t('Activa «Mostrar extensiones +18» en Ajustes > Extensiones para ver fuentes MIXED, NSFW o sin clasificación.')}
         action={
           <Button
             variant="secondary"
             onClick={() => navigate('/explorar')}
             style={{ height: px(40, scale, 33), fontSize: fontPx(14, scale, 12), paddingLeft: px(16, scale, 12), paddingRight: px(16, scale, 12) }}
           >
-            Ir a Explorar
+            {t('Ir a Explorar')}
           </Button>
         }
       />
@@ -162,7 +165,7 @@ export default function Results() {
     return (
       <EmptyState
         face="¯\\_(ツ)_/¯"
-        title="Sin resultados"
+        title={t('Sin resultados')}
         action={
           <Button
             variant="secondary"
@@ -174,7 +177,7 @@ export default function Results() {
               paddingRight: px(16, scale, 12)
             }}
           >
-            Ir a Explorar
+            {t('Ir a Explorar')}
           </Button>
         }
       />
@@ -217,8 +220,8 @@ export default function Results() {
         ) : (
           <EmptyState
             face="（・_・）"
-            title={hideSavedManga ? 'No hay mangas nuevos' : 'Sin resultados'}
-            description={hideSavedManga ? 'Los mangas encontrados ya están en Biblioteca.' : undefined}
+            title={t(hideSavedManga ? 'No hay mangas nuevos' : 'Sin resultados')}
+            description={hideSavedManga ? t('Los mangas encontrados ya están en Biblioteca.') : undefined}
           />
         )}
       </motion.div>
@@ -227,7 +230,7 @@ export default function Results() {
         <div className="flex flex-col items-center gap-2" style={{ marginTop: px(24, scale, 18) }}>
           <Button variant="secondary" onClick={loadNextPage} disabled={loadingMore}>
             {loadingMore && <Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 14), height: px(16, scale, 14) }} />}
-            {loadingMore ? 'Cargando…' : 'Cargar más resultados'}
+            {t(loadingMore ? 'Cargando…' : 'Cargar más resultados')}
           </Button>
           {loadError && <p className="text-sm text-destructive">{loadError}</p>}
         </div>

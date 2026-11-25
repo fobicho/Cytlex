@@ -6,6 +6,7 @@ import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
 import { SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
 import { settings, SIDEBAR_WIDTH } from '../lib/settings.js';
+import { useI18n } from '../lib/i18n.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
 import CytlexLogoMark from './CytlexLogoMark.jsx';
 
@@ -98,6 +99,7 @@ function routeSection(location) {
 }
 
 export default function Sidebar({ tutorialNavOnly = false }) {
+  const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(settings.get().sidebarCollapsed);
   const location = useLocation();
   const navigate = useNavigate();
@@ -173,7 +175,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
         )}
       </div>
       <nav
-        aria-label="Navegación principal"
+        aria-label={t('Navegación principal')}
         inert={tutorialNavOnly}
         className="sidebar-navigation flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col"
         style={{
@@ -201,8 +203,8 @@ export default function Sidebar({ tutorialNavOnly = false }) {
             <NavLink
               key={item.to}
               aria-current={isActive ? 'page' : undefined}
-              aria-label={item.label}
-              title={collapsed ? item.label : undefined}
+              aria-label={t(item.label)}
+              title={collapsed ? t(item.label) : undefined}
               className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
               to={tutorialNavOnly && item.to === '/explorar'
                 ? '/explorar?tab=mangas'
@@ -297,7 +299,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                       transition={transition}
                       style={{ left: `${Math.max(6, Math.round(8 * scale))}px` }}
                     >
-                      <ActiveRouteLabel label={item.label} active={isActive} />
+              <ActiveRouteLabel label={t(item.label)} active={isActive} />
                     </motion.span>
                   )}
                 </AnimatePresence>
@@ -321,8 +323,8 @@ export default function Sidebar({ tutorialNavOnly = false }) {
               if (window.cytlex?.openExternal) window.cytlex.openExternal(url);
               else window.open(url, '_blank', 'noopener');
             }}
-            title="Apoyar en Ko-fi"
-            aria-label="Apoyar en Ko-fi"
+            title={t('Apoyar en Ko-fi')}
+            aria-label={t('Apoyar en Ko-fi')}
             className={cn(
               'w-full flex items-center rounded-md font-medium',
               'transition-[gap,color,background-color,border-color,text-decoration-color,fill,stroke] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
@@ -369,7 +371,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                 transitionDuration: collapsed ? '180ms' : '300ms'
               }}
             >
-              Apoyar en Ko-fi
+              {t('Apoyar en Ko-fi')}
             </span>
           </button>
         </div>
@@ -384,9 +386,9 @@ export default function Sidebar({ tutorialNavOnly = false }) {
           whileHover={{ scale: 1.04 }}
           whileTap={{ scale: 0.94 }}
           onClick={toggle}
-          aria-label={collapsed ? 'Expandir menu lateral' : 'Colapsar menu lateral'}
+          aria-label={collapsed ? t('Expandir menu lateral') : t('Colapsar menu lateral')}
           aria-expanded={!collapsed}
-          title={collapsed ? 'Expandir' : 'Colapsar'}
+          title={collapsed ? t('Expandir') : t('Colapsar')}
           className="mx-auto grid shrink-0 place-items-center bg-transparent text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
           style={{
             width: `${Math.max(36, Math.round(40 * scale))}px`,

@@ -12,8 +12,10 @@ import { useToast } from './Toast.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils.js';
 import { useScale, px, fontPx, toolbarButtonStyle } from '../lib/useScale.js';
+import { useI18n } from '../lib/i18n.js';
 
 function ExtensionCard({ m, action, updatable = false, disabled = false, scale = 1, selected = false, confirmationOpen = false, onSelectionChange, selectionLabel, selectionDisabled = false }) {
+  const { t } = useI18n();
   const [imgOk, setImgOk] = useState(true);
   const showImg = m.icon && imgOk;
   const declaredRating = String(m.contentWarning || '').trim().toUpperCase();
@@ -75,7 +77,7 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
               'shrink-0 font-semibold',
               hasAdultContent ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'
             )}
-            title={`Clasificación de contenido: ${contentRating}`}
+            title={`${t('Clasificación de contenido')}: ${contentRating}`}
             aria-label={contentRatingLabel}
             style={{ fontSize: fontPx(11, scale, 9) }}
           >
@@ -100,7 +102,7 @@ function ExtensionCard({ m, action, updatable = false, disabled = false, scale =
         <button
           type="button"
           onClick={() => onSelectionChange(!selected)}
-          aria-label={selectionLabel}
+        aria-label={t(selectionLabel)}
           aria-pressed={selected}
           disabled={selectionDisabled}
           className="absolute inset-0 z-0 cursor-pointer rounded-lg bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-default"
@@ -161,6 +163,7 @@ function sortLabel(sortBy) {
 }
 
 export default function ExtensionsPanel({ tutorialPreview = false, active = true }) {
+  const { language, t } = useI18n();
   const { toast } = useToast();
   const scale = useScale();
   const configuredRepo = (settings.get().extIndexUrl || '').trim();
@@ -487,10 +490,12 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
         toast({ title: 'No hay actualizaciones pendientes', description: 'Tus extensiones están al día.', variant: 'info' });
       } else {
         toast({
-          title: found.length === 1 ? `${found[0].name} tiene una actualización` : `${found.length} extensiones tienen actualizaciones`,
+          title: found.length === 1
+            ? t('{name} tiene una actualización', { name: found[0].name })
+            : t('{count} extensiones tienen actualizaciones', { count: found.length }),
           description: found.length === 1
-            ? `Ya puedes instalar la versión ${found[0].to}.`
-            : 'Ya puedes instalarlas desde Extensiones.',
+            ? t('Ya puedes instalar la versión {version}.', { version: found[0].to })
+            : t('Ya puedes instalarlas desde Extensiones.'),
           variant: 'info'
         });
       }
@@ -611,7 +616,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
         const updated = r.actualizadas[0];
         toast({
           title: 'Extensión actualizada',
-          description: updated ? `${updated.name} quedó en la versión ${updated.version}.` : undefined,
+            description: updated ? t('{name} quedó en la versión {version}.', { name: updated.name, version: updated.version }) : undefined,
           variant: 'success'
         });
       } else if (!r.fallos.length) {
@@ -619,7 +624,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
         const version = current?.installedVersion || current?.manifest.version;
         toast({
           title: 'La extensión ya está actualizada',
-          description: version ? `Está en la versión ${version}.` : undefined,
+            description: version ? t('Está en la versión {version}.', { version }) : undefined,
           variant: 'info'
         });
       } else {
@@ -643,7 +648,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
         toast({
           title: 'Actualización parcial',
           description: [
-            `${r.ok} actualizadas, ${r.fallos.length} fallaron.`,
+            t('{updated} actualizadas, {failed} fallaron.', { updated: r.ok, failed: r.fallos.length }),
             r.actualizadas.map(({ name, version }) => `${name} ${version}`).join(' · ')
           ].filter(Boolean).join(' '),
           variant: 'error'
@@ -661,7 +666,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
       } else {
         extUpdates.clear();
         toast({
-          title: r.ok === 1 ? '1 extensión actualizada' : `${r.ok} extensiones actualizadas`,
+          title: t(r.ok === 1 ? '1 extensión actualizada' : '{count} extensiones actualizadas', { count: r.ok }),
           description: r.actualizadas.map(({ name, version }) => `${name} ${version}`).join(' · '),
           variant: 'success'
         });
@@ -769,8 +774,8 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
     } else if (succeeded.length) {
       toast({
         title: isInstall
-          ? `${succeeded.length} ${succeeded.length === 1 ? 'extensión instalada' : 'extensiones instaladas'}`
-          : `${succeeded.length} ${succeeded.length === 1 ? 'extensión desinstalada' : 'extensiones desinstaladas'}`,
+          ? t(succeeded.length === 1 ? '1 extensión instalada' : '{count} extensiones instaladas', { count: succeeded.length })
+          : t(succeeded.length === 1 ? '1 extensión desinstalada' : '{count} extensiones desinstaladas', { count: succeeded.length }),
         variant: 'success'
       });
     }
@@ -810,8 +815,8 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
             variant="secondary"
             size="sm"
             className="extensions-square-button extensions-sort-button"
-            title="Ordenar extensiones"
-            aria-label={`Ordenar extensiones: ${sortLabel(sortBy)}`}
+            title={t('Ordenar extensiones')}
+            aria-label={`${t('Ordenar extensiones')}: ${t(sortLabel(sortBy))}`}
             onClick={() => {
               const next = extensionSortModes[(extensionSortModes.indexOf(sortBy) + 1) % extensionSortModes.length];
               setSortBy(next);
@@ -820,22 +825,22 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
             style={toolbarButtonStyle(scale)}
           >
             <ArrowUpDown className="extensions-button-icon mr-2" style={{ width: px(14, scale, 11), height: px(14, scale, 11) }} />
-            <span className="extensions-button-label">{sortLabel(sortBy)}</span>
+            <span className="extensions-button-label">{t(sortLabel(sortBy))}</span>
           </Button>
           <Button
             variant="secondary"
             size="sm"
             className={cn('extensions-square-button extensions-refresh-button', compactRefreshButton && 'is-compact')}
             onClick={searchUpdates}
-            title={checkCooldown ? `Puedes volver a buscar en ${checkCooldown} s` : 'Buscar actualizaciones'}
-            aria-label="Buscar actualizaciones"
+            title={checkCooldown ? t('Puedes volver a buscar en {seconds} s', { seconds: checkCooldown }) : t('Buscar actualizaciones')}
+            aria-label={t('Buscar actualizaciones')}
             style={{ ...toolbarButtonStyle(scale), opacity: 1 }}
           >
             <RefreshCw
               className={cn('extensions-button-icon mr-2', checkingUpdates && 'animate-spin')}
               style={{ width: px(14, scale, 11), height: px(14, scale, 11) }}
             />
-            <span className="extensions-button-label">Buscar actualizaciones</span>
+            <span className="extensions-button-label">{t('Buscar actualizaciones')}</span>
           </Button>
         </>,
         toolbarTarget
@@ -864,7 +869,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
         >
           <div className="flex items-center" style={{ gap: px(12, scale, 8) }}>
             <h3 className="font-medium" style={{ fontSize: fontPx(14, scale, 12) }}>
-              Instaladas
+              {t('Instaladas')}
             </h3>
           </div>
           <div ref={installedActionsRef} className={cn('extensions-bulk-actions absolute right-0 top-1/2 flex min-w-0 max-w-full -translate-y-1/2 items-center justify-end', compactBulkActions && 'is-compact')} style={{ gap: px(8, scale, 6) }}>
@@ -882,14 +887,14 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     variant="secondary"
                     size="sm"
                     className="extensions-square-button"
-                    aria-label="Limpiar selecciones"
-                    title="Limpiar selecciones"
+                    aria-label={t('Limpiar selecciones')}
+                    title={t('Limpiar selecciones')}
                     onClick={() => { setSelectedInstalledIds(new Set()); setConfirmBulk(null); }}
                     disabled={busy !== '' || updating !== ''}
                     style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
                     <X className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="extensions-button-label extensions-bulk-label">Limpiar selecciones</span>
+                    <span className="extensions-button-label extensions-bulk-label">{t('Limpiar selecciones')}</span>
                   </Button>
                 </motion.div>
               )}
@@ -906,8 +911,8 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     variant="secondary"
                     size="sm"
                     className="extensions-square-button"
-                    aria-label="Seleccionar todo"
-                    title="Seleccionar todo"
+                    aria-label={t('Seleccionar todo')}
+                    title={t('Seleccionar todo')}
                     onClick={() => {
                       setSelectedInstalledIds((current) => allInstalledSelected
                         ? current
@@ -918,7 +923,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
                     <CheckSquare className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="extensions-button-label extensions-bulk-label">Seleccionar todo</span>
+                    <span className="extensions-button-label extensions-bulk-label">{t('Seleccionar todo')}</span>
                   </Button>
                 </motion.div>
               )}
@@ -936,8 +941,8 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     variant="destructive"
                     size="sm"
                     className="extensions-square-button bg-red-600 text-white hover:bg-red-700"
-                    aria-label="Desinstalar seleccionadas"
-                    title="Desinstalar seleccionadas"
+                    aria-label={t('Desinstalar seleccionadas')}
+                    title={t('Desinstalar seleccionadas')}
                     onClick={() => handleBulkAction('uninstall')}
                     disabled={busy !== '' || updating !== ''}
                     style={{
@@ -948,7 +953,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     }}
                   >
                     <Trash2 className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="extensions-button-label extensions-bulk-label">Desinstalar seleccionadas</span>
+                    <span className="extensions-button-label extensions-bulk-label">{t('Desinstalar seleccionadas')}</span>
                   </Button>
                 </motion.div>
               )}
@@ -961,7 +966,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                 aria-haspopup="dialog"
                 aria-expanded={!!confirmAll}
                 aria-controls={confirmAll ? 'confirm-update-all' : undefined}
-                aria-label={updating === 'all' ? 'Actualizando extensiones' : 'Actualizar todo'}
+                aria-label={t(updating === 'all' ? 'Actualizando extensiones' : 'Actualizar todo')}
                 className="extensions-square-button whitespace-nowrap"
                 onClick={(event) => {
                   const popoverPosition = confirmationPosition(event.currentTarget);
@@ -992,7 +997,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                         className="extensions-button-icon mr-2 animate-spin"
                         style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
                       />
-                      <span className="extensions-button-label">Actualizando...</span>
+                      <span className="extensions-button-label">{t('Actualizando...')}</span>
                     </motion.span>
                   ) : (
                     <motion.span
@@ -1007,7 +1012,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                         className="extensions-button-icon mr-2"
                         style={{ width: px(16, scale, 13), height: px(16, scale, 13) }}
                       />
-                      <span className="extensions-button-label">Actualizar todo</span>
+                      <span className="extensions-button-label">{t('Actualizar todo')}</span>
                       <span className="extensions-update-count opacity-70 ml-2">{visibleUpdates.length}</span>
                     </motion.span>
                   )}
@@ -1020,7 +1025,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
           <EmptyState
             compact
             face="（・_・）"
-            title="No hay extensiones instaladas"
+            title={t('No hay extensiones instaladas')}
           />
         ) : installed.length > 0 ? (
           <div className="grid min-w-0" style={{ ...grid, alignContent: 'start' }}>
@@ -1037,7 +1042,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     confirmationOpen={confirmRemove?.id === m.id || (confirmUpdate && confirmUpdate !== 'all' && confirmUpdate.id === m.id)}
                     selected={selectedInstalledIds.has(m.id)}
                     onSelectionChange={tutorialPreview ? undefined : (selected) => toggleSelection(setSelectedInstalledIds, m.id, selected)}
-                    selectionLabel={`Seleccionar ${m.name} para desinstalar`}
+                    selectionLabel={language === 'en' ? `Select ${m.name} to uninstall` : `Seleccionar ${m.name} para desinstalar`}
                     selectionDisabled={busy !== ''}
                     action={
                     <div className="flex items-center" style={{ gap: px(4, scale, 3) }}>
@@ -1046,8 +1051,8 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                           variant="ghost"
                           size="icon"
                           className="active:scale-100 hover:bg-transparent hover:text-foreground"
-                          title={`Configuración de ${m.name}`}
-                          aria-label={`Configuración de ${m.name}`}
+                          title={language === 'en' ? `${m.name} settings` : `Configuración de ${m.name}`}
+                          aria-label={language === 'en' ? `${m.name} settings` : `Configuración de ${m.name}`}
                           onClick={() => setConfigExt(m)}
                           style={{ width: px(32, scale, 27), height: px(32, scale, 27) }}
                         >
@@ -1064,8 +1069,8 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                             variant="ghost"
                             size="icon"
                             className="active:scale-100 hover:bg-transparent hover:text-foreground"
-                            title={`Actualizar a la v${upd.to}`}
-                            aria-label={`Actualizar ${m.name}`}
+                            title={language === 'en' ? `Update to v${upd.to}` : `Actualizar a la v${upd.to}`}
+                            aria-label={language === 'en' ? `Update ${m.name}` : `Actualizar ${m.name}`}
                             disabled={updating !== ''}
                             onClick={(event) => {
                               const popoverPosition = confirmationPosition(event.currentTarget);
@@ -1092,8 +1097,8 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                           variant="ghost"
                           size="icon"
                           className="active:scale-100 text-destructive hover:bg-transparent hover:text-destructive"
-                          title="Desinstalar"
-                          aria-label="Desinstalar"
+                          title={t('Desinstalar')}
+                          aria-label={t('Desinstalar')}
                           disabled={busy !== ''}
                           onClick={(event) => {
                             const popoverPosition = confirmationPosition(event.currentTarget);
@@ -1123,7 +1128,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
           style={{ gap: px(8, scale, 6), marginBottom: px(12, scale, 9) }}
         >
           <h3 className="font-medium" style={{ fontSize: fontPx(14, scale, 12) }}>
-            Disponibles
+            {t('Disponibles')}
           </h3>
           <div ref={availableActionsRef} className={cn('extensions-bulk-actions absolute right-0 top-1/2 flex min-w-0 max-w-full -translate-y-1/2 items-center justify-end', compactBulkActions && 'is-compact')} style={{ gap: px(8, scale, 6) }}>
             <AnimatePresence initial={false}>
@@ -1140,14 +1145,14 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     variant="secondary"
                     size="sm"
                     className="extensions-square-button"
-                    aria-label="Limpiar selecciones"
-                    title="Limpiar selecciones"
+                    aria-label={t('Limpiar selecciones')}
+                    title={t('Limpiar selecciones')}
                     onClick={() => { setSelectedAvailableIds(new Set()); setConfirmBulk(null); }}
                     disabled={busy !== '' || loading || updating !== ''}
                     style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
                     <X className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="extensions-button-label extensions-bulk-label">Limpiar selecciones</span>
+                    <span className="extensions-button-label extensions-bulk-label">{t('Limpiar selecciones')}</span>
                   </Button>
                 </motion.div>
               )}
@@ -1164,8 +1169,8 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     variant="secondary"
                     size="sm"
                     className="extensions-square-button"
-                    aria-label="Seleccionar todo"
-                    title="Seleccionar todo"
+                    aria-label={t('Seleccionar todo')}
+                    title={t('Seleccionar todo')}
                     onClick={() => {
                       setSelectedAvailableIds((current) => allAvailableSelected
                         ? current
@@ -1176,7 +1181,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     style={{ height: px(28, scale, 26), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
                     <CheckSquare className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="extensions-button-label extensions-bulk-label">Seleccionar todo</span>
+                    <span className="extensions-button-label extensions-bulk-label">{t('Seleccionar todo')}</span>
                   </Button>
                 </motion.div>
               )}
@@ -1193,8 +1198,8 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                   <Button
                     size="sm"
                     className="extensions-square-button"
-                    aria-label="Instalar seleccionadas"
-                    title="Instalar seleccionadas"
+                    aria-label={t('Instalar seleccionadas')}
+                    title={t('Instalar seleccionadas')}
                     onClick={() => handleBulkAction('install')}
                     disabled={busy !== '' || loading || updating !== ''}
                     style={{
@@ -1205,7 +1210,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     }}
                   >
                     <Download className="extensions-button-icon mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                    <span className="extensions-button-label extensions-bulk-label">Instalar seleccionadas</span>
+                    <span className="extensions-button-label extensions-bulk-label">{t('Instalar seleccionadas')}</span>
                   </Button>
                 </motion.div>
               )}
@@ -1218,7 +1223,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
             compact
             face="（・_・）"
             tone="prompt"
-            title="Sin repositorio configurado"
+            title={t('Sin repositorio configurado')}
           />
         ) : available === null ? (
           loading ? (
@@ -1227,28 +1232,28 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
               style={{ gap: px(12, scale, 9), padding: `${px(24, scale, 18)}px 0` }}
             >
               <Loader2 className="animate-spin" style={{ width: px(24, scale, 19), height: px(24, scale, 19) }} />
-              <p style={{ fontSize: fontPx(14, scale, 12) }}>Cargando extensiones...</p>
+              <p style={{ fontSize: fontPx(14, scale, 12) }}>{t('Cargando extensiones...')}</p>
             </div>
           ) : !hasCheckedRepository ? (
             <EmptyState
               compact
               face="（・_・）"
               tone="prompt"
-              title="Pulsa «Buscar actualizaciones» para cargar el catálogo"
+              title={t('Pulsa «Buscar actualizaciones» para cargar el catálogo')}
             />
           ) : (
             <EmptyState
               compact
               face="（・_・;）"
               tone="error"
-              title="No se pudieron cargar las extensiones"
+              title={t('No se pudieron cargar las extensiones')}
             />
           )
         ) : sortedAvailable.length === 0 ? (
           <EmptyState
             compact
             face="ヽ(・∀・)ﾉ"
-            title="No quedan extensiones por instalar"
+            title={t('No quedan extensiones por instalar')}
           />
         ) : (
           <div className="grid min-w-0" style={{ ...grid, alignContent: 'start' }}>
@@ -1272,8 +1277,8 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                       variant="ghost"
                       size="icon"
                       className="active:scale-100 hover:bg-transparent hover:text-foreground"
-                      title={isExtensionInstallable(m) ? 'Instalar' : 'Instalación no disponible temporalmente'}
-                      aria-label={isExtensionInstallable(m) ? 'Instalar' : 'Instalación no disponible temporalmente'}
+                      title={t(isExtensionInstallable(m) ? 'Instalar' : 'Instalación no disponible temporalmente')}
+                      aria-label={t(isExtensionInstallable(m) ? 'Instalar' : 'Instalación no disponible temporalmente')}
                       disabled={busy !== '' || !isExtensionInstallable(m)}
                       onClick={(event) => {
                         const popoverPosition = confirmationPosition(event.currentTarget);
@@ -1307,7 +1312,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                 exit={{ opacity: 0, y: -6, x: '-50%', scale: 0.96 }}
                 transition={{ duration: 0.14, ease: 'easeOut' }}
                 role="dialog"
-                aria-label="Confirmar actualización de todas las extensiones"
+                aria-label={t('Confirmar actualización de todas las extensiones')}
                 aria-describedby="confirm-update-all-description"
                 className="fixed z-[70] flex flex-col border border-border bg-card shadow-xl"
                 style={{ ...confirmAll.popoverPosition, width: Math.min(288, window.innerWidth - 24), padding: px(12, scale, 10), gap: px(10, scale, 8) }}
@@ -1331,12 +1336,12 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     }}
                     style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
-                    Cancelar
+                    {t('Cancelar')}
                   </Button>
                   <Button
                     size="sm"
                     className="confirmation-action-button"
-                    aria-label="Confirmar actualización de todas las extensiones"
+                    aria-label={t('Confirmar actualización de todas las extensiones')}
                     onClick={async () => {
                       setConfirmAll(null);
                       await doUpdateAll();
@@ -1365,7 +1370,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                 style={{ ...confirmUpdate.popoverPosition, width: Math.min(288, window.innerWidth - 24), padding: px(12, scale, 10), gap: px(10, scale, 8) }}
               >
                 <div className="min-w-0">
-                  <p className="truncate font-semibold" style={{ fontSize: fontPx(14, scale, 12) }}>¿Actualizar {confirmUpdate.name}?</p>
+                  <p className="truncate font-semibold" style={{ fontSize: fontPx(14, scale, 12) }}>{t('¿Actualizar {name}?', { name: confirmUpdate.name })}</p>
                   <p className="mt-1 text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10), lineHeight: 1.4 }}>
                     Se instalará la versión v{confirmUpdate.to} (actualmente v{confirmUpdate.from}).
                   </p>
@@ -1378,12 +1383,12 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     onClick={() => setConfirmUpdate(null)}
                     style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
-                    Cancelar
+                    {t('Cancelar')}
                   </Button>
                   <Button
                     size="sm"
                     className="confirmation-action-button"
-                    aria-label="Confirmar actualización"
+                    aria-label={t('Confirmar actualización')}
                     onClick={async () => {
                       const id = confirmUpdate.id;
                       setConfirmUpdate(null);
@@ -1413,7 +1418,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                 style={{ ...confirmRemove.popoverPosition, width: Math.min(288, window.innerWidth - 24), padding: px(12, scale, 10), gap: px(10, scale, 8) }}
               >
                 <div className="min-w-0">
-                  <p className="truncate font-semibold" style={{ fontSize: fontPx(14, scale, 12) }}>¿Desinstalar {confirmRemove.name}?</p>
+                  <p className="truncate font-semibold" style={{ fontSize: fontPx(14, scale, 12) }}>{t('¿Desinstalar {name}?', { name: confirmRemove.name })}</p>
                   <p className="mt-1 text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10), lineHeight: 1.4 }}>
                     No podrás usar sus fuentes hasta volver a instalarla.
                   </p>
@@ -1426,13 +1431,13 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     onClick={() => setConfirmRemove(null)}
                     style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
-                    Cancelar
+                    {t('Cancelar')}
                   </Button>
                   <Button
                     variant="destructive"
                     size="sm"
                     className="confirmation-action-button"
-                    aria-label="Confirmar desinstalación"
+                    aria-label={t('Confirmar desinstalación')}
                     onClick={async () => {
                       const id = confirmRemove.id;
                       setConfirmRemove(null);
@@ -1462,7 +1467,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                 style={{ ...confirmInstall.popoverPosition, width: Math.min(288, window.innerWidth - 24), padding: px(12, scale, 10), gap: px(10, scale, 8) }}
               >
                 <div className="min-w-0">
-                  <p className="truncate font-semibold" style={{ fontSize: fontPx(14, scale, 12) }}>¿Instalar {confirmInstall.name}?</p>
+                  <p className="truncate font-semibold" style={{ fontSize: fontPx(14, scale, 12) }}>{t('¿Instalar {name}?', { name: confirmInstall.name })}</p>
                   <p className="mt-1 text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10), lineHeight: 1.4 }}>
                     Quedará disponible para buscar mangas en Explorar.
                   </p>
@@ -1475,12 +1480,12 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     onClick={() => setConfirmInstall(null)}
                     style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
-                    Cancelar
+                    {t('Cancelar')}
                   </Button>
                   <Button
                     size="sm"
                     className="confirmation-action-button"
-                    aria-label="Confirmar instalación"
+                    aria-label={t('Confirmar instalación')}
                     onClick={async () => {
                       const { popoverPosition, ...manifest } = confirmInstall;
                       setConfirmInstall(null);
@@ -1527,7 +1532,7 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
                     onClick={() => setConfirmBulk(null)}
                     style={{ height: px(32, scale, 28), fontSize: fontPx(13, scale, 11), paddingLeft: px(10, scale, 8), paddingRight: px(10, scale, 8) }}
                   >
-                    Cancelar
+              {t('Cancelar')}
                   </Button>
                   <Button
                     variant={confirmBulk.action === 'install' ? 'default' : 'destructive'}
@@ -1555,8 +1560,8 @@ export default function ExtensionsPanel({ tutorialPreview = false, active = true
       <Dialog
         open={!!configExt}
         onClose={() => setConfigExt(null)}
-        title={`Configuración de ${configExt?.name || ''}`}
-        description="Selecciona qué idiomas incluir en cada fuente."
+        title={language === 'en' ? `${configExt?.name || ''} settings` : `Configuración de ${configExt?.name || ''}`}
+        description={t('Selecciona qué idiomas incluir en cada fuente.')}
         hideDivider
         scale={scale}
       >
