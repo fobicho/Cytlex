@@ -363,15 +363,24 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
       const style = getComputedStyle(toolbarRow);
       const padding = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
       const gap = Number.parseFloat(style.columnGap) || 0;
-      // Keep the current category visible, then give the remaining width to
-      // actions. The refresh control compacts before the search field does.
       const activeCategoryWidth = subroutes.querySelector('[aria-current="page"]')?.getBoundingClientRect().width || 0;
-      const reservedCategoryWidth = activeCategoryWidth || Number.parseFloat(px(96, scale, 76));
+      const activeWidth = activeCategoryWidth || Number.parseFloat(px(96, scale, 76));
+      const reservedCategoryWidth = Math.max(activeWidth, subroutes.scrollWidth);
+      const categoryNav = categoryTabsRef.current;
       const availableForActions = toolbarRow.clientWidth - padding - reservedCategoryWidth - gap;
       const actionGap = Number.parseFloat(getComputedStyle(actions).columnGap) || 0;
-      const minSearchWidth = Math.max(120, Math.round(140 * scale));
       const preferredSearchWidth = Number.parseFloat(px(280, scale, 240));
+      const selectedCategory = visibleCats.find((category) => category.id === visibleSel);
+      const name = selectedCategory?.id === 'todos' ? t('Todos') : selectedCategory?.name || t('Biblioteca');
+      const placeholder = t('Buscar en {category}', { category: truncateCategoryName(name, 10) });
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      if (context) context.font = getComputedStyle(sortButton).font;
+      const minSearchWidth = Math.max(Number.parseFloat(px(140, scale, 120)), Math.ceil(context?.measureText(placeholder).width || 0) + Number.parseFloat(px(12, scale, 9)) + Number.parseFloat(px(40, scale, 34)) + 4);
       const updatesCompactWidth = updatesButton?.getBoundingClientRect().height || 0;
+      const searchIconWidth = Number.parseFloat(px(32, scale, 26));
+      const categorySpace = toolbarRow.clientWidth - padding - gap - sortWidth - updatesCompactWidth - searchIconWidth - actionGap * 2;
+      if (categoryNav) categoryNav.style.minWidth = `${Math.max(0, Math.min(reservedCategoryWidth, categorySpace))}px`;
       const updatesThreshold = preferredSearchWidth + sortWidth + fullUpdatesWidth + (actionGap * 2);
       const nextCompactUpdates = compactLibraryUpdates
         ? availableForActions < updatesThreshold + 8
@@ -380,7 +389,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
       const availableForSearch = availableForActions - sortWidth - updatesWidth - (actionGap * 2);
       setCompactLibraryUpdates(nextCompactUpdates);
       setCompactLibrarySearch((compact) => compact
-        ? availableForSearch < minSearchWidth + 16
+        ? availableForSearch < minSearchWidth + 8
         : availableForSearch < minSearchWidth);
     };
 
@@ -806,7 +815,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
       <div
         className="library-toolbar-row flex shrink-0 min-w-0 flex-nowrap items-center"
         style={{
-          gap: `${Math.max(16, Math.round(24 * scale))}px`,
+          gap: px(16, scale, 12),
           height: `calc(${px(38, scale, 34)} - 1px)`,
           minHeight: `calc(${px(38, scale, 34)} - 1px)`,
           maxHeight: `calc(${px(38, scale, 34)} - 1px)`,

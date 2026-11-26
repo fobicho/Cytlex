@@ -95,26 +95,16 @@ export const lib = {
       try { list = JSON.parse(raw) || []; } catch {}
       if (!Array.isArray(list)) list = [];
       const categories = loadCats();
-      const categoryIds = new Set(categories.map(({ id }) => id));
       const fallbackCategoryId = categories[0]?.id;
       const normalized = list.map((manga) => {
-        const cats = Array.isArray(manga.cats) ? manga.cats : [];
-        const validCats = [...new Set(cats.filter((id) => categoryIds.has(id)))];
+        const cats = Array.isArray(manga.cats) ? [...new Set(manga.cats)] : [];
         return {
           ...manga,
-          cats: validCats.length ? validCats : fallbackCategoryId ? [fallbackCategoryId] : []
+          cats: cats.length ? cats : fallbackCategoryId ? [fallbackCategoryId] : []
         };
       });
-      if (normalized.some((manga, index) => {
-        const cats = Array.isArray(list[index].cats) ? list[index].cats : [];
-        return cats.length !== manga.cats.length || cats.some((id, catIndex) => id !== manga.cats[catIndex]);
-      })) {
-        list = normalized;
-        raw = JSON.stringify(list);
-        localStorage.setItem(FAV, raw);
-      }
       favoritesRaw = raw;
-      favoritesSnapshot = list;
+      favoritesSnapshot = normalized;
     }
     return favoritesSnapshot.slice();
   },
@@ -196,14 +186,16 @@ export const lib = {
     return lib.favs().filter((f) => (f.cats || []).includes(id)).length;
   },
   removeCat(id) {
+    const previousFavorites = lib.favs();
     let cats = loadCats().filter((c) => c.id !== id);
     if (!cats.length) cats = DEFAULT_CATS.map((c) => ({ ...c }));
-    write(CATS, cats);
     const now = Date.now();
-    const favs = lib.favs().map((f) => (f.cats || []).includes(id)
-      ? { ...f, cats: f.cats.filter((c) => c !== id), catsUpdatedAt: now, updatedAt: now }
+    const favs = previousFavorites.map((f) => (f.cats || []).includes(id)
+      ? { ...f, cats: f.cats.filter((c) => c !== id).length ? f.cats.filter((c) => c !== id) : [cats[0].id], catsUpdatedAt: now, updatedAt: now }
       : f);
-    write(FAV, favs);
+    localStorage.setItem(CATS, JSON.stringify(cats));
+    localStorage.setItem(FAV, JSON.stringify(favs));
+    notifyCloudSyncLocalChange();
     return cats;
   },
   removeFavs(mangas) {

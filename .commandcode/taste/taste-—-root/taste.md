@@ -1,1 +1,0 @@
-- Provides a lot of project context up front (repo under Documents/GitHub, a companion analysis doc) so deep, end-to-end audits are welcome without further scoping. Confidence: 0.4
