@@ -540,6 +540,7 @@ export function importMihonBackup(candidate, { clearCachedCoverUrls = new Set() 
     manga.coverRefreshPending = true;
     manga.cats = [...new Set(manga.cats.map((name) => categoryIds.get(normalizeName(name))).filter(Boolean))];
     if (!manga.cats.length && categories[0]?.id) manga.cats = [categories[0].id];
+    manga.catsUpdatedAt = Date.now();
     const key = `${manga.sourceId}|${urlKey(manga.url)}`;
     const legacyKey = entry.legacySourceId && entry.legacyUrl ? `${entry.legacySourceId}|${pathKey(entry.legacyUrl)}` : '';
     const pathMatchKey = `${manga.sourceId}|${pathKey(manga.url)}`;
@@ -599,7 +600,8 @@ export function importMihonBackup(candidate, { clearCachedCoverUrls = new Set() 
         chapterReadCount: Math.max(Number(existing.chapterReadCount) || 0, Number(manga.chapterReadCount) || 0),
         coverLocal: !clearCachedCover && keepExistingCover && cover === existing.cover ? existing.coverLocal || '' : '',
         coverCached: !clearCachedCover && keepExistingCover && cover === existing.cover ? existing.coverCached || '' : '',
-        cats: [...new Set([...keptCategories, ...manga.cats])]
+        cats: [...new Set([...keptCategories, ...manga.cats])],
+        catsUpdatedAt: manga.catsUpdatedAt
       };
       byManga.set(key, index);
       byManga.set(pathMatchKey, index);

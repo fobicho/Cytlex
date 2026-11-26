@@ -1,12 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 import { libraryKey, lib } from './library.js';
 import { progress } from './progress.js';
-import { extensions, isExtensionAllowed, EXTENSION_INSTALLED_EVENT } from './extensions.js';
+import { extensions, isExtensionAllowed, EXTENSION_INSTALLED_EVENT, isAdultExtension } from './extensions.js';
 import { settings } from './settings.js';
-import { CLOUD_SYNC_LOCAL_CHANGE_EVENT } from './cloudSyncEvents.js';
+import {
+  CLOUD_SYNC_DETAILS_BACKFILL_EVENT,
+  CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY,
+  CLOUD_SYNC_LOCAL_CHANGE_EVENT
+} from './cloudSyncEvents.js';
+import { preloadLibraryCoversBatch } from './covers.js';
 
 const TABLE = 'cytlex_sync_state';
 const ACCOUNT_KEY = 'cytlex:cloud-sync-account:v1';
+const BACKUP_PENDING_KEY = 'cytlex:cloud-sync-backup-pending:v1';
 const TOMBSTONES_KEY = 'cytlex:cloud-sync-tombstones:v1';
 const DEFAULT_REPOSITORY = 'https://fobicho.github.io/Cytlex/index.json';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
@@ -21,20 +27,29 @@ let state = {
   error: '',
   revision: 0,
   pendingChoice: null,
-  warning: ''
+  localChanges: [],
+  ageConfirmation: null,
+  warning: '',
+  restoreProgress: null
 };
 let started = false;
 let stopAuth = null;
-let channel = null;
 let activeUserId = '';
 let initializingUserId = '';
 let revision = 0;
 let initialized = false;
 let applying = false;
-let saving = false;
-let saveTimer = null;
+let localChangesPending = false;
+let localChangeRevision = 0;
 let lastLocalSnapshot = '';
-let pendingRemote = null;
+let backupImportPending = false;
+let syncPromise = null;
+let localChangeSyncTimer = null;
+let syncAbortController = null;
+let ageConfirmationResolver = null;
+let localChangeSyncDelay = 0;
+
+const AGE_CONFIRMATION_CANCELLED = 'CLOUD_SYNC_AGE_CONFIRMATION_CANCELLED';
 
 const emit = () => listeners.forEach((listener) => listener());
 const updateState = (patch) => {
@@ -89,7 +104,76 @@ function normalizeSnapshot(value) {
   };
 }
 
+function stableJson(value) {
+  const sortKeys = (item) => {
+    if (Array.isArray(item)) return item.map(sortKeys);
+    if (!item || typeof item !== 'object') return item;
+    return Object.fromEntries(Object.keys(item).sort().map((key) => [key, sortKeys(item[key])]));
+  };
+  return JSON.stringify(sortKeys(value));
+}
+
+const serializeSnapshot = (value) => stableJson(normalizeSnapshot(value));
+
+function serializeMeaningfulSnapshot(value) {
+  const snapshot = normalizeSnapshot(value);
+  const without = (item, fields) => item && typeof item === 'object'
+    ? Object.fromEntries(Object.entries(item).filter(([field]) => !fields.includes(field)))
+    : item;
+  return stableJson({
+    ...snapshot,
+    favorites: snapshot.favorites.map((item) => without(item, ['updatedAt', 'catsUpdatedAt', 'savedAt', 'coverCached', 'coverLocal', 'coverRefreshPending'])),
+    categories: snapshot.categories.map((item) => without(item, ['updatedAt'])),
+    progress: Object.fromEntries(Object.entries(snapshot.progress).map(([key, item]) => [key, without(item, ['updatedAt', 'readAt'])])),
+    extensions: snapshot.extensions.map((item) => without(item, ['installedAt']))
+  });
+}
+
 const mangaKey = (manga) => libraryKey(manga.url, manga.sourceId || 'leercapitulo');
+
+function summarizeSnapshotChanges(beforeValue, afterValue) {
+  const before = normalizeSnapshot(beforeValue);
+  const after = normalizeSnapshot(afterValue);
+  const groups = [];
+  const compareRows = (label, previousRows, currentRows, keyFor, nameFor, ignoredFields = []) => {
+    const previous = new Map(previousRows.map((item) => [keyFor(item), item]));
+    const current = new Map(currentRows.map((item) => [keyFor(item), item]));
+    const changes = [];
+    previous.forEach((item, key) => {
+      const next = current.get(key);
+      if (!next) changes.push({ action: 'Eliminado', name: nameFor(item) });
+      else {
+        const stripMetadata = (value) => Object.fromEntries(Object.entries(value).filter(([field]) => !ignoredFields.includes(field)));
+        if (stableJson(stripMetadata(item)) !== stableJson(stripMetadata(next))) {
+          const fields = [...new Set([...Object.keys(item), ...Object.keys(next)])]
+            .filter((field) => !ignoredFields.includes(field) && stableJson(item[field]) !== stableJson(next[field]));
+          changes.push({ action: 'Modificado', name: nameFor(next), fields });
+        }
+      }
+    });
+    current.forEach((item, key) => {
+      if (!previous.has(key)) changes.push({ action: 'Agregado', name: nameFor(item) });
+    });
+    if (changes.length) groups.push({ label, count: changes.length, items: changes.slice(0, 6), more: Math.max(0, changes.length - 6) });
+  };
+
+  compareRows('Biblioteca', before.favorites, after.favorites, mangaKey, (manga) => manga.title || manga.url,
+    ['updatedAt', 'catsUpdatedAt', 'savedAt', 'coverCached', 'coverLocal', 'coverRefreshPending']);
+  compareRows('Categorías', before.categories, after.categories, (category) => category.id, (category) => category.name || category.id, ['updatedAt']);
+  compareRows('Extensiones', before.extensions, after.extensions, (extension) => extension.id, (extension) => extensions.manifest(extension.id).name || extension.id, ['installedAt']);
+
+  const progressKeys = new Set([...Object.keys(before.progress), ...Object.keys(after.progress)]);
+  let progressChanges = 0;
+  progressKeys.forEach((key) => {
+    const previous = before.progress[key];
+    const current = after.progress[key];
+    if (stableJson(previous) === stableJson(current)) return;
+    const withoutDates = (entry) => entry && Object.fromEntries(Object.entries(entry).filter(([field]) => !['updatedAt', 'readAt'].includes(field)));
+    if (stableJson(withoutDates(previous)) !== stableJson(withoutDates(current))) progressChanges += 1;
+  });
+  if (progressChanges) groups.push({ label: 'Progreso de lectura', count: progressChanges, items: [], more: 0 });
+  return groups;
+}
 
 function mergeSnapshots(localValue, cloudValue) {
   const local = normalizeSnapshot(localValue);
@@ -106,9 +190,19 @@ function mergeSnapshots(localValue, cloudValue) {
     const key = mangaKey(manga);
     const current = favorites.get(key);
     if (!current) favorites.set(key, manga);
-    else favorites.set(key,
-      Number(manga.updatedAt || manga.savedAt) >= Number(current.updatedAt || current.savedAt) ? manga : current
-    );
+    else {
+      const favorite = Number(manga.updatedAt || manga.savedAt) >= Number(current.updatedAt || current.savedAt) ? manga : current;
+      const localCatsUpdatedAt = Number(manga.catsUpdatedAt) || 0;
+      const cloudCatsUpdatedAt = Number(current.catsUpdatedAt) || 0;
+      const categories = localCatsUpdatedAt === cloudCatsUpdatedAt
+        ? [...new Set([...(current.cats || []), ...(manga.cats || [])])]
+        : [...((localCatsUpdatedAt > cloudCatsUpdatedAt ? manga.cats : current.cats) || [])];
+      favorites.set(key, {
+        ...favorite,
+        cats: categories,
+        ...(Math.max(localCatsUpdatedAt, cloudCatsUpdatedAt) ? { catsUpdatedAt: Math.max(localCatsUpdatedAt, cloudCatsUpdatedAt) } : {})
+      });
+    }
   });
   const categories = new Map(cloud.categories.map((category) => [category.id, category]));
   local.categories.forEach((category) => {
@@ -134,8 +228,15 @@ function mergeSnapshots(localValue, cloudValue) {
   clearTombstoneForNewer(categories.values(), (item) => item.id, 'categories', (item) => item.updatedAt || 0);
   clearTombstoneForNewer(Object.entries(mergedProgress).map(([key, item]) => ({ key, item })), (row) => row.key, 'progress', (row) => row.item?.updatedAt || row.item?.readAt || 0);
   clearTombstoneForNewer(installed.values(), (item) => item.id, 'extensions', (item) => item.installedAt || 0);
-  const favoriteRows = [...favorites.entries()].filter(([key, manga]) => Number(manga.savedAt || 0) > (Number(tombstones.favorites[key]) || 0));
   const categoryRows = [...categories.entries()].filter(([id, category]) => id === 'todos' || Number(category.updatedAt || 0) > (Number(tombstones.categories[id]) || 0));
+  const validCategoryIds = new Set(categoryRows.map(([id]) => id));
+  const fallbackCategoryId = validCategoryIds.has('todos') ? 'todos' : categoryRows[0]?.[0];
+  const favoriteRows = [...favorites.entries()]
+    .filter(([key, manga]) => Number(manga.savedAt || 0) > (Number(tombstones.favorites[key]) || 0))
+    .map(([key, manga]) => {
+      const cats = [...new Set((Array.isArray(manga.cats) ? manga.cats : []).filter((id) => validCategoryIds.has(id)))];
+      return [key, { ...manga, cats: cats.length ? cats : fallbackCategoryId ? [fallbackCategoryId] : [] }];
+    });
   const progressRows = Object.entries(mergedProgress).filter(([key, entry]) => Number(entry?.updatedAt || entry?.readAt || 0) > (Number(tombstones.progress[key]) || 0));
   const extensionRows = [...installed.entries()].filter(([id, item]) => Number(item.installedAt || 0) > (Number(tombstones.extensions[id]) || 0));
   return {
@@ -182,15 +283,35 @@ function trackLocalDeletions(snapshot) {
   return { ...snapshot, tombstones };
 }
 
+function scheduleLocalResync(delay = 800) {
+  if (localChangeSyncTimer && delay >= localChangeSyncDelay) return;
+  if (localChangeSyncTimer) window.clearTimeout(localChangeSyncTimer);
+  localChangeSyncDelay = delay;
+  localChangeSyncTimer = window.setTimeout(async () => {
+    localChangeSyncTimer = null;
+    localChangeSyncDelay = 0;
+    if (syncPromise) {
+      try { await syncPromise; } catch {}
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+    if (activeUserId && initialized && !state.pendingChoice && ['local-pending', 'syncing'].includes(state.status) && localChangesPending) {
+      void cloudSync.syncNow().catch(() => {});
+    }
+  }, delay);
+}
+
 const hasLocalData = (snapshot) => snapshot.favorites.length > 0
   || Object.keys(snapshot.progress).length > 0
   || snapshot.extensions.length > 0
   || snapshot.categories.some((category) => category.id !== 'todos');
 
-async function fetchRemote(userId) {
+async function fetchRemote(userId, signal) {
+  const timeoutSignal = AbortSignal.timeout(30000);
+  const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
   const { data, error } = await client.from(TABLE)
     .select('payload, revision')
     .eq('user_id', userId)
+    .abortSignal(requestSignal)
     .maybeSingle();
   if (error) throw error;
   return data ? { payload: normalizeSnapshot(data.payload), revision: data.revision } : null;
@@ -208,7 +329,7 @@ async function reconcileExtensions(snapshot) {
   const repoUrl = settings.get().extIndexUrl?.trim() || DEFAULT_REPOSITORY;
   let repository;
   try {
-    repository = await extensions.repoIndex(repoUrl, { refresh: true });
+    repository = await extensions.repoIndex(repoUrl);
   } catch (error) {
     return `No se pudo consultar el repositorio de extensiones: ${error.message}`;
   }
@@ -250,8 +371,42 @@ async function reconcileExtensions(snapshot) {
   ].filter(Boolean).join(' ');
 }
 
+async function confirmAdultSyncIfNeeded(snapshot) {
+  if (settings.get().showAdultExtensions) return true;
+  const desired = normalizeSnapshot(snapshot).extensions;
+  if (!desired.length) return true;
+
+  const repoUrl = settings.get().extIndexUrl?.trim() || DEFAULT_REPOSITORY;
+  let repository = [];
+  try { repository = await extensions.repoIndex(repoUrl); } catch {}
+  const manifests = new Map(repository.map((manifest) => [manifest.id, manifest]));
+  const adultExtensions = desired.map(({ id }) => manifests.get(id) || extensions.manifest(id))
+    .filter(isAdultExtension)
+    .map((manifest) => ({
+      id: manifest.id,
+      name: manifest.name || manifest.id,
+      rating: String(manifest.contentWarning || '').toUpperCase().replace(/\s*\+?\s*18$/, '')
+    }));
+  if (!adultExtensions.length) return true;
+
+  updateState({
+    status: 'age-confirmation',
+    ageConfirmation: { extensions: adultExtensions },
+    restoreProgress: null
+  });
+  const confirmed = await new Promise((resolve) => { ageConfirmationResolver = resolve; });
+  if (!confirmed) {
+    const error = new Error('La sincronización se canceló porque no se confirmó la edad.');
+    error.code = AGE_CONFIRMATION_CANCELLED;
+    throw error;
+  }
+  return true;
+}
+
 async function applySnapshot(value, { syncExtensions = true } = {}) {
   const snapshot = normalizeSnapshot(value);
+  if (syncExtensions) await confirmAdultSyncIfNeeded(snapshot);
+  updateState({ restoreProgress: snapshot.favorites.length ? { label: 'Preparando la restauración' } : null });
   applying = true;
   try {
     const warning = syncExtensions ? await reconcileExtensions(snapshot) : '';
@@ -263,9 +418,39 @@ async function applySnapshot(value, { syncExtensions = true } = {}) {
     window.dispatchEvent(new Event('cytlex:library-updated'));
     window.dispatchEvent(new Event('cytlex:source-config-changed'));
     lastLocalSnapshot = JSON.stringify(localSnapshot());
+    updateState({ localChanges: [] });
+    void prepareSyncedLibrary(snapshot.favorites);
     return warning;
   } finally {
     applying = false;
+  }
+}
+
+async function preloadAccountLibraryCovers(favorites, onProgress) {
+  const covers = [...new Set((favorites || [])
+    .map((manga) => manga?.cover)
+    .filter((cover) => typeof cover === 'string' && /^https?:\/\//i.test(cover)))];
+  if (covers.length) await preloadLibraryCoversBatch(covers, {
+    web: true,
+    persist: true,
+    onProgress: ({ current }) => onProgress?.({ label: 'Preparando las portadas', current, total: covers.length })
+  });
+}
+
+async function prepareSyncedLibrary(favorites) {
+  const coverCount = new Set((favorites || [])
+    .map((manga) => manga?.cover)
+    .filter((cover) => typeof cover === 'string' && /^https?:\/\//i.test(cover))).size;
+  if (coverCount) updateState({ restoreProgress: { label: 'Preparando las portadas', current: 0, total: coverCount } });
+  try {
+    await preloadAccountLibraryCovers(favorites, (restoreProgress) => updateState({ restoreProgress }));
+  } catch {}
+  if (favorites.length) {
+    try { localStorage.setItem(CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY, '1'); } catch {}
+    window.dispatchEvent(new Event(CLOUD_SYNC_DETAILS_BACKFILL_EVENT));
+    if (localStorage.getItem(CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY) === '1') updateState({ restoreProgress: null });
+  } else {
+    updateState({ restoreProgress: null });
   }
 }
 
@@ -273,17 +458,18 @@ async function writeRemote(payload, expectedRevision) {
   const { data, error } = await client.rpc('save_cytlex_sync_state', {
     p_payload: payload,
     p_expected_revision: expectedRevision
-  });
+  }).abortSignal(AbortSignal.timeout(30000));
   if (error) throw error;
+  if (Number(data) === 0) throw Object.assign(new Error('Sync revision conflict'), { code: '40001' });
   return Number(data);
 }
 
-async function persistSnapshot(payload, expectedRevision, retries = 1) {
+async function persistSnapshot(payload, expectedRevision, retries = 3) {
   try {
     const nextRevision = await writeRemote(payload, expectedRevision);
     revision = nextRevision;
-    updateState({ revision, status: 'synced', error: '', warning: '' });
-    lastLocalSnapshot = JSON.stringify(localSnapshot());
+    updateState({ revision, status: 'synced', error: '', warning: '', localChanges: [] });
+    lastLocalSnapshot = JSON.stringify(normalizeSnapshot(payload));
     return payload;
   } catch (error) {
     if (error.code !== '40001' || retries <= 0) throw error;
@@ -291,30 +477,15 @@ async function persistSnapshot(payload, expectedRevision, retries = 1) {
     if (!remote) throw error;
     revision = remote.revision;
     const merged = mergeSnapshots(payload, remote.payload);
+    if (serializeSnapshot(merged) === serializeSnapshot(remote.payload)) {
+      const warning = await applySnapshot(merged);
+      lastLocalSnapshot = JSON.stringify(localSnapshot());
+      updateState({ revision, status: 'synced', error: '', warning, localChanges: [] });
+      return merged;
+    }
     const warning = await applySnapshot(merged);
     updateState({ warning });
     return persistSnapshot(merged, remote.revision, retries - 1);
-  }
-}
-
-async function onRemoteUpdate() {
-  if (!activeUserId || saving || state.pendingChoice) return;
-  try {
-    const remote = await fetchRemote(activeUserId);
-    if (!remote || remote.revision <= revision) return;
-    revision = remote.revision;
-    if (saveTimer) {
-      const merged = mergeSnapshots(localSnapshot(), remote.payload);
-      const warning = await applySnapshot(merged);
-      updateState({ warning, revision });
-      await persistSnapshot(merged, revision);
-      return;
-    }
-    const warning = await applySnapshot(remote.payload);
-    lastLocalSnapshot = JSON.stringify(localSnapshot());
-    updateState({ revision, status: 'synced', warning, error: '' });
-  } catch (error) {
-    updateState({ error: error.message, status: 'error' });
   }
 }
 
@@ -324,112 +495,109 @@ async function initializeUser(user) {
   initializingUserId = user.id;
   initialized = false;
   revision = 0;
-  updateState({ email: user.email || '', status: 'loading', error: '', warning: '', pendingChoice: null });
+  updateState({ email: user.email || '', status: 'loading', error: '', warning: '', pendingChoice: null, ageConfirmation: null });
   try {
     const [remote, local] = await Promise.all([fetchRemote(user.id), Promise.resolve(localSnapshot())]);
     if (activeUserId !== user.id) return;
-    const previousAccount = localStorage.getItem(ACCOUNT_KEY);
-    if (!remote) {
-      const payload = normalizeSnapshot(local);
-      await persistSnapshot(payload, 0);
-      localStorage.setItem(ACCOUNT_KEY, user.id);
-    } else if (!hasLocalData(local)) {
-      revision = remote.revision;
-      const warning = await applySnapshot(remote.payload);
-      localStorage.setItem(ACCOUNT_KEY, user.id);
-      initialized = true;
-      updateState({ status: 'synced', revision, warning });
-    } else if (previousAccount === user.id) {
-      revision = remote.revision;
-      const merged = mergeSnapshots(local, remote.payload);
-      const warning = await applySnapshot(merged);
-      await persistSnapshot(merged, remote.revision);
-      localStorage.setItem(ACCOUNT_KEY, user.id);
-      initialized = true;
-      updateState({ status: 'synced', revision, warning });
-    } else {
-      updateState({
-        status: 'needs-choice',
-        pendingChoice: { local, remote },
-        revision: remote.revision
-      });
-    }
-    if (state.status !== 'needs-choice') initialized = true;
-    if (state.status === 'needs-choice') return;
-    channel?.unsubscribe();
-    channel = client.channel(`cytlex-sync-${user.id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLE, filter: `user_id=eq.${user.id}` }, () => { void onRemoteUpdate(); })
-      .subscribe();
+    revision = remote?.revision || 0;
+    lastLocalSnapshot = JSON.stringify(local);
+    const different = remote ? serializeMeaningfulSnapshot(local) !== serializeMeaningfulSnapshot(remote.payload) : hasLocalData(local);
+    initialized = true;
+    localChangesPending = different;
+    updateState({ status: different ? 'local-pending' : 'connected', revision, localChanges: remote ? summarizeSnapshotChanges(remote.payload, local) : [] });
   } catch (error) {
-    if (activeUserId === user.id) updateState({ status: 'error', error: error.message });
+    if (error.code === AGE_CONFIRMATION_CANCELLED) {
+      initialized = true;
+      lastLocalSnapshot = JSON.stringify(localSnapshot());
+      localChangesPending = false;
+      updateState({ status: 'connected', error: '', warning: '', restoreProgress: null });
+      return;
+    }
+    if (activeUserId === user.id) updateState({ status: 'error', error: error.message, restoreProgress: null });
   } finally {
     if (initializingUserId === user.id) initializingUserId = '';
   }
 }
 
-async function saveLocalChanges() {
-  if (!client || !activeUserId || !initialized || applying || saving || state.pendingChoice) return;
-  const current = localSnapshot();
-  const serialized = JSON.stringify(current);
-  if (serialized === lastLocalSnapshot) return;
-  saving = true;
-  updateState({ status: 'saving', error: '' });
-  try {
-    await persistSnapshot(current, revision);
-    localStorage.setItem(ACCOUNT_KEY, activeUserId);
-  } catch (error) {
-    updateState({ status: 'error', error: error.message });
-  } finally {
-    saving = false;
+function onLocalChange(event) {
+  if (!activeUserId || (!initialized && !state.pendingChoice) || applying) return;
+  const pendingChoice = state.pendingChoice;
+  let snapshot;
+  if (event.detail?.type === 'backup-import') {
+    backupImportPending = true;
+    localStorage.setItem(BACKUP_PENDING_KEY, '1');
+    snapshot = localSnapshot();
+  } else {
+    snapshot = trackLocalDeletions(localSnapshot());
   }
-}
-
-function onLocalChange() {
-  if (!activeUserId || !initialized || applying || state.pendingChoice) return;
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    const current = trackLocalDeletions(localSnapshot());
-    lastLocalSnapshot = lastLocalSnapshot || JSON.stringify(current);
-    void saveLocalChanges();
-  }, 1500);
-}
-
-function onVisibilityChange() {
-  if (document.visibilityState === 'visible') void onRemoteUpdate();
+  let previous = null;
+  try { if (lastLocalSnapshot) previous = JSON.parse(lastLocalSnapshot); } catch {}
+  const hasChanges = !previous || serializeSnapshot(snapshot) !== serializeSnapshot(previous);
+  if (!hasChanges) {
+    if (pendingChoice) return;
+    localChangesPending = false;
+    backupImportPending = false;
+    localStorage.removeItem(BACKUP_PENDING_KEY);
+    if (localChangeSyncTimer) window.clearTimeout(localChangeSyncTimer);
+    localChangeSyncTimer = null;
+    localChangeSyncDelay = 0;
+    updateState({ status: 'synced', localChanges: [] });
+    return;
+  }
+  localChangesPending = true;
+  localChangeRevision += 1;
+  if (pendingChoice) {
+    updateState({ status: 'local-pending', pendingChoice: null, localChanges: summarizeSnapshotChanges(pendingChoice.remote.payload, snapshot) });
+    return;
+  }
+  updateState({ status: 'local-pending', localChanges: summarizeSnapshotChanges(previous || {}, snapshot) });
 }
 
 export const cloudSync = {
   getState() { return state; },
+  setRestoreProgress(restoreProgress) { updateState({ restoreProgress: restoreProgress || null }); },
   subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+  cancelAccountViewSync() {
+    syncAbortController?.abort();
+    if (state.pendingChoice) updateState({ status: 'local-pending', pendingChoice: null });
+  },
   start() {
     if (!client || started) return () => {};
     started = true;
     window.addEventListener(CLOUD_SYNC_LOCAL_CHANGE_EVENT, onLocalChange);
-    window.addEventListener('online', onLocalChange);
-    document.addEventListener('visibilitychange', onVisibilityChange);
     const auth = client.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
+        const user = session.user;
+        const isNewUser = user.id !== activeUserId;
+        if (isNewUser) {
+          activeUserId = user.id;
+          initialized = false;
+          initializingUserId = '';
+          updateState({ email: user.email || '', status: 'loading', pendingChoice: null, localChanges: [], error: '' });
+        }
+        if (!isNewUser && (initialized || initializingUserId === user.id || state.pendingChoice)) return;
+        if (event !== 'SIGNED_IN' && event !== 'INITIAL_SESSION') return;
         updateState({ email: session.user.email || '', status: 'loading', error: '' });
-        window.setTimeout(() => { void initializeUser(session.user); }, 0);
+        window.setTimeout(() => { void initializeUser(user); }, 0);
       } else if (event === 'SIGNED_OUT') {
+        if (localChangeSyncTimer) window.clearTimeout(localChangeSyncTimer);
+        localChangeSyncTimer = null;
+        localChangeSyncDelay = 0;
+        syncAbortController?.abort();
         activeUserId = '';
         initializingUserId = '';
         initialized = false;
         revision = 0;
-        channel?.unsubscribe();
-        channel = null;
-        updateState({ email: '', status: 'signed-out', revision: 0, pendingChoice: null, error: '', warning: '' });
+        localChangesPending = false;
+        localChangeRevision = 0;
+        lastLocalSnapshot = '';
+        backupImportPending = false;
+        updateState({ email: '', status: 'signed-out', revision: 0, pendingChoice: null, localChanges: [], ageConfirmation: null, error: '', warning: '', restoreProgress: null });
       }
     });
     stopAuth = () => auth.data.subscription.unsubscribe();
     return () => {
       window.removeEventListener(CLOUD_SYNC_LOCAL_CHANGE_EVENT, onLocalChange);
-      window.removeEventListener('online', onLocalChange);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      clearTimeout(saveTimer);
-      channel?.unsubscribe();
-      channel = null;
       stopAuth?.();
       stopAuth = null;
       started = false;
@@ -444,40 +612,105 @@ export const cloudSync = {
     if (error) throw error;
     return Boolean(data.session);
   },
-  async signOut() {
-    const { error } = await client.auth.signOut();
+  async signOut(options) {
+    const { error } = await client.auth.signOut(options);
     if (error) throw error;
   },
+  resolveAgeConfirmation(confirmed) {
+    const resolve = ageConfirmationResolver;
+    const ratings = state.ageConfirmation?.extensions?.map((item) => item.rating) || [];
+    ageConfirmationResolver = null;
+    updateState({ ageConfirmation: null });
+    if (confirmed) {
+      const current = settings.get();
+      settings.set({
+        showAdultExtensions: true,
+        adultContentRatings: [...new Set([...current.adultContentRatings, ...ratings])]
+      });
+    }
+    resolve?.(Boolean(confirmed));
+  },
   async syncNow() {
-    if (!activeUserId || !initialized) return;
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = null;
-    await saveLocalChanges();
-    if (activeUserId) await onRemoteUpdate();
+    if (!activeUserId || !initialized || state.pendingChoice) return;
+    if (syncPromise) return syncPromise;
+    const userId = activeUserId;
+    const localRevision = localChangeRevision;
+    const hasLocalChanges = localChangesPending;
+    const controller = new AbortController();
+    syncAbortController = controller;
+    const local = hasLocalChanges ? trackLocalDeletions(localSnapshot()) : localSnapshot();
+    updateState({ status: 'syncing', error: '' });
+    const operation = (async () => {
+      try {
+        const remote = await fetchRemote(userId, controller.signal);
+        if (controller.signal.aborted || activeUserId !== userId) return;
+        if (localChangeRevision !== localRevision) {
+          updateState({ status: 'local-pending', pendingChoice: null });
+          return;
+        }
+        const accountState = remote || { payload: normalizeSnapshot(null), revision: 0 };
+        const localChanges = summarizeSnapshotChanges(accountState.payload, local);
+        updateState({ status: 'needs-choice', pendingChoice: { local, remote: accountState, localChanges, localRevision }, localChanges, revision: accountState.revision });
+      } catch (error) {
+        if (controller.signal.aborted) {
+          if (activeUserId === userId) {
+            updateState({ status: localChangesPending ? 'local-pending' : 'connected', pendingChoice: null, error: '' });
+          }
+          return;
+        }
+        if (error.code === AGE_CONFIRMATION_CANCELLED) {
+          initialized = true;
+          updateState({ status: 'connected', error: '', warning: '', restoreProgress: null });
+          return;
+        }
+        if (activeUserId === userId) updateState({ status: 'error', error: error.message, restoreProgress: null });
+        throw error;
+      }
+    })();
+    syncPromise = operation;
+    try {
+      await operation;
+    } finally {
+      if (syncPromise === operation) syncPromise = null;
+      if (syncAbortController === controller) syncAbortController = null;
+    }
   },
   async resolveInitialChoice(choice) {
     const pending = state.pendingChoice;
     if (!pending) return;
-    if (choice === 'local') {
-      await this.signOut();
+    if (choice === 'cancel') {
+      updateState({ status: 'local-pending', pendingChoice: null });
       return;
     }
     const userId = activeUserId;
-    let payload = choice === 'cloud' ? pending.remote.payload : mergeSnapshots(pending.local, pending.remote.payload);
-    revision = pending.remote.revision;
-    updateState({ status: 'loading', pendingChoice: null, error: '' });
+    updateState({ status: 'syncing', pendingChoice: null, error: '' });
     try {
-      const warning = await applySnapshot(payload);
-      await persistSnapshot(payload, revision);
+      const current = await fetchRemote(userId);
+      if (activeUserId !== userId) return;
+      if ((current?.revision || 0) !== pending.remote.revision || localChangeRevision !== pending.localRevision) {
+        updateState({ status: 'local-pending', error: 'Los datos cambiaron. Sincroniza de nuevo para revisarlos.' });
+        return;
+      }
+      let warning = '';
+      if (choice === 'cloud') {
+        warning = await applySnapshot(pending.remote.payload);
+        revision = pending.remote.revision;
+      } else if (choice === 'backup') {
+        revision = await writeRemote(pending.local, pending.remote.revision);
+        lastLocalSnapshot = JSON.stringify(pending.local);
+      } else return;
       localStorage.setItem(ACCOUNT_KEY, userId);
       initialized = true;
-      updateState({ status: 'synced', revision, warning });
-      channel?.unsubscribe();
-      channel = client.channel(`cytlex-sync-${userId}`)
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLE, filter: `user_id=eq.${userId}` }, () => { void onRemoteUpdate(); })
-        .subscribe();
+      localChangesPending = localChangeRevision !== pending.localRevision;
+      backupImportPending = false;
+      localStorage.removeItem(BACKUP_PENDING_KEY);
+      updateState({ status: localChangesPending ? 'local-pending' : 'synced', revision, warning, localChanges: [] });
     } catch (error) {
-      updateState({ status: 'error', error: error.message, pendingChoice: pending });
+      if (error.code === AGE_CONFIRMATION_CANCELLED) {
+        updateState({ status: 'needs-choice', pendingChoice: pending, error: '', restoreProgress: null });
+        return;
+      }
+      updateState({ status: 'local-pending', error: error.code === '40001' ? 'Los datos de la cuenta cambiaron. Sincroniza de nuevo para revisarlos.' : error.message, restoreProgress: null });
     }
   }
 };

@@ -11,7 +11,8 @@ import { Button } from './ui/button.jsx';
 import LanguageToggle from './LanguageToggle.jsx';
 import { GENTLE_FLOAT_MOTION, GENTLE_FLOAT_TRANSITION } from './ui/empty-state.jsx';
 import CytlexLogoMark from './CytlexLogoMark.jsx';
-import Settings, { BackupProgress } from '../pages/Settings.jsx';
+import Settings from '../pages/Settings.jsx';
+import BackupProgress from './BackupProgress.jsx';
 
 const STEPS = [
   {

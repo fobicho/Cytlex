@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useCallback, useRef, Component } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, useRef, useSyncExternalStore, Component } from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar.jsx';
 import BrowserMobileNav from './components/BrowserMobileNav.jsx';
@@ -12,15 +12,56 @@ import Settings from './pages/Settings.jsx';
 import Tracking from './pages/Tracking.jsx';
 import { resolveMode, settings } from './lib/settings.js';
 import { extensions } from './lib/extensions.js';
-import { lastSearch, resultsScroll, catalogScroll, sourceCatalogState } from './lib/searchState.js';
+import { lastSearch, resultsScroll, catalogScroll, sourceCatalogState, rememberExploreLocation, rememberLibraryLocation } from './lib/searchState.js';
 import { useToast } from './components/Toast.jsx';
 import { appWindow } from './lib/appWindow.js';
-import { px, useScale } from './lib/useScale.js';
+import { px, fontPx, useScale } from './lib/useScale.js';
 import { Search } from 'lucide-react';
 import { Input } from './components/ui/input.jsx';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useI18n } from './lib/i18n.js';
 import { cloudSync } from './lib/cloudSync.js';
+import { Button } from './components/ui/button.jsx';
+import { Dialog } from './components/ui/dialog.jsx';
+
+function CloudSyncAgeConfirmation({ scale }) {
+  const { t } = useI18n();
+  const state = useSyncExternalStore(cloudSync.subscribe, cloudSync.getState, cloudSync.getState);
+
+  return (
+    <Dialog
+      open={Boolean(state.ageConfirmation)}
+      onClose={() => cloudSync.resolveAgeConfirmation(false)}
+      title="Confirmación de edad"
+      description="El respaldo incluye extensiones MIXED o NSFW (+18) que pueden mostrar contenido para adultos. Confirma que tienes 18 años o más para continuar con la sincronización y habilitar esas extensiones en este dispositivo."
+      hideDivider
+      bodyClassName="pb-6"
+      scrollableBody={false}
+      scale={scale}
+      className="max-w-xl"
+    >
+      <section className="mb-5 text-muted-foreground" style={{ fontSize: fontPx(13, scale, 11) }}>
+        <h3 className="mb-2 font-semibold text-foreground">{t('Extensiones bloqueadas en Cytlex')}</h3>
+        <ul className="space-y-2">
+          {state.ageConfirmation?.extensions.map((extension) => (
+            <li key={extension.id} className="flex items-center justify-between gap-4">
+              <span className="min-w-0 truncate text-foreground">{extension.name}</span>
+              <span className="shrink-0 text-muted-foreground">+18 {extension.rating}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <div className="flex flex-col-reverse items-stretch justify-end gap-2 sm:flex-row sm:items-center">
+        <Button type="button" className="w-full sm:w-auto" variant="outline" onClick={() => cloudSync.resolveAgeConfirmation(false)} style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}>
+          {t('Cancelar sincronización')}
+        </Button>
+        <Button type="button" className="w-full sm:w-auto" onClick={() => cloudSync.resolveAgeConfirmation(true)} style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(14, scale, 11), paddingRight: px(14, scale, 11) }}>
+          {t('Tengo 18 años o más')}
+        </Button>
+      </div>
+    </Dialog>
+  );
+}
 
 function quickSearchPosition(x, y, scale = 1) {
   const width = Math.min(420 * scale, Math.max(0, window.innerWidth - 32 * scale));
@@ -125,9 +166,17 @@ export default function App({ tutorialMode = false }) {
   useEffect(() => {
     if (isExplorePage) setRetainedExploreLocation(location);
   }, [isExplorePage, location.pathname, location.search]);
+  useEffect(() => {
+    if (isExplorePage || (isMangaPage && ['explorar', 'fuentes', 'resultados'].includes(currentDetailOrigin))) {
+      rememberExploreLocation(location);
+    }
+  }, [isExplorePage, isMangaPage, currentDetailOrigin, location.pathname, location.search]);
   const catalogLocation = isExplorePage ? location : retainedExploreLocation;
   const isLibraryPage = location.pathname === '/biblioteca';
   const isLibraryDetail = isMangaPage && new URLSearchParams(location.search).get('from') === 'biblioteca';
+  useEffect(() => {
+    if (isLibraryPage || isLibraryDetail) rememberLibraryLocation(location);
+  }, [isLibraryPage, isLibraryDetail, location.pathname, location.search]);
   const tutorialPreview = tutorialMode;
 
   useLayoutEffect(() => {
@@ -323,6 +372,7 @@ export default function App({ tutorialMode = false }) {
         </div>
       </div>
       {!tutorialMode && !isElectronApp && !isReader && <BrowserMobileNav />}
+      <CloudSyncAgeConfirmation scale={scale} />
       <AnimatePresence>
         {quickSearchOpen && (
           <div

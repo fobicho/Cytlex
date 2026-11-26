@@ -12,6 +12,8 @@ import { progress } from '../lib/progress.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { tracking } from '../lib/tracking.js';
 import { api } from '../lib/api.js';
+import { cloudSync } from '../lib/cloudSync.js';
+import { CLOUD_SYNC_DETAILS_BACKFILL_EVENT, CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY } from '../lib/cloudSyncEvents.js';
 import { preloadLibraryCoversBatch } from '../lib/covers.js';
 import { setHttpGetBatchWindow } from '../lib/browserHttp.js';
 import { useToast } from '../components/Toast.jsx';
@@ -125,7 +127,7 @@ const sameLibraryFavorites = (left, right) => left.length === right.length && le
     && (manga.cats || []).join('\0') === (next.cats || []).join('\0');
 });
 
-async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, installedSourceIds = null) {
+async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, installedSourceIds = null, fetchFullDetails = false) {
   const pending = favorites.filter((manga) => {
     const resolvedId = sourceIdFor(manga);
     return extensions.isInstalled(resolvedId)
@@ -133,11 +135,16 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
       && isSourceConfigured(extensions.manifest(resolvedId));
   });
   pending.sort((a, b) => Number(isMangaDexManga(b)) - Number(isMangaDexManga(a)));
-  if (!pending.length) return;
+  if (fetchFullDetails) cloudSync.setRestoreProgress({ label: 'Recuperando detalles de las fuentes', current: 0, total: pending.length });
+  if (!pending.length) {
+    if (fetchFullDetails) cloudSync.setRestoreProgress(null);
+    return;
+  }
 
   const restoreBatchWindow = setHttpGetBatchWindow(5000);
   let favoritesChanged = false;
   const refreshedCoverUrls = new Set();
+  let completed = 0;
   try {
     let next = 0;
     const concurrency = Math.min(50, pending.length);
@@ -170,7 +177,9 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
               if (!installedSourceIds && Number(manga.chapterTotal) > 0) continue;
               detail = api.peekDetail(manga.url, resolvedId);
               if (!detail?.chapters?.length) {
-                const chaptersDetail = await api.detailFromLibraryChapters(manga.url, resolvedId, manga, { timeoutMs: 120_000 });
+                const chaptersDetail = fetchFullDetails
+                  ? null
+                  : await api.detailFromLibraryChapters(manga.url, resolvedId, manga, { timeoutMs: 120_000 });
                 detail = chaptersDetail || await api.detail(manga.url, resolvedId, { cacheResult: false, persistResult: false, allowDisabled: true, timeoutMs: 120_000 });
               }
             }
@@ -178,6 +187,15 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
           if (detail?.chapters?.length) await api.persistLibraryDetail(manga.url, resolvedId, detail, savedSourceId);
         } catch {
           // Keep this manga in the library; the missing detail can be retried next time.
+        }
+        completed += 1;
+        if (fetchFullDetails) {
+          cloudSync.setRestoreProgress({
+            label: 'Recuperando detalles de las fuentes',
+            current: completed,
+            total: pending.length,
+            currentLabel: manga.title || 'Manga'
+          });
         }
       }
     }));
@@ -187,6 +205,7 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
   } finally {
     restoreBatchWindow();
     if (favoritesChanged) window.dispatchEvent(new Event('cytlex:library-updated'));
+    if (fetchFullDetails) cloudSync.setRestoreProgress(null);
   }
 }
 
@@ -195,7 +214,7 @@ function startLibraryDetailBackfill() {
     libraryDetailBackfillPromise = (async () => {
       while (pendingLibraryDetailBackfills.length) {
         const nextJob = pendingLibraryDetailBackfills.shift();
-        await backfillLibraryDetails(nextJob.favorites, nextJob.showAdultExtensions, nextJob.isActive, nextJob.installedSourceIds);
+        await backfillLibraryDetails(nextJob.favorites, nextJob.showAdultExtensions, nextJob.isActive, nextJob.installedSourceIds, nextJob.fetchFullDetails);
       }
     })().finally(() => {
       libraryDetailBackfillPromise = null;
@@ -204,13 +223,14 @@ function startLibraryDetailBackfill() {
   }
 }
 
-function queueLibraryDetailBackfill(favorites, showAdultExtensions, isActive, installedSourceIds = null) {
+function queueLibraryDetailBackfill(favorites, showAdultExtensions, isActive, installedSourceIds = null, fetchFullDetails = false) {
   const queuedJob = pendingLibraryDetailBackfills.find((queued) => Boolean(queued.installedSourceIds) === Boolean(installedSourceIds));
   if (queuedJob) {
     const mergedFavorites = new Map(queuedJob.favorites.map((manga) => [`${sourceIdFor(manga)}|${manga.url}`, manga]));
     favorites.forEach((manga) => mergedFavorites.set(`${sourceIdFor(manga)}|${manga.url}`, manga));
     queuedJob.favorites = [...mergedFavorites.values()];
     queuedJob.showAdultExtensions ||= showAdultExtensions;
+    queuedJob.fetchFullDetails ||= fetchFullDetails;
     const previousIsActive = queuedJob.isActive;
     queuedJob.isActive = () => previousIsActive() || isActive();
     if (queuedJob.installedSourceIds && installedSourceIds) {
@@ -221,7 +241,8 @@ function queueLibraryDetailBackfill(favorites, showAdultExtensions, isActive, in
       favorites: [...new Map(favorites.map((manga) => [`${sourceIdFor(manga)}|${manga.url}`, manga])).values()],
       showAdultExtensions,
       isActive,
-      installedSourceIds: installedSourceIds ? new Set(installedSourceIds) : null
+      installedSourceIds: installedSourceIds ? new Set(installedSourceIds) : null,
+      fetchFullDetails
     });
   }
   startLibraryDetailBackfill();
@@ -447,14 +468,24 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
       const favorites = lib.favs().filter((manga) => sourceIds.has(sourceIdFor(manga)));
       if (favorites.length) queueLibraryDetailBackfill(favorites, settings.get().showAdultExtensions, () => true, sourceIds);
     };
+    const backfillSyncedLibrary = () => {
+      if (tutorialPreview || localStorage.getItem(CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY) !== '1') return;
+      localStorage.removeItem(CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY);
+      const favorites = lib.favs();
+      const sourceIds = new Set(favorites.map(sourceIdFor).filter(Boolean));
+      if (favorites.length) queueLibraryDetailBackfill(favorites, settings.get().showAdultExtensions, () => true, sourceIds, true);
+    };
     const reloadLibraryOnUpdate = () => {
       const latest = lib.favs();
       setFavs((current) => sameLibraryFavorites(current, latest) ? current : latest);
     };
     window.addEventListener(EXTENSION_INSTALLED_EVENT, backfillInstalledSources);
+    window.addEventListener(CLOUD_SYNC_DETAILS_BACKFILL_EVENT, backfillSyncedLibrary);
     window.addEventListener('cytlex:library-updated', reloadLibraryOnUpdate);
+    backfillSyncedLibrary();
     return () => {
       window.removeEventListener(EXTENSION_INSTALLED_EVENT, backfillInstalledSources);
+      window.removeEventListener(CLOUD_SYNC_DETAILS_BACKFILL_EVENT, backfillSyncedLibrary);
       window.removeEventListener('cytlex:library-updated', reloadLibraryOnUpdate);
     };
   }, [tutorialPreview]);

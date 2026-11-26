@@ -94,9 +94,22 @@ export const lib = {
       let list = [];
       try { list = JSON.parse(raw) || []; } catch {}
       if (!Array.isArray(list)) list = [];
-      if (list.some((f) => f.cats === undefined)) {
-        const [first] = loadCats();
-        list = list.map((f) => f.cats === undefined ? { ...f, cats: first ? [first.id] : [] } : f);
+      const categories = loadCats();
+      const categoryIds = new Set(categories.map(({ id }) => id));
+      const fallbackCategoryId = categories[0]?.id;
+      const normalized = list.map((manga) => {
+        const cats = Array.isArray(manga.cats) ? manga.cats : [];
+        const validCats = [...new Set(cats.filter((id) => categoryIds.has(id)))];
+        return {
+          ...manga,
+          cats: validCats.length ? validCats : fallbackCategoryId ? [fallbackCategoryId] : []
+        };
+      });
+      if (normalized.some((manga, index) => {
+        const cats = Array.isArray(list[index].cats) ? list[index].cats : [];
+        return cats.length !== manga.cats.length || cats.some((id, catIndex) => id !== manga.cats[catIndex]);
+      })) {
+        list = normalized;
         raw = JSON.stringify(list);
         localStorage.setItem(FAV, raw);
       }
@@ -117,7 +130,7 @@ export const lib = {
     if (i >= 0) favs.splice(i, 1);
     else {
       const now = Date.now();
-      favs.unshift({ ...manga, cats: catIds || [], savedAt: now, updatedAt: now });
+      favs.unshift({ ...manga, cats: catIds || [], catsUpdatedAt: now, savedAt: now, updatedAt: now });
     }
     write(FAV, favs);
     return favs;
@@ -126,7 +139,8 @@ export const lib = {
     const favs = lib.favs();
     const i = favs.findIndex((f) => match(f, url, sourceId));
     if (i >= 0) {
-      favs[i] = { ...favs[i], cats: catIds, updatedAt: Date.now() };
+      const now = Date.now();
+      favs[i] = { ...favs[i], cats: catIds, catsUpdatedAt: now, updatedAt: now };
       write(FAV, favs);
     }
     return favs;
@@ -140,6 +154,7 @@ export const lib = {
         ...favs[i],
         ...patch,
         updatedAt: Date.now(),
+        ...(Object.hasOwn(patch, 'cats') ? { catsUpdatedAt: Date.now() } : {}),
         ...(coverChanged ? { coverLocal: '', coverCached: '' } : {})
       };
       write(FAV, favs);
@@ -154,7 +169,8 @@ export const lib = {
       const patch = patches.get(`${SRC(f)}|${sameUrlKey(f.url)}`);
       if (!patch) return f;
       changed = true;
-      return { ...f, ...patch, updatedAt: Date.now() };
+      const now = Date.now();
+      return { ...f, ...patch, updatedAt: now, ...(Object.hasOwn(patch, 'cats') ? { catsUpdatedAt: now } : {}) };
     });
     if (changed) write(FAV, next);
     return next;
@@ -183,7 +199,10 @@ export const lib = {
     let cats = loadCats().filter((c) => c.id !== id);
     if (!cats.length) cats = DEFAULT_CATS.map((c) => ({ ...c }));
     write(CATS, cats);
-    const favs = lib.favs().map((f) => ({ ...f, cats: (f.cats || []).filter((c) => c !== id) }));
+    const now = Date.now();
+    const favs = lib.favs().map((f) => (f.cats || []).includes(id)
+      ? { ...f, cats: f.cats.filter((c) => c !== id), catsUpdatedAt: now, updatedAt: now }
+      : f);
     write(FAV, favs);
     return cats;
   },

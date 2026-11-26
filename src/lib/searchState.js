@@ -3,18 +3,56 @@ import { isMangaCover, mangaSourceUrl } from './library.js';
 export const lastSearch = { q: '', genre: '', results: null };
 export const MAX_SEARCH_RESULTS = 30;
 export const SOURCE_CATALOG_HOME_EVENT = 'cytlex:source-catalog-home';
+const EXPLORE_TABS = new Set(['mangas', 'extensiones', 'fuentes']);
+let lastExploreTab = 'mangas';
+let lastExploreLocation = '/explorar?tab=mangas';
+let lastLibraryLocation = '/biblioteca';
+
+export function rememberLibraryLocation(location) {
+  const isLibraryDetail = location?.pathname === '/manga'
+    && new URLSearchParams(location.search || '').get('from') === 'biblioteca';
+  if (location?.pathname !== '/biblioteca' && !isLibraryDetail) return;
+  lastLibraryLocation = `${location.pathname}${location.search || ''}`;
+}
+
+export function libraryReturnRoute() {
+  return lastLibraryLocation;
+}
+
+export function rememberExploreTab(tab) {
+  if (EXPLORE_TABS.has(tab)) lastExploreTab = tab;
+}
+
+export function rememberExploreLocation(location) {
+  const params = new URLSearchParams(location?.search || '');
+  if (location?.pathname === '/explorar'
+    && (params.has('migrationFrom') || params.has('migrationSource') || params.has('migrationTargets'))) return;
+  const isExploreDetail = location?.pathname === '/manga'
+    && ['explorar', 'fuentes', 'resultados'].includes(params.get('from'));
+  if (location?.pathname !== '/explorar' && !isExploreDetail) return;
+  const search = location.search || '';
+  const tab = isExploreDetail
+    ? params.get('from') === 'fuentes' ? 'fuentes' : 'mangas'
+    : params.get('tab');
+  lastExploreLocation = `${location.pathname}${search}`;
+  rememberExploreTab(tab);
+}
+
+export function exploreReturnRoute() {
+  return lastExploreLocation;
+}
 
 export function exploreHomeRoute(location) {
   const params = new URLSearchParams(location.search);
   const from = location.pathname.startsWith('/manga') ? params.get('from') : '';
   const currentTab = params.get('tab');
-  const tab = from === 'fuentes'
-    ? 'fuentes'
-    : from === 'extensiones'
-      ? 'extensiones'
-      : !from && location.pathname === '/explorar' && ['mangas', 'extensiones', 'fuentes'].includes(currentTab)
+  const tab = from
+    ? from === 'fuentes' ? 'fuentes' : from === 'extensiones' ? 'extensiones' : 'mangas'
+    : location.pathname === '/resultados'
+      ? 'mangas'
+      : location.pathname === '/explorar' && EXPLORE_TABS.has(currentTab)
         ? currentTab
-        : 'mangas';
+        : lastExploreTab;
   return `/explorar?tab=${tab}`;
 }
 

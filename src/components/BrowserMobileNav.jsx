@@ -4,7 +4,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { BookOpen, Compass, Settings as SettingsIcon } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { useI18n } from '../lib/i18n.js';
-import { exploreHomeRoute, isExploreHomeRoute, SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
+import { exploreHomeRoute, exploreReturnRoute, libraryReturnRoute, SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
 
 const RESET_PAGE_EVENT = 'cytlex:reset-page';
 
@@ -93,7 +93,11 @@ export default function BrowserMobileNav({ tutorialNavOnly = false }) {
 
   const handleRouteClick = (to, event, selected) => {
     if (tutorialNavOnly || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    const destination = to === '/explorar' ? exploreHomeRoute(location) : to;
+    const destination = to === '/explorar'
+      ? selected ? exploreHomeRoute(location) : exploreReturnRoute()
+      : to === '/biblioteca' && !selected
+        ? libraryReturnRoute()
+      : to;
     const libraryDetail = location.pathname === '/manga'
       && new URLSearchParams(location.search).get('from') === 'biblioteca';
     if (to === '/biblioteca' && (location.pathname === '/biblioteca' || libraryDetail)) {
@@ -107,19 +111,19 @@ export default function BrowserMobileNav({ tutorialNavOnly = false }) {
       }
       return;
     }
-    if (to === '/explorar' && isExploreHomeRoute(location, destination)) {
+    if (to === '/explorar' && selected && location.pathname === '/explorar') {
       event.preventDefault();
-      const main = document.querySelector('.catalog-page-scroll') || document.querySelector('main');
-      if (main?.scrollTop > 1) {
-        resetSubrouteScroll(destination);
-        main.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+      if (`${location.pathname}${location.search}` !== destination) {
+        navigate(destination, { replace: true });
       }
       return;
     }
     event.preventDefault();
-    resetSubrouteScroll(destination);
-    if (destination === '/explorar?tab=fuentes') window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
-    window.dispatchEvent(new Event(RESET_PAGE_EVENT));
+    if (selected) {
+      resetSubrouteScroll(destination);
+      if (destination === '/explorar?tab=fuentes') window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
+      window.dispatchEvent(new Event(RESET_PAGE_EVENT));
+    }
     navigate(destination, { replace: selected });
   };
 
@@ -139,7 +143,11 @@ export default function BrowserMobileNav({ tutorialNavOnly = false }) {
         return (
           <Link
             key={to}
-            to={to === '/explorar' ? exploreHomeRoute(location) : to}
+            to={to === '/explorar'
+              ? selected ? exploreHomeRoute(location) : exploreReturnRoute()
+              : to === '/biblioteca' && !selected
+                ? libraryReturnRoute()
+              : to}
             aria-current={selected ? 'page' : undefined}
             className={cn('browser-mobile-nav__item', selected && 'is-active')}
             onClick={(event) => handleRouteClick(to, event, selected)}

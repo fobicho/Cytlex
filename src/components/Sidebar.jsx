@@ -4,7 +4,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { BookOpen, ChevronsRight, Compass, Settings as SettingsIcon } from 'lucide-react';
 import { RESET_PAGE_EVENT } from '../App.jsx';
 import { cn } from '../lib/utils.js';
-import { exploreHomeRoute, isExploreHomeRoute, SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
+import { exploreHomeRoute, exploreReturnRoute, libraryReturnRoute, SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
 import { settings, SIDEBAR_WIDTH } from '../lib/settings.js';
 import { useI18n } from '../lib/i18n.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
@@ -24,7 +24,7 @@ const randomSidebarGlyphs = () => Array.from({ length: 12 }, () =>
 const EASE = [0.25, 0.1, 0.25, 1];
 const DURATION = 0.3;
 const SIDEBAR_SCALE_MIN = 0.72;
-function ActiveRouteLabel({ label, active }) {
+function ActiveRouteLabel({ label, active, centered = false }) {
   const [glyphs] = useState(randomSidebarGlyphs);
   const reduceMotion = useReducedMotion();
 
@@ -62,7 +62,7 @@ function ActiveRouteLabel({ label, active }) {
           </motion.span>
         )}
       </AnimatePresence>
-      {active && <span key="leading" aria-hidden="true" className="sidebar-glyph-leading" />}
+      {active && <span key="leading" aria-hidden="true" className="sidebar-glyph-leading" style={centered ? { flex: '1 1 0', minWidth: 0 } : undefined} />}
       <motion.span
         key="route-name"
         layout={reduceMotion ? false : 'position'}
@@ -71,7 +71,7 @@ function ActiveRouteLabel({ label, active }) {
       >
         {label}
       </motion.span>
-      {active && <span key="trailing" aria-hidden="true" className="sidebar-glyph-trailing" />}
+      {active && <span key="trailing" aria-hidden="true" className="sidebar-glyph-trailing" style={centered ? { flex: '1 1 0' } : undefined} />}
     </span>
   );
 }
@@ -160,7 +160,11 @@ export default function Sidebar({ tutorialNavOnly = false }) {
       >
         {navItems.map((item) => {
           const isActive = routeSection(location) === item.to || location.pathname === item.to;
-          const destination = item.to === '/explorar' ? exploreHomeRoute(location) : item.to;
+          const destination = item.to === '/explorar'
+            ? isActive ? exploreHomeRoute(location) : exploreReturnRoute()
+            : item.to === '/biblioteca' && !isActive
+              ? libraryReturnRoute()
+            : item.to;
           const Icon = item.icon;
           const collapsedEnter = reduceMotion ? 'translateX(0)' : 'translateX(-3px)';
           const collapsedExit = reduceMotion ? 'translateX(0)' : 'translateX(3px)';
@@ -197,19 +201,19 @@ export default function Sidebar({ tutorialNavOnly = false }) {
                   }
                   return;
                 }
-                if (item.to === '/explorar' && isExploreHomeRoute(location, destination)) {
+                if (item.to === '/explorar' && isActive && location.pathname === '/explorar') {
                   event.preventDefault();
-                  const main = document.querySelector('.catalog-page-scroll') || document.querySelector('main');
-                  if (main?.scrollTop > 1) {
-                    resetSubrouteScroll(destination);
-                    main.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+                  if (`${location.pathname}${location.search}` !== destination) {
+                    navigate(destination, { replace: true });
                   }
                   return;
                 }
                 event.preventDefault();
-                resetSubrouteScroll(destination);
-                if (destination === '/explorar?tab=fuentes') window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
-                window.dispatchEvent(new Event(RESET_PAGE_EVENT));
+                if (isActive) {
+                  resetSubrouteScroll(destination);
+                  if (destination === '/explorar?tab=fuentes') window.dispatchEvent(new Event(SOURCE_CATALOG_HOME_EVENT));
+                  window.dispatchEvent(new Event(RESET_PAGE_EVENT));
+                }
                 navigate(destination, { replace: isActive });
               }}
             >
@@ -288,7 +292,7 @@ export default function Sidebar({ tutorialNavOnly = false }) {
             className={cn(
               'relative w-full flex items-center rounded-md font-semibold',
               'transition-[gap,color,background-color,border-color,text-decoration-color,fill,stroke] duration-300 [transition-timing-function:cubic-bezier(0.25,0.1,0.25,1)]',
-              'bg-primary/10 text-primary ring-1 ring-inset ring-primary/25 hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
+              'bg-primary/10 text-primary ring-1 ring-inset ring-primary/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
             )}
             style={{
               justifyContent: collapsed ? 'center' : 'flex-start',
@@ -329,12 +333,12 @@ export default function Sidebar({ tutorialNavOnly = false }) {
               )}
               style={{
                 flex: collapsed ? '0 1 0' : '1 1 0',
-                maxWidth: collapsed ? 0 : `${Math.round(160 * scale)}px`,
-                marginLeft: collapsed ? 0 : `${Math.max(3, Math.round(5 * scale))}px`,
+                maxWidth: collapsed ? 0 : 'none',
+                marginLeft: 0,
                 transitionDuration: collapsed ? '180ms' : '300ms'
               }}
             >
-              <ActiveRouteLabel label={supportLabel} active={!collapsed} />
+              <ActiveRouteLabel label={supportLabel} active={!collapsed} centered />
             </span>
           </button>
         </div>

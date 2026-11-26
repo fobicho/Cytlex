@@ -11,11 +11,11 @@ const read = () => {
   return cache;
 };
 
-const write = (data) => {
+const write = (data, type = 'progress') => {
   cache = data;
   revision += 1;
   try { localStorage.setItem(KEY, JSON.stringify(data)); } catch {}
-  notifyCloudSyncLocalChange();
+  notifyCloudSyncLocalChange({ type });
 };
 
 const cap = (url, sourceId = 'leercapitulo') => `${sourceId}|${url}`;
@@ -23,11 +23,14 @@ const cap = (url, sourceId = 'leercapitulo') => `${sourceId}|${url}`;
 const listeners = new Set();
 const notify = (change) => listeners.forEach((l) => l(change));
 
-function put(url, sourceId, patch) {
+function put(url, sourceId, patch, type = 'progress') {
   const data = read();
   const k = cap(url, sourceId);
-  data[k] = { ...(data[k] || {}), ...patch, updatedAt: Date.now() };
-  write(data);
+  const current = data[k] || {};
+  const next = { ...current, ...patch, updatedAt: Date.now() };
+  if (type === 'progress-page' && current.page === next.page && current.total === next.total && current.read === next.read) return;
+  data[k] = next;
+  write(data, type);
 }
 
 export const progress = {
@@ -54,7 +57,7 @@ export const progress = {
     if (!Number.isInteger(page) || page < 0) return;
     const cur = read()[cap(url, sourceId)];
     if (cur?.read) return;
-    put(url, sourceId, { page, total: total ?? cur?.total ?? 0, updatedAt: Date.now() });
+    put(url, sourceId, { page, total: total ?? cur?.total ?? 0, updatedAt: Date.now() }, 'progress-page');
   },
 
   markRead(url, sourceId, total = 0, mangaUrl = '') {

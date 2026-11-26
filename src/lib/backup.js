@@ -4,11 +4,19 @@ const FORMAT = 'cytlex-backup';
 const VERSION = 1;
 const KEY_PREFIX = 'cytlex:';
 const EXTENSIONS_KEY = 'cytlex:extensions:v1';
+const CLOUD_SYNC_ACCOUNT_KEY = 'cytlex:cloud-sync-account:v1';
+const CLOUD_SYNC_METADATA_PREFIX = 'cytlex:cloud-sync-tombstones:v1:';
+const CLOUD_SYNC_BACKUP_PENDING_KEY = 'cytlex:cloud-sync-backup-pending:v1';
+
+const isCloudSyncMetadata = (key) => key === CLOUD_SYNC_ACCOUNT_KEY
+  || key === CLOUD_SYNC_BACKUP_PENDING_KEY
+  || key.startsWith(CLOUD_SYNC_METADATA_PREFIX);
+
 export function createBackup() {
   const data = {};
   for (let i = 0; i < localStorage.length; i += 1) {
     const key = localStorage.key(i);
-    if (key?.startsWith(KEY_PREFIX) && key !== EXTENSIONS_KEY) data[key] = localStorage.getItem(key);
+    if (key?.startsWith(KEY_PREFIX) && key !== EXTENSIONS_KEY && !isCloudSyncMetadata(key)) data[key] = localStorage.getItem(key);
   }
   return {
     format: FORMAT,
@@ -63,12 +71,12 @@ export function restoreBackup(data) {
 
   try {
     Object.keys(current).forEach((key) => {
-      if (key !== EXTENSIONS_KEY) localStorage.removeItem(key);
+      if (key !== EXTENSIONS_KEY && key !== CLOUD_SYNC_ACCOUNT_KEY) localStorage.removeItem(key);
     });
     Object.entries(data).forEach(([key, value]) => {
-      if (key !== EXTENSIONS_KEY) localStorage.setItem(key, value);
+      if (key !== EXTENSIONS_KEY && !isCloudSyncMetadata(key)) localStorage.setItem(key, value);
     });
-    notifyCloudSyncLocalChange();
+    notifyCloudSyncLocalChange({ type: 'backup-import' });
   } catch (error) {
     for (let i = localStorage.length - 1; i >= 0; i -= 1) {
       const key = localStorage.key(i);

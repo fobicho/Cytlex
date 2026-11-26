@@ -8,7 +8,7 @@ import { isLibraryManga, lib, libraryIdentityKey, libraryKey } from '../lib/libr
 import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaSource, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { settings } from '../lib/settings.js';
-import { lastSearch, scrollMemory, rememberMangaPreview, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
+import { lastSearch, scrollMemory, rememberMangaPreview, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, rememberExploreTab, rememberExploreLocation, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import { clearSearchCoverCache, createSearchCoverBatch, preloadSearchCover } from '../lib/covers.js';
 import MangaCard from '../components/MangaCard.jsx';
 import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
@@ -351,7 +351,12 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     setCoverSize(s.coverSize);
     setHideSavedManga(!!s.hideSavedManga);
   }), []);
-  useEffect(() => { sessionTab = tab; }, [tab]);
+  useEffect(() => {
+    if (migrationMode) return;
+    sessionTab = tab;
+    rememberExploreTab(tab);
+    rememberExploreLocation(loc);
+  }, [migrationMode, tab, loc.pathname, loc.search]);
   useEffect(() => {
     // Catalog stays mounted behind the manga detail page. Keep its blob URLs
     // alive while those cards are hidden so returning to Explore preserves covers.
@@ -463,71 +468,81 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     else lastSearch.results = initialResults;
     setResults(initialResults);
 
-    void Promise.allSettled(list.map(({ manifest }) => extensions.source(manifest.id))).then(() => {
-      if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) {
-        list.forEach(({ manifest }) => finishCatalogSearchBatchSource(searchBatchId, manifest.id));
-        return;
-      }
-      const sourceJobs = list.map(async (s) => {
-        try {
-          const params = { q: searchQuery, genre: '', page: 1, __cytlexGlobalSearch: true, __cytlexSearchBatchId: searchBatchId };
-          const r = await api.catalog(params, s.manifest.id);
-          if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
-          const items = (r.items || []).filter((m) =>
-            (!migrationMode || isUnavailableMangaSource(migrationFromSource) || normalizeMangaTitle(m.title) === normalizeMangaTitle(migrationQuery)) &&
-            (s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim())
-          ).slice(0, MAX_SEARCH_RESULTS);
-          const coverPromises = items.map((m) => window.cytlex?.fetchImage
-            ? preloadSearchCover(m.cover)
-            : coverBatch.preload(m.cover));
-          const directCoverIndexes = new Map();
-          const directCoverPromises = [];
-          items.forEach((m, index) => {
-            if (!window.cytlex?.fetchImage && m.cover && browserImageUrl(m.cover) === m.cover) {
-              directCoverIndexes.set(index, directCoverPromises.length);
-              directCoverPromises.push(waitForDirectCover(m.cover));
-            }
-          });
-          coverBatch.flushBundled();
-          items.forEach((m) => rememberMangaPreview(m, s.manifest.id));
-          await coverBatch.flush();
-          const loadedCovers = await Promise.all(coverPromises);
-          const directCoverLoads = await Promise.all(directCoverPromises);
-          if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
-          const allCoversLoaded = items.every((item, index) => {
-            const directIndex = directCoverIndexes.get(index);
-            return !!item.cover && (directIndex === undefined ? !!loadedCovers[index] : directCoverLoads[directIndex]);
-          });
-          if (!allCoversLoaded) throw new Error('No se pudieron cargar todas las portadas de esta extensión.');
-          const readyItems = items.map((item, index) => loadedCovers[index]
-            ? { ...item, coverCached: loadedCovers[index] }
-            : item);
-          updateResults((prev) =>
-            prev ? prev.map((x) => (x.id === s.manifest.id
-              ? {
-                  ...x,
-                  status: 'done',
-                  items: readyItems,
-                  page: r.page || 1,
-                  totalPages: r.totalPages || 1,
-                  hasMore: items.length < MAX_SEARCH_RESULTS && (r.hasMore ?? (r.totalPages > 1)),
-                  totalText: r.totalText || ''
-                }
-              : x)) : prev
-          );
-        } catch (e) {
-          console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);
-          if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
-          const errorMessage = sourceErrorMessage(e, s.manifest.name);
-          updateResults((prev) => (prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'error', errorMessage } : x)) : prev));
-        } finally {
-          finishCatalogSearchBatchSource(searchBatchId, s.manifest.id);
-        }
-      });
-      void Promise.allSettled(sourceJobs).then(() => {
+    const sourceJobs = list.map(async (s) => {
+      try {
+        await extensions.source(s.manifest.id);
         if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
-        if (!migrationMode && activeSearchKey === searchKey) activeSearchKey = '';
-      });
+        const params = { q: searchQuery, genre: '', page: 1, __cytlexGlobalSearch: true, __cytlexSearchBatchId: searchBatchId };
+        const r = await api.catalog(params, s.manifest.id);
+        if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+        const items = (r.items || []).filter((m) =>
+          (!migrationMode || isUnavailableMangaSource(migrationFromSource) || normalizeMangaTitle(m.title) === normalizeMangaTitle(migrationQuery)) &&
+          (s.manifest.id !== 'mangalect' || String(m.lastChapter || '').trim())
+        ).slice(0, MAX_SEARCH_RESULTS);
+        const coverPromises = items.map((m) => window.cytlex?.fetchImage
+          ? preloadSearchCover(m.cover)
+          : coverBatch.preload(m.cover));
+        const directCoverIndexes = new Map();
+        const directCoverPromises = [];
+        items.forEach((m, index) => {
+          if (!window.cytlex?.fetchImage && m.cover && browserImageUrl(m.cover) === m.cover) {
+            directCoverIndexes.set(index, directCoverPromises.length);
+            directCoverPromises.push(waitForDirectCover(m.cover));
+          }
+        });
+        coverBatch.flushBundled();
+        items.forEach((m) => rememberMangaPreview(m, s.manifest.id));
+        return { source: s, response: r, items, coverPromises, directCoverIndexes, directCoverPromises };
+      } catch (e) {
+        console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);
+        if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+        const errorMessage = sourceErrorMessage(e, s.manifest.name);
+        updateResults((prev) => (prev ? prev.map((x) => (x.id === s.manifest.id ? { ...x, status: 'error', errorMessage } : x)) : prev));
+        return null;
+      } finally {
+        finishCatalogSearchBatchSource(searchBatchId, s.manifest.id);
+      }
+    });
+    void Promise.allSettled(sourceJobs).then(async (sourceOutcomes) => {
+      if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+      const coverFlush = coverBatch.flush();
+      const coverJobs = sourceOutcomes
+        .filter((outcome) => outcome.status === 'fulfilled' && outcome.value)
+        .map(async ({ value: { source, response, items, coverPromises, directCoverIndexes, directCoverPromises } }) => {
+            try {
+              const loadedCovers = await Promise.all(coverPromises);
+              const directCoverLoads = await Promise.all(directCoverPromises);
+              if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+              const allCoversLoaded = items.every((item, index) => {
+                const directIndex = directCoverIndexes.get(index);
+                return !!item.cover && (directIndex === undefined ? !!loadedCovers[index] : directCoverLoads[directIndex]);
+              });
+              if (!allCoversLoaded) throw new Error('No se pudieron cargar todas las portadas de esta extensión.');
+              const readyItems = items.map((item, index) => loadedCovers[index]
+                ? { ...item, coverCached: loadedCovers[index] }
+                : item);
+              updateResults((prev) => prev ? prev.map((result) => (result.id === source.manifest.id
+                ? {
+                    ...result,
+                    status: 'done',
+                    items: readyItems,
+                    page: response.page || 1,
+                    totalPages: response.totalPages || 1,
+                    hasMore: items.length < MAX_SEARCH_RESULTS && (response.hasMore ?? (response.totalPages > 1)),
+                    totalText: response.totalText || ''
+                  }
+                : result)) : prev);
+            } catch (error) {
+              console.warn('[Cytlex] búsqueda falló en', source.manifest.id, error?.message || error);
+              if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+              const errorMessage = sourceErrorMessage(error, source.manifest.name);
+              updateResults((prev) => (prev ? prev.map((result) => (result.id === source.manifest.id ? { ...result, status: 'error', errorMessage } : result)) : prev));
+            }
+        });
+      await Promise.allSettled(coverJobs);
+      await coverFlush;
+      if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+      if (!migrationMode && activeSearchKey === searchKey) activeSearchKey = '';
     });
   };
 
@@ -910,7 +925,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
                     r={r}
                     coverSize={cs}
                     scale={scale}
-                    animate={animateSearch}
+                    animate={animateSearch || migrationMode}
                     active={active}
                     onMangaSelect={(manga, sourceId) => {
                       if (migrationMode) {

@@ -581,20 +581,40 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       let alive = true;
       if (cached?.chapters?.length) {
         writeActiveDetail(activeDetailKey, cached);
-        api.persistLibraryDetail(mangaUrl, sourceId, cached);
+        void api.persistLibraryDetail(mangaUrl, sourceId, cached);
         return () => { alive = false; };
       }
       const loadSavedDetail = async () => {
         let saved = null;
         try { saved = await api.restoreDetail(mangaUrl, sourceId); } catch {}
         if (!alive) return;
+        if (!saved?.chapters?.length) {
+          try { saved = await api.detail(mangaUrl, sourceId); } catch (error) {
+            if (alive) setErr(sourceErrorMessage(error, sourceName, 'No se pudo cargar el manga.'));
+            return;
+          }
+        }
+        if (!alive) return;
         if (saved?.chapters?.length) {
           writeActiveDetail(activeDetailKey, saved);
-          api.persistLibraryDetail(mangaUrl, sourceId, saved);
+          await api.persistLibraryDetail(mangaUrl, sourceId, saved);
+          if (!alive) return;
           if (reconcileMihonProgress(mangaUrl, sourceId, saved.chapters)) {
             setProgressTick((tick) => tick + 1);
           }
           setDetailState({ key: detailKey, data: saved });
+          const favorite = lib.fav(mangaUrl, sourceId);
+          if (favorite) {
+            lib.updateFav(mangaUrl, {
+              title: saved.title || favorite.title,
+              ...(saved.cover && isMangaCover(saved.cover, mangaUrl) ? { cover: saved.cover } : {}),
+              type: saved.facts?.tipo || favorite.type,
+              author: saved.facts?.autor || saved.author || saved.artist || favorite.author,
+              description: saved.sinopsis || favorite.description,
+              genres: saved.genres?.length ? saved.genres : favorite.genres,
+              chapterTotal: saved.chapters.length
+            }, sourceId);
+          }
           return;
         }
         setErr('No hay información guardada para este manga. Puedes obtenerla manualmente con «Reintentar carga».');
@@ -1368,17 +1388,24 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             <span aria-hidden="true" className="text-muted-foreground">·</span>
             <SourceLine key={sourceId} sourceId={sourceId} manifest={sourceManifest} scale={scale} iconFailed={sourceIconFailed} />
           </div>
-          <div className="mt-2 flex flex-wrap items-center" style={{ gap: px(8, scale, 6) }}>
-            {(d.facts.estado || d.facts.status) && (
-              <Badge style={badgeStyle}>{(d.facts.estado || d.facts.status)}</Badge>
-            )}
-            {d.facts.tipo && <Badge style={badgeStyle}>{d.facts.tipo}</Badge>}
-            {d.genres.slice(0, 6).map((g) => (
-              <Badge key={g} variant="outline" style={badgeStyle}>
-                {g}
-              </Badge>
-            ))}
-          </div>
+          {(d.facts.estado || d.facts.status || d.facts.tipo) && (
+            <div className="mt-2 flex flex-wrap items-center text-muted-foreground" style={{ gap: px(7, scale, 5), fontSize: badgeStyle.fontSize }}>
+              {(d.facts.estado || d.facts.status) && (
+                <span className="font-semibold text-primary">{d.facts.estado || d.facts.status}</span>
+              )}
+              {(d.facts.estado || d.facts.status) && d.facts.tipo && <span aria-hidden="true">·</span>}
+              {d.facts.tipo && <span>{d.facts.tipo}</span>}
+            </div>
+          )}
+          {!!d.genres.length && (
+            <div role="group" aria-label={t('Géneros')} className="mt-2 flex flex-wrap" style={{ gap: px(7, scale, 5) }}>
+              {d.genres.slice(0, 6).map((g) => (
+                <Badge key={g} variant="outline" className="rounded-none border-border/60 bg-secondary/30 px-2 py-0.5 text-secondary-foreground" style={badgeStyle}>
+                  {g}
+                </Badge>
+              ))}
+            </div>
+          )}
         </div>
 
         {(d.facts.publicacion || d.facts.periodicidad || d.facts.proximo) && (
@@ -1768,7 +1795,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                 size="sm"
                 variant="secondary"
                 title="Orden de los capítulos"
-                className="rounded-lg"
+                className="detail-square-control rounded-none"
                 onClick={() => setChapterSort((v) => (v === 'chapter' ? 'scanlation' : 'chapter'))}
                 style={{
                   height: px(32, scale, 27),

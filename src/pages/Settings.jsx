@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
-import { Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Database, Download, Upload, CircleHelp, Info, Settings as SettingsIcon, Monitor, Sun, Moon, Cloud } from 'lucide-react';
+import { Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Database, Download, Upload, CircleHelp, Info, Settings as SettingsIcon, Monitor, Sun, Moon, Cloud, Columns3 } from 'lucide-react';
 import { CONTENT_WARNING_RATINGS, resolveMode, settings } from '../lib/settings.js';
 import { isMangaCover, isUnresolvedMihonSource, lib } from '../lib/library.js';
 import { api } from '../lib/api.js';
@@ -18,6 +18,7 @@ import { compressBackup, createBackup, parseBackup, readBackupFile, restoreBacku
 import { importMihonBackup, previewMihonBackup } from '../lib/mihonBackup.js';
 import { extensions, isExtensionAllowed, isSourceConfigured } from '../lib/extensions.js';
 import { Button } from '../components/ui/button.jsx';
+import BackupProgress from '../components/BackupProgress.jsx';
 import LanguageToggle from '../components/LanguageToggle.jsx';
 import { LanguageLayoutMotionProvider, useLanguageLayoutMotion } from '../lib/languageLayoutMotion.js';
 import { Dropdown } from '../components/ui/dropdown.jsx';
@@ -269,35 +270,6 @@ async function refreshImportedMihonDetails(mangas, onProgress) {
   return { results, attempted };
 }
 
-export function BackupProgress({ progress, scale }) {
-  const { t } = useI18n();
-  if (!progress) return null;
-  const determinate = progress.total > 0;
-  const value = determinate ? Math.round((progress.current / progress.total) * 100) : 0;
-  return (
-    <div className="space-y-2 rounded-lg border bg-secondary/40" style={{ padding: px(12, scale, 10), marginBottom: px(16, scale, 12) }} role="status" aria-live="polite">
-      <div className="flex items-center justify-between gap-3">
-        <span className="font-medium text-foreground" style={{ fontSize: fontPx(13, scale, 11) }}>{t(progress.label)}</span>
-        {determinate && <span className="shrink-0 text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10) }}>{progress.current} {t('de')} {progress.total}</span>}
-      </div>
-      <div
-        className="h-2 overflow-hidden rounded-full bg-muted"
-        role="progressbar"
-        aria-label={t(progress.label)}
-        aria-valuemin={0}
-        aria-valuemax={determinate ? 100 : undefined}
-        aria-valuenow={determinate ? value : undefined}
-      >
-        <div
-          className={`h-full rounded-full bg-primary transition-[width] duration-200 ${determinate ? '' : 'w-2/5 animate-pulse'}`}
-          style={determinate ? { width: `${value}%` } : undefined}
-        />
-      </div>
-      {progress.currentLabel && <p className="truncate text-muted-foreground" style={{ fontSize: fontPx(12, scale, 10) }} title={progress.currentLabel}>{progress.currentLabel}</p>}
-    </div>
-  );
-}
-
 function throwIfAborted(signal) {
   if (!signal?.aborted) return;
   const error = new Error('Importación cancelada.');
@@ -414,32 +386,53 @@ function ConnectHint({ open, hintRef, scale, reduceMotion, className, message = 
   );
 }
 
-function Segmented({ value, options, onChange, scale = 1, stableLayout = false }) {
+function Segmented({ value, options, onChange, scale = 1, stableLayout = false, ariaLabel, Icon }) {
   const { t } = useI18n();
+  const reduceMotion = useReducedMotion();
   return (
-    <div className="flex" style={{ gap: px(8, scale, 5) }}>
-      {options.map(([val, label]) => (
-        <Button
-          key={val}
-          size="sm"
-          variant={value === val ? 'default' : 'outline'}
-          className={stableLayout ? cn(
-            'border transition-colors active:scale-100',
-            value === val ? 'border-transparent' : 'border-border'
-          ) : undefined}
-          onClick={() => onChange(val)}
-          style={{
-            height: px(36, scale, 30),
-            fontSize: fontPx(14, scale, 12),
-            paddingLeft: px(12, scale, 9),
-            paddingRight: px(12, scale, 9),
-            minWidth: px(40, scale, 32),
-            justifyContent: 'center'
-          }}
-        >
-          {t(label)}
-        </Button>
-      ))}
+    <div
+      role="group"
+      aria-label={ariaLabel}
+      className="inline-flex items-center rounded-xl border border-border bg-card p-1 text-card-foreground shadow-sm"
+      style={{ gap: px(4, scale, 3) }}
+    >
+      {Icon && <Icon aria-hidden="true" className="ml-1 h-4 w-4 shrink-0 text-muted-foreground" />}
+      <div className="inline-flex items-center rounded-lg p-0.5">
+        {options.map(([val, label]) => {
+          const selected = value === val;
+          return (
+            <button
+              key={val}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChange(val)}
+              className={cn(
+                'relative z-10 inline-flex items-center justify-center rounded-lg px-1 py-0.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
+                stableLayout && 'active:scale-100',
+                selected ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+              )}
+              style={{
+                height: px(24, scale, 20),
+                fontSize: fontPx(14, scale, 12),
+                paddingLeft: px(12, scale, 9),
+                paddingRight: px(12, scale, 9),
+                minWidth: px(40, scale, 32),
+                justifyContent: 'center'
+              }}
+            >
+              {selected && (
+                <motion.span
+                  aria-hidden="true"
+                  layoutId={reduceMotion ? undefined : `settings-segmented-${ariaLabel || 'active'}`}
+                  transition={{ layout: { duration: reduceMotion ? 0 : 0.2, ease: [0.23, 1, 0.32, 1] } }}
+                  className="absolute inset-0 z-0 rounded-md bg-primary"
+                />
+              )}
+              <span className="relative z-10">{t(label)}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -471,7 +464,7 @@ function ModeToggle({ value, options, onChange }) {
             aria-pressed={value === mode}
             onClick={() => onChange(mode)}
             className={cn(
-              'relative z-10 w-16 rounded-lg px-1 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
+              'relative z-10 w-16 rounded-lg px-1 py-0.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
               value === mode ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
             )}
           >
@@ -647,6 +640,13 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
   const resetWebData = async () => {
     setWebDataResetBusy(true);
     try {
+      if (cloudSync.getState().email) {
+        try {
+          await cloudSync.signOut({ scope: 'local' });
+        } catch (error) {
+          if (cloudSync.getState().status !== 'signed-out') throw error;
+        }
+      }
       await Promise.all([clearPersistentLibraryCoverCache(), clearSourceCache(), clearRecentChapters()]);
       const keys = [];
       for (let index = 0; index < localStorage.length; index += 1) {
@@ -1586,6 +1586,8 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
           right={
             <Segmented
               scale={scale}
+              ariaLabel={t('Vista')}
+              Icon={LibraryIcon}
               value={s.libraryView}
               onChange={(v) => set({ libraryView: v })}
               options={[['grid', 'Portadas'], ['list', 'Compacta']]}
@@ -1624,10 +1626,20 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
           desc={t('Cantidad de capítulos por fila en la ficha de un manga')}
           right={
             <>
-              <span className="rounded-lg border border-border bg-muted px-3 py-2 text-sm md:hidden">{t('1 por fila')}</span>
+              <span className="inline-flex items-center gap-1 rounded-xl border border-border bg-card p-1 text-card-foreground shadow-sm md:hidden">
+                <Columns3 aria-hidden="true" className="ml-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                <span
+                  className="inline-flex items-center justify-center rounded-lg bg-muted px-3 text-sm font-semibold"
+                  style={{ height: px(28, scale, 24), fontSize: fontPx(14, scale, 12) }}
+                >
+                  {t('1 por fila')}
+                </span>
+              </span>
               <div className="hidden md:block">
                 <Segmented
                   scale={scale}
+                  ariaLabel={t('Capítulos por fila')}
+                  Icon={Columns3}
                   value={s.chaptersPerRow}
                   onChange={(v) => set({ chaptersPerRow: v })}
                   options={[[1, '1'], [2, '2'], [3, '3']]}
@@ -2391,7 +2403,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
         open={confirmWebDataReset}
         onClose={() => { if (!webDataResetBusy) setConfirmWebDataReset(false); }}
         title="Restablecer datos de Cytlex"
-        description="Se borrarán permanentemente la biblioteca, las categorías, el progreso, los ajustes, las extensiones instaladas y las portadas guardadas en este navegador. La página se recargará y volverá a mostrar la introducción. Exporta un respaldo antes si quieres conservar tus datos."
+        description={t('Se borrarán permanentemente la biblioteca, las categorías, el progreso, los ajustes, las extensiones instaladas y las portadas guardadas en este navegador. También se cerrará la sesión en este dispositivo. Los datos de la cuenta en la nube no se borrarán y podrían volver a cargarse si inicias sesión otra vez.')}
         hideDivider
         bodyClassName="pb-6"
         scrollableBody={false}

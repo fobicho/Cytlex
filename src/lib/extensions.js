@@ -56,12 +56,13 @@ function parseRepositoryIndex(text, indexUrl) {
 
 export function isAdultExtension(source) {
   const manifest = source?.manifest || source;
-  return ADULT_CONTENT_WARNINGS.includes(String(manifest?.contentWarning || '').toUpperCase());
+  const rating = String(manifest?.contentWarning || '').toUpperCase().replace(/\s*\+?\s*18$/, '');
+  return ADULT_CONTENT_WARNINGS.includes(rating);
 }
 
 export function isExtensionAllowed(source, showAdultExtensions) {
   const manifest = source?.manifest || source;
-  const rating = String(manifest?.contentWarning || '').toUpperCase();
+  const rating = String(manifest?.contentWarning || '').toUpperCase().replace(/\s*\+?\s*18$/, '');
   if (!showAdultExtensions) return rating === 'SAFE';
   return settings.get().adultContentRatings.includes(rating);
 }

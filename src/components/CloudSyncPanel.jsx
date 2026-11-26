@@ -1,30 +1,85 @@
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Button } from './ui/button.jsx';
 import { Input } from './ui/input.jsx';
 import { cloudSync } from '../lib/cloudSync.js';
 import { useI18n } from '../lib/i18n.js';
+import { useScale, fontPx } from '../lib/useScale.js';
 import { cn } from '../lib/utils.js';
+import BackupProgress from './BackupProgress.jsx';
+import { Dialog } from './ui/dialog.jsx';
 
 const STATUS_LABELS = {
   loading: 'Conectando…',
+  syncing: 'Sincronizando datos…',
   saving: 'Guardando cambios…',
   synced: 'Sincronizado',
+  connected: 'Conectado',
+  'local-pending': 'Hay cambios pendientes de sincronizar',
   error: 'Error de sincronización',
   'needs-choice': 'Elige cómo combinar los datos',
+  'age-confirmation': 'Confirmación de edad pendiente',
   'signed-out': 'Sin vincular',
   unconfigured: 'Falta configurar Supabase'
 };
 
+const FIELD_LABELS = {
+  title: 'título',
+  author: 'autor',
+  cover: 'portada',
+  description: 'descripción',
+  type: 'tipo',
+  genres: 'géneros',
+  chapterTotal: 'cantidad de capítulos',
+  chapterReadCount: 'capítulos leídos',
+  sourceId: 'fuente',
+  sourceName: 'nombre de la fuente',
+  sourceIcon: 'icono de la fuente',
+  cats: 'categorías',
+  version: 'versión',
+  page: 'página',
+  total: 'total de páginas',
+  read: 'estado de lectura'
+};
+
+function ChangeSummary({ groups, t, scale }) {
+  if (!groups?.length) return null;
+  return (
+    <ul className="min-w-0 space-y-2" style={{ fontSize: fontPx(13, scale, 12), lineHeight: 1.45 }}>
+      {groups.map((group) => (
+        <li key={group.label} className="min-w-0 break-words [overflow-wrap:anywhere]">
+          <p className="font-medium" style={{ fontSize: fontPx(14, scale, 13), lineHeight: 1.35 }}>{t(group.label)} · {group.count}</p>
+          {group.items.length > 0 ? (
+            <ul className="ml-3 mt-1 min-w-0 space-y-1 text-muted-foreground">
+              {group.items.map((item, index) => (
+                <li key={`${item.action}-${item.name}-${index}`}>
+                  {item.action ? `${t(item.action)}: ` : ''}{item.name}
+                  {group.label !== 'Biblioteca' && item.fields?.length > 0 && <span className="text-muted-foreground"> · {item.fields.map((field) => t(FIELD_LABELS[field] || field)).join(', ')}</span>}
+                </li>
+              ))}
+              {group.more > 0 && <li>{t('+{count} más', { count: group.more })}</li>}
+            </ul>
+          ) : (
+            <p className="ml-3 mt-1 text-muted-foreground">{t('{count} capítulos con diferencias', { count: group.count })}</p>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function CloudSyncPanel() {
   const { t } = useI18n();
+  const scale = useScale();
   const state = useSyncExternalStore(cloudSync.subscribe, cloudSync.getState, cloudSync.getState);
+  useEffect(() => () => cloudSync.cancelAccountViewSync(), []);
   const [mode, setMode] = useState('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [formError, setFormError] = useState('');
-
+  const [choiceConfirmation, setChoiceConfirmation] = useState(null);
+  useEffect(() => { if (state.status !== 'needs-choice') setChoiceConfirmation(null); }, [state.status]);
   const submit = async (event) => {
     event.preventDefault();
     setBusy(true);
@@ -38,7 +93,9 @@ export default function CloudSyncPanel() {
         await cloudSync.signIn(email.trim(), password);
       }
     } catch (error) {
-      setFormError(error.message || t('No se pudo conectar con la cuenta.'));
+      setFormError(error.message?.toLowerCase() === 'invalid login credentials'
+        ? t('Credenciales de inicio de sesión no válidas.')
+        : error.message || t('No se pudo conectar con la cuenta.'));
     } finally {
       setBusy(false);
     }
@@ -47,7 +104,7 @@ export default function CloudSyncPanel() {
   const status = t(STATUS_LABELS[state.status] || 'Estado de sincronización desconocido');
 
   return (
-    <section className="max-w-2xl rounded-xl border border-border bg-card p-4 text-card-foreground sm:p-5" aria-labelledby="cloud-sync-title">
+    <section className="w-full rounded-xl border border-border bg-card p-4 text-card-foreground sm:p-5" aria-labelledby="cloud-sync-title">
       <div className="mb-4">
         <h2 id="cloud-sync-title" className="text-base font-semibold">{t('Cuenta y sincronización')}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -66,28 +123,55 @@ export default function CloudSyncPanel() {
               <p className="truncate text-sm font-medium">{state.email}</p>
               <p className="mt-1 text-xs text-muted-foreground" role="status">{status}</p>
             </div>
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" size="sm" disabled={busy || state.status === 'loading'} onClick={() => { setBusy(true); void cloudSync.syncNow().catch((error) => setFormError(error.message)).finally(() => setBusy(false)); }}>
-                {t('Sincronizar ahora')}
-              </Button>
+            <div className="ml-auto flex gap-2">
               <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { setBusy(true); void cloudSync.signOut().catch((error) => setFormError(error.message)).finally(() => setBusy(false)); }}>
                 {t('Desconectar')}
+              </Button>
+              <Button type="button" variant="outline" size="sm" disabled={busy || state.status === 'loading' || state.status === 'syncing' || state.status === 'needs-choice' || state.status === 'age-confirmation' || Boolean(state.restoreProgress)} onClick={() => { setBusy(true); void cloudSync.syncNow().catch((error) => setFormError(error.message)).finally(() => setBusy(false)); }}>
+                {t('Sincronizar ahora')}
               </Button>
             </div>
           </div>
 
+          {state.status === 'local-pending' && state.localChanges?.length > 0 && (
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm" role="status">
+              <p className="mb-2 text-muted-foreground">{t('Sincroniza para comparar los datos de este dispositivo con los de tu cuenta.')}</p>
+              <ChangeSummary groups={state.localChanges} t={t} scale={scale} />
+            </div>
+          )}
+
+          <BackupProgress progress={state.restoreProgress} scale={scale} compact />
+
+          <Dialog open={Boolean(choiceConfirmation)} onClose={() => setChoiceConfirmation(null)}
+            title={choiceConfirmation === 'cloud' ? 'Cargar datos de la cuenta' : 'Guardar datos en tu cuenta'}
+            description={choiceConfirmation === 'cloud'
+              ? 'La biblioteca, el progreso, las categorías y las extensiones de este dispositivo se reemplazarán con los datos de tu cuenta.'
+              : 'La biblioteca, el progreso, las categorías y las extensiones de tu cuenta se reemplazarán con los datos de este dispositivo.'}
+            hideDivider bodyClassName="pb-6" scrollableBody={false} scale={scale}>
+            <div className="flex flex-col-reverse justify-end gap-2 sm:flex-row">
+              <Button type="button" variant="outline" onClick={() => setChoiceConfirmation(null)}>{t('Cancelar')}</Button>
+              <Button type="button" onClick={() => {
+                const choice = choiceConfirmation;
+                setChoiceConfirmation(null);
+                setBusy(true);
+                void cloudSync.resolveInitialChoice(choice).catch((error) => setFormError(error.message)).finally(() => setBusy(false));
+              }}>{choiceConfirmation === 'cloud' ? t('Cargar datos') : t('Guardar datos')}</Button>
+            </div>
+          </Dialog>
+
           {state.status === 'needs-choice' && (
-            <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
-              <p className="text-sm font-medium">{t('Hay datos en este dispositivo y en la cuenta. Elige cómo continuar.')}</p>
+            <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
+              <p className="text-sm font-medium">{t('Hay cambios distintos en este dispositivo y en tu cuenta')}</p>
+              <ChangeSummary groups={state.pendingChoice.localChanges} t={t} scale={scale} />
               <div className="flex flex-wrap gap-2">
-                <Button type="button" size="sm" disabled={busy} onClick={() => { setBusy(true); void cloudSync.resolveInitialChoice('merge').catch((error) => setFormError(error.message)).finally(() => setBusy(false)); }}>
-                  {t('Combinar datos')}
+                <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setChoiceConfirmation('cloud')}>
+                  {t('Cargar datos')}
                 </Button>
-                <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { setBusy(true); void cloudSync.resolveInitialChoice('cloud').catch((error) => setFormError(error.message)).finally(() => setBusy(false)); }}>
-                  {t('Usar datos de la cuenta')}
+                <Button type="button" size="sm" disabled={busy} onClick={() => setChoiceConfirmation('backup')}>
+                  {t('Guardar datos')}
                 </Button>
-                <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => { setBusy(true); void cloudSync.resolveInitialChoice('local').catch((error) => setFormError(error.message)).finally(() => setBusy(false)); }}>
-                  {t('Mantener sin vincular')}
+                <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void cloudSync.resolveInitialChoice('cancel')}>
+                  {t('Cancelar')}
                 </Button>
               </div>
             </div>
@@ -98,6 +182,7 @@ export default function CloudSyncPanel() {
               {state.error || state.warning}
             </p>
           )}
+
         </div>
       ) : (
         <form className="space-y-3" onSubmit={submit}>
