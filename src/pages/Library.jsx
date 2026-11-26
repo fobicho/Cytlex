@@ -371,7 +371,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
       const actionGap = Number.parseFloat(getComputedStyle(actions).columnGap) || 0;
       const preferredSearchWidth = Number.parseFloat(px(280, scale, 240));
       const selectedCategory = visibleCats.find((category) => category.id === visibleSel);
-      const name = selectedCategory?.id === 'todos' ? t('Todos') : selectedCategory?.name || t('Biblioteca');
+      const name = selectedCategory?.name === 'Todos' && selectedCategory?.id === 'todos' ? t('Todos') : selectedCategory?.name || t('Biblioteca');
       const placeholder = t('Buscar en {category}', { category: truncateCategoryName(name, 10) });
       const canvas = document.createElement('canvas');
       const context = canvas.getContext('2d');
@@ -632,7 +632,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
     [inCategory, sortBy, unreadSort]
   );
   const selectedCategory = visibleCats.find((category) => category.id === visibleSel);
-  const categoryName = selectedCategory?.id === 'todos' ? t('Todos') : selectedCategory?.name || t('Biblioteca');
+  const categoryName = selectedCategory?.id === 'todos' && selectedCategory?.name === 'Todos' ? t('Todos') : selectedCategory?.name || t('Biblioteca');
   const searched = useMemo(() => {
     const query = normalizeLibrarySearch(libraryQuery);
     return query ? shown.filter((manga) => normalizeLibrarySearch(manga.title).includes(query)) : shown;
@@ -843,8 +843,8 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
                   key={c.id}
                   type="button"
                   aria-current={active ? 'page' : undefined}
-                  aria-label={c.id === 'todos' ? t('Todos') : c.name}
-                  title={c.id === 'todos' ? t('Todos') : c.name}
+                  aria-label={c.id === 'todos' && c.name === 'Todos' ? t('Todos') : c.name}
+                  title={c.id === 'todos' && c.name === 'Todos' ? t('Todos') : c.name}
                   onClick={(event) => {
                     if (active) {
                       const main = libraryScroller();
@@ -863,7 +863,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
                   )}
                   style={{ fontSize: fontPx(14, scale), scrollMarginInline: px(16, scale, 12) }}
                 >
-                  <SubrouteTabLabel active={active}>{truncateCategoryName(c.id === 'todos' ? t('Todos') : c.name, 15)}</SubrouteTabLabel>
+                  <SubrouteTabLabel active={active}>{truncateCategoryName(c.id === 'todos' && c.name === 'Todos' ? t('Todos') : c.name, 15)}</SubrouteTabLabel>
                 </button>
               );
             })}

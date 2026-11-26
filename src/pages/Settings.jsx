@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
-import { Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Database, Download, Upload, CircleHelp, Info, Settings as SettingsIcon, Monitor, Sun, Moon, Cloud, Columns3 } from 'lucide-react';
+import { Plus, Pencil, Check, Palette, Library as LibraryIcon, BookOpen, Puzzle, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Database, Download, Upload, CircleHelp, Info, Settings as SettingsIcon, Monitor, Sun, Moon, Cloud, Columns3 } from 'lucide-react';
 import { CONTENT_WARNING_RATINGS, resolveMode, settings } from '../lib/settings.js';
 import { isMangaCover, isUnresolvedMihonSource, lib } from '../lib/library.js';
 import { api } from '../lib/api.js';
@@ -768,10 +768,13 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
     setRepoInput('');
   };
 
-  const renameLocal = (id, name) =>
-    setCats((prev) => prev.map((c) => (c.id === id ? { ...c, name } : c)));
-  const commitRename = (id) =>
-    setCats(lib.renameCat(id, cats.find((c) => c.id === id)?.name || ''));
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [categoryDraft, setCategoryDraft] = useState('');
+  const commitRename = () => {
+    if (!editingCategory || !categoryDraft.trim()) return;
+    setCats(lib.renameCat(editingCategory, categoryDraft));
+    setEditingCategory(null);
+  };
   const [pendingCat, setPendingCat] = useState(null);
 
   const removeCat = (id) => {
@@ -1755,10 +1758,14 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                 className={cn('flex items-center', i < cats.length - 1 && 'border-b border-border/70')}
                 style={{ gap: px(8, scale, 6), padding: `${px(6, scale, 5)} ${px(8, scale, 6)}` }}
               >
-                <Input
-                  value={c.name}
-                  onChange={(e) => renameLocal(c.id, e.target.value)}
-                  onBlur={() => commitRename(c.id)}
+                {editingCategory === c.id ? <Input
+                  autoFocus
+                  value={categoryDraft}
+                  onChange={(e) => setCategoryDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+                    if (e.key === 'Escape') setEditingCategory(null);
+                  }}
                   className="min-w-0 flex-1 border-none bg-transparent transition-colors focus:bg-background"
                   aria-label={t(`Nombre de la categoría ${c.name}`)}
                   style={{
@@ -1767,7 +1774,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                     paddingLeft: px(10, scale, 7),
                     paddingRight: px(10, scale, 7)
                   }}
-                />
+                /> : <span className="flex min-w-0 flex-1 items-center" style={{ height: px(36, scale, 30), paddingLeft: px(10, scale, 7), fontSize: fontPx(14, scale, 12) }}><span className="truncate">{c.name}</span></span>}
                 <span
                   className="category-count shrink-0 bg-muted text-center tabular-nums text-muted-foreground"
                   style={{
@@ -1779,6 +1786,19 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                 >
                   {counts.get(c.id) || 0}
                 </span>
+                <Button
+                  variant="ghost" size="icon" className="shrink-0 text-muted-foreground"
+                  title={editingCategory === c.id ? t('Guardar nombre') : t('Editar categoría')}
+                  aria-label={editingCategory === c.id ? t('Guardar nombre') : t('Editar categoría')}
+                  disabled={editingCategory === c.id && !categoryDraft.trim()}
+                  onClick={() => {
+                    if (editingCategory === c.id) commitRename();
+                    else { setEditingCategory(c.id); setCategoryDraft(c.name); }
+                  }}
+                  style={{ width: px(34, scale, 29), height: px(34, scale, 29) }}
+                >
+                  {editingCategory === c.id ? <Check style={{ width: px(15, scale, 13), height: px(15, scale, 13) }} /> : <Pencil style={{ width: px(15, scale, 13), height: px(15, scale, 13) }} />}
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"

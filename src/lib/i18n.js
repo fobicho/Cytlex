@@ -120,6 +120,7 @@ const messages = {
     'Agregar repositorio oficial': 'Add official repository', 'Comenzar a leer': 'Start reading',
     'Apoyar en Ko-fi': 'Support on Ko-fi', 'Donaciones': 'Donations', 'Ayuda': 'Help on Ko-fi', 'Navegación principal': 'Main navigation', 'Expandir menu lateral': 'Expand sidebar',
     'Cuenta': 'Account', 'Cuenta y sincronización': 'Account and sync',
+    'Guardar nombre': 'Save name', 'Editar categoría': 'Edit category',
     'Vincula una cuenta para compartir tu biblioteca, progreso, categorías y extensiones entre dispositivos.': 'Link an account to share your library, progress, categories, and extensions across devices.',
     'Configura VITE_SUPABASE_URL y VITE_SUPABASE_PUBLISHABLE_KEY para activar las cuentas.': 'Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to enable accounts.',
     'Conectando…': 'Connecting…', 'Sincronizando datos…': 'Syncing data…', 'Guardando cambios…': 'Saving changes…', 'Sincronizado': 'Synced', 'Conectado': 'Connected',
