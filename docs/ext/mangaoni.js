@@ -87,9 +87,9 @@ export default function createSource({ fetchText, parse, head }) {
     };
   }
 
-  async function search(term, page = 1, requestId) {
+  async function search(term, page = 1, requestId, forceFetch = false) {
     const key = `${term.trim().toLocaleLowerCase()}|${page}`;
-    if (searchCache.has(key)) return searchCache.get(key);
+    if (!forceFetch && searchCache.has(key)) return searchCache.get(key);
 
     const pending = (async () => {
       const url = `${BASE}/buscar?q=${encodeURIComponent(term)}&p=${page}`;
@@ -112,8 +112,8 @@ export default function createSource({ fetchText, parse, head }) {
     }
   }
 
-  async function catalog({ q = '', page = 1, __cytlexRequestId } = {}) {
-    if (q) return search(q, page, __cytlexRequestId);
+  async function catalog({ q = '', page = 1, __cytlexRequestId, __cytlexForceFetch = false } = {}) {
+    if (q) return search(q, page, __cytlexRequestId, __cytlexForceFetch);
 
     const doc = parse(await fetchText(`${BASE}/directorio?p=${page}`, __cytlexRequestId));
     lastPage = Math.max(lastPage, pageCount(doc));

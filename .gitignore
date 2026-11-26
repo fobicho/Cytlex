@@ -2,4 +2,7 @@ node_modules
 dist
 out
 *.log
+.env
+.env.*
+!.env.example
 utils/*

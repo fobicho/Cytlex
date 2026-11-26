@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2, Download, RefreshCw, AlertTriangle, Loader2, ArrowUpCircle, ArrowUpDown, Settings as SettingsIcon, X, Check, CheckSquare } from 'lucide-react';
 import { extensions, isExtensionAllowed, isExtensionInstallable, isNewer, EXTENSION_INSTALLED_EVENT, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
+import { notifyCloudSyncLocalChange } from '../lib/cloudSyncEvents.js';
 import { extUpdates } from '../lib/extUpdates.js';
 import { settings } from '../lib/settings.js';
 import { Card } from './ui/card.jsx';
@@ -151,6 +152,7 @@ const readExtConfig = () => {
 
 const writeExtConfig = (cfg) => {
   try { localStorage.setItem(EXT_CONFIG_KEY, JSON.stringify(cfg)); } catch {}
+  notifyCloudSyncLocalChange();
 };
 const extensionSortModes = ['title-asc', 'title-desc', 'added'];
 let manualExtensionCheckInFlight = false;

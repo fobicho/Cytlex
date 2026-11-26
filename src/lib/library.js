@@ -1,3 +1,5 @@
+import { notifyCloudSyncLocalChange } from './cloudSyncEvents.js';
+
 const FAV = 'cytlex:favs';
 const CATS = 'cytlex:cats:v1';
 let favoritesRaw;
@@ -6,7 +8,10 @@ let favoritesSnapshot;
 const read = (k, fb) => {
   try { return JSON.parse(localStorage.getItem(k)) ?? fb; } catch { return fb; }
 };
-const write = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+const write = (k, v) => {
+  localStorage.setItem(k, JSON.stringify(v));
+  notifyCloudSyncLocalChange();
+};
 
 const DEFAULT_CATS = [{ id: 'todos', name: 'Todos' }];
 
@@ -110,7 +115,10 @@ export const lib = {
     const favs = lib.favs();
     const i = favs.findIndex((f) => match(f, manga.url, SRC(manga)));
     if (i >= 0) favs.splice(i, 1);
-    else favs.unshift({ ...manga, cats: catIds || [], savedAt: Date.now() });
+    else {
+      const now = Date.now();
+      favs.unshift({ ...manga, cats: catIds || [], savedAt: now, updatedAt: now });
+    }
     write(FAV, favs);
     return favs;
   },
@@ -118,7 +126,7 @@ export const lib = {
     const favs = lib.favs();
     const i = favs.findIndex((f) => match(f, url, sourceId));
     if (i >= 0) {
-      favs[i] = { ...favs[i], cats: catIds };
+      favs[i] = { ...favs[i], cats: catIds, updatedAt: Date.now() };
       write(FAV, favs);
     }
     return favs;
@@ -131,6 +139,7 @@ export const lib = {
       favs[i] = {
         ...favs[i],
         ...patch,
+        updatedAt: Date.now(),
         ...(coverChanged ? { coverLocal: '', coverCached: '' } : {})
       };
       write(FAV, favs);
@@ -145,7 +154,7 @@ export const lib = {
       const patch = patches.get(`${SRC(f)}|${sameUrlKey(f.url)}`);
       if (!patch) return f;
       changed = true;
-      return { ...f, ...patch };
+      return { ...f, ...patch, updatedAt: Date.now() };
     });
     if (changed) write(FAV, next);
     return next;
@@ -154,7 +163,7 @@ export const lib = {
   cats() { return loadCats(); },
   addCat(name) {
     const cats = loadCats();
-    cats.push({ id: uid(), name: name.trim() || 'Sin nombre' });
+    cats.push({ id: uid(), name: name.trim() || 'Sin nombre', updatedAt: Date.now() });
     write(CATS, cats);
     return cats;
   },
@@ -162,7 +171,7 @@ export const lib = {
     const cats = loadCats();
     const i = cats.findIndex((c) => c.id === id);
     if (i >= 0) {
-      cats[i] = { ...cats[i], name: name.trim() || cats[i].name };
+      cats[i] = { ...cats[i], name: name.trim() || cats[i].name, updatedAt: Date.now() };
       write(CATS, cats);
     }
     return cats;

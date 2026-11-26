@@ -20,6 +20,7 @@ import { Search } from 'lucide-react';
 import { Input } from './components/ui/input.jsx';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useI18n } from './lib/i18n.js';
+import { cloudSync } from './lib/cloudSync.js';
 
 function quickSearchPosition(x, y, scale = 1) {
   const width = Math.min(420 * scale, Math.max(0, window.innerWidth - 32 * scale));
@@ -84,6 +85,8 @@ export default function App({ tutorialMode = false }) {
   const quickSearchInput = useRef(null);
   const quickSearchPanel = useRef(null);
   const pointerPosition = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+
+  useEffect(() => cloudSync.start(), []);
   const reduceMotion = useReducedMotion();
   const location = useLocation();
   const navigate = useNavigate();

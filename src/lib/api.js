@@ -255,6 +255,7 @@ export const api = {
     delete catalogArgs.__cytlexForceFetch;
     delete catalogArgs.__cytlexGlobalSearch;
     delete catalogArgs.__cytlexSearchBatchId;
+    if (sourceId === 'mangaoni' && forceFetch) catalogArgs.__cytlexForceFetch = true;
     const key = browser ? catalogKey(args, sourceId) : '';
     const { q = '', page = 1, genre = '', year = '', status = '', type = '', sort = '' } = args || {};
     const searchKey = isMangaDex(sourceId)

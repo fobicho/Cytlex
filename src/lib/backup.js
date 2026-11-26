@@ -1,3 +1,5 @@
+import { notifyCloudSyncLocalChange } from './cloudSyncEvents.js';
+
 const FORMAT = 'cytlex-backup';
 const VERSION = 1;
 const KEY_PREFIX = 'cytlex:';
@@ -66,6 +68,7 @@ export function restoreBackup(data) {
     Object.entries(data).forEach(([key, value]) => {
       if (key !== EXTENSIONS_KEY) localStorage.setItem(key, value);
     });
+    notifyCloudSyncLocalChange();
   } catch (error) {
     for (let i = localStorage.length - 1; i >= 0; i -= 1) {
       const key = localStorage.key(i);

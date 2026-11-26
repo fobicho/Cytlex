@@ -4,6 +4,7 @@ import { settings } from './settings.js';
 import { httpGet, httpHead, httpPost } from './browserHttp.js';
 import { isUnresolvedMihonSource } from './library.js';
 import defaultExtensionIndex from '../../docs/index.json';
+import { notifyCloudSyncLocalChange } from './cloudSyncEvents.js';
 
 const KEY = 'cytlex:extensions:v1';
 const EXT_CONFIG_KEY = 'cytlex:ext-config:v1';
@@ -98,6 +99,7 @@ const read = () => {
 const write = (v) => {
   recordsCache = v.filter(keepInstalledExtension);
   localStorage.setItem(KEY, JSON.stringify(recordsCache));
+  notifyCloudSyncLocalChange();
 };
 
 function ctx(manifest = {}) {

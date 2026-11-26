@@ -1,3 +1,5 @@
+import { notifyCloudSyncLocalChange } from './cloudSyncEvents.js';
+
 const KEY = 'cytlex:progress:v1';
 
 let cache = null;
@@ -13,6 +15,7 @@ const write = (data) => {
   cache = data;
   revision += 1;
   try { localStorage.setItem(KEY, JSON.stringify(data)); } catch {}
+  notifyCloudSyncLocalChange();
 };
 
 const cap = (url, sourceId = 'leercapitulo') => `${sourceId}|${url}`;
@@ -23,7 +26,7 @@ const notify = (change) => listeners.forEach((l) => l(change));
 function put(url, sourceId, patch) {
   const data = read();
   const k = cap(url, sourceId);
-  data[k] = { ...(data[k] || {}), ...patch };
+  data[k] = { ...(data[k] || {}), ...patch, updatedAt: Date.now() };
   write(data);
 }
 
@@ -71,7 +74,7 @@ export const progress = {
       const key = cap(url, sourceId);
       const previous = data[key] || {};
       if (!previous.read) changed = true;
-      data[key] = { ...previous, page: null, total: total ?? previous.total ?? 0, read: true, readAt: now };
+      data[key] = { ...previous, page: null, total: total ?? previous.total ?? 0, read: true, readAt: now, updatedAt: now };
     });
     write(data);
     if (changed) notify({ type: 'read', mangaUrl, sourceId });

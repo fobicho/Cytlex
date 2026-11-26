@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
-import { Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Database, Download, Upload, CircleHelp, Info, Settings as SettingsIcon, Monitor, Sun, Moon } from 'lucide-react';
+import { Plus, Palette, Library as LibraryIcon, BookOpen, Puzzle, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Database, Download, Upload, CircleHelp, Info, Settings as SettingsIcon, Monitor, Sun, Moon, Cloud } from 'lucide-react';
 import { CONTENT_WARNING_RATINGS, resolveMode, settings } from '../lib/settings.js';
 import { isMangaCover, isUnresolvedMihonSource, lib } from '../lib/library.js';
 import { api } from '../lib/api.js';
@@ -32,6 +32,8 @@ import { clearSourceCache } from '../lib/sourceCache.js';
 import { clearRecentChapters } from '../lib/recentChapters.js';
 import SubrouteTabLabel from '../components/SubrouteTabLabel.jsx';
 import { attachHorizontalScrollFade } from '../lib/horizontalScrollFade.js';
+import CloudSyncPanel from '../components/CloudSyncPanel.jsx';
+import { cloudSync } from '../lib/cloudSync.js';
 
 function clearLibraryUnreadCache() {
   localStorage.removeItem('cytlex:libraryUnread:v1');
@@ -488,8 +490,12 @@ const SECTIONS = [
   { id: 'categorias', label: 'Categorías', icon: Tags },
   { id: 'extensiones', label: 'Extensiones', icon: Puzzle },
   { id: 'seguimiento', label: 'Seguimiento', icon: Link2 },
+  { id: 'cuenta', label: 'Cuenta', icon: Cloud },
   { id: 'respaldo', label: 'Respaldo', icon: Database }
 ];
+const VISIBLE_SECTIONS = cloudSync.getState().configured
+  ? SECTIONS
+  : SECTIONS.filter(({ id }) => id !== 'cuenta');
 
 const READER_MODES = [
   { value: 'vertical', label: 'Vertical' },
@@ -521,7 +527,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
   const languageLayoutFrameRef = useRef(null);
   const [section, setSection] = useState(() => {
     const restoredSection = tutorialImportControls ? 'respaldo' : consumeBrowserSettingsSection() || sessionSeccion;
-    return SECTIONS.some(({ id }) => id === restoredSection) ? restoredSection : 'apariencia';
+    return VISIBLE_SECTIONS.some(({ id }) => id === restoredSection) ? restoredSection : 'apariencia';
   });
   const [libraryUnreadTipOpen, setLibraryUnreadTipOpen] = useState(false);
   const libraryUnreadTipRef = useRef(null);
@@ -673,7 +679,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
     if (tutorialImportControls) return;
     const params = new URLSearchParams(location.search);
     const nextSection = params.get('tutorial') === '1' ? params.get('section') : null;
-    if (!SECTIONS.some(({ id }) => id === nextSection)) return;
+    if (!VISIBLE_SECTIONS.some(({ id }) => id === nextSection)) return;
     setSection(nextSection);
     sessionSeccion = nextSection;
   }, [location.search, tutorialImportControls]);
@@ -2115,6 +2121,8 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
         />
       </div>
     );
+  } else if (section === 'cuenta') {
+    content = <CloudSyncPanel />;
   } else if (section === 'respaldo') {
     content = (
       <div className="flex flex-col">
@@ -2334,7 +2342,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             paddingRight: px(16, scale, 12)
           }}
         >
-        {SECTIONS.map((sec) => {
+        {VISIBLE_SECTIONS.map((sec) => {
           const on = sec.id === section;
           return (
             <motion.button
