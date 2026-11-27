@@ -63,6 +63,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const [repoUrl, setRepoUrl] = useState(() => (settings.get().extIndexUrl || '').trim());
   const [addingRepository, setAddingRepository] = useState(false);
   const [navigationVisible, setNavigationVisible] = useState(false);
+  const [importResult, setImportResult] = useState(null);
   const navigationTimer = useRef(null);
   const contentRef = useRef(null);
   const importControls = useRef(null);
@@ -175,6 +176,8 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const isTheme = step === 2;
   const isRepository = step === 3;
   const isBackup = step === 4;
+  const importingBackup = isBackup && tutorialImportBusy && !!tutorialImportProgress;
+  const showImportStatus = isBackup && (importingBackup || !!importResult);
   const isReady = step === STEPS.length - 1;
   const showLanguageToggle = step !== 1 && navigationVisible;
   const progress = ((step + 1) / STEPS.length) * 100;
@@ -223,11 +226,6 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
               }}
               style={{ transformOrigin: 'center' }}
             >
-              {isBackup && tutorialImportBusy && tutorialImportProgress && (
-                <div className="w-full max-w-md">
-                  <BackupProgress progress={tutorialImportProgress} scale={scale} />
-                </div>
-              )}
               <motion.div
                 animate={{ transform: `scale(${scale})` }}
                 transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1], layout: { duration: 0.28, ease: [0.77, 0, 0.175, 1] } }}
@@ -253,11 +251,11 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                   </div>
                 ) : (
                   <div className={cn('onboarding-step-heading mb-6', step >= 2 ? 'mb-2' : 'mt-2')}>
-                    <h2 className="onboarding-step-title text-2xl font-semibold tracking-tight font-display">{t(STEPS[step].title)}</h2>
+                    <h2 className="onboarding-step-title text-2xl font-semibold tracking-tight font-display">{t(showImportStatus ? (importingBackup ? 'Importando respaldo' : importResult === 'complete' ? 'Respaldo importado' : 'No se pudo importar el respaldo') : STEPS[step].title)}</h2>
                   </div>
                 )}
 
-                {STEPS[step].body && (
+                {!showImportStatus && STEPS[step].body && (
                   <p className={cn('onboarding-step-description text-base text-muted-foreground whitespace-pre-line', isRepository ? 'leading-normal' : 'leading-relaxed')}>
                     {t(STEPS[step].body).split(/(\*\*[^*]+\*\*|Cytlex)/g).map((part, i) => {
                       if (part.startsWith('**') && part.endsWith('**')) {
@@ -268,7 +266,23 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                   </p>
                 )}
 
-                {isBackup && (
+                {showImportStatus && (
+                  <div className="mt-3" role="status" aria-live="polite">
+                    <p className="text-base leading-relaxed text-muted-foreground">
+                      {t(importingBackup ? 'Estamos preparando tu biblioteca. Esto puede tardar unos momentos.' : importResult === 'complete' ? 'Tu biblioteca está lista. Puedes continuar con el tutorial.' : 'Puedes volver a intentarlo desde esta pantalla.')}
+                    </p>
+                    {importingBackup ? (
+                      <div className="mt-5"><BackupProgress progress={tutorialImportProgress} scale={scale} compact /></div>
+                    ) : (
+                      <div className="mt-5 flex items-center gap-3 border border-border bg-secondary/40 px-4 py-3">
+                        {importResult === 'complete' ? <Check className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" /> : <span className="h-2 w-2 shrink-0 rounded-full bg-destructive" aria-hidden="true" />}
+                        <span className="text-sm font-medium">{t(importResult === 'complete' ? 'Importación completada' : 'Importación interrumpida')}</span>
+                      </div>
+                    )}
+                    {!importingBackup && <div className="mt-5 flex justify-end"><Button variant="outline" onClick={() => setImportResult(null)}>{t('Importar otro respaldo')}</Button></div>}
+                  </div>
+                )}
+                {isBackup && !showImportStatus && (
                   <>
                     <div className="onboarding-import-actions mt-5 flex flex-row-reverse flex-wrap items-end justify-start gap-2">
                       <Button onClick={() => importControls.current?.importBackup()}>{t('Importar respaldo de Cytlex')}</Button>
@@ -474,13 +488,14 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 tutorialImportControls={importControls}
                 onTutorialImportBusyChange={onTutorialImportBusyChange}
                 onTutorialImportProgressChange={onTutorialImportProgressChange}
+                onTutorialImportResult={setImportResult}
               />
             </div>,
             document.body
           )}
           <motion.div initial={false} animate={{ opacity: navigationVisible ? 1 : 0, y: navigationVisible || reduceMotion ? 0 : 'calc(100% + env(safe-area-inset-bottom))' }} transition={{ duration: reduceMotion ? 0 : 0.25, ease: [0.23, 1, 0.32, 1] }} inert={!navigationVisible} className="onboarding-footer pointer-events-auto fixed bottom-[env(safe-area-inset-bottom)] inset-x-0 mx-auto z-10 grid w-full max-w-3xl grid-cols-[1fr_auto] items-center gap-x-2 gap-y-2 bg-card border border-border px-4 py-3 sm:grid-cols-3 sm:gap-4 sm:px-10 sm:py-4">
             <div className="flex justify-start">
-              <Button variant="outline" size="sm" className="px-1.5 sm:px-3" onClick={finish}>
+              <Button variant="outline" size="sm" className="px-1.5 sm:px-3" onClick={finish} disabled={importingBackup}>
                 {t('Saltar tutorial')}
               </Button>
             </div>
@@ -501,7 +516,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
 
             <div className="col-start-2 row-start-1 flex justify-end gap-2 sm:col-start-3 sm:row-start-1">
               {step > 0 && (
-                <Button variant="outline" size="sm" className="w-10 px-0 md:w-auto md:px-3" aria-label={t('Atrás')} onClick={back}>
+                <Button variant="outline" size="sm" className="w-10 px-0 md:w-auto md:px-3" aria-label={t('Atrás')} onClick={back} disabled={importingBackup}>
                   <ArrowLeft className="h-4 w-4 md:mr-1" />
                   <span className="hidden md:inline">{t('Atrás')}</span>
                 </Button>
@@ -511,6 +526,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                 className="w-10 px-0 md:w-28 md:px-3"
                 aria-label={t(step === STEPS.length - 1 ? 'Comenzar' : 'Siguiente')}
                 onClick={next}
+                disabled={importingBackup}
               >
                 {step === STEPS.length - 1 ? (
                   <>

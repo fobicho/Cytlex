@@ -3,6 +3,7 @@ import { isMangaCover, mangaSourceUrl } from './library.js';
 export const lastSearch = { q: '', genre: '', results: null };
 export const MAX_SEARCH_RESULTS = 30;
 export const SOURCE_CATALOG_HOME_EVENT = 'cytlex:source-catalog-home';
+export const MANGA_CATALOG_HOME_EVENT = 'cytlex:manga-catalog-home';
 const EXPLORE_TABS = new Set(['mangas', 'extensiones', 'fuentes']);
 let lastExploreTab = 'mangas';
 let lastExploreLocation = '/explorar?tab=mangas';

@@ -8,7 +8,7 @@ import { isLibraryManga, lib, libraryIdentityKey, libraryKey } from '../lib/libr
 import { extensions, isExtensionAllowed, isSourceConfigured, isUnavailableMangaSource, SOURCE_CONFIG_CHANGE_EVENT } from '../lib/extensions.js';
 import { chapterIndex } from '../lib/chapterIndex.js';
 import { settings } from '../lib/settings.js';
-import { lastSearch, scrollMemory, rememberMangaPreview, catalogScroll, sourceCatalogState, SOURCE_CATALOG_HOME_EVENT, rememberExploreTab, rememberExploreLocation, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
+import { lastSearch, scrollMemory, rememberMangaPreview, catalogScroll, sourceCatalogState, MANGA_CATALOG_HOME_EVENT, SOURCE_CATALOG_HOME_EVENT, rememberExploreTab, rememberExploreLocation, MAX_SEARCH_RESULTS } from '../lib/searchState.js';
 import { clearSearchCoverCache, createSearchCoverBatch, preloadSearchCover } from '../lib/covers.js';
 import MangaCard from '../components/MangaCard.jsx';
 import ExtensionsPanel from '../components/ExtensionsPanel.jsx';
@@ -468,6 +468,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     else lastSearch.results = initialResults;
     setResults(initialResults);
 
+    const coverJobs = [];
     const sourceJobs = list.map(async (s) => {
       try {
         await extensions.source(s.manifest.id);
@@ -490,7 +491,29 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
         });
         coverBatch.flushBundled();
         items.forEach((m) => rememberMangaPreview(m, s.manifest.id));
-        return { source: s, response: r, items, coverPromises, directCoverPromises };
+        coverJobs.push((async () => {
+          const loadedCovers = await Promise.all(coverPromises);
+          await Promise.all(directCoverPromises);
+          if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+          const readyItems = items.map((item, index) => loadedCovers[index]
+            ? { ...item, coverCached: loadedCovers[index] }
+            : item);
+          updateResults((prev) => prev ? prev.map((result) => (result.id === s.manifest.id
+            ? {
+                ...result,
+                status: 'done',
+                items: readyItems,
+                page: r.page || 1,
+                totalPages: r.totalPages || 1,
+                hasMore: items.length < MAX_SEARCH_RESULTS && (r.hasMore ?? (r.totalPages > 1)),
+                totalText: r.totalText || ''
+              }
+            : result)) : prev);
+        })().catch((error) => {
+          if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
+          const errorMessage = sourceErrorMessage(error, s.manifest.name);
+          updateResults((prev) => prev ? prev.map((result) => result.id === s.manifest.id ? { ...result, status: 'error', errorMessage } : result) : prev);
+        }));
       } catch (e) {
         console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);
         if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
@@ -501,37 +524,9 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
         finishCatalogSearchBatchSource(searchBatchId, s.manifest.id);
       }
     });
-    void Promise.allSettled(sourceJobs).then(async (sourceOutcomes) => {
+    void Promise.allSettled(sourceJobs).then(async () => {
       if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
       const coverFlush = coverBatch.flush();
-      const coverJobs = sourceOutcomes
-        .filter((outcome) => outcome.status === 'fulfilled' && outcome.value)
-        .map(async ({ value: { source, response, items, coverPromises, directCoverPromises } }) => {
-            try {
-              const loadedCovers = await Promise.all(coverPromises);
-              await Promise.all(directCoverPromises);
-              if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
-              const readyItems = items.map((item, index) => loadedCovers[index]
-                ? { ...item, coverCached: loadedCovers[index] }
-                : item);
-              updateResults((prev) => prev ? prev.map((result) => (result.id === source.manifest.id
-                ? {
-                    ...result,
-                    status: 'done',
-                    items: readyItems,
-                    page: response.page || 1,
-                    totalPages: response.totalPages || 1,
-                    hasMore: items.length < MAX_SEARCH_RESULTS && (response.hasMore ?? (response.totalPages > 1)),
-                    totalText: response.totalText || ''
-                  }
-                : result)) : prev);
-            } catch (error) {
-              console.warn('[Cytlex] búsqueda falló en', source.manifest.id, error?.message || error);
-              if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
-              const errorMessage = sourceErrorMessage(error, source.manifest.name);
-              updateResults((prev) => (prev ? prev.map((result) => (result.id === source.manifest.id ? { ...result, status: 'error', errorMessage } : result)) : prev));
-            }
-        });
       await Promise.allSettled(coverJobs);
       await coverFlush;
       if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
@@ -593,6 +588,12 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
     const search = params.toString();
     navigate({ pathname: loc.pathname, search: search ? `?${search}` : '' }, { replace: true });
   };
+
+  useEffect(() => {
+    const onMangaCatalogHome = () => returnWithinActiveTab();
+    window.addEventListener(MANGA_CATALOG_HOME_EVENT, onMangaCatalogHome);
+    return () => window.removeEventListener(MANGA_CATALOG_HOME_EVENT, onMangaCatalogHome);
+  }, [loc.pathname, loc.search, q, results, tab, migrationMode]);
 
   const confirmMigration = async () => {
     if (!migrationSelection || migrationBusy || !migrationFromUrl || !migrationFromSource) return;

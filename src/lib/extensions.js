@@ -24,6 +24,7 @@ const keepInstalledExtension = (record) => record?.manifest?.type !== 'builtin'
   && !isUnavailableMangaSource(record?.manifest?.id)
   && isExtensionInstallable(record?.manifest);
 let recordsCache = null;
+let recordsRaw;
 const repoIndexRequests = new Map();
 
 function freshIndexUrl(indexUrl) {
@@ -81,10 +82,13 @@ export function isSourceConfigured(source) {
 }
 
 const read = () => {
-  if (recordsCache) return recordsCache;
+  let raw;
+  try { raw = localStorage.getItem(KEY); } catch { return recordsCache || []; }
+  if (recordsCache && recordsRaw === raw) return recordsCache;
   let list = [];
-  try { list = JSON.parse(localStorage.getItem(KEY)) || []; } catch { list = []; }
+  try { list = JSON.parse(raw) || []; } catch { list = []; }
   recordsCache = list.filter(keepInstalledExtension);
+  recordsRaw = raw;
   if (recordsCache.length !== list.length) {
     for (const record of list.filter((entry) => entry?.manifest?.id && !isExtensionInstallable(entry.manifest))) {
       const id = record.manifest.id;
@@ -93,13 +97,16 @@ const read = () => {
         chapterIndex.dropSource(sourceId);
       }
     }
-    try { localStorage.setItem(KEY, JSON.stringify(recordsCache)); } catch {}
+    try { recordsRaw = JSON.stringify(recordsCache); localStorage.setItem(KEY, recordsRaw); } catch { recordsRaw = raw; }
   }
   return recordsCache;
 };
 const write = (v) => {
-  recordsCache = v.filter(keepInstalledExtension);
-  localStorage.setItem(KEY, JSON.stringify(recordsCache));
+  const records = v.filter(keepInstalledExtension);
+  const raw = JSON.stringify(records);
+  localStorage.setItem(KEY, raw);
+  recordsCache = records;
+  recordsRaw = raw;
   notifyCloudSyncLocalChange();
 };
 
@@ -365,6 +372,32 @@ const hostMatches = (url, baseUrl) => {
 };
 
 export const extensions = {
+  syncRecords() { return [...read()]; },
+  async prepareSyncRecord(manifest, indexUrl) {
+    if (isRetiredExtension(manifest.id) || !isExtensionInstallable(manifest)) throw new Error('Extensión no disponible.');
+    let code = null;
+    if (manifest.type === 'module') {
+      if (!manifest.main) throw new Error('La extensión no define "main"');
+      const mainUrl = /^https?:/i.test(manifest.main) ? manifest.main : new URL(manifest.main, indexUrl).href;
+      code = await ctx().fetchText(freshIndexUrl(mainUrl));
+    }
+    return { manifest, code, installedVersion: manifest.version || '0', installedAt: Date.now() };
+  },
+  applySyncRecords(records, previous) {
+    const before = new Map(previous.map((record) => [record.manifest.id, record]));
+    const after = new Map(records.map((record) => [record.manifest.id, record]));
+    recordsCache = records.filter(keepInstalledExtension);
+    recordsRaw = localStorage.getItem(KEY);
+    for (const id of new Set([...before.keys(), ...after.keys()])) {
+      const oldRecord = before.get(id);
+      const newRecord = after.get(id);
+      if (oldRecord === newRecord) continue;
+      try { clearModule(id); } catch {}
+      for (const sourceId of new Set([id, ...(subSources(oldRecord?.manifest)?.map((source) => source.id) || []), ...(subSources(newRecord?.manifest)?.map((source) => source.id) || [])])) {
+        chapterIndex.dropSource(sourceId);
+      }
+    }
+  },
   installed() {
     return read().map((r) => ({ manifest: r.manifest }));
   },

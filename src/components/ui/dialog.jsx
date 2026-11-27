@@ -1,4 +1,4 @@
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useId, useLayoutEffect, useRef } from 'react';
 import { cn } from '../../lib/utils.js';
 import { useScale, px, fontPx } from '../../lib/useScale.js';
@@ -152,10 +152,6 @@ function DialogContent({ onClose, title, ariaLabel, description, children, class
 }
 
 export function Dialog({ open, ...props }) {
-  return (
-    <AnimatePresence>
-      {open && <DialogContent {...props} />}
-    </AnimatePresence>
-  );
+  return open ? <DialogContent {...props} /> : null;
 }
 

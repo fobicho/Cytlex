@@ -50,6 +50,7 @@ const PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS = 50;
 const PROXY_IMAGE_BATCH_ITEM_MAX_BYTES = 8 * 1024 * 1024;
 const PROXY_IMAGE_BATCH_TOTAL_MAX_BYTES = 128 * 1024 * 1024;
 const PROXY_IMAGE_BATCH_MAX_SUBREQUESTS = 50;
+const requestSubrequestCounts = new WeakMap();
 const PROXY_CHAPTER_IMAGE_MAX_WITH_ONE_METADATA = Math.min(PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
 const PROXY_CHAPTER_IMAGE_MAX_WITH_TWO_METADATA = Math.min(PROXY_CHAPTER_IMAGE_BATCH_MAX_REQUESTS, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 2);
 const PROXY_ACHY_CATALOG_MAX_IMAGES = PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1;
@@ -115,6 +116,21 @@ function limitResponseBody(body, maxBytes, onFinish, abortUpstream) {
       }
     }
   });
+}
+
+function createStreamPressure() {
+  let waiters = [];
+  return {
+    wait(controller) {
+      if (controller.desiredSize > 0) return Promise.resolve();
+      return new Promise((resolve) => waiters.push(resolve));
+    },
+    release() {
+      const pending = waiters;
+      waiters = [];
+      pending.forEach((resolve) => resolve());
+    }
+  };
 }
 
 function onfCookiePairs(request) {
@@ -350,7 +366,7 @@ function isDnsFailure(error) {
   return ['ENOTFOUND', 'EAI_AGAIN'].includes(error?.cause?.code || error?.code);
 }
 
-async function fetchTarget(initialTarget, method, headers, body, signal, options = {}) {
+async function fetchTarget(request, initialTarget, method, headers, body, signal, options = {}) {
   let target = initialTarget;
   let currentMethod = method;
   let currentBody = body;
@@ -373,6 +389,9 @@ async function fetchTarget(initialTarget, method, headers, body, signal, options
       try {
         if (mangaDexApi) await waitForMangaDexRequestSlot();
         signal.throwIfAborted();
+        const used = requestSubrequestCounts.get(request) || 0;
+        if (used >= PROXY_IMAGE_BATCH_MAX_SUBREQUESTS) throw new Error('Proxy subrequest limit reached');
+        requestSubrequestCounts.set(request, used + 1);
         response = await fetch(target, {
           method: currentMethod,
           headers: currentHeaders,
@@ -381,7 +400,7 @@ async function fetchTarget(initialTarget, method, headers, body, signal, options
           signal: attemptSignal
         });
       } catch (error) {
-        if (signal.aborted || isDnsFailure(error) || !retryableMethod || attempt >= retries) throw error;
+        if (signal.aborted || error?.message === 'Proxy subrequest limit reached' || isDnsFailure(error) || !retryableMethod || attempt >= retries) throw error;
         await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
         continue;
       }
@@ -452,7 +471,7 @@ async function fetchBatchItem(item, request) {
   let streaming = false;
   let responseTooLarge = false;
   try {
-    const { upstream, proxyError, finalUrl } = await fetchTarget(
+    const { upstream, proxyError, finalUrl } = await fetchTarget(request,
       target,
       method,
       forwardedHeaders(metadataRequest, target),
@@ -497,7 +516,7 @@ async function fetchBatchItem(item, request) {
       ...(onfCookie ? { onfCookie } : {})
     };
   } catch (error) {
-    if (responseTooLarge) return { fallback: true };
+    if (responseTooLarge || error?.message === 'Proxy subrequest limit reached') return { fallback: true };
     const timedOut = deadline.signal.aborted && !request.signal.aborted;
     return {
       status: timedOut ? 504 : 502,
@@ -863,23 +882,64 @@ async function handleCombinedSearchRequest(request) {
     || catalogTargets[index].pathname !== '/manga' || Number(catalogTargets[index].searchParams.get('limit')) !== 40
     || !catalogTargets[index].searchParams.getAll('includes[]').includes('cover_art'))) return errorResponse('Invalid MangaDex catalog request', 400);
   const encoder = new TextEncoder();
+  const binaryStream = payload?.streamFormat === 'binary-v1';
   let stopped = false;
+  const pressure = createStreamPressure();
+
   const body = new ReadableStream({
-    async start(controller) {
-      const send = (value) => { if (!stopped) controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`)); };
+
+    pull() { pressure.release(); },
+
+    start(controller) { void (async () => {
+      let sendQueue = Promise.resolve();
+      const send = (value, bytes = new Uint8Array()) => {
+        const pending = sendQueue.then(async () => {
+          if (stopped) return;
+          await pressure.wait(controller);
+          if (stopped) return;
+          if (!binaryStream) {
+            controller.enqueue(encoder.encode(`${JSON.stringify(value.type === 'catalog-image' ? { ...value, body: bytesToBase64(bytes) } : value)}\n`));
+            return;
+          }
+          const metadata = encoder.encode(JSON.stringify(value.type === 'catalog-image' ? { ...value, length: bytes.length } : value));
+          const prefix = new Uint8Array(4);
+          new DataView(prefix.buffer).setUint32(0, metadata.length);
+          controller.enqueue(prefix);
+          controller.enqueue(metadata);
+          if (bytes.length) controller.enqueue(bytes);
+        });
+        sendQueue = pending.catch((error) => {
+          if (!stopped) { stopped = true; controller.error(error); pressure.release(); }
+        });
+        return pending;
+      };
       try {
-        send({ type: 'start' });
+        await send({ type: 'start' });
         let totalResponseBytes = 0;
         const catalogImageUrls = new Set();
-        const imageSubrequestLimit = Math.max(0, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - requests.length);
+        const imageSubrequestLimit = Math.max(0, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - requests.length - catalogTargets.length);
+        const imageSubrequestBudget = createSharedImageSubrequestBudget(imageSubrequestLimit);
         const imageByteBudget = createImageByteBudget();
         const catalogCoverJobs = [];
-        let imageSubrequests = 0;
-        const takeImageSubrequest = () => {
-          if (imageSubrequests >= imageSubrequestLimit) throw new Error('Image batch subrequest limit reached');
-          imageSubrequests += 1;
+        let activeCatalogCovers = 0;
+        const catalogCoverWaiters = [];
+        const fetchCatalogCover = async ({ requestIndex, imageIndex, image }) => {
+          if (activeCatalogCovers >= PROXY_IMAGE_BATCH_CONCURRENCY) await new Promise((resolve) => catalogCoverWaiters.push(resolve));
+          else activeCatalogCovers += 1;
+          try {
+            if (stopped) return;
+            let result = await fetchImageBatchItem(image, request, imageSubrequestBudget, imageByteBudget, 1);
+            if (result.status === 200 && result.body?.size === 0) result = await fetchImageBatchItem(image, request, imageSubrequestBudget, imageByteBudget, 1);
+            const bytes = result.body ? new Uint8Array(await result.body.arrayBuffer()) : new Uint8Array();
+            await send({ type: 'catalog-image', requestIndex, index: imageIndex, status: result.status, contentType: result.contentType || '' }, bytes);
+          } catch {
+            await send({ type: 'catalog-image', requestIndex, index: imageIndex, status: 502, contentType: '', body: '' });
+          } finally {
+            const next = catalogCoverWaiters.shift();
+            if (next) next();
+            else activeCatalogCovers -= 1;
+          }
         };
-        const imageSubrequestBudget = { takeInitial: takeImageSubrequest, takeAdditional: takeImageSubrequest };
         const olympusDetails = new Map();
         let olympusListRequest;
         const mangaDexCount = requests.filter((item) => item?.detail === 'mangadex').length;
@@ -916,14 +976,35 @@ async function handleCombinedSearchRequest(request) {
         const withOlympusDetailSlot = async (run) => {
           if (activeOlympusDetails >= 1) await new Promise((resolve) => olympusDetailWaiters.push(resolve));
           else activeOlympusDetails += 1;
-          try { return await run(); }
+          try {
+            if (stopped) throw new Error('Search stream cancelled');
+            return await run();
+          }
           finally {
             const next = olympusDetailWaiters.shift();
             if (next) next();
             else activeOlympusDetails -= 1;
           }
         };
-        const sourceResults = requests.map(async (item) => {
+        let activeSources = 0;
+        const sourceWaiters = [];
+        const withSourceSlot = async (run, priority = false) => {
+          if (activeSources >= PROXY_BATCH_CONCURRENCY) await new Promise((resolve) => {
+            if (priority) sourceWaiters.unshift(resolve);
+            else sourceWaiters.push(resolve);
+          });
+          else activeSources += 1;
+          try {
+            if (stopped) throw new Error('Search stream cancelled');
+            return await run();
+          }
+          finally {
+            const next = sourceWaiters.shift();
+            if (next) next();
+            else activeSources -= 1;
+          }
+        };
+        const sourceResults = requests.map((item) => withSourceSlot(async () => {
           const target = validateTarget(item?.url);
           if (item?.detail === 'mangadex') {
             if (!target || target.origin !== 'https://api.mangadex.org'
@@ -940,6 +1021,7 @@ async function handleCombinedSearchRequest(request) {
             let response;
             try { response = await handleMangaDexFeed(request, target, item.includeManga !== false, mangaDexBudget, release); }
             finally { release(); }
+            if (response.headers.get('x-cytlex-upstream-error') === 'subrequest-limit') return { fallback: true };
             return { status: response.status, text: await response.text(), url: target.href,
               contentType: response.headers.get('content-type') || '',
               errorOrigin: response.headers.get('x-cytlex-error-origin') || (response.ok ? '' : 'source') };
@@ -1031,6 +1113,7 @@ async function handleCombinedSearchRequest(request) {
               };
               try { response = await handleOlympusDetail(request, target, olympusBudget, 200, () => reservedOlympus.delete(target.href)); }
               finally { reservedOlympus.delete(target.href); }
+              if (response.headers.get('x-cytlex-upstream-error') === 'subrequest-limit') return { fallback: true };
               const detailResult = {
                 status: response.status,
                 text: await response.text(),
@@ -1076,7 +1159,7 @@ async function handleCombinedSearchRequest(request) {
             olympusDetails.set(target.href, result);
           }
           return result;
-        });
+        }));
         const processSourceResult = async (index) => {
           const item = requests[index];
           let result;
@@ -1120,33 +1203,32 @@ async function handleCombinedSearchRequest(request) {
               ? (detailCover ? [detailCover] : [...queuedCoverUrls, ...scannedCoverUrls]).slice(0, remaining)
               : [];
             urls.forEach((url) => catalogImageUrls.add(url));
-            send({ type: 'result', index, result: totalResponseBytes <= PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES
+            await send({ type: 'result', index, result: totalResponseBytes <= PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES
               ? { ...result, ...(urls.length ? { catalogImages: urls } : {}) }
               : { fallback: true } });
             if (urls.length && totalResponseBytes <= PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES) {
-              urls.forEach((url, imageIndex) => catalogCoverJobs.push({
+              urls.forEach((url, imageIndex) => catalogCoverJobs.push(fetchCatalogCover({
                 requestIndex: index,
                 sourceId,
                 imageIndex,
                 image: { url, referer: result.url || target.href, sourceId }
-              }));
+              })));
             }
           } else {
-            send({ type: 'result', index, result: totalResponseBytes <= PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES ? result : { fallback: true } });
+            await send({ type: 'result', index, result: totalResponseBytes <= PROXY_BATCH_TOTAL_RESPONSE_MAX_BYTES ? result : { fallback: true } });
           }
         };
-        if (detailCount && !requests.some((item) => item?.catalogCovers === true)) {
-          await Promise.all(sourceResults.map((_, index) => processSourceResult(index)));
-        } else {
-          for (let index = 0; index < sourceResults.length && !stopped; index += 1) {
-            await processSourceResult(index);
-          }
-        }
+        const sourceProcessing = Promise.all(sourceResults.map((_, index) => processSourceResult(index).catch(() => {
+          return send({ type: 'result', index, result: { fallback: true } });
+        })));
         const catalogTasks = catalogTargets.map(async (catalogTarget, catalogIndex) => {
-          const response = await handleMangaDexCatalog(request, catalogTarget);
+          let announcedImages = 0;
+          const receivedImages = new Set();
+          try {
+          const response = await withSourceSlot(() => handleMangaDexCatalog(request, catalogTarget, imageSubrequestBudget), true);
           const contentType = response.headers.get('content-type') || '';
           if (!response.ok || !contentType.includes('application/vnd.cytlex.catalog-stream') || !response.body) {
-            send({ type: 'catalog', index: catalogIndex, status: response.status, contentType, errorOrigin: response.headers.get('x-cytlex-error-origin') || 'source', upstreamError: response.headers.get('x-cytlex-upstream-error') || '' });
+            await send({ type: 'catalog', index: catalogIndex, status: response.status, contentType, errorOrigin: response.headers.get('x-cytlex-error-origin') || 'source', upstreamError: response.headers.get('x-cytlex-upstream-error') || '' });
             return;
           }
           const reader = response.body.getReader();
@@ -1172,39 +1254,38 @@ async function handleCombinedSearchRequest(request) {
           };
           const first = await frame();
           if (typeof first?.catalog !== 'string' || !Array.isArray(first.images) || first.images.length > 40) throw new Error('Invalid MangaDex catalog metadata');
-          send({ type: 'catalog', index: catalogIndex, status: response.status, contentType, catalog: first.catalog, images: first.images });
+          announcedImages = first.images.length;
+          await send({ type: 'catalog', index: catalogIndex, status: response.status, contentType, catalog: first.catalog, images: first.images });
           while (!stopped) {
             const image = await frame(true);
             if (!image) break;
             if (!Number.isInteger(image.index) || !Number.isInteger(image.length) || image.length < 0 || image.length > PROXY_IMAGE_BATCH_ITEM_MAX_BYTES) throw new Error('Invalid MangaDex cover frame');
             const bytes = await read(image.length);
-            send({ type: 'catalog-image', catalogIndex, index: image.index, status: image.status, contentType: image.contentType || '', body: bytesToBase64(bytes) });
+            receivedImages.add(image.index);
+            await send({ type: 'catalog-image', catalogIndex, index: image.index, status: image.status, contentType: image.contentType || '' }, bytes);
           }
-        });
-        await Promise.all(catalogTasks);
-        await mapConcurrent(catalogCoverJobs, PROXY_IMAGE_BATCH_CONCURRENCY, async ({ requestIndex, imageIndex, image }) => {
-          try {
-            let result = await fetchImageBatchItem(image, request, imageSubrequestBudget, imageByteBudget, 1);
-            if (result.status === 200 && result.body?.size === 0) {
-              result = await fetchImageBatchItem(image, request, imageSubrequestBudget, imageByteBudget, 1);
-            }
-            const bytes = result.body ? new Uint8Array(await result.body.arrayBuffer()) : new Uint8Array();
-            send({ type: 'catalog-image', requestIndex, index: imageIndex, status: result.status, contentType: result.contentType || '', body: bytesToBase64(bytes) });
           } catch {
-            send({ type: 'catalog-image', requestIndex, index: imageIndex, status: 502, contentType: '', body: '' });
+            await send({ type: 'catalog', index: catalogIndex, status: 502, errorOrigin: 'connection' });
+          } finally {
+            for (let index = 0; index < announcedImages; index += 1) {
+              if (!receivedImages.has(index)) await send({ type: 'catalog-image', catalogIndex, index, status: 502, body: '' });
+            }
           }
         });
+        await Promise.all([sourceProcessing, ...catalogTasks]);
+        await Promise.all(catalogCoverJobs);
         if (!stopped) controller.close();
       } catch (error) {
-        if (!stopped) controller.error(error);
+        if (!stopped) { stopped = true; controller.error(error); pressure.release(); }
       }
+    })();
     },
     cancel() {
       stopped = true;
-      coverQueue.splice(0).forEach((job) => job.resolve());
+      pressure.release();
     }
   });
-  return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/x-ndjson; charset=utf-8', 'x-cytlex-search-batch': '1' } });
+  return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': binaryStream ? 'application/vnd.cytlex.search-stream' : 'application/x-ndjson; charset=utf-8', 'x-cytlex-search-batch': binaryStream ? '2' : '1' } });
 }
 
 function createImageSubrequestBudget(total, limit = PROXY_IMAGE_BATCH_MAX_SUBREQUESTS) {
@@ -1223,6 +1304,15 @@ function createImageSubrequestBudget(total, limit = PROXY_IMAGE_BATCH_MAX_SUBREQ
       used += 1;
     }
   };
+}
+
+function createSharedImageSubrequestBudget(limit) {
+  let used = 0;
+  const take = () => {
+    if (used >= limit) throw new Error('Image batch subrequest limit reached');
+    used += 1;
+  };
+  return { takeInitial: take, takeAdditional: take };
 }
 
 function createImageByteBudget() {
@@ -1263,7 +1353,7 @@ async function fetchImageBatchItem(item, request, subrequestBudget, byteBudget, 
   let streaming = false;
   let responseTooLarge = false;
   try {
-    const { upstream, proxyError, finalUrl } = await fetchTarget(
+    const { upstream, proxyError, finalUrl } = await fetchTarget(request,
       target,
       'GET',
       forwardedHeaders(metadataRequest, target),
@@ -1350,12 +1440,19 @@ async function handleImageBatchRequest(request) {
   if (payload.stream === true) {
     let next = 0;
     let stopped = false;
+    const pressure = createStreamPressure();
+
     const body = new ReadableStream({
-      async start(controller) {
+
+      pull() { pressure.release(); },
+
+      start(controller) { void (async () => {
         const encoder = new TextEncoder();
         try {
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, payload.images.length) }, async () => {
             while (!stopped && next < payload.images.length) {
+              await pressure.wait(controller);
+              if (stopped) return;
               const index = next++;
               const item = payload.images[index];
               const result = await fetchImageBatchItem(item, request, subrequestBudget, byteBudget, 1);
@@ -1372,10 +1469,11 @@ async function handleImageBatchRequest(request) {
           }));
           if (!stopped) controller.close();
         } catch (error) {
-          if (!stopped) controller.error(error);
+          if (!stopped) { stopped = true; controller.error(error); pressure.release(); }
         }
+      })();
       },
-      cancel() { stopped = true; }
+      cancel() { stopped = true; pressure.release(); }
     });
     return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.image-stream', 'x-cytlex-image-batch': 'stream' } });
   }
@@ -1446,7 +1544,7 @@ async function handleImageBatchRequest(request) {
   });
 }
 
-async function handleMangaDexCatalog(request, target) {
+async function handleMangaDexCatalog(request, target, sharedSubrequestBudget = null) {
   if (target.origin !== 'https://api.mangadex.org' || target.pathname !== '/manga'
     || Number(target.searchParams.get('limit')) !== 40 || !target.searchParams.getAll('includes[]').includes('cover_art')) {
     return errorResponse('Invalid MangaDex catalog request', 400);
@@ -1455,7 +1553,7 @@ async function handleMangaDexCatalog(request, target) {
   const timeout = setTimeout(() => deadline.abort(), 12000);
   let upstream;
   try {
-    const result = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined,
+    const result = await fetchTarget(request, target, 'GET', forwardedHeaders(request, target), undefined,
       AbortSignal.any([request.signal, deadline.signal]));
     if (result.proxyError) return result.proxyError;
     upstream = result.upstream;
@@ -1469,13 +1567,18 @@ async function handleMangaDexCatalog(request, target) {
       if (!/^[0-9a-f-]{36}$/i.test(item.id || '') || !/^[0-9a-f-]{36}\.(jpg|png|webp|jpeg)$/i.test(file || '')) return [];
       return [`https://uploads.mangadex.org/covers/${item.id}/${file}.256.jpg`];
     });
-    const subrequestBudget = createImageSubrequestBudget(images.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
+    const subrequestBudget = sharedSubrequestBudget || createImageSubrequestBudget(images.length, PROXY_IMAGE_BATCH_MAX_SUBREQUESTS - 1);
     const byteBudget = createImageByteBudget();
     let stopped = false;
     let next = 0;
     const encoder = new TextEncoder();
+    const pressure = createStreamPressure();
+
     const body = new ReadableStream({
-      async start(controller) {
+
+      pull() { pressure.release(); },
+
+      start(controller) { void (async () => {
         const write = (metadata, bytes = new Uint8Array()) => {
           const encoded = encoder.encode(JSON.stringify(metadata));
           const prefix = new Uint8Array(4);
@@ -1487,6 +1590,8 @@ async function handleMangaDexCatalog(request, target) {
           write({ catalog: raw, images });
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, images.length) }, async () => {
             while (!stopped && next < images.length) {
+              await pressure.wait(controller);
+              if (stopped) return;
               const index = next++;
               const result = await fetchImageBatchItem({ url: images[index], sourceId: 'mangadex' }, request, subrequestBudget, byteBudget, 1);
               if (stopped) return;
@@ -1495,13 +1600,14 @@ async function handleMangaDexCatalog(request, target) {
             }
           }));
           if (!stopped) controller.close();
-        } catch (error) { if (!stopped) controller.error(error); }
+        } catch (error) { if (!stopped) { stopped = true; controller.error(error); pressure.release(); } }
+      })();
       },
-      cancel() { stopped = true; }
+      cancel() { stopped = true; pressure.release(); }
     });
     return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.catalog-stream', 'x-cytlex-proxy': '1' } });
   } catch (error) {
-    return errorResponse('The source could not be reached', deadline.signal.aborted ? 504 : 502, false, deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
+    return errorResponse('The source could not be reached', deadline.signal.aborted ? 504 : 502, false, deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : error?.message === 'Proxy subrequest limit reached' ? 'subrequest-limit' : 'unreachable');
   } finally { clearTimeout(timeout); }
 }
 
@@ -1696,7 +1802,7 @@ async function handleOnfMangaDetail(request, target) {
   const timeout = setTimeout(() => deadline.abort(), 12000);
   const signal = AbortSignal.any([request.signal, deadline.signal]);
   try {
-    const result = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    const result = await fetchTarget(request, target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
     if (result.proxyError) return result.proxyError;
     if (!result.upstream.ok) return new Response(null, { status: result.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const html = await new Response(limitResponseBody(result.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
@@ -1789,7 +1895,7 @@ async function handleAchyChapter(request, target) {
   const timeout = setTimeout(() => deadline.abort(), 12000);
   const signal = AbortSignal.any([request.signal, deadline.signal]);
   try {
-    const result = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    const result = await fetchTarget(request, target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
     if (result.proxyError) return result.proxyError;
     if (!result.upstream.ok) return new Response(null, { status: result.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const html = await new Response(limitResponseBody(result.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
@@ -1800,8 +1906,13 @@ async function handleAchyChapter(request, target) {
     let stopped = false;
     let next = 0;
     const encoder = new TextEncoder();
+    const pressure = createStreamPressure();
+
     const body = new ReadableStream({
-      async start(controller) {
+
+      pull() { pressure.release(); },
+
+      start(controller) { void (async () => {
         const write = (metadata, bytes = new Uint8Array()) => {
           const data = encoder.encode(JSON.stringify(metadata));
           const prefix = new Uint8Array(4);
@@ -1813,6 +1924,8 @@ async function handleAchyChapter(request, target) {
           write(chapter);
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
             while (!stopped && next < initial.length) {
+              await pressure.wait(controller);
+              if (stopped) return;
               const index = next++;
               const image = await fetchImageBatchItem({ url: initial[index], referer: target.href }, request, subrequestBudget, byteBudget);
               if (stopped) return;
@@ -1821,9 +1934,10 @@ async function handleAchyChapter(request, target) {
             }
           }));
           if (!stopped) controller.close();
-        } catch (error) { if (!stopped) controller.error(error); }
+        } catch (error) { if (!stopped) { stopped = true; controller.error(error); pressure.release(); } }
+      })();
       },
-      cancel() { stopped = true; }
+      cancel() { stopped = true; pressure.release(); }
     });
     return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
   } catch (error) {
@@ -1838,7 +1952,7 @@ async function handleAchyCatalog(request, target) {
   const deadline = new AbortController();
   const timeout = setTimeout(() => deadline.abort(), 12000);
   try {
-    const result = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined,
+    const result = await fetchTarget(request, target, 'GET', forwardedHeaders(request, target), undefined,
       AbortSignal.any([request.signal, deadline.signal]), { retries: 0 });
     if (result.proxyError) return result.proxyError;
     if (!result.upstream.ok) return new Response(result.upstream.body, { status: result.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
@@ -1851,8 +1965,13 @@ async function handleAchyCatalog(request, target) {
     let stopped = false;
     let next = 0;
     const encoder = new TextEncoder();
+    const pressure = createStreamPressure();
+
     const body = new ReadableStream({
-      async start(controller) {
+
+      pull() { pressure.release(); },
+
+      start(controller) { void (async () => {
         const write = (metadata, bytes = new Uint8Array()) => {
           const encoded = encoder.encode(JSON.stringify(metadata));
           const prefix = new Uint8Array(4);
@@ -1864,6 +1983,8 @@ async function handleAchyCatalog(request, target) {
           write({ catalog: raw, images });
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, images.length) }, async () => {
             while (!stopped && next < images.length) {
+              await pressure.wait(controller);
+              if (stopped) return;
               const index = next++;
               const image = await fetchImageBatchItem({ url: images[index], referer: target.href }, request, subrequestBudget, byteBudget, 1);
               if (stopped) return;
@@ -1872,9 +1993,10 @@ async function handleAchyCatalog(request, target) {
             }
           }));
           if (!stopped) controller.close();
-        } catch (error) { if (!stopped) controller.error(error); }
+        } catch (error) { if (!stopped) { stopped = true; controller.error(error); pressure.release(); } }
+      })();
       },
-      cancel() { stopped = true; }
+      cancel() { stopped = true; pressure.release(); }
     });
     return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.catalog-stream', 'x-cytlex-proxy': '1' } });
   } catch (error) {
@@ -1896,7 +2018,7 @@ async function handleOlympusDetail(request, target, sharedBudget = null, maxChap
     const timeout = setTimeout(() => { timedOut = true; deadline.abort(); }, 12000);
     const signal = AbortSignal.any([request.signal, deadline.signal]);
     try {
-    const result = await fetchTarget(page, 'GET', forwardedHeaders(request, page), undefined, signal, { retries: 0 });
+    const result = await fetchTarget(request, page, 'GET', forwardedHeaders(request, page), undefined, signal, { retries: 0 });
     if (result.proxyError) throw { response: result.proxyError };
     if (!result.upstream.ok) {
       throw { response: new Response(result.upstream.body, {
@@ -1916,7 +2038,7 @@ async function handleOlympusDetail(request, target, sharedBudget = null, maxChap
     try {
       first = await readJson(`https://olympusxyz.com/api/series/${slug}/chapters?page=1&direction=desc&type=comic`);
     } catch (error) {
-      if (request.signal.aborted) throw error;
+      if (request.signal.aborted || error?.message === 'Proxy subrequest limit reached') throw error;
       return Response.json(series, { headers: { 'cache-control': 'no-store', 'x-cytlex-proxy': '1' } });
     }
     const lastPage = Math.min(Math.max(Number(first?.meta?.last_page) || 1, 1), 200);
@@ -1934,7 +2056,10 @@ async function handleOlympusDetail(request, target, sharedBudget = null, maxChap
       const pageResults = await Promise.allSettled(pageUrls.map((url) => readJson(url, true)));
       let batchFailed = false;
       for (const pageResult of pageResults) {
-        if (pageResult.status === 'rejected') { batchFailed = true; break; }
+        if (pageResult.status === 'rejected') {
+          if (pageResult.reason?.message === 'Proxy subrequest limit reached') throw pageResult.reason;
+          batchFailed = true; break;
+        }
         results.push(pageResult.value);
         fetchedPages += 1;
       }
@@ -1947,7 +2072,7 @@ async function handleOlympusDetail(request, target, sharedBudget = null, maxChap
   } catch (error) {
     if (error?.response) return error.response;
     return errorResponse('Olympus detail unavailable', timedOut ? 504 : 502, false,
-      timedOut ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
+      timedOut ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : error?.message === 'Proxy subrequest limit reached' ? 'subrequest-limit' : 'unreachable');
   }
 }
 
@@ -1959,7 +2084,7 @@ async function handleOlympusChapter(request, target) {
   const timeout = setTimeout(() => deadline.abort(), 12000);
   const signal = AbortSignal.any([request.signal, deadline.signal]);
   try {
-    const response = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    const response = await fetchTarget(request, target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
     if (response.proxyError) return response.proxyError;
     if (!response.upstream.ok) return new Response(null, { status: response.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const raw = await new Response(limitResponseBody(response.upstream.body, PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
@@ -1975,8 +2100,13 @@ async function handleOlympusChapter(request, target) {
     let next = 0;
     const encoder = new TextEncoder();
     const imageReferer = 'https://olympusxyz.com/';
+    const pressure = createStreamPressure();
+
     const body = new ReadableStream({
-      async start(controller) {
+
+      pull() { pressure.release(); },
+
+      start(controller) { void (async () => {
         const write = (metadata, bytes = new Uint8Array()) => {
           const encoded = encoder.encode(JSON.stringify(metadata));
           const prefix = new Uint8Array(4);
@@ -1988,6 +2118,8 @@ async function handleOlympusChapter(request, target) {
           write({ label: chapter.name ? `Capítulo ${chapter.name}` : '', mangaUrl: `https://olympusxyz.com/series/${slug}`, pages, imageReferer });
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
             while (!stopped && next < initial.length) {
+              await pressure.wait(controller);
+              if (stopped) return;
               const index = next++;
               const image = await fetchImageBatchItem({ url: initial[index], referer: imageReferer }, request, subrequestBudget, byteBudget);
               if (stopped) return;
@@ -1996,15 +2128,16 @@ async function handleOlympusChapter(request, target) {
             }
           }));
           if (!stopped) controller.close();
-        } catch (error) { if (!stopped) controller.error(error); }
+        } catch (error) { if (!stopped) { stopped = true; controller.error(error); pressure.release(); } }
+      })();
       },
-      cancel() { stopped = true; }
+      cancel() { stopped = true; pressure.release(); }
     });
     return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
   } catch (error) {
     if (error?.response) return error.response;
     return errorResponse('Olympus chapter unavailable', deadline.signal.aborted ? 504 : 422, false,
-      deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
+      deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : error?.message === 'Proxy subrequest limit reached' ? 'subrequest-limit' : 'unreachable');
   } finally { clearTimeout(timeout); }
 }
 
@@ -2023,7 +2156,7 @@ async function handleMangaDexFeed(request, target, includeManga = false, sharedB
     if (sharedBudget && !sharedBudget.take()) throw new Error('MangaDex batch subrequest limit reached');
     requestsFetched += 1;
     const page = validateTarget(url);
-    const result = await fetchTarget(page, 'GET', forwardedHeaders(request, page), undefined, signal);
+    const result = await fetchTarget(request, page, 'GET', forwardedHeaders(request, page), undefined, signal);
     if (result.proxyError) throw { response: result.proxyError };
     if (!result.upstream.ok) throw { response: new Response(result.upstream.body, {
       status: result.upstream.status,
@@ -2086,7 +2219,7 @@ async function handleMangaDexFeed(request, target, includeManga = false, sharedB
   } catch (error) {
     if (error?.response) return error.response;
     return errorResponse('MangaDex feed unavailable', deadline.signal.aborted ? 504 : 502, false,
-      deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : 'unreachable');
+      deadline.signal.aborted ? 'timeout' : isDnsFailure(error) ? 'dns-not-found' : error?.message === 'Proxy subrequest limit reached' ? 'subrequest-limit' : 'unreachable');
   } finally { clearTimeout(timeout); }
 }
 
@@ -2160,7 +2293,7 @@ async function handleMangaDexChapter(request, target) {
   const signal = AbortSignal.any([request.signal, deadline.signal]);
   try {
     const atHomeUrl = new URL(`/at-home/server/${chapterId}`, 'https://api.mangadex.org');
-    const atHome = await fetchTarget(atHomeUrl, 'GET', forwardedHeaders(request, atHomeUrl), undefined, signal, { retries: 0 });
+    const atHome = await fetchTarget(request, atHomeUrl, 'GET', forwardedHeaders(request, atHomeUrl), undefined, signal, { retries: 0 });
     if (atHome.proxyError) return atHome.proxyError;
     if (!atHome.upstream.ok) return new Response(atHome.upstream.body, { status: atHome.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const raw = await new Response(limitResponseBody(atHome.upstream.body, PROXY_BATCH_ITEM_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
@@ -2182,8 +2315,13 @@ async function handleMangaDexChapter(request, target) {
     let stopped = false;
     let next = 0;
     const encoder = new TextEncoder();
+    const pressure = createStreamPressure();
+
     const body = new ReadableStream({
-      async start(controller) {
+
+      pull() { pressure.release(); },
+
+      start(controller) { void (async () => {
         const write = (metadata, bytes = new Uint8Array()) => {
           const encoded = encoder.encode(JSON.stringify(metadata));
           const prefix = new Uint8Array(4);
@@ -2196,6 +2334,8 @@ async function handleMangaDexChapter(request, target) {
             mangaUrl: mangaId ? `https://mangadex.org/title/${mangaId}` : '', imageReferer: 'https://mangadex.org/' });
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
             while (!stopped && next < initial.length) {
+              await pressure.wait(controller);
+              if (stopped) return;
               const index = next++;
               let image = await fetchImageBatchItem({ url: initial[index], referer: 'https://mangadex.org/' }, request, subrequestBudget, byteBudget);
               if (image.status >= 400 && fallbacks[index]) {
@@ -2207,9 +2347,10 @@ async function handleMangaDexChapter(request, target) {
             }
           }));
           if (!stopped) controller.close();
-        } catch (error) { if (!stopped) controller.error(error); }
+        } catch (error) { if (!stopped) { stopped = true; controller.error(error); pressure.release(); } }
+      })();
       },
-      cancel() { stopped = true; }
+      cancel() { stopped = true; pressure.release(); }
     });
     return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
   } catch (error) {
@@ -2226,7 +2367,7 @@ async function handleLeerCapituloChapter(request, target) {
   const timeout = setTimeout(() => deadline.abort(), 12000);
   const signal = AbortSignal.any([request.signal, deadline.signal]);
   try {
-    const result = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    const result = await fetchTarget(request, target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
     if (result.proxyError) return result.proxyError;
     if (!result.upstream.ok) return new Response(null, { status: result.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const html = await new Response(limitResponseBody(result.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
@@ -2295,8 +2436,13 @@ async function handleLeerCapituloChapter(request, target) {
     let stopped = false;
     let next = 0;
     const encoder = new TextEncoder();
+    const pressure = createStreamPressure();
+
     const body = new ReadableStream({
-      async start(controller) {
+
+      pull() { pressure.release(); },
+
+      start(controller) { void (async () => {
         const write = (metadata, bytes = new Uint8Array()) => {
           const data = encoder.encode(JSON.stringify(metadata));
           const prefix = new Uint8Array(4);
@@ -2310,6 +2456,8 @@ async function handleLeerCapituloChapter(request, target) {
             next: currentIndex >= 0 ? options[currentIndex - 1] || null : null });
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
             while (!stopped && next < initial.length) {
+              await pressure.wait(controller);
+              if (stopped) return;
               const index = next++;
               const image = await fetchImageBatchItem({ url: initial[index], referer: target.href }, request, subrequestBudget, byteBudget);
               if (stopped) return;
@@ -2318,9 +2466,10 @@ async function handleLeerCapituloChapter(request, target) {
             }
           }));
           if (!stopped) controller.close();
-        } catch (error) { if (!stopped) controller.error(error); }
+        } catch (error) { if (!stopped) { stopped = true; controller.error(error); pressure.release(); } }
+      })();
       },
-      cancel() { stopped = true; }
+      cancel() { stopped = true; pressure.release(); }
     });
     return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
   } catch (error) {
@@ -2341,12 +2490,12 @@ async function handleKomiwaChapter(request, target) {
     const chapterPageUrl = new URL(target.pathname, target.origin);
     const chapterHeaders = forwardedHeaders(request, target);
     chapterHeaders.set('referer', 'https://www.komiwa.net/');
-    const chapterRequest = fetchTarget(chapterPageUrl, 'GET', chapterHeaders, undefined, signal, { retries: 0 });
+    const chapterRequest = fetchTarget(request, chapterPageUrl, 'GET', chapterHeaders, undefined, signal, { retries: 0 });
     const chaptersUrl = /^[\da-f-]{36}$/i.test(mangaId)
       ? new URL(`/manga/${encodeURIComponent(mangaId)}/chapters?page=1&limit=99999&sort=desc`, 'https://b78sk.komiwa.net')
       : null;
     const chaptersRequest = chaptersUrl
-      ? fetchTarget(chaptersUrl, 'GET', new Headers({ accept: 'application/json', referer: 'https://www.komiwa.net/' }), undefined, signal, { retries: 0 })
+      ? fetchTarget(request, chaptersUrl, 'GET', new Headers({ accept: 'application/json', referer: 'https://www.komiwa.net/' }), undefined, signal, { retries: 0 })
       : Promise.resolve(null);
     const [chapterResult, chaptersResult] = await Promise.all([chapterRequest, chaptersRequest]);
     if (chapterResult.proxyError) return chapterResult.proxyError;
@@ -2394,8 +2543,13 @@ async function handleKomiwaChapter(request, target) {
     const byteBudget = createImageByteBudget();
     let stopped = false, next = 0;
     const encoder = new TextEncoder();
+    const pressure = createStreamPressure();
+
     const body = new ReadableStream({
-      async start(controller) {
+
+      pull() { pressure.release(); },
+
+      start(controller) { void (async () => {
         const write = (metadata, bytes = new Uint8Array()) => {
           const data = encoder.encode(JSON.stringify(metadata));
           const prefix = new Uint8Array(4);
@@ -2410,6 +2564,8 @@ async function handleKomiwaChapter(request, target) {
             next: currentIndex >= 0 ? options[currentIndex + 1] || null : null });
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
             while (!stopped && next < initial.length) {
+              await pressure.wait(controller);
+              if (stopped) return;
               const index = next++;
               const image = await fetchImageBatchItem({ url: initial[index], referer: target.href }, request, subrequestBudget, byteBudget);
               if (stopped) return;
@@ -2418,9 +2574,10 @@ async function handleKomiwaChapter(request, target) {
             }
           }));
           if (!stopped) controller.close();
-        } catch (error) { if (!stopped) controller.error(error); }
+        } catch (error) { if (!stopped) { stopped = true; controller.error(error); pressure.release(); } }
+      })();
       },
-      cancel() { stopped = true; }
+      cancel() { stopped = true; pressure.release(); }
     });
     return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
   } catch (error) {
@@ -2435,7 +2592,7 @@ async function handleOnfChapter(request, target) {
   const timeout = setTimeout(() => deadline.abort(), 12000);
   const signal = AbortSignal.any([request.signal, deadline.signal]);
   try {
-    const first = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    const first = await fetchTarget(request, target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
     if (first.proxyError) return first.proxyError;
     if (!first.upstream.ok) return new Response(null, { status: first.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const html = await new Response(limitResponseBody(first.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
@@ -2449,7 +2606,7 @@ async function handleOnfChapter(request, target) {
     pageHeaders.set('content-type', 'application/json');
     pageHeaders.set('x-requested-with', 'XMLHttpRequest');
     const pageRequest = new Request(request.url, { method: 'POST', headers: pageHeaders });
-    const second = await fetchTarget(pageTarget, 'POST', forwardedHeaders(pageRequest, pageTarget), JSON.stringify({ access }), signal, { retries: 0 });
+    const second = await fetchTarget(request, pageTarget, 'POST', forwardedHeaders(pageRequest, pageTarget), JSON.stringify({ access }), signal, { retries: 0 });
     if (second.proxyError || !second.upstream?.ok) return errorResponse('ONF page list unavailable', 422);
     for (const pair of responseOnfCookies(second.upstream)) cookiePairs.set(pair.slice(0, pair.indexOf('=')), pair);
     cookies = [...cookiePairs.values()].join('; ').slice(0, 4096);
@@ -2471,8 +2628,13 @@ async function handleOnfChapter(request, target) {
     const byteBudget = createImageByteBudget();
     let stopped = false, next = 0;
     const encoder = new TextEncoder();
+    const pressure = createStreamPressure();
+
     const body = new ReadableStream({
-      async start(controller) {
+
+      pull() { pressure.release(); },
+
+      start(controller) { void (async () => {
         const write = (metadata, bytes = new Uint8Array()) => {
           const data = encoder.encode(JSON.stringify(metadata));
           const prefix = new Uint8Array(4); new DataView(prefix.buffer).setUint32(0, data.length);
@@ -2482,6 +2644,8 @@ async function handleOnfChapter(request, target) {
           write({ pages: entries.map((entry) => entry.url), pageFallbacks: entries.map((entry) => entry.fallback), imageCookie: cookies });
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
             while (!stopped && next < initial.length) {
+              await pressure.wait(controller);
+              if (stopped) return;
               const index = next++;
               let result = await fetchImageBatchItem({ url: initial[index].url, referer: target.href, onfCookie: cookies }, request, subrequestBudget, byteBudget);
               if ((!result.body || result.status !== 200) && initial[index].fallback) {
@@ -2494,8 +2658,9 @@ async function handleOnfChapter(request, target) {
             }
           }));
           if (!stopped) controller.close();
-        } catch (error) { if (!stopped) controller.error(error); }
-      }, cancel() { stopped = true; }
+        } catch (error) { if (!stopped) { stopped = true; controller.error(error); pressure.release(); } }
+      })();
+      }, cancel() { stopped = true; pressure.release(); }
     });
     return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
   } catch (error) {
@@ -2509,7 +2674,7 @@ async function handleZonaTmoChapter(request, target) {
   const timeout = setTimeout(() => deadline.abort(), 12000);
   const signal = AbortSignal.any([request.signal, deadline.signal]);
   try {
-    const result = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    const result = await fetchTarget(request, target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
     if (result.proxyError) return result.proxyError;
     if (!result.upstream.ok) return new Response(null, { status: result.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const html = await new Response(limitResponseBody(result.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
@@ -2542,8 +2707,13 @@ async function handleZonaTmoChapter(request, target) {
     const byteBudget = createImageByteBudget();
     let stopped = false, next = 0;
     const encoder = new TextEncoder();
+    const pressure = createStreamPressure();
+
     const body = new ReadableStream({
-      async start(controller) {
+
+      pull() { pressure.release(); },
+
+      start(controller) { void (async () => {
         const write = (metadata, bytes = new Uint8Array()) => {
           const data = encoder.encode(JSON.stringify(metadata));
           const prefix = new Uint8Array(4); new DataView(prefix.buffer).setUint32(0, data.length);
@@ -2553,6 +2723,8 @@ async function handleZonaTmoChapter(request, target) {
           write({ pages: uniquePages, label: options.find((option) => option.url === target.href)?.title || '', options, prev: index >= 0 ? options[index + 1] || null : null, next: index >= 0 ? options[index - 1] || null : null, mangaUrl, imageReferer: 'https://zonatmo.org/' });
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
             while (!stopped && next < initial.length) {
+              await pressure.wait(controller);
+              if (stopped) return;
               const i = next++;
               const image = await fetchImageBatchItem({ url: initial[i], referer: 'https://zonatmo.org/' }, request, subrequestBudget, byteBudget);
               if (stopped) return;
@@ -2561,9 +2733,10 @@ async function handleZonaTmoChapter(request, target) {
             }
           }));
           if (!stopped) controller.close();
-        } catch (error) { if (!stopped) controller.error(error); }
+        } catch (error) { if (!stopped) { stopped = true; controller.error(error); pressure.release(); } }
+      })();
       },
-      cancel() { stopped = true; }
+      cancel() { stopped = true; pressure.release(); }
     });
     return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
   } catch (error) {
@@ -2588,7 +2761,7 @@ async function handleInmangaChapter(request, target) {
   try {
     const pageTarget = new URL('/chapter/chapterIndexControls', target.origin);
     pageTarget.searchParams.set('identification', chapterId);
-    const first = await fetchTarget(pageTarget, 'GET', forwardedHeaders(request, pageTarget), undefined, signal, { retries: 0 });
+    const first = await fetchTarget(request, pageTarget, 'GET', forwardedHeaders(request, pageTarget), undefined, signal, { retries: 0 });
     if (first.proxyError) return first.proxyError;
     if (!first.upstream.ok) return new Response(null, { status: first.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const html = await new Response(limitResponseBody(first.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
@@ -2638,8 +2811,13 @@ async function handleInmangaChapter(request, target) {
     let stopped = false;
     let next = 0;
     const encoder = new TextEncoder();
+    const pressure = createStreamPressure();
+
     const body = new ReadableStream({
-      async start(controller) {
+
+      pull() { pressure.release(); },
+
+      start(controller) { void (async () => {
         const write = (metadata, bytes = new Uint8Array()) => {
           const data = encoder.encode(JSON.stringify(metadata));
           const prefix = new Uint8Array(4);
@@ -2657,6 +2835,8 @@ async function handleInmangaChapter(request, target) {
           });
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
             while (!stopped && next < initial.length) {
+              await pressure.wait(controller);
+              if (stopped) return;
               const index = next++;
               let result = await fetchImageBatchItem({ url: initial[index].url, referer: imageReferer }, request, subrequestBudget, byteBudget);
               if (result.status >= 400 && initial[index].fallback) {
@@ -2668,9 +2848,10 @@ async function handleInmangaChapter(request, target) {
             }
           }));
           if (!stopped) controller.close();
-        } catch (error) { if (!stopped) controller.error(error); }
+        } catch (error) { if (!stopped) { stopped = true; controller.error(error); pressure.release(); } }
+      })();
       },
-      cancel() { stopped = true; }
+      cancel() { stopped = true; pressure.release(); }
     });
     return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
   } catch (error) {
@@ -2687,7 +2868,7 @@ async function handleMangaLectChapter(request, target) {
   const timeout = setTimeout(() => deadline.abort(), 12000);
   const signal = AbortSignal.any([request.signal, deadline.signal]);
   try {
-    const first = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    const first = await fetchTarget(request, target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
     if (first.proxyError) return first.proxyError;
     if (!first.upstream.ok) return new Response(null, { status: first.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const html = await new Response(limitResponseBody(first.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
@@ -2709,8 +2890,13 @@ async function handleMangaLectChapter(request, target) {
     let stopped = false;
     let next = 0;
     const encoder = new TextEncoder();
+    const pressure = createStreamPressure();
+
     const body = new ReadableStream({
-      async start(controller) {
+
+      pull() { pressure.release(); },
+
+      start(controller) { void (async () => {
         const write = (metadata, bytes = new Uint8Array()) => {
           const data = encoder.encode(JSON.stringify(metadata));
           const prefix = new Uint8Array(4);
@@ -2722,6 +2908,8 @@ async function handleMangaLectChapter(request, target) {
           write({ html, pages: entries.map((entry) => entry.url) });
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
             while (!stopped && next < initial.length) {
+              await pressure.wait(controller);
+              if (stopped) return;
               const index = next++;
               const result = await fetchImageBatchItem({ url: initial[index].url, referer: target.href }, request, subrequestBudget, byteBudget);
               if (stopped) return;
@@ -2730,9 +2918,10 @@ async function handleMangaLectChapter(request, target) {
             }
           }));
           if (!stopped) controller.close();
-        } catch (error) { if (!stopped) controller.error(error); }
+        } catch (error) { if (!stopped) { stopped = true; controller.error(error); pressure.release(); } }
+      })();
       },
-      cancel() { stopped = true; }
+      cancel() { stopped = true; pressure.release(); }
     });
     return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
   } catch (error) {
@@ -2749,7 +2938,7 @@ async function handleMangaOniChapter(request, target) {
   const timeout = setTimeout(() => deadline.abort(), 12000);
   const signal = AbortSignal.any([request.signal, deadline.signal]);
   try {
-    const result = await fetchTarget(target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
+    const result = await fetchTarget(request, target, 'GET', forwardedHeaders(request, target), undefined, signal, { retries: 0 });
     if (result.proxyError) return result.proxyError;
     if (!result.upstream.ok) return new Response(null, { status: result.upstream.status, headers: { 'x-cytlex-proxy': '1', 'x-cytlex-error-origin': 'source' } });
     const html = await new Response(limitResponseBody(result.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => deadline.abort())).text();
@@ -2792,7 +2981,7 @@ async function handleMangaOniChapter(request, target) {
     const mangaController = new AbortController();
     try {
       const mangaSignal = AbortSignal.any([signal, mangaController.signal, AbortSignal.timeout(3500)]);
-      const mangaResult = await fetchTarget(mangaTarget, 'GET', forwardedHeaders(request, mangaTarget), undefined, mangaSignal, { retries: 0 });
+      const mangaResult = await fetchTarget(request, mangaTarget, 'GET', forwardedHeaders(request, mangaTarget), undefined, mangaSignal, { retries: 0 });
       if (!mangaResult.proxyError && mangaResult.upstream.ok) {
         mangaHtml = await new Response(limitResponseBody(mangaResult.upstream.body, PROXY_BATCH_RESPONSE_MAX_BYTES, () => {}, () => mangaController.abort())).text();
       }
@@ -2820,8 +3009,13 @@ async function handleMangaOniChapter(request, target) {
     let stopped = false;
     let next = 0;
     const encoder = new TextEncoder();
+    const pressure = createStreamPressure();
+
     const body = new ReadableStream({
-      async start(controller) {
+
+      pull() { pressure.release(); },
+
+      start(controller) { void (async () => {
         const write = (metadata, bytes = new Uint8Array()) => {
           const data = encoder.encode(JSON.stringify(metadata));
           const prefix = new Uint8Array(4);
@@ -2833,6 +3027,8 @@ async function handleMangaOniChapter(request, target) {
           write({ title, pages, mangaUrl: mangaTarget.href, options });
           await Promise.all(Array.from({ length: Math.min(PROXY_IMAGE_BATCH_CONCURRENCY, initial.length) }, async () => {
             while (!stopped && next < initial.length) {
+              await pressure.wait(controller);
+              if (stopped) return;
               const index = next++;
               const image = await fetchImageBatchItem({ url: initial[index], referer: target.href }, request, subrequestBudget, byteBudget);
               if (stopped) return;
@@ -2841,9 +3037,10 @@ async function handleMangaOniChapter(request, target) {
             }
           }));
           if (!stopped) controller.close();
-        } catch (error) { if (!stopped) controller.error(error); }
+        } catch (error) { if (!stopped) { stopped = true; controller.error(error); pressure.release(); } }
+      })();
       },
-      cancel() { stopped = true; }
+      cancel() { stopped = true; pressure.release(); }
     });
     return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'application/vnd.cytlex.chapter-stream', 'x-cytlex-proxy': '1' } });
   } catch (error) {
@@ -2957,7 +3154,7 @@ export async function onRequest(context) {
   const signal = AbortSignal.any([request.signal, deadline.signal]);
   let streaming = false;
   try {
-    const { upstream, proxyError, finalUrl } = await fetchTarget(target, method, forwardedHeaders(request, target), body, signal);
+    const { upstream, proxyError, finalUrl } = await fetchTarget(request, target, method, forwardedHeaders(request, target), body, signal);
     if (proxyError) return proxyError;
 
     let responseBody = null;

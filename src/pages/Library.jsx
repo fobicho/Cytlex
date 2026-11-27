@@ -13,9 +13,8 @@ import { chapterIndex } from '../lib/chapterIndex.js';
 import { tracking } from '../lib/tracking.js';
 import { api } from '../lib/api.js';
 import { cloudSync } from '../lib/cloudSync.js';
-import { CLOUD_SYNC_DETAILS_BACKFILL_EVENT, CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY } from '../lib/cloudSyncEvents.js';
+import { CLOUD_SYNC_DETAILS_BACKFILL_EVENT, CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY, pendingLibraryDetailKey, readPendingLibraryDetails } from '../lib/cloudSyncEvents.js';
 import { preloadLibraryCoversBatch } from '../lib/covers.js';
-import { setHttpGetBatchWindow } from '../lib/browserHttp.js';
 import { useToast } from '../components/Toast.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { Input } from '../components/ui/input.jsx';
@@ -27,6 +26,7 @@ import { useLibraryCover } from '../lib/useLibraryCover.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 import { libraryScroll, recallCover, rememberMangaPreview } from '../lib/searchState.js';
 import { attachHorizontalScrollFade } from '../lib/horizontalScrollFade.js';
+import { beginImportRequestBatching, setKomiwaImportHints } from '../lib/browserHttp.js';
 import { useI18n } from '../lib/i18n.js';
 
 let sessionCategoria = '';
@@ -35,6 +35,7 @@ let libraryCheckCooldownUntil = 0;
 let libraryCheckProgress = { current: 0, total: 0 };
 const libraryCheckProgressListeners = new Set();
 let libraryDetailBackfillPromise = null;
+let activeLibraryDetailBackfill = null;
 const pendingLibraryDetailBackfills = [];
 const UNREAD_CACHE_KEY = 'cytlex:libraryUnread:v2';
 const LIBRARY_CATEGORY_KEY = 'cytlex:libraryCategory';
@@ -127,7 +128,7 @@ const sameLibraryFavorites = (left, right) => left.length === right.length && le
     && (manga.cats || []).join('\0') === (next.cats || []).join('\0');
 });
 
-async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, installedSourceIds = null, fetchFullDetails = false) {
+async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, installedSourceIds = null, fetchFullDetails = false, restorationId = '') {
   const pending = favorites.filter((manga) => {
     const resolvedId = sourceIdFor(manga);
     return extensions.isInstalled(resolvedId)
@@ -141,11 +142,19 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
     return;
   }
 
-  const restoreBatchWindow = setHttpGetBatchWindow(5000);
+  const legacyLookup = api.createLegacyDetailLookup();
+  const releaseBatching = fetchFullDetails ? beginImportRequestBatching() : () => {};
+  const restoreKomiwaHints = fetchFullDetails ? setKomiwaImportHints(pending) : () => {};
   let favoritesChanged = false;
   const refreshedCoverUrls = new Set();
   let completed = 0;
   try {
+    if (fetchFullDetails) {
+      await Promise.race([
+        Promise.allSettled([...new Set(pending.map(sourceIdFor))].map((sourceId) => extensions.source(sourceId))),
+        new Promise((resolve) => setTimeout(resolve, 1500))
+      ]);
+    }
     let next = 0;
     const concurrency = Math.min(50, pending.length);
     await Promise.all(Array.from({ length: concurrency }, async () => {
@@ -156,7 +165,7 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
         try {
           let detail;
           if (manga.coverRefreshPending) {
-            detail = await api.restoreDetail(manga.url, resolvedId, savedSourceId);
+            detail = await api.restoreDetail(manga.url, resolvedId, savedSourceId, legacyLookup);
             const cachedCover = detail?.cover && isMangaCover(detail.cover, manga.url) ? detail.cover : '';
             if (!detail?.chapters?.length || !cachedCover) {
               detail = await api.detail(manga.url, resolvedId, { cacheResult: false, persistResult: false, allowDisabled: true, timeoutMs: 120_000 });
@@ -164,7 +173,7 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
             const cover = detail?.cover && isMangaCover(detail.cover, manga.url) ? detail.cover : '';
             if (cover) refreshedCoverUrls.add(cover);
             const patch = {
-              ...(manga.coverRefreshPending ? { coverRefreshPending: false } : {}),
+              ...(manga.coverRefreshPending && cover ? { coverRefreshPending: false } : {}),
               ...(cover && cover !== manga.cover ? { cover } : {})
             };
             if (Object.keys(patch).length) {
@@ -172,7 +181,7 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
               favoritesChanged = true;
             }
           } else {
-            detail = await api.restoreDetail(manga.url, resolvedId, savedSourceId);
+            detail = await api.restoreDetail(manga.url, resolvedId, savedSourceId, legacyLookup);
             if (!detail?.chapters?.length) {
               if (!installedSourceIds && Number(manga.chapterTotal) > 0) continue;
               detail = api.peekDetail(manga.url, resolvedId);
@@ -184,7 +193,15 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
               }
             }
           }
-          if (detail?.chapters?.length) await api.persistLibraryDetail(manga.url, resolvedId, detail, savedSourceId);
+          const persisted = detail?.chapters?.length && await api.persistLibraryDetail(manga.url, resolvedId, detail, savedSourceId);
+          if (persisted && restorationId) {
+            const job = readPendingLibraryDetails();
+            if (job?.id === restorationId && Array.isArray(job.pending)) {
+              job.pending = job.pending.filter((key) => key !== pendingLibraryDetailKey(manga));
+              if (job.pending.length) localStorage.setItem(CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY, JSON.stringify(job));
+              else localStorage.removeItem(CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY);
+            }
+          }
         } catch {
           // Keep this manga in the library; the missing detail can be retried next time.
         }
@@ -203,7 +220,8 @@ async function backfillLibraryDetails(favorites, showAdultExtensions, isActive, 
       await preloadLibraryCoversBatch([...refreshedCoverUrls], { web: true, persist: true });
     }
   } finally {
-    restoreBatchWindow();
+    restoreKomiwaHints();
+    releaseBatching();
     if (favoritesChanged) window.dispatchEvent(new Event('cytlex:library-updated'));
     if (fetchFullDetails) cloudSync.setRestoreProgress(null);
   }
@@ -214,7 +232,12 @@ function startLibraryDetailBackfill() {
     libraryDetailBackfillPromise = (async () => {
       while (pendingLibraryDetailBackfills.length) {
         const nextJob = pendingLibraryDetailBackfills.shift();
-        await backfillLibraryDetails(nextJob.favorites, nextJob.showAdultExtensions, nextJob.isActive, nextJob.installedSourceIds, nextJob.fetchFullDetails);
+        activeLibraryDetailBackfill = nextJob;
+        try {
+          await backfillLibraryDetails(nextJob.favorites, nextJob.showAdultExtensions, nextJob.isActive, nextJob.installedSourceIds, nextJob.fetchFullDetails, nextJob.restorationId);
+        } finally {
+          activeLibraryDetailBackfill = null;
+        }
       }
     })().finally(() => {
       libraryDetailBackfillPromise = null;
@@ -223,8 +246,9 @@ function startLibraryDetailBackfill() {
   }
 }
 
-function queueLibraryDetailBackfill(favorites, showAdultExtensions, isActive, installedSourceIds = null, fetchFullDetails = false) {
-  const queuedJob = pendingLibraryDetailBackfills.find((queued) => Boolean(queued.installedSourceIds) === Boolean(installedSourceIds));
+function queueLibraryDetailBackfill(favorites, showAdultExtensions, isActive, installedSourceIds = null, fetchFullDetails = false, restorationId = '') {
+  if (restorationId && activeLibraryDetailBackfill?.restorationId === restorationId) return;
+  const queuedJob = pendingLibraryDetailBackfills.find((queued) => queued.restorationId === restorationId && Boolean(queued.installedSourceIds) === Boolean(installedSourceIds));
   if (queuedJob) {
     const mergedFavorites = new Map(queuedJob.favorites.map((manga) => [`${sourceIdFor(manga)}|${manga.url}`, manga]));
     favorites.forEach((manga) => mergedFavorites.set(`${sourceIdFor(manga)}|${manga.url}`, manga));
@@ -242,7 +266,8 @@ function queueLibraryDetailBackfill(favorites, showAdultExtensions, isActive, in
       showAdultExtensions,
       isActive,
       installedSourceIds: installedSourceIds ? new Set(installedSourceIds) : null,
-      fetchFullDetails
+      fetchFullDetails,
+      restorationId
     });
   }
   startLibraryDetailBackfill();
@@ -370,13 +395,18 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
       const availableForActions = toolbarRow.clientWidth - padding - reservedCategoryWidth - gap;
       const actionGap = Number.parseFloat(getComputedStyle(actions).columnGap) || 0;
       const preferredSearchWidth = Number.parseFloat(px(280, scale, 240));
-      const selectedCategory = visibleCats.find((category) => category.id === visibleSel);
-      const name = selectedCategory?.name === 'Todos' && selectedCategory?.id === 'todos' ? t('Todos') : selectedCategory?.name || t('Biblioteca');
-      const placeholder = t('Buscar en {category}', { category: truncateCategoryName(name, 10) });
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      if (context) context.font = getComputedStyle(sortButton).font;
-      const minSearchWidth = Math.max(Number.parseFloat(px(140, scale, 120)), Math.ceil(context?.measureText(placeholder).width || 0) + Number.parseFloat(px(12, scale, 9)) + Number.parseFloat(px(40, scale, 34)) + 4);
+      const context = document.createElement('canvas').getContext('2d');
+      if (context) context.font = `${fontPx(14, scale)} ${getComputedStyle(toolbarRow).fontFamily}`;
+      const placeholderWidth = Math.max(0, ...visibleCats.map((category) => {
+        const name = category.id === 'todos' && category.name === 'Todos' ? t('Todos') : category.name;
+        const placeholder = t('Buscar en {category}', { category: truncateCategoryName(name || t('Biblioteca'), 10) });
+        return context?.measureText(placeholder).width || 0;
+      }));
+      const minSearchWidth = Math.max(
+        Number.parseFloat(px(140, scale, 120)),
+        Math.ceil(placeholderWidth)
+          + Number.parseFloat(px(12, scale, 9)) + Number.parseFloat(px(40, scale, 34)) + 4
+      );
       const updatesCompactWidth = updatesButton?.getBoundingClientRect().height || 0;
       const searchIconWidth = Number.parseFloat(px(32, scale, 26));
       const categorySpace = toolbarRow.clientWidth - padding - gap - sortWidth - updatesCompactWidth - searchIconWidth - actionGap * 2;
@@ -388,9 +418,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
       const updatesWidth = nextCompactUpdates ? updatesCompactWidth : fullUpdatesWidth;
       const availableForSearch = availableForActions - sortWidth - updatesWidth - (actionGap * 2);
       setCompactLibraryUpdates(nextCompactUpdates);
-      setCompactLibrarySearch((compact) => compact
-        ? availableForSearch < minSearchWidth + 8
-        : availableForSearch < minSearchWidth);
+      setCompactLibrarySearch(availableForSearch < minSearchWidth);
     };
 
     const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
@@ -401,7 +429,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
       observer?.disconnect();
       window.removeEventListener('resize', update);
     };
-  }, [active, visibleCats, visibleSel, scale, checking, checkProgress.current, checkProgress.total, compactLibraryUpdates]);
+  }, [active, visibleCats, visibleSel, scale, language, checking, checkProgress.current, checkProgress.total, compactLibraryUpdates]);
 
   const toggleLibrarySearch = () => {
     const nextOpen = !librarySearchOpen;
@@ -474,15 +502,34 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
       if (tutorialPreview) return;
       const sourceIds = new Set(event.detail?.sourceIds || []);
       if (!sourceIds.size) return;
-      const favorites = lib.favs().filter((manga) => sourceIds.has(sourceIdFor(manga)));
+      if (readPendingLibraryDetails()) {
+        if (cloudSync.getState().restoreProgress?.label !== 'Preparando las portadas') backfillSyncedLibrary();
+        return;
+      }
+      const pending = new Set(readPendingLibraryDetails()?.pending || []);
+      const favorites = lib.favs().filter((manga) => sourceIds.has(sourceIdFor(manga)) && !pending.has(pendingLibraryDetailKey(manga)));
       if (favorites.length) queueLibraryDetailBackfill(favorites, settings.get().showAdultExtensions, () => true, sourceIds);
     };
     const backfillSyncedLibrary = () => {
-      if (tutorialPreview || localStorage.getItem(CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY) !== '1') return;
-      localStorage.removeItem(CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY);
-      const favorites = lib.favs();
+      if (tutorialPreview) return;
+      const job = readPendingLibraryDetails();
+      if (!job) return;
+      const allFavorites = lib.favs();
+      if (!job.pending) {
+        job.pending = allFavorites.map(pendingLibraryDetailKey);
+        try { localStorage.setItem(CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY, JSON.stringify(job)); } catch { return; }
+      }
+      const currentKeys = new Set(allFavorites.map(pendingLibraryDetailKey));
+      const remaining = job.pending.filter((key) => currentKeys.has(key));
+      if (remaining.length !== job.pending.length) {
+        job.pending = remaining;
+        try { localStorage.setItem(CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY, JSON.stringify(job)); } catch { return; }
+      }
+      const keys = new Set(job.pending);
+      const favorites = allFavorites.filter((manga) => keys.has(pendingLibraryDetailKey(manga)));
+      if (!favorites.length) { localStorage.removeItem(CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY); return; }
       const sourceIds = new Set(favorites.map(sourceIdFor).filter(Boolean));
-      if (favorites.length) queueLibraryDetailBackfill(favorites, settings.get().showAdultExtensions, () => true, sourceIds, true);
+      queueLibraryDetailBackfill(favorites, settings.get().showAdultExtensions, () => readPendingLibraryDetails()?.id === job.id, sourceIds, true, job.id);
     };
     const reloadLibraryOnUpdate = () => {
       const latest = lib.favs();
@@ -491,13 +538,13 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
     window.addEventListener(EXTENSION_INSTALLED_EVENT, backfillInstalledSources);
     window.addEventListener(CLOUD_SYNC_DETAILS_BACKFILL_EVENT, backfillSyncedLibrary);
     window.addEventListener('cytlex:library-updated', reloadLibraryOnUpdate);
-    backfillSyncedLibrary();
+    if (active) backfillSyncedLibrary();
     return () => {
       window.removeEventListener(EXTENSION_INSTALLED_EVENT, backfillInstalledSources);
       window.removeEventListener(CLOUD_SYNC_DETAILS_BACKFILL_EVENT, backfillSyncedLibrary);
       window.removeEventListener('cytlex:library-updated', reloadLibraryOnUpdate);
     };
-  }, [tutorialPreview]);
+  }, [tutorialPreview, active]);
   useEffect(() => {
     const updates = [];
     const reassigned = new Set();

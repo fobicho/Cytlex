@@ -208,7 +208,25 @@ export const api = {
     return detailCache.get(detailKey(url, sourceId))?.value || null;
   },
 
-  async restoreDetail(url, sourceId, favoriteSourceId = sourceId) {
+  createLegacyDetailLookup() {
+    let libraryEntries;
+    let detailEntries;
+    const indexEntries = (entries, maxAge = Infinity) => {
+      const index = new Map();
+      entries.forEach((entry) => {
+        const identity = libraryDetailIdentity(entry.key);
+        const age = Date.now() - entry.at;
+        if (identity && entry.value?.chapters?.length && (maxAge === Infinity || (age >= 0 && age <= maxAge)) && !index.has(identity)) index.set(identity, entry);
+      });
+      return index;
+    };
+    return {
+      library: () => libraryEntries ??= listSourceCache('library-details').then(indexEntries),
+      details: () => detailEntries ??= listSourceCache('details').then((entries) => indexEntries(entries, DETAIL_TTL_MS))
+    };
+  },
+
+  async restoreDetail(url, sourceId, favoriteSourceId = sourceId, legacyLookup = null) {
     const key = detailKey(url, sourceId);
     const restore = (value) => {
       if (!value?.chapters?.length) return null;
@@ -221,21 +239,20 @@ export const api = {
       const stable = await readSourceCache('library-details', stableKey);
       if (stable?.value?.chapters?.length) return restore(stable.value);
 
-      const legacyEntries = await listSourceCache('library-details');
-      const legacy = legacyEntries.find((entry) => libraryDetailIdentity(entry.key) === `${sourceId}|${mangaSourceUrl(url, sourceId)}`
-        && entry.value?.chapters?.length);
+      const identity = `${sourceId}|${mangaSourceUrl(url, sourceId)}`;
+      const legacy = legacyLookup
+        ? (await legacyLookup.library()).get(identity)
+        : (await listSourceCache('library-details')).find((entry) => libraryDetailIdentity(entry.key) === identity && entry.value?.chapters?.length);
       if (legacy) {
         await writeSourceCache('library-details', stableKey, legacy.value, 1000);
         return restore(legacy.value);
       }
 
-      const legacyDetails = (await listSourceCache('details')).find((entry) =>
-        libraryDetailIdentity(entry.key) === `${sourceId}|${mangaSourceUrl(url, sourceId)}`
-        && entry.value?.chapters?.length
-        && Date.now() - entry.at >= 0
-        && Date.now() - entry.at <= DETAIL_TTL_MS
-      );
-      if (legacyDetails) {
+      const legacyDetails = legacyLookup
+        ? (await legacyLookup.details()).get(identity)
+        : (await listSourceCache('details')).find((entry) => libraryDetailIdentity(entry.key) === identity
+          && entry.value?.chapters?.length && Date.now() - entry.at >= 0 && Date.now() - entry.at <= DETAIL_TTL_MS);
+      if (legacyDetails && Date.now() - legacyDetails.at >= 0 && Date.now() - legacyDetails.at <= DETAIL_TTL_MS) {
         await writeSourceCache('library-details', stableKey, legacyDetails.value, 1000);
         return restore(legacyDetails.value);
       }

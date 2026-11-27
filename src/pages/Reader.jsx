@@ -161,6 +161,8 @@ function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFa
   const [srcOverride, setSrcOverride] = useState('');
   const [displaySrcFailed, setDisplaySrcFailed] = useState(false);
   const [cachedDisplaySrc, setCachedDisplaySrc] = useState(displaySrc);
+  const [nearViewport, setNearViewport] = useState(loading !== 'lazy');
+  const [imageRatio, setImageRatio] = useState('');
   const imageFallback = useRef(null);
   const autoRetried = useRef(false);
   const retrying = useRef(false);
@@ -174,6 +176,18 @@ function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFa
   const usePreload = forcePreload || browserProxyImage || (!directWebImage && browserSrc !== src);
   const imageSrc = usePreload ? (displaySrc || proxyDisplaySrc) : srcOverride || (!usingFallback && !displaySrcFailed ? cachedDisplaySrc : '')
     || (usingFallback ? (directWebImage ? fallbackSrc : browserImageUrl(fallbackSrc, imageReferer)) : (directWebImage ? src : browserSrc));
+
+  useEffect(() => {
+    if (loading !== 'lazy' || !panelRef.current || !('IntersectionObserver' in window)) {
+      setNearViewport(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      setNearViewport(entries.some((entry) => entry.isIntersecting));
+    }, { root: document.getElementById('reader-vertical-scroll'), rootMargin: '1200px 0px' });
+    observer.observe(panelRef.current);
+    return () => observer.disconnect();
+  }, [loading]);
 
   useEffect(() => () => {
     imageFallback.current?.abort();
@@ -240,6 +254,9 @@ function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFa
     imageFallback.current?.abort();
     imageFallback.current = null;
     setStatus('loaded');
+    if (imageRef.current?.naturalWidth && imageRef.current?.naturalHeight) {
+      setImageRatio(`${imageRef.current.naturalWidth} / ${imageRef.current.naturalHeight}`);
+    }
     onLoaded?.();
   }, [onLoaded]);
 
@@ -284,7 +301,7 @@ function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFa
   }, [attempt, cachedDisplaySrc, loading, src, status, usePreload, usingFallback]);
 
   return (
-    <div ref={panelRef} id={id} className={cn('relative grid place-items-center', wrapperClassName)} style={status === 'loaded' ? undefined : placeholderStyle}>
+    <div ref={panelRef} id={id} className={cn('relative grid place-items-center', wrapperClassName)} style={!nearViewport && imageRatio ? { aspectRatio: imageRatio } : status === 'loaded' ? undefined : placeholderStyle}>
       {status === 'loading' && (
         <div role="status" aria-label={`Cargando ${alt.toLowerCase()}`} className="absolute inset-0 grid place-items-center text-muted-foreground">
           <Loader2 className="h-6 w-6 animate-spin" />
@@ -326,7 +343,7 @@ function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFa
           </div>
         </div>
       )}
-      {imageSrc && <img
+      {nearViewport && imageSrc && <img
         key={usePreload ? imageSrc : attempt}
         ref={imageRef}
         src={imageSrc}
@@ -694,13 +711,18 @@ export default function Reader() {
       raf = requestAnimationFrame(() => {
         updateVerticalEnd();
         let best = 0;
-        let bestTop = -Infinity;
         const line = mainEl.getBoundingClientRect().top;
-        for (let i = 0; i < ch.pages.length; i++) {
-          const el = document.getElementById(`pg-${i}`);
-          if (!el || el.getBoundingClientRect().height <= 5) continue;
-          const top = el.getBoundingClientRect().top;
-          if (top <= line + 24 && top > bestTop) { bestTop = top; best = i; }
+        let low = 0;
+        let high = ch.pages.length - 1;
+        while (low <= high) {
+          const middle = Math.floor((low + high) / 2);
+          const el = document.getElementById(`pg-${middle}`);
+          if (el && el.getBoundingClientRect().top <= line + 24) {
+            best = middle;
+            low = middle + 1;
+          } else {
+            high = middle - 1;
+          }
         }
         setLastSeen(best);
         setPage(best);
@@ -784,7 +806,6 @@ export default function Reader() {
       let cancelled = false;
       const controller = new AbortController();
       const results = new Map();
-      const decodedImages = new Map();
       const cachedImages = new Array(pageSources.length);
       let cachedImageCount = 0;
       let cacheWritten = false;
@@ -798,7 +819,6 @@ export default function Reader() {
             URL.revokeObjectURL(objectUrl);
             return false;
           }
-          decodedImages.set(src, image);
           saveResult(src, objectUrl);
           pageSources.forEach((pageSrc, index) => {
             if (pageSrc === src && !cachedImages[index]) { cachedImages[index] = blob; cachedImageCount += 1; }
@@ -862,8 +882,20 @@ export default function Reader() {
 
       if (batchedPages.length) {
         const loadBatches = async () => {
-          for (let offset = 0; offset < batchedPages.length && !cancelled; offset += 50) {
-            const batch = batchedPages.slice(offset, offset + 50);
+          const batches = [];
+          const addBatches = (entries) => {
+            for (let offset = 0; offset < entries.length; offset += 50) batches.push(entries.slice(offset, offset + 50));
+          };
+          if (ch?.combinedImages?.length) {
+            addBatches(batchedPages.filter((entry) => entry.index < ch.combinedImages.length));
+            addBatches(batchedPages.filter((entry) => entry.index >= ch.combinedImages.length));
+          } else {
+            addBatches(batchedPages);
+          }
+          const start = batches.findIndex((batch) => batch.some((entry) => entry.index >= pageRef.current.page));
+          if (start > 0) batches.push(...batches.splice(0, start));
+          let nextBatch = 0;
+          const loadBatch = async (batch) => {
             const receiveImage = async ({ blob, error: failure }, resultIndex) => {
               const { src, index } = batch[resultIndex];
               if (cancelled || controller.signal.aborted) return;
@@ -918,7 +950,13 @@ export default function Reader() {
               }
             }
             if (!cancelled) setPreloadRevision((revision) => revision + 1);
-          }
+          };
+          await Promise.all(Array.from({ length: Math.min(2, batches.length) }, async () => {
+            while (!cancelled && nextBatch < batches.length) {
+              const batch = batches[nextBatch++];
+              await loadBatch(batch);
+            }
+          }));
         };
         void loadBatches();
       }
@@ -928,7 +966,6 @@ export default function Reader() {
         cancelled = true;
         retryPreloadedPageRef.current = null;
         controller.abort();
-        decodedImages.clear();
         for (const [src, objectUrl] of results) {
           if (preloadedPagesRef.current.get(src) === objectUrl) preloadedPagesRef.current.delete(src);
           if (typeof objectUrl === 'string') URL.revokeObjectURL(objectUrl);

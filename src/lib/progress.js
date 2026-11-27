@@ -3,28 +3,59 @@ import { notifyCloudSyncLocalChange } from './cloudSyncEvents.js';
 const KEY = 'cytlex:progress:v1';
 
 let cache = null;
+let cacheRaw;
 let revision = 0;
-
-const read = () => {
-  if (cache) return cache;
-  try { cache = JSON.parse(localStorage.getItem(KEY)) ?? {}; } catch { cache = {}; }
-  return cache;
-};
-
-const write = (data, type = 'progress') => {
-  cache = data;
-  revision += 1;
-  try { localStorage.setItem(KEY, JSON.stringify(data)); } catch {}
-  notifyCloudSyncLocalChange({ type });
-};
-
-const cap = (url, sourceId = 'leercapitulo') => `${sourceId}|${url}`;
+let baseline = {};
+const pending = new Map();
+const removed = Symbol('removed');
+let storageError = false;
 
 const listeners = new Set();
 const notify = (change) => listeners.forEach((l) => l(change));
 
+const read = () => {
+  let raw;
+  try { raw = localStorage.getItem(KEY); } catch { return cache || {}; }
+  if (!cache || raw !== cacheRaw) {
+    let stored;
+    try { stored = JSON.parse(raw) ?? {}; } catch { stored = {}; }
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) stored = {};
+    cache = { ...stored };
+    pending.forEach((value, key) => { if (value === removed) delete cache[key]; else cache[key] = value; });
+    cacheRaw = raw;
+  }
+  return cache;
+};
+const edit = () => { baseline = { ...read() }; return { ...baseline }; };
+
+const write = (data, type = 'progress') => {
+  new Set([...Object.keys(baseline), ...Object.keys(data)]).forEach((key) => {
+    if (!Object.hasOwn(data, key)) pending.set(key, removed);
+    else if (data[key] !== baseline[key]) pending.set(key, data[key]);
+  });
+  const latest = { ...read() };
+  pending.forEach((value, key) => { if (value === removed) delete latest[key]; else latest[key] = value; });
+  revision += 1;
+  try {
+    const raw = JSON.stringify(latest);
+    localStorage.setItem(KEY, raw);
+    pending.clear();
+    cache = latest;
+    cacheRaw = raw;
+    if (storageError) { storageError = false; notify({ type: 'storage-recovered' }); }
+    notifyCloudSyncLocalChange({ type });
+    return true;
+  } catch {
+    cache = latest;
+    if (!storageError) { storageError = true; notify({ type: 'storage-error' }); }
+    return false;
+  }
+};
+
+const cap = (url, sourceId = 'leercapitulo') => `${sourceId}|${url}`;
+
 function put(url, sourceId, patch, type = 'progress') {
-  const data = read();
+  const data = edit();
   const k = cap(url, sourceId);
   const current = data[k] || {};
   const next = { ...current, ...patch, updatedAt: Date.now() };
@@ -35,6 +66,11 @@ function put(url, sourceId, patch, type = 'progress') {
 
 export const progress = {
   revision: () => revision,
+  hasPendingWrites: () => pending.size > 0,
+  retry() {
+    if (!pending.size) return true;
+    return write(edit());
+  },
 
   reload() {
     cache = null;
@@ -70,7 +106,7 @@ export const progress = {
   markMany(urls, sourceId, total = null, mangaUrl = '') {
     const list = (urls || []).filter(Boolean);
     if (!list.length) return;
-    const data = read();
+    const data = edit();
     const now = Date.now();
     let changed = false;
     list.forEach((url) => {
@@ -92,7 +128,7 @@ export const progress = {
   },
 
   remove(url, sourceId, mangaUrl = '') {
-    const data = read();
+    const data = edit();
     const wasRead = data[cap(url, sourceId)]?.read;
     delete data[cap(url, sourceId)];
     write(data);
@@ -100,7 +136,7 @@ export const progress = {
   },
 
   removeMany(urls, sourceId, mangaUrl = '') {
-    const data = read();
+    const data = edit();
     let changed = false;
     let wasRead = false;
     [...new Set((urls || []).filter(Boolean))].forEach((url) => {
@@ -117,7 +153,7 @@ export const progress = {
 
   reassignSource(oldId, newId) {
     if (!oldId || !newId || oldId === newId) return;
-    const data = read();
+    const data = edit();
     const prefix = `${oldId}|`;
     let changed = false;
     for (const [key, value] of Object.entries(data)) {
@@ -133,4 +169,14 @@ export const progress = {
     }
   }
 };
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== KEY && event.key !== null) return;
+    cache = null;
+    revision += 1;
+    notify({ type: 'reset' });
+    notifyCloudSyncLocalChange({ type: 'progress' });
+  });
+}
 

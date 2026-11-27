@@ -4,7 +4,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { BookOpen, Compass, Settings as SettingsIcon } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { useI18n } from '../lib/i18n.js';
-import { exploreHomeRoute, exploreReturnRoute, libraryReturnRoute, SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
+import { exploreHomeRoute, exploreReturnRoute, libraryReturnRoute, MANGA_CATALOG_HOME_EVENT, SOURCE_CATALOG_HOME_EVENT, resetSubrouteScroll } from '../lib/searchState.js';
 
 const RESET_PAGE_EVENT = 'cytlex:reset-page';
 
@@ -98,6 +98,19 @@ export default function BrowserMobileNav({ tutorialNavOnly = false }) {
       : to === '/biblioteca' && !selected
         ? libraryReturnRoute()
       : to;
+    const searchParams = new URLSearchParams(location.search);
+    const isRegularMangaSearch = to === '/explorar'
+      && selected
+      && location.pathname === '/explorar'
+      && destination === '/explorar?tab=mangas'
+      && !searchParams.has('migrationFrom')
+      && !searchParams.has('migrationSource')
+      && !searchParams.has('migrationTargets');
+    if (isRegularMangaSearch) {
+      event.preventDefault();
+      window.dispatchEvent(new Event(MANGA_CATALOG_HOME_EVENT));
+      return;
+    }
     const libraryDetail = location.pathname === '/manga'
       && new URLSearchParams(location.search).get('from') === 'biblioteca';
     if (to === '/biblioteca' && (location.pathname === '/biblioteca' || libraryDetail)) {

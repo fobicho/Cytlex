@@ -138,15 +138,6 @@ async function fetchCatalogBatch({ id, params, page, queuedItems = [], existingI
 
   while (batch.length < CATALOG_BATCH_SIZE && queued.length) batch.push(queued.shift());
 
-  if (['leercapitulo', 'mangaoni', 'zonatmo'].includes(id) && batch.length === CATALOG_BATCH_SIZE && queuedItems.length >= CATALOG_BATCH_SIZE) {
-    await api.catalog({
-      ...params,
-      page: Math.max(1, currentPage),
-      __cytlexRequestId: requestId,
-      __cytlexForceFetch: true
-    }, id);
-  }
-
   while (batch.length < CATALOG_BATCH_SIZE && canFetchNextPage
     && pagesFetched < (id === 'komiwa' ? 1 : CATALOG_BATCH_SIZE)) {
     const startPage = currentPage + 1;
@@ -238,7 +229,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const filterPanelWidth = px(isZonaTmo ? 480 : 360, scale, 300);
   const getFilterRoot = () => filterRootRef.current;
   const preloadCatalogCovers = (mangas) =>
-    preloadLibraryCoversBatch(mangas.map((manga) => manga.cover).filter(Boolean), { web: true, bundledOnly: true });
+    preloadLibraryCoversBatch(mangas.map((manga) => manga.cover).filter(Boolean), { web: true });
 
   const selectSource = (id) => {
     sourceCatalogState.clear();

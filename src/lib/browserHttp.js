@@ -3,6 +3,15 @@ let onfCookieJar = '';
 const HTTP_GET_CACHE_TTL_MS = 20 * 1000;
 const HTTP_GET_CACHE_MAX = 160;
 const HTTP_GET_BATCH_WINDOW_MS = 250;
+let importBatchUsers = 0;
+export function beginImportRequestBatching() {
+  importBatchUsers += 1;
+  let released = false;
+  return () => {
+    if (!released) importBatchUsers -= 1;
+    released = true;
+  };
+}
 const HTTP_CATALOG_BATCH_WINDOW_MS = 500;
 const HTTP_GET_BATCH_MAX = 50;
 const PROXY_IMAGE_BATCH_WINDOW_MS = 30;
@@ -22,8 +31,8 @@ const mangaDexCatalogImages = new Map();
 const catalogRequestSources = new Map();
 const catalogSearchBatches = new Map();
 let httpGetBatchTimer;
+let activeImportProxyBatches = 0;
 let proxyImageBatchTimer;
-let httpGetBatchWindowMs = HTTP_GET_BATCH_WINDOW_MS;
 export const catalogImageKey = (value) => {
   try {
     const url = new URL(value);
@@ -181,7 +190,8 @@ export function beginCatalogSearchBatch(batchId, sourceIds) {
   catalogSearchBatches.set(batchId, {
     expected: new Set(sourceIds),
     queued: new Set(),
-    finished: new Set()
+    finished: new Set(),
+    startedAt: Date.now()
   });
 }
 
@@ -241,7 +251,7 @@ function preferDirectRequest(target, method) {
     || (method === 'POST' && target.origin === 'https://graphql.anilist.co' && target.pathname === '/');
 }
 
-async function runProxyBatch(entries) {
+async function runProxyBatch(entries, regroupOnFailure = true) {
   const resolveEntry = (entry, value) => {
     if (entry.settled) return;
     entry.settled = true;
@@ -271,23 +281,41 @@ async function runProxyBatch(entries) {
   const catalogEntries = entries.filter((entry) => entry.catalog);
 
   const catalogImageBatches = new Map();
-  const fallbackTasks = [];
-  const fallbackEntry = (entry) => fallbackTasks.push(runIndividually([entry]));
+  const fallbackTasks = new Map();
+  const requeuedEntries = new Set();
+  const fallbackEntry = (entry) => {
+    if (entry.importBatch && !entry.importRetried) {
+      entry.importRetried = true;
+      requeuedEntries.add(entry);
+      queueProxyGet(entry);
+      return;
+    }
+    if (!fallbackTasks.has(entry)) fallbackTasks.set(entry, runIndividually([entry]));
+  };
+  const finishPending = async () => {
+    await Promise.all(fallbackTasks.values());
+    const pending = entries.filter((entry) => !entry.settled && !requeuedEntries.has(entry));
+    if (regroupOnFailure && pending.length > 1) await runProxyBatch(pending, false);
+    else if (pending.length) await runIndividually(pending);
+  };
+  const releasePendingImages = () => catalogImageBatches.forEach((images) => images.forEach((image) => {
+    if (!image.done) { image.done = true; image.resolve(null); }
+    setTimeout(() => { if (mangaDexCatalogImages.get(image.imageUrl) === image.promise) mangaDexCatalogImages.delete(image.imageUrl); }, 60000);
+  }));
   try {
     const response = await fetch(searchBatchProxyUrl(), {
       method: 'POST',
       credentials: 'omit',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        streamFormat: 'binary-v1',
         requests: entries.filter((entry) => !entry.catalog).map(batchDescriptor),
         ...(catalogEntries.length ? { catalogs: catalogEntries.map((entry) => ({ url: entry.url })) } : {})
       })
     });
-    if (!response.ok || response.headers.get('x-cytlex-search-batch') !== '1' || !response.body) throw new Error('Proxy batch unavailable');
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let pendingText = '';
-    const processMessage = async (message) => {
+    const streamVersion = response.headers.get('x-cytlex-search-batch');
+    if (!response.ok || !['1', '2'].includes(streamVersion) || !response.body) throw new Error('Proxy batch unavailable');
+    const processMessage = async (message, binaryBody = null) => {
       if (!message || message.type === 'start') return;
       if (message.type === 'result') {
         const entry = entries.filter((item) => !item.catalog)[message.index];
@@ -333,6 +361,7 @@ async function runProxyBatch(entries) {
         const catalogIndex = Number(message.index) || 0;
         const entry = catalogEntries[catalogIndex];
         if (!entry || entry.settled) return;
+        if (message.upstreamError === 'subrequest-limit') { fallbackEntry(entry); return; }
         const headers = new Headers({ 'x-cytlex-proxy': '1', 'content-type': message.contentType || '' });
         if (message.errorOrigin) headers.set('x-cytlex-error-origin', message.errorOrigin);
         if (message.upstreamError) headers.set('x-cytlex-upstream-error', message.upstreamError);
@@ -361,52 +390,70 @@ async function runProxyBatch(entries) {
         if (!image || image.done) return;
         image.done = true;
         try {
-          const bytes = Uint8Array.from(atob(message.body || ''), (character) => character.charCodeAt(0));
+          const bytes = binaryBody || Uint8Array.from(atob(message.body || ''), (character) => character.charCodeAt(0));
           image.resolve(message.status === 200 && bytes.length > 0 && bytes.length <= PROXY_IMAGE_ITEM_MAX_BYTES
             ? new Blob([bytes], { type: message.contentType || '' }) : null);
         } catch { image.resolve(null); }
         return;
       }
     };
-    while (true) {
-      const { value, done: streamDone } = await reader.read();
-      pendingText += decoder.decode(value || new Uint8Array(), { stream: !streamDone });
-      let newline;
-      while ((newline = pendingText.indexOf('\n')) !== -1) {
-        const line = pendingText.slice(0, newline);
-        pendingText = pendingText.slice(newline + 1);
-        if (line) await processMessage(JSON.parse(line));
+    if (streamVersion === '2') {
+      const read = createStreamReader(response.body, 'La respuesta de búsqueda está incompleta.');
+      const decoder = new TextDecoder();
+      while (true) {
+        const prefix = await read(4, true);
+        if (!prefix) break;
+        const size = new DataView(prefix.buffer).getUint32(0);
+        if (!size || size > 64 * 1024 * 1024) throw new Error('Metadatos de búsqueda no válidos.');
+        const message = JSON.parse(decoder.decode(await read(size)));
+        let bytes = null;
+        if (message.type === 'catalog-image') {
+          if (!Number.isInteger(message.length) || message.length < 0 || message.length > PROXY_IMAGE_ITEM_MAX_BYTES) throw new Error('Portada no válida.');
+          bytes = await read(message.length);
+        }
+        await processMessage(message, bytes);
       }
-      if (streamDone) break;
+    } else {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pendingText = '';
+      while (true) {
+        const { value, done: streamDone } = await reader.read();
+        pendingText += decoder.decode(value || new Uint8Array(), { stream: !streamDone });
+        let newline;
+        while ((newline = pendingText.indexOf('\n')) !== -1) {
+          const line = pendingText.slice(0, newline);
+          pendingText = pendingText.slice(newline + 1);
+          if (line) await processMessage(JSON.parse(line));
+        }
+        if (streamDone) break;
+      }
+      if (pendingText.trim()) await processMessage(JSON.parse(pendingText));
     }
-    if (pendingText.trim()) await processMessage(JSON.parse(pendingText));
-    await Promise.all(fallbackTasks);
-    await runIndividually();
   } catch {
-    await Promise.all(fallbackTasks);
-    await runIndividually();
+    // Retry only entries that did not receive a result.
   } finally {
-    catalogImageBatches.forEach((images) => images.forEach((image) => {
-      if (!image.done) image.resolve(null);
-      setTimeout(() => { if (mangaDexCatalogImages.get(image.imageUrl) === image.promise) mangaDexCatalogImages.delete(image.imageUrl); }, 60000);
-    }));
+    releasePendingImages();
   }
+  await finishPending();
 }
 
 function flushProxyGetQueue() {
   httpGetBatchTimer = null;
+  if (!httpGetBatchQueue.length) return;
+  const oldestWait = Date.now() - (httpGetBatchQueue[0]?.queuedAt || Date.now());
   const queuedSearchBatchIds = new Set(httpGetBatchQueue.map((entry) => entry.searchBatchId).filter(Boolean));
   const waitingForSearchBatch = [...queuedSearchBatchIds].some((batchId) => {
     const batch = catalogSearchBatches.get(batchId);
-    return batch && [...batch.expected].some((id) => !batch.queued.has(id) && !batch.finished.has(id));
+    return batch && Date.now() - batch.startedAt < 1000 && [...batch.expected].some((id) => !batch.queued.has(id) && !batch.finished.has(id));
   });
-  if (waitingForSearchBatch) {
+  if (waitingForSearchBatch && oldestWait < 1000) {
     httpGetBatchTimer = setTimeout(flushProxyGetQueue, HTTP_GET_BATCH_WINDOW_MS);
     return;
   }
   const catalogCoverRequests = httpGetBatchQueue.filter((item) => item.options?.catalogCovers === true);
   const readySearchBatch = [...queuedSearchBatchIds].some((batchId) => catalogSearchBatches.has(batchId));
-  const candidates = readySearchBatch || !catalogCoverRequests.length ? httpGetBatchQueue : catalogCoverRequests;
+  const candidates = oldestWait >= 1000 || readySearchBatch || !catalogCoverRequests.length ? httpGetBatchQueue : catalogCoverRequests;
   let batchSize = 0;
   let nestedDetailCount = 0;
   while (batchSize < Math.min(candidates.length, HTTP_GET_BATCH_MAX)) {
@@ -417,6 +464,10 @@ function flushProxyGetQueue() {
     batchSize += 1;
   }
   const entries = candidates.slice(0, batchSize);
+  if (entries.some((entry) => entry.importBatch) && activeImportProxyBatches > 0
+    && batchSize + nestedDetailCount < HTTP_GET_BATCH_MAX && batchSize === candidates.length) {
+    return;
+  }
   if (catalogCoverRequests.length) {
     const selected = new Set(entries);
     for (let index = httpGetBatchQueue.length - 1; index >= 0; index -= 1) {
@@ -428,14 +479,23 @@ function flushProxyGetQueue() {
   for (const batchId of queuedSearchBatchIds) {
     if (!httpGetBatchQueue.some((entry) => entry.searchBatchId === batchId)) catalogSearchBatches.delete(batchId);
   }
-  void runProxyBatch(entries);
+  const isImportBatch = entries.some((entry) => entry.importBatch);
+  if (isImportBatch) activeImportProxyBatches += 1;
+  void runProxyBatch(entries).finally(() => {
+    if (isImportBatch) activeImportProxyBatches -= 1;
+    if (httpGetBatchQueue.length && !httpGetBatchTimer) {
+      httpGetBatchTimer = setTimeout(flushProxyGetQueue, 0);
+    }
+  });
   if (httpGetBatchQueue.length) {
-    const delay = httpGetBatchQueue.length >= HTTP_GET_BATCH_MAX ? 0 : httpGetBatchWindowMs;
+    const delay = httpGetBatchQueue.length >= HTTP_GET_BATCH_MAX ? 0 : (importBatchUsers ? 1000 : HTTP_GET_BATCH_WINDOW_MS);
     httpGetBatchTimer = setTimeout(flushProxyGetQueue, delay);
   }
 }
 
 function queueProxyGet(entry) {
+  entry.queuedAt = Date.now();
+  entry.importBatch = importBatchUsers > 0;
   const catalogRequest = entry.requestId && catalogRequestSources.get(entry.requestId);
   if (catalogRequest?.searchBatchId) {
     const batch = catalogSearchBatches.get(catalogRequest.searchBatchId);
@@ -454,17 +514,11 @@ function queueProxyGet(entry) {
     httpGetBatchTimer = setTimeout(flushProxyGetQueue, 0);
   } else {
     const hasCatalogRequest = httpGetBatchQueue.some((item) => item.catalog || item.options?.catalogCovers === true);
-    const delay = Math.max(httpGetBatchWindowMs, hasCatalogRequest ? HTTP_CATALOG_BATCH_WINDOW_MS : 0);
-    clearTimeout(httpGetBatchTimer);
-    httpGetBatchTimer = setTimeout(flushProxyGetQueue, delay);
+    const delay = Math.max(importBatchUsers ? 1000 : HTTP_GET_BATCH_WINDOW_MS, hasCatalogRequest ? HTTP_CATALOG_BATCH_WINDOW_MS : 0);
+    if (!httpGetBatchTimer) httpGetBatchTimer = setTimeout(flushProxyGetQueue, delay);
   }
 }
 
-export function setHttpGetBatchWindow(duration) {
-  const previous = httpGetBatchWindowMs;
-  httpGetBatchWindowMs = Math.max(0, Number(duration) || 0);
-  return () => { httpGetBatchWindowMs = previous; };
-}
 
 export function setKomiwaImportHints(mangas) {
   const previous = komiwaImportHints;
@@ -546,6 +600,37 @@ function abortError(signal) {
   return error;
 }
 
+function createStreamReader(body, incompleteMessage) {
+  const reader = body.getReader();
+  const chunks = [];
+  let head = 0;
+  let offset = 0;
+  let available = 0;
+  return async (size, allowEnd = false) => {
+    while (available < size) {
+      const { value, done } = await reader.read();
+      if (done) {
+        if (allowEnd && available === 0) return null;
+        throw new Error(incompleteMessage);
+      }
+      if (value?.length) { chunks.push(value); available += value.length; }
+    }
+    const result = new Uint8Array(size);
+    let written = 0;
+    while (written < size) {
+      const chunk = chunks[head];
+      const count = Math.min(size - written, chunk.length - offset);
+      result.set(chunk.subarray(offset, offset + count), written);
+      written += count;
+      offset += count;
+      available -= count;
+      if (offset === chunk.length) { chunks[head++] = null; offset = 0; }
+    }
+    if (head === chunks.length) { chunks.length = 0; head = 0; }
+    return result;
+  };
+}
+
 function settleProxyImageEntry(entry, method, value) {
   if (entry.settled) return;
   entry.settled = true;
@@ -601,21 +686,14 @@ export async function fetchImageBlobBatch(entries, signal, onResult, maxRequests
     throw Object.assign(new Error('No se pudo cargar el lote de imágenes del capítulo.'), { status: response.status });
   }
 
-  const reader = response.body.getReader();
-  let buffer = new Uint8Array();
-  const readBytes = async (size) => {
-    while (buffer.length < size) {
-      const { value, done } = await reader.read();
-      if (done) throw new Error('La respuesta del lote de imágenes está incompleta.');
-      const joined = new Uint8Array(buffer.length + value.length);
-      joined.set(buffer); joined.set(value, buffer.length); buffer = joined;
-    }
-    const result = buffer.slice(0, size);
-    buffer = buffer.slice(size);
-    return result;
-  };
+  const readBytes = createStreamReader(response.body, 'La respuesta del lote de imágenes está incompleta.');
   const seen = new Set();
+  const processing = new Set();
+  let processingError;
+  try {
   for (let count = 0; count < entries.length; count++) {
+    if (processing.size >= 4) await Promise.race(processing);
+    if (processingError) throw processingError;
     const prefix = await readBytes(4);
     const metadataLength = new DataView(prefix.buffer).getUint32(0);
     if (!metadataLength || metadataLength > 512_000) throw new Error('Metadatos de imagen no válidos.');
@@ -632,22 +710,31 @@ export async function fetchImageBlobBatch(entries, signal, onResult, maxRequests
     const denied = proxied.headers.get('x-cytlex-proxy-denied') === '1';
     const receivedCookie = proxied.headers.get('x-cytlex-onf-cookie') || '';
     if (receivedCookie) onfCookieJar = mergeCookiePairs(onfCookieJar, receivedCookie);
-    try {
-      const checked = assertProxyResponse(proxied, target, entry.url, true, denied);
-      const blob = await readImageBlob(checked);
-      if (!blob) throw new Error('La fuente no devolvió una imagen válida.');
-      await onResult({ blob, error: null }, index);
-    } catch (error) {
-      await onResult({ blob: null, error }, index);
-    }
+    const task = (async () => {
+      let result;
+      try {
+        const checked = assertProxyResponse(proxied, target, entry.url, true, denied);
+        const blob = await readImageBlob(checked);
+        if (!blob) throw new Error('La fuente no devolvió una imagen válida.');
+        result = { blob, error: null };
+      } catch (error) { result = { blob: null, error }; }
+      await onResult(result, index);
+    })().catch((error) => { processingError ||= error; }).finally(() => processing.delete(task));
+    processing.add(task);
   }
+  } finally {
+    await Promise.all(processing);
+  }
+  if (processingError) throw processingError;
 }
 
-export async function fetchSearchCoverBlobBatch(entries, signal, onResult) {
+export async function fetchSearchCoverBlobBatch(entries, signal, onResult, forceProxyUrls = null) {
   const catalogImages = [];
   const remoteImages = [];
   entries.forEach((entry, index) => {
-    const catalogImage = mangaDexCatalogImages.get(catalogImageKey(entry.url));
+    const catalogImage = forceProxyUrls?.has(entry.url)
+      ? null
+      : mangaDexCatalogImages.get(catalogImageKey(entry.url));
     if (catalogImage) catalogImages.push({ promise: catalogImage, index });
     else remoteImages.push({ ...entry, index });
   });
@@ -681,16 +768,7 @@ async function fetchCombinedChapter(url, signal, chapterType, referer = url) {
       reason: response.headers.get('x-cytlex-upstream-error') || undefined
     });
   }
-  const reader = response.body.getReader();
-  let buffer = new Uint8Array();
-  const read = async (size) => {
-    while (buffer.length < size) {
-      const { value, done } = await reader.read();
-      if (done) throw new Error('La respuesta del capítulo está incompleta.');
-      const joined = new Uint8Array(buffer.length + value.length); joined.set(buffer); joined.set(value, buffer.length); buffer = joined;
-    }
-    const result = buffer.slice(0, size); buffer = buffer.slice(size); return result;
-  };
+  const read = createStreamReader(response.body, 'La respuesta del capítulo está incompleta.');
   const metadata = async () => {
     const prefix = await read(4); const size = new DataView(prefix.buffer).getUint32(0);
     if (!size || size > (chapterType === 'achymanga' ? 3 * 1024 * 1024 : 512_000)) throw new Error('Metadatos del capítulo no válidos.');
@@ -699,7 +777,10 @@ async function fetchCombinedChapter(url, signal, chapterType, referer = url) {
   const chapter = await metadata();
   if (!Array.isArray(chapter.pages) || !chapter.pages.length || chapter.pages.length > 1000) throw new Error('Lista de páginas no válida.');
   if (chapter.imageCookie) onfCookieJar = mergeCookiePairs(onfCookieJar, chapter.imageCookie);
-  const entries = chapter.pages.slice(0, PROXY_CHAPTER_IMAGE_BATCH_MAX).map(() => {
+  const combinedImageLimit = chapterType === 'olympus'
+    ? PROXY_CHAPTER_IMAGE_BATCH_MAX - 1
+    : PROXY_CHAPTER_IMAGE_BATCH_MAX;
+  const entries = chapter.pages.slice(0, combinedImageLimit).map(() => {
     let resolve;
     const promise = new Promise((done) => { resolve = done; });
     return { promise, resolve, done: false };
@@ -778,19 +859,7 @@ export async function fetchMangaLectChapter(url, signal) {
   if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('application/vnd.cytlex.chapter-stream')) {
     throw new Error('No se pudo usar la carga combinada de MangaLect.');
   }
-  const reader = response.body.getReader();
-  let buffer = new Uint8Array();
-  const read = async (size) => {
-    while (buffer.length < size) {
-      const { value, done } = await reader.read();
-      if (done) throw new Error('La respuesta del capítulo está incompleta.');
-      const joined = new Uint8Array(buffer.length + value.length);
-      joined.set(buffer); joined.set(value, buffer.length); buffer = joined;
-    }
-    const value = buffer.slice(0, size);
-    buffer = buffer.slice(size);
-    return value;
-  };
+  const read = createStreamReader(response.body, 'La respuesta del capítulo está incompleta.');
   const metadata = async () => {
     const prefix = await read(4);
     const size = new DataView(prefix.buffer).getUint32(0);
@@ -1009,17 +1078,7 @@ function mangaDexCatalogRequest(url, options, requestId) {
 
 async function parseMangaDexCatalogResponse(response) {
   if (!response.body || !response.headers.get('content-type')?.includes('application/vnd.cytlex.catalog-stream')) throw new Error('Respuesta de catálogo no válida.');
-  const reader = response.body.getReader();
-  let buffer = new Uint8Array();
-  const read = async (size) => {
-    while (buffer.length < size) {
-      const { value, done } = await reader.read();
-      if (done) throw new Error('Respuesta de catálogo incompleta.');
-      const joined = new Uint8Array(buffer.length + value.length);
-      joined.set(buffer); joined.set(value, buffer.length); buffer = joined;
-    }
-    const value = buffer.slice(0, size); buffer = buffer.slice(size); return value;
-  };
+  const read = createStreamReader(response.body, 'Respuesta de catálogo incompleta.');
   const metadata = async () => {
     const prefix = await read(4);
     const size = new DataView(prefix.buffer).getUint32(0);
@@ -1056,17 +1115,7 @@ async function parseMangaDexCatalogResponse(response) {
 
 async function parseAchyCatalogResponse(response) {
   if (!response.body || !response.headers.get('content-type')?.includes('application/vnd.cytlex.catalog-stream')) throw new Error('Respuesta de catálogo de AchyManga no válida.');
-  const reader = response.body.getReader();
-  let buffer = new Uint8Array();
-  const read = async (size) => {
-    while (buffer.length < size) {
-      const { value, done } = await reader.read();
-      if (done) throw new Error('Respuesta de catálogo de AchyManga incompleta.');
-      const joined = new Uint8Array(buffer.length + value.length);
-      joined.set(buffer); joined.set(value, buffer.length); buffer = joined;
-    }
-    const value = buffer.slice(0, size); buffer = buffer.slice(size); return value;
-  };
+  const read = createStreamReader(response.body, 'Respuesta de catálogo de AchyManga incompleta.');
   const metadata = async () => {
     const prefix = await read(4);
     const size = new DataView(prefix.buffer).getUint32(0);

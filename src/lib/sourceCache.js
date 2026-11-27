@@ -1,22 +1,12 @@
-const stores = ['details', 'searches', 'catalog-filters', 'library-details'];
-let opening;
+import { createDatabaseOpener } from './indexedDb.js';
 
-function openCache() {
-  if (!globalThis.indexedDB) return Promise.resolve(null);
-  return opening ??= new Promise((resolve, reject) => {
-    const request = indexedDB.open('cytlex-source-cache', 3);
-    request.onupgradeneeded = () => {
-      for (const name of stores) {
-        if (!request.result.objectStoreNames.contains(name)) {
-          request.result.createObjectStore(name, { keyPath: 'key' }).createIndex('at', 'at');
-        }
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    request.onblocked = () => resolve(null);
-  });
-}
+const stores = ['details', 'searches', 'catalog-filters', 'library-details'];
+const openCache = createDatabaseOpener('cytlex-source-cache', 3, (event) => {
+  const db = event.target.result;
+  for (const name of stores) {
+    if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'key' }).createIndex('at', 'at');
+  }
+});
 
 export async function readSourceCache(name, key) {
   try {

@@ -1,4 +1,5 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import { Button } from './ui/button.jsx';
 import { Input } from './ui/input.jsx';
 import { cloudSync } from '../lib/cloudSync.js';
@@ -52,7 +53,7 @@ function ChangeSummary({ groups, t, scale }) {
             <ul className="ml-3 mt-1 min-w-0 space-y-1 text-muted-foreground">
               {group.items.map((item, index) => (
                 <li key={`${item.action}-${item.name}-${index}`}>
-                  {item.action ? `${t(item.action)}: ` : ''}{item.name}
+                  {item.action ? `${t(item.action)}: ` : ''}{group.label === 'Ajustes' ? t(item.name) : item.name}
                   {group.label !== 'Biblioteca' && item.fields?.length > 0 && <span className="text-muted-foreground"> · {item.fields.map((field) => t(FIELD_LABELS[field] || field)).join(', ')}</span>}
                 </li>
               ))}
@@ -71,17 +72,28 @@ export default function CloudSyncPanel() {
   const { t } = useI18n();
   const scale = useScale();
   const state = useSyncExternalStore(cloudSync.subscribe, cloudSync.getState, cloudSync.getState);
-  useEffect(() => () => cloudSync.cancelAccountViewSync(), []);
+  const manualSyncRef = useRef(false);
+  useEffect(() => () => {
+    if (manualSyncRef.current) cloudSync.cancelAccountViewSync();
+  }, []);
   const [mode, setMode] = useState('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [formError, setFormError] = useState('');
   const [choiceConfirmation, setChoiceConfirmation] = useState(null);
+  const [showSyncPreview, setShowSyncPreview] = useState(false);
   useEffect(() => { if (state.status !== 'needs-choice') setChoiceConfirmation(null); }, [state.status]);
   const submit = async (event) => {
     event.preventDefault();
+    if (mode === 'signup' && password !== confirmPassword) {
+      setFormError(t('Las contraseñas no coinciden.'));
+      return;
+    }
     setBusy(true);
     setMessage('');
     setFormError('');
@@ -92,6 +104,10 @@ export default function CloudSyncPanel() {
       } else {
         await cloudSync.signIn(email.trim(), password);
       }
+      setPassword('');
+      setConfirmPassword('');
+      setShowPassword(false);
+      setShowConfirmation(false);
     } catch (error) {
       setFormError(error.message?.toLowerCase() === 'invalid login credentials'
         ? t('Credenciales de inicio de sesión no válidas.')
@@ -101,6 +117,17 @@ export default function CloudSyncPanel() {
     }
   };
 
+  const changeMode = () => {
+    setMode((current) => current === 'signup' ? 'signin' : 'signup');
+    setEmail('');
+    setPassword('');
+    setConfirmPassword('');
+    setShowPassword(false);
+    setShowConfirmation(false);
+    setFormError('');
+    setMessage('');
+  };
+
   const status = t(STATUS_LABELS[state.status] || 'Estado de sincronización desconocido');
 
   return (
@@ -108,7 +135,7 @@ export default function CloudSyncPanel() {
       <div className="mb-4">
         <h2 id="cloud-sync-title" className="text-base font-semibold">{t('Cuenta y sincronización')}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          {t('Vincula una cuenta para compartir tu biblioteca, progreso, categorías y extensiones entre dispositivos.')}
+          {t('Vincula una cuenta para compartir tu biblioteca, progreso, categorías, extensiones y ajustes entre dispositivos.')}
         </p>
       </div>
 
@@ -123,54 +150,48 @@ export default function CloudSyncPanel() {
               <p className="truncate text-sm font-medium">{state.email}</p>
               <p className="mt-1 text-xs text-muted-foreground" role="status">{status}</p>
             </div>
-            <div className="ml-auto flex gap-2">
+            <div className="ml-auto flex flex-wrap justify-end gap-2">
               <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { setBusy(true); void cloudSync.signOut().catch((error) => setFormError(error.message)).finally(() => setBusy(false)); }}>
                 {t('Desconectar')}
               </Button>
-              <Button type="button" variant="outline" size="sm" disabled={busy || state.status === 'loading' || state.status === 'syncing' || state.status === 'needs-choice' || state.status === 'age-confirmation' || Boolean(state.restoreProgress)} onClick={() => { setBusy(true); void cloudSync.syncNow().catch((error) => setFormError(error.message)).finally(() => setBusy(false)); }}>
+              <Button type="button" variant="outline" size="sm" disabled={busy || state.status === 'loading' || state.status === 'syncing' || (state.status === 'needs-choice' && showSyncPreview) || state.status === 'age-confirmation' || Boolean(state.restoreProgress)} onClick={() => { manualSyncRef.current = true; setShowSyncPreview(true); setFormError(''); if (state.pendingChoice) return; setBusy(true); void cloudSync.syncNow().catch((error) => setFormError(error.message)).finally(() => setBusy(false)); }}>
                 {t('Sincronizar ahora')}
               </Button>
             </div>
           </div>
-
-          {state.status === 'local-pending' && state.localChanges?.length > 0 && (
-            <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm" role="status">
-              <p className="mb-2 text-muted-foreground">{t('Sincroniza para comparar los datos de este dispositivo con los de tu cuenta.')}</p>
-              <ChangeSummary groups={state.localChanges} t={t} scale={scale} />
-            </div>
-          )}
 
           <BackupProgress progress={state.restoreProgress} scale={scale} compact />
 
           <Dialog open={Boolean(choiceConfirmation)} onClose={() => setChoiceConfirmation(null)}
             title={choiceConfirmation === 'cloud' ? 'Cargar datos de la cuenta' : 'Guardar datos en tu cuenta'}
             description={choiceConfirmation === 'cloud'
-              ? 'La biblioteca, el progreso, las categorías y las extensiones de este dispositivo se reemplazarán con los datos de tu cuenta.'
-              : 'La biblioteca, el progreso, las categorías y las extensiones de tu cuenta se reemplazarán con los datos de este dispositivo.'}
+              ? 'La biblioteca, el progreso, las categorías, las extensiones y los ajustes de este dispositivo se reemplazarán con los datos de tu cuenta.'
+              : 'La biblioteca, el progreso, las categorías, las extensiones y los ajustes de tu cuenta se reemplazarán con los datos de este dispositivo.'}
             hideDivider bodyClassName="pb-6" scrollableBody={false} scale={scale}>
             <div className="flex flex-col-reverse justify-end gap-2 sm:flex-row">
               <Button type="button" variant="outline" onClick={() => setChoiceConfirmation(null)}>{t('Cancelar')}</Button>
               <Button type="button" onClick={() => {
                 const choice = choiceConfirmation;
                 setChoiceConfirmation(null);
+                manualSyncRef.current = false;
                 setBusy(true);
                 void cloudSync.resolveInitialChoice(choice).catch((error) => setFormError(error.message)).finally(() => setBusy(false));
               }}>{choiceConfirmation === 'cloud' ? t('Cargar datos') : t('Guardar datos')}</Button>
             </div>
           </Dialog>
 
-          {state.status === 'needs-choice' && (
+          {showSyncPreview && state.status === 'needs-choice' && state.pendingChoice && (
             <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
               <p className="text-sm font-medium">{t('Hay cambios distintos en este dispositivo y en tu cuenta')}</p>
               <ChangeSummary groups={state.pendingChoice.localChanges} t={t} scale={scale} />
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setChoiceConfirmation('cloud')}>
                   {t('Cargar datos')}
                 </Button>
                 <Button type="button" size="sm" disabled={busy} onClick={() => setChoiceConfirmation('backup')}>
                   {t('Guardar datos')}
                 </Button>
-                <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void cloudSync.resolveInitialChoice('cancel')}>
+                <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { setShowSyncPreview(false); manualSyncRef.current = false; void cloudSync.resolveInitialChoice('cancel'); }}>
                   {t('Cancelar')}
                 </Button>
               </div>
@@ -188,19 +209,35 @@ export default function CloudSyncPanel() {
         <form className="space-y-3" onSubmit={submit}>
           <label className="block space-y-1.5 text-sm">
             <span>{t('Correo electrónico')}</span>
-            <Input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
+            <Input type="email" autoComplete="email" required disabled={busy} value={email} onChange={(event) => { setEmail(event.target.value); setFormError(''); }} />
           </label>
           <label className="block space-y-1.5 text-sm">
             <span>{t('Contraseña')}</span>
-            <Input type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={6} required value={password} onChange={(event) => setPassword(event.target.value)} />
+            <span className="relative block">
+              <Input type={showPassword ? 'text' : 'password'} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={mode === 'signup' ? 6 : undefined} required disabled={busy} value={password} onChange={(event) => { setPassword(event.target.value); setFormError(''); }} className="pr-11" />
+              <button type="button" aria-label={t(showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña')} aria-pressed={showPassword} onClick={() => setShowPassword((value) => !value)} className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+                {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+              </button>
+            </span>
           </label>
-          {formError && <p className="text-sm text-destructive" role="alert">{formError}</p>}
+          {mode === 'signup' && (
+            <label className="block space-y-1.5 text-sm">
+              <span>{t('Confirmar contraseña')}</span>
+              <span className="relative block">
+                <Input type={showConfirmation ? 'text' : 'password'} autoComplete="new-password" minLength={6} required disabled={busy} value={confirmPassword} onChange={(event) => { setConfirmPassword(event.target.value); setFormError(''); }} className="pr-11" aria-invalid={!!formError && password !== confirmPassword} aria-describedby={formError ? 'cloud-auth-error' : undefined} />
+                <button type="button" aria-label={t(showConfirmation ? 'Ocultar confirmación de contraseña' : 'Mostrar confirmación de contraseña')} aria-pressed={showConfirmation} onClick={() => setShowConfirmation((value) => !value)} className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+                  {showConfirmation ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+                </button>
+              </span>
+            </label>
+          )}
+          {formError && <p id="cloud-auth-error" className="text-sm text-destructive" role="alert">{formError}</p>}
           {message && <p className="text-sm text-muted-foreground" role="status">{message}</p>}
           <div className="flex flex-row-reverse flex-wrap items-center justify-start gap-2 pt-1">
             <Button type="submit" disabled={busy}>
               {busy ? t('Conectando…') : mode === 'signup' ? t('Crear cuenta') : t('Iniciar sesión')}
             </Button>
-            <Button type="button" variant="ghost" disabled={busy} onClick={() => { setMode(mode === 'signup' ? 'signin' : 'signup'); setFormError(''); setMessage(''); }}>
+            <Button type="button" variant="ghost" disabled={busy} onClick={changeMode}>
               {mode === 'signup' ? t('Ya tengo una cuenta') : t('Crear cuenta')}
             </Button>
           </div>

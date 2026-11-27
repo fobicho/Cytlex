@@ -21,6 +21,7 @@ import { Input } from './components/ui/input.jsx';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useI18n } from './lib/i18n.js';
 import { cloudSync } from './lib/cloudSync.js';
+import { progress } from './lib/progress.js';
 import { Button } from './components/ui/button.jsx';
 import { Dialog } from './components/ui/dialog.jsx';
 
@@ -111,7 +112,7 @@ function useResetPage(onReset) {
 
 export default function App({ tutorialMode = false }) {
   const { t } = useI18n();
-  const { toast } = useToast();
+  const { toast, dismiss } = useToast();
   const [theme, setTheme] = useState(() => settings.get().theme);
   const [mode, setMode] = useState(() => resolveMode(settings.get().mode));
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -126,8 +127,29 @@ export default function App({ tutorialMode = false }) {
   const quickSearchInput = useRef(null);
   const quickSearchPanel = useRef(null);
   const pointerPosition = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+  const progressWarning = useRef(null);
 
   useEffect(() => cloudSync.start(), []);
+  useEffect(() => {
+    const warn = () => {
+      if (progressWarning.current) return;
+      progressWarning.current = toast({
+        title: 'No se pudo guardar el progreso',
+        description: 'El progreso está pendiente en esta pestaña. Libera espacio y vuelve a intentarlo.',
+        variant: 'error', duration: null,
+        action: { label: 'Reintentar', onClick: () => { progressWarning.current = null; if (!progress.retry()) warn(); } },
+        onDismiss: () => { progressWarning.current = null; }
+      });
+    };
+    if (progress.hasPendingWrites()) warn();
+    return progress.subscribe((change) => {
+      if (change.type === 'storage-error') warn();
+      else if (change.type === 'storage-recovered' && progressWarning.current) {
+        dismiss(progressWarning.current);
+        progressWarning.current = null;
+      }
+    });
+  }, [toast, dismiss]);
   const reduceMotion = useReducedMotion();
   const location = useLocation();
   const navigate = useNavigate();

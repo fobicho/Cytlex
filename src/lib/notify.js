@@ -2,7 +2,6 @@ import { api } from './api.js';
 import { lib } from './library.js';
 import { settings } from './settings.js';
 import { chapterIndex } from './chapterIndex.js';
-import { setHttpGetBatchWindow } from './browserHttp.js';
 
 const key = (url, sourceId) => `${sourceId}|${url}`;
 const CHECK_BATCH_SIZE = 50;
@@ -33,7 +32,6 @@ export async function checkLibrary({ onProgress } = {}) {
   const found = [];
   let cursor = 0;
   let completed = 0;
-  const restoreBatchWindow = setHttpGetBatchWindow(250);
 
   try {
     // Keep update checks responsive while still combining requests queued together.
@@ -60,7 +58,6 @@ export async function checkLibrary({ onProgress } = {}) {
     settings.set({ notifyBaseline: baseline });
     return found;
   } finally {
-    restoreBatchWindow();
     running = false;
   }
 }

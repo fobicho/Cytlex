@@ -6,7 +6,9 @@ import { settings } from './settings.js';
 import {
   CLOUD_SYNC_DETAILS_BACKFILL_EVENT,
   CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY,
-  CLOUD_SYNC_LOCAL_CHANGE_EVENT
+  CLOUD_SYNC_LOCAL_CHANGE_EVENT,
+  pendingLibraryDetailKey,
+  readPendingLibraryDetails
 } from './cloudSyncEvents.js';
 import { preloadLibraryCoversBatch } from './covers.js';
 
@@ -15,6 +17,11 @@ const ACCOUNT_KEY = 'cytlex:cloud-sync-account:v1';
 const BACKUP_PENDING_KEY = 'cytlex:cloud-sync-backup-pending:v1';
 const TOMBSTONES_KEY = 'cytlex:cloud-sync-tombstones:v1';
 const DEFAULT_REPOSITORY = 'https://fobicho.github.io/Cytlex/index.json';
+const SYNCED_SETTINGS = ['theme', 'mode', 'language', 'readerMode', 'readerZoom', 'readerDoublePage', 'libraryView', 'coverSize', 'libraryShowUnread', 'hideSavedManga', 'chaptersPerRow', 'sidebarCollapsed', 'extIndexUrl', 'anilistSynopsisLang', 'anilistCover'];
+const SETTINGS_LABELS = { theme: 'Tema', mode: 'Modo', language: 'Idioma', readerMode: 'Modo de lectura', readerZoom: 'Zoom del lector', readerDoublePage: 'Página doble', libraryView: 'Vista de biblioteca', coverSize: 'Tamaño de portadas', libraryShowUnread: 'Mostrar capítulos sin leer', hideSavedManga: 'Ocultar mangas guardados', chaptersPerRow: 'Capítulos por fila', sidebarCollapsed: 'Barra lateral', extIndexUrl: 'Repositorio de extensiones', anilistSynopsisLang: 'Idioma de sinopsis', anilistCover: 'Portada de AniList' };
+const syncedSettings = (value) => value && typeof value === 'object' && !Array.isArray(value)
+  ? Object.fromEntries(SYNCED_SETTINGS.filter((key) => Object.hasOwn(value, key)).map((key) => [key, value[key]]))
+  : null;
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
 const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim();
 const client = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
@@ -76,6 +83,7 @@ function localSnapshot() {
     favorites,
     categories: lib.cats(),
     progress: readJson('cytlex:progress:v1', {}),
+    settings: syncedSettings(settings.get()),
     extensions: (Array.isArray(installed) ? installed : []).map((record) => ({
       id: record?.manifest?.id,
       version: record?.installedVersion || record?.manifest?.version || '0',
@@ -92,6 +100,7 @@ function normalizeSnapshot(value) {
     favorites: Array.isArray(snapshot.favorites) ? snapshot.favorites : [],
     categories: Array.isArray(snapshot.categories) ? snapshot.categories : [{ id: 'todos', name: 'Todos' }],
     progress: snapshot.progress && typeof snapshot.progress === 'object' ? snapshot.progress : {},
+    settings: syncedSettings(snapshot.settings),
     extensions: Array.isArray(snapshot.extensions) ? snapshot.extensions.filter((item) => item?.id) : [],
     tombstones: snapshot.tombstones && typeof snapshot.tombstones === 'object'
       ? {
@@ -161,6 +170,11 @@ function summarizeSnapshotChanges(beforeValue, afterValue) {
     ['updatedAt', 'catsUpdatedAt', 'savedAt', 'coverCached', 'coverLocal', 'coverRefreshPending']);
   compareRows('Categorías', before.categories, after.categories, (category) => category.id, (category) => category.name || category.id, ['updatedAt']);
   compareRows('Extensiones', before.extensions, after.extensions, (extension) => extension.id, (extension) => extensions.manifest(extension.id).name || extension.id, ['installedAt']);
+
+  if (before.settings && after.settings) {
+    const changed = SYNCED_SETTINGS.filter((key) => stableJson(before.settings[key]) !== stableJson(after.settings[key]));
+    if (changed.length) groups.push({ label: 'Ajustes', count: changed.length, items: changed.slice(0, 6).map((key) => ({ action: 'Modificado', name: SETTINGS_LABELS[key] || key })), more: Math.max(0, changed.length - 6) });
+  }
 
   const progressKeys = new Set([...Object.keys(before.progress), ...Object.keys(after.progress)]);
   let progressChanges = 0;
@@ -244,6 +258,7 @@ function mergeSnapshots(localValue, cloudValue) {
     favorites: favoriteRows.map(([, manga]) => manga),
     categories: categoryRows.map(([, category]) => category),
     progress: Object.fromEntries(progressRows),
+    settings: cloud.settings || local.settings,
     extensions: extensionRows.map(([, extension]) => extension),
     tombstones
   };
@@ -317,13 +332,22 @@ async function fetchRemote(userId, signal) {
   return data ? { payload: normalizeSnapshot(data.payload), revision: data.revision } : null;
 }
 
+async function fetchRemoteRevision(userId) {
+  const { data, error } = await client.from(TABLE)
+    .select('revision')
+    .eq('user_id', userId)
+    .abortSignal(AbortSignal.timeout(30000))
+    .maybeSingle();
+  if (error) throw error;
+  return data?.revision || 0;
+}
+
 async function reconcileExtensions(snapshot) {
   const desired = normalizeSnapshot(snapshot).extensions;
   const targetIds = new Set(desired.map((item) => item.id));
-  const current = extensions.installed();
+  const current = extensions.syncRecords();
   if (!desired.length) {
-    await Promise.all(current.map(({ manifest }) => extensions.uninstall(manifest.id)));
-    return '';
+    return { records: [], previous: current, warning: '', installedIds: [] };
   }
 
   const repoUrl = settings.get().extIndexUrl?.trim() || DEFAULT_REPOSITORY;
@@ -331,7 +355,7 @@ async function reconcileExtensions(snapshot) {
   try {
     repository = await extensions.repoIndex(repoUrl);
   } catch (error) {
-    return `No se pudo consultar el repositorio de extensiones: ${error.message}`;
+    return { records: current, previous: current, installedIds: [], warning: `No se pudo consultar el repositorio de extensiones: ${error.message}` };
   }
 
   const blocked = [];
@@ -350,25 +374,27 @@ async function reconcileExtensions(snapshot) {
     manifests.set(item.id, manifest);
   });
 
-  const removable = current.filter(({ manifest }) => !targetIds.has(manifest.id));
-  await Promise.all(removable.map(({ manifest }) => extensions.uninstall(manifest.id)));
+  const records = current.filter(({ manifest }) => targetIds.has(manifest.id));
   const installedIds = [];
   for (const [id, manifest] of manifests) {
-    const installed = extensions.installed().find((record) => record.manifest.id === id);
+    const installed = records.find((record) => record.manifest.id === id);
     if (installed && String(installed.installedVersion || installed.manifest.version || '0') === String(manifest.version || '0')) continue;
     try {
-      await extensions.install(manifest, repoUrl, { backfillLibrary: false });
+      const prepared = await extensions.prepareSyncRecord(manifest, repoUrl);
+      const index = records.findIndex((record) => record.manifest.id === id);
+      if (index >= 0) records[index] = prepared;
+      else records.push(prepared);
       installedIds.push(id, ...(manifest.config?.sources || []).map((source) => source.id));
     } catch {
       missing.push(id);
     }
   }
 
-  if (installedIds.length) window.dispatchEvent(new CustomEvent(EXTENSION_INSTALLED_EVENT, { detail: { sourceIds: installedIds } }));
-  return [
+  const warning = [
     blocked.length ? `No se restauraron extensiones bloqueadas por los ajustes de contenido: ${blocked.join(', ')}.` : '',
     missing.length ? `No se encontraron versiones disponibles para: ${[...new Set(missing)].join(', ')}.` : ''
   ].filter(Boolean).join(' ');
+  return { records, previous: current, warning, installedIds };
 }
 
 async function confirmAdultSyncIfNeeded(snapshot) {
@@ -403,24 +429,57 @@ async function confirmAdultSyncIfNeeded(snapshot) {
   return true;
 }
 
-async function applySnapshot(value, { syncExtensions = true } = {}) {
+async function applySnapshot(value, { syncExtensions = true, expectedRevision = localChangeRevision, expectedUser = activeUserId } = {}) {
   const snapshot = normalizeSnapshot(value);
+  if (progress.hasPendingWrites()) throw new Error('Guarda primero el progreso pendiente en este dispositivo.');
+  const before = serializeSnapshot(localSnapshot());
   if (syncExtensions) await confirmAdultSyncIfNeeded(snapshot);
   updateState({ restoreProgress: snapshot.favorites.length ? { label: 'Preparando la restauración' } : null });
+  const prepared = syncExtensions ? await reconcileExtensions(snapshot) : null;
+  if (activeUserId !== expectedUser || localChangeRevision !== expectedRevision || progress.hasPendingWrites()
+    || serializeSnapshot(localSnapshot()) !== before) {
+    throw new Error('Los datos cambiaron. Sincroniza de nuevo para revisarlos.');
+  }
+  const restorationId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const writes = [
+    ['cytlex:cats:v1', JSON.stringify(snapshot.categories)],
+    ['cytlex:favs', JSON.stringify(snapshot.favorites)],
+    ['cytlex:progress:v1', JSON.stringify(snapshot.progress)],
+    ...(snapshot.settings ? [['cytlex:settings:v1', JSON.stringify({ ...settings.get(), ...snapshot.settings })]] : []),
+    [tombstonesStorageKey(), JSON.stringify(snapshot.tombstones)],
+    [ACCOUNT_KEY, expectedUser],
+    [CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY, snapshot.favorites.length
+      ? JSON.stringify({ id: restorationId, pending: [...new Set(snapshot.favorites.filter((manga) => manga?.url).map(pendingLibraryDetailKey))] })
+      : null],
+    ...(prepared ? [['cytlex:extensions:v1', JSON.stringify(prepared.records)]] : [])
+  ];
+  const previous = writes.map(([key]) => [key, localStorage.getItem(key)]);
   applying = true;
   try {
-    const warning = syncExtensions ? await reconcileExtensions(snapshot) : '';
-    localStorage.setItem('cytlex:cats:v1', JSON.stringify(snapshot.categories));
-    localStorage.setItem('cytlex:favs', JSON.stringify(snapshot.favorites));
-    localStorage.setItem('cytlex:progress:v1', JSON.stringify(snapshot.progress));
-    localStorage.setItem(tombstonesStorageKey(), JSON.stringify(snapshot.tombstones));
+    let written = 0;
+    try {
+      for (const [key, data] of writes) { if (data === null) localStorage.removeItem(key); else localStorage.setItem(key, data); written += 1; }
+    } catch (error) {
+      let rollbackFailed = false;
+      for (let index = written - 1; index >= 0; index -= 1) {
+        const [key, oldValue] = previous[index];
+        try { if (oldValue === null) localStorage.removeItem(key); else localStorage.setItem(key, oldValue); }
+        catch { rollbackFailed = true; }
+      }
+      throw new Error(rollbackFailed
+        ? 'No se pudieron aplicar ni restaurar todos los datos locales. Revisa el espacio disponible y carga la cuenta de nuevo.'
+        : 'No se pudieron guardar los datos de la cuenta en este dispositivo. Revisa el espacio disponible.');
+    }
+    if (prepared) extensions.applySyncRecords(prepared.records, prepared.previous);
+    if (snapshot.settings) settings.reload();
     progress.reload();
     window.dispatchEvent(new Event('cytlex:library-updated'));
     window.dispatchEvent(new Event('cytlex:source-config-changed'));
     lastLocalSnapshot = JSON.stringify(localSnapshot());
     updateState({ localChanges: [] });
-    void prepareSyncedLibrary(snapshot.favorites);
-    return warning;
+    void prepareSyncedLibrary(snapshot.favorites, restorationId);
+    if (prepared?.installedIds.length) window.dispatchEvent(new CustomEvent(EXTENSION_INSTALLED_EVENT, { detail: { sourceIds: prepared.installedIds } }));
+    return prepared?.warning || '';
   } finally {
     applying = false;
   }
@@ -437,18 +496,20 @@ async function preloadAccountLibraryCovers(favorites, onProgress) {
   });
 }
 
-async function prepareSyncedLibrary(favorites) {
+async function prepareSyncedLibrary(favorites, restorationId) {
   const coverCount = new Set((favorites || [])
     .map((manga) => manga?.cover)
     .filter((cover) => typeof cover === 'string' && /^https?:\/\//i.test(cover))).size;
   if (coverCount) updateState({ restoreProgress: { label: 'Preparando las portadas', current: 0, total: coverCount } });
   try {
-    await preloadAccountLibraryCovers(favorites, (restoreProgress) => updateState({ restoreProgress }));
+    await preloadAccountLibraryCovers(favorites, (restoreProgress) => {
+      if (readPendingLibraryDetails()?.id === restorationId) updateState({ restoreProgress });
+    });
   } catch {}
   if (favorites.length) {
-    try { localStorage.setItem(CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY, '1'); } catch {}
+    if (readPendingLibraryDetails()?.id !== restorationId) return;
     window.dispatchEvent(new Event(CLOUD_SYNC_DETAILS_BACKFILL_EVENT));
-    if (localStorage.getItem(CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY) === '1') updateState({ restoreProgress: null });
+    if (state.restoreProgress?.label !== 'Recuperando detalles de las fuentes') updateState({ restoreProgress: null });
   } else {
     updateState({ restoreProgress: null });
   }
@@ -501,7 +562,8 @@ async function initializeUser(user) {
     if (activeUserId !== user.id) return;
     revision = remote?.revision || 0;
     lastLocalSnapshot = JSON.stringify(local);
-    const different = remote ? serializeMeaningfulSnapshot(local) !== serializeMeaningfulSnapshot(remote.payload) : hasLocalData(local);
+    const comparableLocal = remote && !remote.payload.settings ? { ...local, settings: null } : local;
+    const different = remote ? serializeMeaningfulSnapshot(comparableLocal) !== serializeMeaningfulSnapshot(remote.payload) : hasLocalData(local);
     initialized = true;
     localChangesPending = different;
     updateState({ status: different ? 'local-pending' : 'connected', revision, localChanges: remote ? summarizeSnapshotChanges(remote.payload, local) : [] });
@@ -521,6 +583,12 @@ async function initializeUser(user) {
 
 function onLocalChange(event) {
   if (!activeUserId || (!initialized && !state.pendingChoice) || applying) return;
+  if (event.detail?.type === 'progress-page') {
+    localChangesPending = true;
+    localChangeRevision += 1;
+    updateState({ status: 'local-pending', pendingChoice: null, localChanges: [] });
+    return;
+  }
   const pendingChoice = state.pendingChoice;
   let snapshot;
   if (event.detail?.type === 'backup-import') {
@@ -553,6 +621,12 @@ function onLocalChange(event) {
   updateState({ status: 'local-pending', localChanges: summarizeSnapshotChanges(previous || {}, snapshot) });
 }
 
+function onStorageChange(event) {
+  if (event.key === null || ['cytlex:cats:v1', 'cytlex:favs', 'cytlex:extensions:v1', 'cytlex:settings:v1'].includes(event.key)) {
+    onLocalChange({ detail: { type: 'storage' } });
+  }
+}
+
 export const cloudSync = {
   getState() { return state; },
   setRestoreProgress(restoreProgress) { updateState({ restoreProgress: restoreProgress || null }); },
@@ -565,6 +639,8 @@ export const cloudSync = {
     if (!client || started) return () => {};
     started = true;
     window.addEventListener(CLOUD_SYNC_LOCAL_CHANGE_EVENT, onLocalChange);
+    window.addEventListener('cytlex:settings', onLocalChange);
+    window.addEventListener('storage', onStorageChange);
     const auth = client.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
         const user = session.user;
@@ -598,6 +674,8 @@ export const cloudSync = {
     stopAuth = () => auth.data.subscription.unsubscribe();
     return () => {
       window.removeEventListener(CLOUD_SYNC_LOCAL_CHANGE_EVENT, onLocalChange);
+      window.removeEventListener('cytlex:settings', onLocalChange);
+      window.removeEventListener('storage', onStorageChange);
       stopAuth?.();
       stopAuth = null;
       started = false;
@@ -685,9 +763,9 @@ export const cloudSync = {
     const userId = activeUserId;
     updateState({ status: 'syncing', pendingChoice: null, error: '' });
     try {
-      const current = await fetchRemote(userId);
+      const currentRevision = await fetchRemoteRevision(userId);
       if (activeUserId !== userId) return;
-      if ((current?.revision || 0) !== pending.remote.revision || localChangeRevision !== pending.localRevision) {
+      if (currentRevision !== pending.remote.revision || localChangeRevision !== pending.localRevision) {
         updateState({ status: 'local-pending', error: 'Los datos cambiaron. Sincroniza de nuevo para revisarlos.' });
         return;
       }
@@ -699,7 +777,7 @@ export const cloudSync = {
         revision = await writeRemote(pending.local, pending.remote.revision);
         lastLocalSnapshot = JSON.stringify(pending.local);
       } else return;
-      localStorage.setItem(ACCOUNT_KEY, userId);
+      if (choice !== 'cloud') localStorage.setItem(ACCOUNT_KEY, userId);
       initialized = true;
       localChangesPending = localChangeRevision !== pending.localRevision;
       backupImportPending = false;

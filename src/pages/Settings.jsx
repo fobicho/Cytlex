@@ -28,13 +28,22 @@ import { Input } from '../components/ui/input.jsx';
 import { cn } from '../lib/utils.js';
 import { useScale, px, fontPx } from '../lib/useScale.js';
 import { clearPersistentLibraryCoverCache, invalidateLibraryCovers, persistAvailableLibraryCover, preloadLibraryCoversBatch, protectLibraryCovers } from '../lib/covers.js';
-import { browserImageUrl, setHttpGetBatchWindow, setKomiwaImportHints } from '../lib/browserHttp.js';
+import { beginImportRequestBatching, browserImageUrl, setKomiwaImportHints } from '../lib/browserHttp.js';
 import { clearSourceCache } from '../lib/sourceCache.js';
 import { clearRecentChapters } from '../lib/recentChapters.js';
 import SubrouteTabLabel from '../components/SubrouteTabLabel.jsx';
 import { attachHorizontalScrollFade } from '../lib/horizontalScrollFade.js';
 import CloudSyncPanel from '../components/CloudSyncPanel.jsx';
 import { cloudSync } from '../lib/cloudSync.js';
+
+let importedEnrichmentQueue = Promise.resolve();
+
+function scheduleImportedEnrichment(task) {
+  importedEnrichmentQueue = importedEnrichmentQueue
+    .catch(() => {})
+    .then(task);
+  return importedEnrichmentQueue;
+}
 
 function clearLibraryUnreadCache() {
   localStorage.removeItem('cytlex:libraryUnread:v1');
@@ -108,10 +117,11 @@ function importedSourceId(manga) {
 }
 
 async function prepareImportedDetails(mangas) {
+  const legacyLookup = api.createLegacyDetailLookup();
   const rows = await Promise.all(mangas.map(async (manga) => {
     const sourceId = importedSourceId(manga);
     try {
-      return { manga, sourceId, cached: await api.restoreDetail(manga.url, sourceId, manga.sourceId || 'leercapitulo') };
+      return { manga, sourceId, cached: await api.restoreDetail(manga.url, sourceId, manga.sourceId || 'leercapitulo', legacyLookup) };
     } catch (error) {
       return { manga, sourceId, error };
     }
@@ -124,9 +134,8 @@ async function prepareImportedDetails(mangas) {
   return rows;
 }
 
-async function cacheImportedLibraryDetails(mangas, onProgress, persistedCoverUrls = new Set()) {
+async function cacheImportedLibraryDetails(mangas, onProgress) {
   let failed = 0;
-  const mangadexCoversToPersist = new Map();
   const allowedMangas = allowedImportedMangas(mangas).filter((manga) => {
     const sourceId = importedSourceId(manga);
     const manifest = extensions.manifest(sourceId);
@@ -134,13 +143,14 @@ async function cacheImportedLibraryDetails(mangas, onProgress, persistedCoverUrl
   });
   let next = 0;
   let current = 0;
-  const restoreBatchWindow = setHttpGetBatchWindow(allowedMangas.length > 1 ? 500 : 0);
+  const releaseBatching = beginImportRequestBatching();
   const restoreKomiwaHints = setKomiwaImportHints(allowedMangas);
   try {
     const prepared = await prepareImportedDetails(allowedMangas);
     await Promise.all(Array.from({ length: Math.min(50, prepared.length) }, async () => {
       while (next < prepared.length) {
-        const { manga, sourceId: resolvedId, cached, error } = prepared[next++];
+        const row = prepared[next++];
+        const { manga, sourceId: resolvedId, cached, error } = row;
         const savedSourceId = manga?.sourceId || 'leercapitulo';
         try {
           if (error) throw error;
@@ -190,27 +200,16 @@ async function cacheImportedLibraryDetails(mangas, onProgress, persistedCoverUrl
             && isMangaCover(detail?.cover, detailUrl)) {
             lib.updateFav(detailUrl, { cover: detail.cover }, savedSourceId);
           }
-          if (['mangadex', 'mangadex-en'].includes(resolvedId)
-            && isMangaCover(detail?.cover, detailUrl)
-            && needsPersistentImportedCover(detail.cover)
-            && !persistedCoverUrls.has(detail.cover)) {
-            mangadexCoversToPersist.set(detailUrl, { ...manga, url: detailUrl, cover: detail.cover, coverLocal: '', coverCached: '' });
-          }
           if (!detail?.chapters?.length || !(await api.persistLibraryDetail(detailUrl, resolvedId, detail, savedSourceId))) failed += 1;
         } catch { failed += 1; }
         current += 1;
         onProgress?.({ label: 'Recuperando detalles de las fuentes', current, total: allowedMangas.length, currentLabel: manga?.title || 'Manga' });
       }
     }));
-    let coverFailedUrls = new Set();
-    if (mangadexCoversToPersist.size) {
-      const covers = await preloadImportedCovers([...mangadexCoversToPersist.values()], onProgress);
-      coverFailedUrls = covers.failedUrls;
-    }
-    return { failed, coverFailedUrls };
+    return { failed };
   } finally {
     restoreKomiwaHints();
-    restoreBatchWindow();
+    releaseBatching();
   }
 }
 
@@ -224,13 +223,14 @@ async function refreshImportedMihonDetails(mangas, onProgress) {
   const attempted = [];
   let next = 0;
   let current = 0;
-  const restoreBatchWindow = setHttpGetBatchWindow(rows.length > 1 ? 500 : 0);
+  const releaseBatching = beginImportRequestBatching();
   const restoreKomiwaHints = setKomiwaImportHints(rows);
   try {
     const prepared = await prepareImportedDetails(rows);
     await Promise.all(Array.from({ length: Math.min(50, prepared.length) }, async () => {
       while (next < prepared.length) {
-        const { manga, sourceId, cached, error } = prepared[next++];
+        const row = prepared[next++];
+        const { manga, sourceId, cached, error } = row;
         attempted.push(manga);
         try {
           if (error) throw error;
@@ -265,9 +265,72 @@ async function refreshImportedMihonDetails(mangas, onProgress) {
     }));
   } finally {
     restoreKomiwaHints();
-    restoreBatchWindow();
+    releaseBatching();
   }
   return { results, attempted };
+}
+
+async function enrichImportedMihon(mangas, backupCovers, onProgress) {
+  const { results, attempted } = await refreshImportedMihonDetails(mangas, onProgress);
+  const refreshedKeys = new Set();
+  for (const { manga, sourceId, detail, detailUrl } of results) {
+    const savedSourceId = manga.sourceId || sourceId;
+    const favorite = lib.fav(manga.url, savedSourceId);
+    if (!favorite) continue;
+    if (detailUrl !== favorite.url) {
+      const backupCover = backupCovers.get(`${savedSourceId}|${favorite.url}`);
+      lib.updateFav(favorite.url, { url: detailUrl }, savedSourceId);
+      if (backupCover) backupCovers.set(`${savedSourceId}|${detailUrl}`, backupCover);
+      tracking.move(favorite.url, detailUrl, savedSourceId);
+      chapterOrder.move(favorite.url, detailUrl);
+      chapterIndex.drop(favorite.url, savedSourceId);
+      manga.url = detailUrl;
+      favorite.url = detailUrl;
+    }
+    const detailCoverValid = /^https?:\/\//i.test(detail.cover || '') && isMangaCover(detail.cover, favorite.url);
+    lib.updateFav(favorite.url, {
+      coverRefreshPending: false,
+      ...(detailCoverValid && detail.cover !== favorite.cover ? { cover: detail.cover } : {})
+    }, savedSourceId);
+    refreshedKeys.add(`${savedSourceId}|${favorite.url}`);
+    if (detail.chapters?.length) await api.persistLibraryDetail(favorite.url, sourceId, detail, savedSourceId);
+  }
+  for (const manga of attempted) {
+    const savedSourceId = manga.sourceId || 'leercapitulo';
+    const favorite = lib.fav(manga.url, savedSourceId);
+    const key = `${savedSourceId}|${favorite?.url || manga.url}`;
+    if (favorite && !refreshedKeys.has(key)) lib.updateFav(favorite.url, { coverRefreshPending: false }, savedSourceId);
+  }
+
+  const favorites = mangas.map((manga) => lib.fav(manga.url, manga.sourceId || 'leercapitulo')).filter(Boolean);
+  const releaseProtection = protectLibraryCovers(favorites.map((manga) => manga?.cover));
+  try {
+    const coverFavorites = favorites.filter((manga) => {
+      const manifest = extensions.manifest(importedSourceId(manga));
+      return (isUnresolvedMihonSource(manga.sourceId) && !manifest?.contentWarning)
+        || isExtensionAllowed(manifest, settings.get().showAdultExtensions);
+    });
+    const { failedUrls, persistedUrls: initiallyPersistedUrls } = await preloadImportedCovers(coverFavorites, onProgress);
+    const fallbackFavorites = [];
+    for (const manga of coverFavorites) {
+      if (!failedUrls.has(manga.cover)) continue;
+      const backupCover = backupCovers.get(`${manga.sourceId || 'leercapitulo'}|${manga.url}`);
+      if (!backupCover || backupCover === manga.cover || !isMangaCover(backupCover, manga.url)) continue;
+      lib.updateFav(manga.url, { cover: backupCover }, manga.sourceId || 'leercapitulo');
+      fallbackFavorites.push(lib.fav(manga.url, manga.sourceId || 'leercapitulo'));
+    }
+    const fallback = fallbackFavorites.length ? await preloadImportedCovers(fallbackFavorites, onProgress) : { persistedUrls: new Set() };
+    const persistedUrls = new Set([...initiallyPersistedUrls, ...fallback.persistedUrls]);
+    for (const manga of favorites) {
+      const current = lib.fav(manga.url, manga.sourceId || 'leercapitulo');
+      if (current && persistedUrls.has(current.cover) && (current.coverLocal || current.coverCached)) {
+        lib.updateFav(current.url, { coverLocal: '', coverCached: '' }, current.sourceId || 'leercapitulo');
+      }
+    }
+    window.dispatchEvent(new Event('cytlex:library-updated'));
+  } finally {
+    releaseProtection();
+  }
 }
 
 function throwIfAborted(signal) {
@@ -511,7 +574,7 @@ const sortByName = (items, getName = (item) => item?.name || '') => [...items].s
 
 let sessionSeccion = '';
 
-export default function Settings({ tutorialPreview = false, tutorialImportControls = null, onTutorialImportBusyChange = null, onTutorialImportProgressChange = null }) {
+export default function Settings({ tutorialPreview = false, tutorialImportControls = null, onTutorialImportBusyChange = null, onTutorialImportProgressChange = null, onTutorialImportResult = null }) {
   const { language, t } = useI18n();
   const location = useLocation();
   const [s, setS] = useState(settings.get());
@@ -890,7 +953,6 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       toast({ title: 'No se pudo importar el respaldo', description: error.message, variant: 'error' });
     } finally {
       setBackupBusy(false);
-      setBackupProgress(null);
     }
   };
 
@@ -903,6 +965,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       throw new Error(`Instala estas extensiones antes de restaurar: ${uninstalled.map(({ name, id }) => name || id).join(', ')}.`);
     }
     activeImportRef.current = true;
+    onTutorialImportResult?.(null);
     setTutorialImportApplying(true);
     setBackupBusy(true);
     let releaseCoverProtection = () => {};
@@ -917,18 +980,6 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       } catch {}
       const coversToPersist = new Set(favorites.map((manga) => manga?.cover).filter(needsPersistentImportedCover));
       releaseCoverProtection = protectLibraryCovers([...coversToPersist]);
-      if (coversToPersist.size) {
-        setBackupProgress({ label: 'Preparando las portadas', current: 0, total: coversToPersist.size });
-      }
-      const { failedUrls: initiallyFailedCoverUrls, persistedUrls: proxiedCovers } = await preloadImportedCovers(favorites, setBackupProgress);
-      if (proxiedCovers.size) {
-        data = {
-          ...data,
-          'cytlex:favs': JSON.stringify(favorites.map((manga) => proxiedCovers.has(manga?.cover)
-            ? { ...manga, coverLocal: '', coverCached: '' }
-            : manga))
-        };
-      }
       setBackupProgress({ label: 'Guardando tu biblioteca' });
       try {
         const importedSettings = JSON.parse(data['cytlex:settings:v1'] || '{}');
@@ -948,29 +999,39 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       chapterIndex.reload();
       tracking.reload();
       clearLibraryUnreadCache();
-      setBackupProgress({ label: 'Recuperando detalles de las fuentes', current: 0, total: favorites.length });
-      const detailResults = favorites.length
-        ? await cacheImportedLibraryDetails(favorites, setBackupProgress, proxiedCovers)
-        : { failed: 0, coverFailedUrls: new Set() };
-      const currentFavoriteCovers = new Set(lib.favs().map((manga) => manga?.cover).filter(Boolean));
-      const coverFailedUrls = new Set([...initiallyFailedCoverUrls].filter((url) => currentFavoriteCovers.has(url)));
-      detailResults.coverFailedUrls.forEach((url) => coverFailedUrls.add(url));
-      const coverFailures = coverFailedUrls.size;
       setBackupCandidate(null);
       setBackupInstallOpen(false);
       setBackupReviewOpen(false);
       setBackupMissingSources([]);
       setBackupUnavailableSources([]);
       setBackupInstallManifests([]);
-      setBackupProgress(null);
       setCats(lib.cats());
       window.dispatchEvent(new Event('cytlex:library-updated'));
-      toast({
+      const releaseBackgroundCoverProtection = releaseCoverProtection;
+      releaseCoverProtection = () => {};
+      await scheduleImportedEnrichment(async () => {
+        try {
+          await cacheImportedLibraryDetails(favorites, setBackupProgress);
+          const currentFavorites = lib.favs();
+          const { persistedUrls } = await preloadImportedCovers(currentFavorites, setBackupProgress);
+          currentFavorites.forEach((manga) => {
+            if (persistedUrls.has(manga?.cover) && (manga.coverLocal || manga.coverCached)) {
+              lib.updateFav(manga.url, { coverLocal: '', coverCached: '' }, manga.sourceId || 'leercapitulo');
+            }
+          });
+          window.dispatchEvent(new Event('cytlex:library-updated'));
+        } finally {
+          releaseBackgroundCoverProtection();
+        }
+      });
+      if (!tutorialImportControls) toast({
         title: 'Respaldo restaurado',
-        description: `${t('Los datos se aplicaron correctamente')}${coverFailures ? `; ${t('{count} portadas no pudieron guardarse', { count: coverFailures })}` : ''}${detailResults.failed ? `; ${t('No se pudo guardar la información de {count} mangas', { count: detailResults.failed })}` : ''}.`,
+        description: `${t('Los datos se aplicaron correctamente')}.`,
         variant: 'success'
       });
+      onTutorialImportResult?.('complete');
     } catch (error) {
+      onTutorialImportResult?.('error');
       toast({ title: 'No se pudo restaurar el respaldo', description: error.message, variant: 'error' });
     } finally {
       releaseCoverProtection();
@@ -1212,10 +1273,10 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
     if (blockedEntries.length) return;
     if (activeImportRef.current) return;
     activeImportRef.current = true;
+    onTutorialImportResult?.(null);
     setTutorialImportApplying(true);
     setMihonBusy(true);
     let releaseCoverProtection = () => {};
-    let releaseFinalCoverProtection = () => {};
     try {
       const failedSourceIds = new Set(failedInstalls.map(({ id }) => id));
       const omitted = new Set([
@@ -1245,70 +1306,12 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
         const favorite = lib.fav(manga.url, manga.sourceId || 'leercapitulo');
         return [`${manga.sourceId || 'leercapitulo'}|${manga.url}`, favorite?.cover || ''];
       }));
-      setMihonProgress({ label: 'Recuperando detalles de las fuentes', current: 0, total: importedFavorites.length });
-      const { results: refreshedDetails, attempted } = await refreshImportedMihonDetails(importedFavorites, setMihonProgress);
-      const detailFailures = attempted.length - refreshedDetails.filter(({ detail }) => detail?.chapters?.length).length;
-      const refreshedFavoriteKeys = new Set();
-      for (const { manga, sourceId, detail, detailUrl } of refreshedDetails) {
-        const savedSourceId = manga.sourceId || sourceId;
-        const favorite = lib.fav(manga.url, savedSourceId);
-        if (!favorite) continue;
-        if (detailUrl !== favorite.url) {
-          lib.updateFav(favorite.url, { url: detailUrl }, savedSourceId);
-          tracking.move(favorite.url, detailUrl, savedSourceId);
-          chapterOrder.move(favorite.url, detailUrl);
-          chapterIndex.drop(favorite.url, savedSourceId);
-          manga.url = detailUrl;
-          favorite.url = detailUrl;
-        }
-        const detailCoverValid = /^https?:\/\//i.test(detail.cover || '') && isMangaCover(detail.cover, favorite.url);
-        lib.updateFav(favorite.url, {
-          coverRefreshPending: false,
-          ...(detailCoverValid && detail.cover !== favorite.cover ? { cover: detail.cover } : {})
-        }, savedSourceId);
-        refreshedFavoriteKeys.add(`${savedSourceId}|${favorite.url}`);
-        if (detail.chapters?.length) {
-          await api.persistLibraryDetail(favorite.url, sourceId, detail, savedSourceId);
-        }
-      }
-      for (const manga of attempted) {
-        const savedSourceId = manga.sourceId || 'leercapitulo';
-        const favorite = lib.fav(manga.url, savedSourceId);
-        const key = `${savedSourceId}|${favorite?.url || manga.url}`;
-        if (favorite && !refreshedFavoriteKeys.has(key)) {
-          lib.updateFav(favorite.url, { coverRefreshPending: false }, savedSourceId);
-        }
-      }
-      const finalFavorites = importedFavorites.map((manga) => lib.fav(manga.url, manga.sourceId || 'leercapitulo')).filter(Boolean);
-      const finalCoverUrls = finalFavorites.map((manga) => manga?.cover);
-      releaseFinalCoverProtection = protectLibraryCovers(finalCoverUrls);
-      const coverFavorites = finalFavorites.filter((manga) => {
-        const manifest = extensions.manifest(importedSourceId(manga));
-        return (isUnresolvedMihonSource(manga.sourceId) && !manifest?.contentWarning)
-          || isExtensionAllowed(manifest, settings.get().showAdultExtensions);
+      const releaseBackgroundCoverProtection = releaseCoverProtection;
+      releaseCoverProtection = () => {};
+      await scheduleImportedEnrichment(async () => {
+        try { await enrichImportedMihon(importedFavorites, backupCovers, setMihonProgress); }
+        finally { releaseBackgroundCoverProtection(); }
       });
-      const totalCovers = new Set(coverFavorites.map((manga) => manga.cover).filter(needsPersistentImportedCover)).size;
-      setMihonProgress({ label: 'Guardando las portadas', current: 0, total: totalCovers });
-      const { failedUrls: initialCoverFailures, persistedUrls: initiallyPersistedUrls } = await preloadImportedCovers(coverFavorites, setMihonProgress);
-      const fallbackFavorites = [];
-      for (const manga of coverFavorites) {
-        if (!initialCoverFailures.has(manga.cover)) continue;
-        const backupCover = backupCovers.get(`${manga.sourceId || 'leercapitulo'}|${manga.url}`);
-        if (!backupCover || backupCover === manga.cover || !isMangaCover(backupCover, manga.url)) continue;
-        lib.updateFav(manga.url, { cover: backupCover }, manga.sourceId || 'leercapitulo');
-        fallbackFavorites.push(lib.fav(manga.url, manga.sourceId || 'leercapitulo'));
-      }
-      const fallbackResult = fallbackFavorites.length
-        ? await preloadImportedCovers(fallbackFavorites, setMihonProgress)
-        : { failedUrls: new Set(), persistedUrls: new Set() };
-      const persistedUrls = new Set([...initiallyPersistedUrls, ...fallbackResult.persistedUrls]);
-      const finalCoverUrlSet = new Set(coverFavorites.map((manga) => lib.fav(manga.url, manga.sourceId || 'leercapitulo')?.cover).filter(needsPersistentImportedCover));
-      const coverFailures = [...finalCoverUrlSet].filter((cover) => !persistedUrls.has(cover)).length;
-      for (const manga of finalFavorites) {
-        if (persistedUrls.has(manga.cover) && (manga.coverLocal || manga.coverCached)) {
-          lib.updateFav(manga.url, { coverLocal: '', coverCached: '' }, manga.sourceId || 'leercapitulo');
-        }
-      }
       window.dispatchEvent(new Event('cytlex:library-updated'));
       setMihonCandidate(null);
       setMihonInstallManifests([]);
@@ -1318,16 +1321,17 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       setMihonReviewOpen(false);
       setMihonInstallOpen(false);
       setCats(lib.cats());
-      toast({
+      if (!tutorialImportControls) toast({
         title: 'Respaldo de Mihon importado',
-        description: `${t('{count} mangas importados', { count: result.added + result.updated })}${omitted.size ? `, ${t('{count} omitidos', { count: omitted.size })}` : ''}.${detailFailures ? ` ${t('No se pudo guardar la información de {count} mangas', { count: detailFailures })}.` : ''}${coverFailures ? ` ${t('{count} portadas no pudieron guardarse', { count: coverFailures })}.` : ''}${failedInstalls.length ? ` ${t('No se pudieron instalar: {names}', { names: failedInstalls.map(({ name }) => name).join(', ') })}.` : ''}`,
+        description: `${t('{count} mangas importados', { count: result.added + result.updated })}${omitted.size ? `, ${t('{count} omitidos', { count: omitted.size })}` : ''}.`,
         variant: 'success'
       });
+      onTutorialImportResult?.('complete');
     } catch (error) {
+      onTutorialImportResult?.('error');
       toast({ title: 'No se pudo importar el respaldo de Mihon', description: error.message, variant: 'error' });
     } finally {
       releaseCoverProtection();
-      releaseFinalCoverProtection();
       activeImportRef.current = false;
       setTutorialImportApplying(false);
       setMihonProgress(null);
