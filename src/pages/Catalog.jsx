@@ -482,17 +482,15 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
         const coverPromises = items.map((m) => window.cytlex?.fetchImage
           ? preloadSearchCover(m.cover)
           : coverBatch.preload(m.cover));
-        const directCoverIndexes = new Map();
         const directCoverPromises = [];
-        items.forEach((m, index) => {
+        items.forEach((m) => {
           if (!window.cytlex?.fetchImage && m.cover && browserImageUrl(m.cover) === m.cover) {
-            directCoverIndexes.set(index, directCoverPromises.length);
             directCoverPromises.push(waitForDirectCover(m.cover));
           }
         });
         coverBatch.flushBundled();
         items.forEach((m) => rememberMangaPreview(m, s.manifest.id));
-        return { source: s, response: r, items, coverPromises, directCoverIndexes, directCoverPromises };
+        return { source: s, response: r, items, coverPromises, directCoverPromises };
       } catch (e) {
         console.warn('[Cytlex] búsqueda falló en', s.manifest.id, e?.message || e);
         if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
@@ -508,16 +506,11 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
       const coverFlush = coverBatch.flush();
       const coverJobs = sourceOutcomes
         .filter((outcome) => outcome.status === 'fulfilled' && outcome.value)
-        .map(async ({ value: { source, response, items, coverPromises, directCoverIndexes, directCoverPromises } }) => {
+        .map(async ({ value: { source, response, items, coverPromises, directCoverPromises } }) => {
             try {
               const loadedCovers = await Promise.all(coverPromises);
-              const directCoverLoads = await Promise.all(directCoverPromises);
+              await Promise.all(directCoverPromises);
               if (runId !== (migrationMode ? activeMigrationSearchRun : activeSearchRun)) return;
-              const allCoversLoaded = items.every((item, index) => {
-                const directIndex = directCoverIndexes.get(index);
-                return !!item.cover && (directIndex === undefined ? !!loadedCovers[index] : directCoverLoads[directIndex]);
-              });
-              if (!allCoversLoaded) throw new Error('No se pudieron cargar todas las portadas de esta extensión.');
               const readyItems = items.map((item, index) => loadedCovers[index]
                 ? { ...item, coverCached: loadedCovers[index] }
                 : item);

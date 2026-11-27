@@ -765,15 +765,27 @@ export function createSearchCoverBatch() {
       return Promise.resolve();
     }
     const fail = (entry) => {
+      if (entry.settled) return;
       if (searchCoverCache.get(entry.url) === entry.promise) searchCoverCache.delete(entry.url);
       entry.resolve('');
     };
     const controller = new AbortController();
     controllers.add(controller);
-    const task = fetchSearchCoverBlobBatch(entries, controller.signal, async ({ blob }, index) => {
-      const entry = entries[index];
-      if (cancelled || generation !== searchCoverGeneration || !blob) {
-        fail(entry);
+    const task = (async () => {
+      let pending = entries.map((entry) => ({ entry, error: null }));
+      for (let attempt = 0; attempt < 3 && pending.length && !cancelled; attempt += 1) {
+        if (attempt) await new Promise((resolve) => setTimeout(resolve, attempt * 600));
+        if (cancelled || controller.signal.aborted || generation !== searchCoverGeneration) break;
+        const batch = pending;
+        const retry = [];
+        try {
+          const fetchBatch = attempt === 0 ? fetchSearchCoverBlobBatch : fetchImageBlobBatch;
+          await fetchBatch(batch.map(({ entry }) => entry), controller.signal, async ({ blob, error }, index) => {
+      const entry = batch[index].entry;
+      if (cancelled || generation !== searchCoverGeneration) return;
+      if (!blob) {
+        if (![400, 401, 403, 404].includes(error?.status)) retry.push({ entry, error });
+        else fail(entry);
         return;
       }
       const originalUrl = URL.createObjectURL(blob);
@@ -795,9 +807,17 @@ export function createSearchCoverBatch() {
       if (searchCoverCache.get(entry.url) === entry.promise) searchCoverCache.set(entry.url, objectUrl);
       pruneSearchCoverCache();
       entry.resolve(objectUrl);
-    }).catch(() => {
-      entries.forEach(fail);
-    }).finally(() => {
+          });
+        } catch (error) {
+          batch.forEach((item) => {
+            if (!item.entry.settled && !retry.some(({ entry }) => entry === item.entry)) retry.push({ ...item, error });
+          });
+        }
+        pending = retry;
+      }
+      pending.forEach(({ entry }) => fail(entry));
+      if (cancelled || generation !== searchCoverGeneration) entries.forEach(fail);
+    })().finally(() => {
       controllers.delete(controller);
       searchCoverControllers.delete(controller);
       inFlight.delete(task);
@@ -814,7 +834,11 @@ export function createSearchCoverBatch() {
 
     let resolve;
     const promise = new Promise((done) => { resolve = done; });
-    const entry = { url, promise, resolve };
+    const entry = { url, promise, settled: false, resolve(value) {
+      if (entry.settled) return;
+      entry.settled = true;
+      resolve(value);
+    } };
     searchCoverCache.set(url, promise);
     queue.push(entry);
     if (queue.length >= SEARCH_COVER_BATCH_SIZE) dispatch(queue.splice(0, SEARCH_COVER_BATCH_SIZE));

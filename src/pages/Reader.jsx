@@ -601,6 +601,7 @@ export default function Reader() {
     (async () => {
       try {
         let r = extensions.isInstalled(sourceId) && !adultExtensionDisabled ? await readRecentChapter(recentChapterKey) : null;
+        let combinedError = null;
         if (!active) return;
         if (!r && sourceId.startsWith('mangadex') && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
           try { r = await fetchMangaDexChapter(chapterUrl, combinedController.signal); }
@@ -610,22 +611,22 @@ export default function Reader() {
           }
         }
         if (!r && sourceId === 'achymanga' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
-          try { r = await fetchAchyChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
+          try { r = await fetchAchyChapter(chapterUrl, combinedController.signal); } catch (error) { if (!active) return; combinedError = error; }
         }
         if (!r && sourceId === 'olympusscanlation' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
-          try { r = await fetchOlympusChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
+          try { r = await fetchOlympusChapter(chapterUrl, combinedController.signal); } catch (error) { if (!active) return; combinedError = error; }
         }
         if (!r && sourceId === 'onfmangas' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
-          try { r = await fetchOnfChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
+          try { r = await fetchOnfChapter(chapterUrl, combinedController.signal); } catch (error) { if (!active) return; combinedError = error; }
         }
         if (!r && sourceId === 'zonatmo' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
-          try { r = await fetchZonaTmoChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
+          try { r = await fetchZonaTmoChapter(chapterUrl, combinedController.signal); } catch (error) { if (!active) return; combinedError = error; }
         }
         if (!r && sourceId === 'inmanga' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
-          try { r = await fetchInmangaChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
+          try { r = await fetchInmangaChapter(chapterUrl, combinedController.signal); } catch (error) { if (!active) return; combinedError = error; }
         }
         if (!r && sourceId === 'mangalect' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
-          try { r = await fetchMangaLectChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
+          try { r = await fetchMangaLectChapter(chapterUrl, combinedController.signal); } catch (error) { if (!active) return; combinedError = error; }
         }
         if (!r && sourceId === 'leercapitulo' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
           try { r = await fetchLeerCapituloChapter(chapterUrl, combinedController.signal); }
@@ -635,7 +636,7 @@ export default function Reader() {
           }
         }
         if (!r && sourceId === 'mangaoni' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
-          try { r = await fetchMangaOniChapter(chapterUrl, combinedController.signal); } catch { if (!active) return; }
+          try { r = await fetchMangaOniChapter(chapterUrl, combinedController.signal); } catch (error) { if (!active) return; combinedError = error; }
         }
         if (!r && sourceId === 'komiwa' && extensions.isInstalled(sourceId) && !adultExtensionDisabled && !window.cytlex?.httpGet) {
           r = await fetchKomiwaChapter(chapterUrl, combinedController.signal);
@@ -644,6 +645,7 @@ export default function Reader() {
         if (!r?.pages?.length) r = await api.chapter(chapterUrl, sourceId, { fresh: true });
         if (!active) return;
         if (!r?.pages?.length) {
+          if (combinedError) throw combinedError;
           setErr('La extensión no encontró páginas para este capítulo.');
           return;
         }
@@ -862,25 +864,25 @@ export default function Reader() {
         const loadBatches = async () => {
           for (let offset = 0; offset < batchedPages.length && !cancelled; offset += 50) {
             const batch = batchedPages.slice(offset, offset + 50);
-            try {
-              const receiveImage = async ({ blob, error: failure }, resultIndex) => {
-                const { src, index } = batch[resultIndex];
-                if (cancelled || controller.signal.aborted) return;
-                if (blob) {
-                  try {
-                    const image = pageTransforms?.[index] === 'scramble-4x4' ? await unscramble4x4(blob) : blob;
-                    if (!cancelled && !controller.signal.aborted) await prepareImage(src, image);
-                  } catch (error) {
-                    saveResult(src, { failure: error });
-                  }
-                } else {
-                  saveResult(src, {
-                    failure,
-                    accessRejected: sourceId === 'onfmangas' && src.startsWith('https://onfmangas.com/') && failure?.status === 403
-                  });
+            const receiveImage = async ({ blob, error: failure }, resultIndex) => {
+              const { src, index } = batch[resultIndex];
+              if (cancelled || controller.signal.aborted) return;
+              if (blob) {
+                try {
+                  const image = pageTransforms?.[index] === 'scramble-4x4' ? await unscramble4x4(blob) : blob;
+                  if (!cancelled && !controller.signal.aborted) await prepareImage(src, image);
+                } catch (error) {
+                  saveResult(src, { failure: error });
                 }
-                if (!cancelled) setPreloadRevision((revision) => revision + 1);
-              };
+              } else {
+                saveResult(src, {
+                  failure,
+                  accessRejected: sourceId === 'onfmangas' && src.startsWith('https://onfmangas.com/') && failure?.status === 403
+                });
+              }
+              if (!cancelled) setPreloadRevision((revision) => revision + 1);
+            };
+            try {
               if (ch?.combinedImages?.length) {
                 const remaining = [];
                 await Promise.all(batch.map(async (entry, resultIndex) => {
@@ -895,6 +897,25 @@ export default function Reader() {
             } catch (error) {
               if (cancelled || controller.signal.aborted) return;
               for (const { src } of batch) if (!results.has(src)) saveResult(src, { failure: error });
+            }
+            for (let attempt = 1; attempt <= 2 && !cancelled; attempt += 1) {
+              const failed = batch.flatMap((entry, resultIndex) => {
+                const result = results.get(entry.src);
+                return typeof result !== 'string' && ![400, 401, 403, 404].includes(result?.failure?.status)
+                  ? [{ ...entry, resultIndex }] : [];
+              });
+              if (!failed.length) break;
+              await new Promise((resolve) => setTimeout(resolve, attempt * 600));
+              if (cancelled || controller.signal.aborted) return;
+              try {
+                const direct = failed.filter(({ url }) => browserImageUrl(url, imageReferer) === url);
+                const proxied = failed.filter(({ url }) => browserImageUrl(url, imageReferer) !== url);
+                await Promise.all(direct.map(({ src }) => loadOne(src)));
+                if (proxied.length) await fetchImageBlobBatch(proxied, controller.signal, (result, index) => receiveImage(result, proxied[index].resultIndex));
+              } catch (error) {
+                if (cancelled || controller.signal.aborted) return;
+                failed.forEach(({ src }) => { if (typeof results.get(src) !== 'string') saveResult(src, { failure: error }); });
+              }
             }
             if (!cancelled) setPreloadRevision((revision) => revision + 1);
           }
