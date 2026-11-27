@@ -48,8 +48,10 @@ function ChangeSummary({ groups, t, scale }) {
     <ul className="min-w-0 space-y-2" style={{ fontSize: fontPx(13, scale, 12), lineHeight: 1.45 }}>
       {groups.map((group) => (
         <li key={group.label} className="min-w-0 break-words [overflow-wrap:anywhere]">
-          <p className="font-medium" style={{ fontSize: fontPx(14, scale, 13), lineHeight: 1.35 }}>{t(group.label)} · {group.count}</p>
-          {group.items.length > 0 ? (
+          <p className="font-medium" style={{ fontSize: fontPx(14, scale, 13), lineHeight: 1.35 }}>{t(group.label)}{group.count > 0 ? ` · ${group.count}` : ''}</p>
+          {group.message ? (
+            <p className="ml-3 mt-1 text-muted-foreground">{t(group.message)}</p>
+          ) : group.items.length > 0 ? (
             <ul className="ml-3 mt-1 min-w-0 space-y-1 text-muted-foreground">
               {group.items.map((item, index) => (
                 <li key={`${item.action}-${item.name}-${index}`}>
@@ -182,7 +184,8 @@ export default function CloudSyncPanel() {
 
           {showSyncPreview && state.status === 'needs-choice' && state.pendingChoice && (
             <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
-              <p className="text-sm font-medium">{t('Hay cambios distintos en este dispositivo y en tu cuenta')}</p>
+              <p className="text-sm font-medium">{t(state.pendingChoice.localChanges?.length ? 'Hay cambios distintos en este dispositivo y en tu cuenta' : 'No se encontraron diferencias visibles entre este dispositivo y tu cuenta.')}</p>
+              {state.pendingChoice.localChanges?.length > 0 && <p className="text-muted-foreground">{t('Cambios que se aplicarían al cargar los datos de la cuenta en este dispositivo:')}</p>}
               <ChangeSummary groups={state.pendingChoice.localChanges} t={t} scale={scale} />
               <div className="flex flex-wrap justify-end gap-2">
                 <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setChoiceConfirmation('cloud')}>

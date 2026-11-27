@@ -140,7 +140,7 @@ function serializeMeaningfulSnapshot(value) {
 
 const mangaKey = (manga) => libraryKey(manga.url, manga.sourceId || 'leercapitulo');
 
-function summarizeSnapshotChanges(beforeValue, afterValue) {
+function summarizeSnapshotChanges(beforeValue, afterValue, { compareAccount = false } = {}) {
   const before = normalizeSnapshot(beforeValue);
   const after = normalizeSnapshot(afterValue);
   const groups = [];
@@ -150,7 +150,7 @@ function summarizeSnapshotChanges(beforeValue, afterValue) {
     const changes = [];
     previous.forEach((item, key) => {
       const next = current.get(key);
-      if (!next) changes.push({ action: 'Eliminado', name: nameFor(item) });
+      if (!next) changes.push({ action: compareAccount ? 'Agregado' : 'Eliminado', name: nameFor(item) });
       else {
         const stripMetadata = (value) => Object.fromEntries(Object.entries(value).filter(([field]) => !ignoredFields.includes(field)));
         if (stableJson(stripMetadata(item)) !== stableJson(stripMetadata(next))) {
@@ -161,7 +161,7 @@ function summarizeSnapshotChanges(beforeValue, afterValue) {
       }
     });
     current.forEach((item, key) => {
-      if (!previous.has(key)) changes.push({ action: 'Agregado', name: nameFor(item) });
+      if (!previous.has(key)) changes.push({ action: compareAccount ? 'Eliminado' : 'Agregado', name: nameFor(item) });
     });
     if (changes.length) groups.push({ label, count: changes.length, items: changes.slice(0, 6), more: Math.max(0, changes.length - 6) });
   };
@@ -174,6 +174,10 @@ function summarizeSnapshotChanges(beforeValue, afterValue) {
   if (before.settings && after.settings) {
     const changed = SYNCED_SETTINGS.filter((key) => stableJson(before.settings[key]) !== stableJson(after.settings[key]));
     if (changed.length) groups.push({ label: 'Ajustes', count: changed.length, items: changed.slice(0, 6).map((key) => ({ action: 'Modificado', name: SETTINGS_LABELS[key] || key })), more: Math.max(0, changed.length - 6) });
+  } else if (compareAccount && !before.settings && after.settings) {
+    groups.push({ label: 'Ajustes', count: 0, items: [], more: 0, message: 'La cuenta aún no tiene ajustes guardados. Al cargar sus datos, se conservarán los ajustes de este dispositivo.' });
+  } else if (compareAccount && before.settings && !after.settings) {
+    groups.push({ label: 'Ajustes', count: 0, items: [], more: 0, message: 'Este dispositivo aún no tiene ajustes disponibles para comparar.' });
   }
 
   const progressKeys = new Set([...Object.keys(before.progress), ...Object.keys(after.progress)]);
@@ -566,7 +570,7 @@ async function initializeUser(user) {
     const different = remote ? serializeMeaningfulSnapshot(comparableLocal) !== serializeMeaningfulSnapshot(remote.payload) : hasLocalData(local);
     initialized = true;
     localChangesPending = different;
-    updateState({ status: different ? 'local-pending' : 'connected', revision, localChanges: remote ? summarizeSnapshotChanges(remote.payload, local) : [] });
+    updateState({ status: different ? 'local-pending' : 'connected', revision, localChanges: remote ? summarizeSnapshotChanges(remote.payload, local, { compareAccount: true }) : [] });
   } catch (error) {
     if (error.code === AGE_CONFIRMATION_CANCELLED) {
       initialized = true;
@@ -615,7 +619,12 @@ function onLocalChange(event) {
   localChangesPending = true;
   localChangeRevision += 1;
   if (pendingChoice) {
-    updateState({ status: 'local-pending', pendingChoice: null, localChanges: summarizeSnapshotChanges(pendingChoice.remote.payload, snapshot) });
+    updateState({ status: 'local-pending', pendingChoice: null, localChanges: summarizeSnapshotChanges(pendingChoice.remote.payload, snapshot, { compareAccount: true }) });
+    return;
+  }
+  if (previous && serializeMeaningfulSnapshot(snapshot) === serializeMeaningfulSnapshot(previous)) {
+    updateState({ status: 'syncing', localChanges: [] });
+    scheduleLocalResync();
     return;
   }
   updateState({ status: 'local-pending', localChanges: summarizeSnapshotChanges(previous || {}, snapshot) });
@@ -727,7 +736,19 @@ export const cloudSync = {
           return;
         }
         const accountState = remote || { payload: normalizeSnapshot(null), revision: 0 };
-        const localChanges = summarizeSnapshotChanges(accountState.payload, local);
+        const localChanges = summarizeSnapshotChanges(accountState.payload, local, { compareAccount: true });
+        if (remote && !localChanges.length && serializeMeaningfulSnapshot(accountState.payload) === serializeMeaningfulSnapshot(local)) {
+          if (serializeSnapshot(accountState.payload) !== serializeSnapshot(local)) {
+            revision = await writeRemote(local, accountState.revision);
+          } else {
+            revision = accountState.revision;
+          }
+          if (activeUserId !== userId) return;
+          lastLocalSnapshot = JSON.stringify(local);
+          localChangesPending = localChangeRevision !== localRevision;
+          updateState({ status: localChangesPending ? 'local-pending' : 'synced', revision, pendingChoice: null, localChanges: [], error: '' });
+          return;
+        }
         updateState({ status: 'needs-choice', pendingChoice: { local, remote: accountState, localChanges, localRevision }, localChanges, revision: accountState.revision });
       } catch (error) {
         if (controller.signal.aborted) {
