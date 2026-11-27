@@ -1,5 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { Link } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
+import { usePerformanceMode } from '../lib/usePerformanceMode.js';
 import { RefreshCw, ArrowUpDown, Search, X } from 'lucide-react';
 import { isMangaCover, isUnresolvedMihonSource, lib, storedCoverThumbnail } from '../lib/library.js';
 import { settings } from '../lib/settings.js';
@@ -367,7 +369,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
     try { return localStorage.getItem(LIBRARY_SEARCH_OPEN_KEY) === '1'; } catch { return false; }
   });
   const skipInitialLibrarySearchAnimation = useRef(librarySearchOpen);
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePerformanceMode();
   const scale = useScale();
   const isBrowserApp = typeof window !== 'undefined' && !window.cytlex;
 
@@ -916,7 +918,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
             })}
           </div>
         </nav>
-        <div ref={libraryActionsRef} className="ml-auto flex min-w-0 shrink items-center" style={{ gap: px(8, scale, 6) }}>
+        <div ref={libraryActionsRef} className="ml-auto flex min-w-0 shrink-0 items-center" style={{ gap: px(8, scale, 6) }}>
           {compactLibrarySearch ? (
             <div className="relative z-30 flex shrink-0 items-center">
               <Button
@@ -1107,8 +1109,8 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
                   const unavailableLabel = t(sourceNotOffered ? 'Extensión no disponible' : adultBlocked ? 'Fuente bloqueada' : !installed ? 'Fuente no instalada' : 'Fuente desactivada');
                   return (
                     <div key={`${sid}|${m.url}`} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5">
-                      <a
-                        href={`#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sid)}&from=biblioteca`}
+                      <Link
+                        to={`/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sid)}&from=biblioteca`}
                         className={cn('flex items-end gap-3 flex-1 min-w-0', unavailable && 'opacity-60', linkDisabled && 'pointer-events-none')}
                         onClick={(event) => rememberMangaPreview(m, sid, event.currentTarget.querySelector('img'))}
                         aria-disabled={linkDisabled}
@@ -1139,7 +1141,7 @@ const Library = memo(function Library({ active = true, tutorialPreview = false }
                             </span>
                           )}
                         </span>
-                      </a>
+                      </Link>
                     </div>
                   );
                 })}

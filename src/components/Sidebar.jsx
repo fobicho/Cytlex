@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
+import { usePerformanceMode } from '../lib/usePerformanceMode.js';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { BookOpen, ChevronsRight, Compass, Settings as SettingsIcon } from 'lucide-react';
 import { RESET_PAGE_EVENT } from '../App.jsx';
@@ -26,7 +27,7 @@ const DURATION = 0.3;
 const SIDEBAR_SCALE_MIN = 0.72;
 function ActiveRouteLabel({ label, active, centered = false }) {
   const [glyphs] = useState(randomSidebarGlyphs);
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePerformanceMode();
 
   useEffect(() => {
     if (!document.getElementById('cytlex-sidebar-noto-jp')) {
@@ -93,19 +94,26 @@ export default function Sidebar({ tutorialNavOnly = false }) {
   const location = useLocation();
   const navigate = useNavigate();
   const scale = useScale(SIDEBAR_SCALE_MIN);
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePerformanceMode();
   const navIconCenter = Math.max(6, Math.round(12 * scale))
     + Math.max(6, Math.round(8 * scale))
     + Math.max(20, Math.round(32 * scale)) / 2;
-  const logoSize = Math.max(18, Math.round(24 * scale));
-  const logoOffset = navIconCenter - logoSize / 2;
   const ribbonLogoSize = Math.max(22, Math.round(30 * scale));
   const ribbonLogoOffset = navIconCenter - ribbonLogoSize / 2;
   const headerHeight = px(38, scale, 34);
   const supportLabel = t('Donaciones');
+  const renderLogoMark = (size) => (
+    <CytlexLogoMark
+      decorative
+      reduceMotion={reduceMotion}
+      strokeWidth={0}
+      themeColor
+      style={{ width: size, height: size }}
+    />
+  );
   const renderBrand = (key) => (
     <span key={key} className="sidebar-ribbon-brand flex shrink-0 items-center" style={{ gap: px(8, scale, 6) }}>
-      <CytlexLogoMark decorative reduceMotion={reduceMotion} strokeWidth={0} themeColor style={{ width: ribbonLogoSize, height: ribbonLogoSize }} />
+      {renderLogoMark(ribbonLogoSize)}
       <span className="sidebar-ribbon-brand-name whitespace-nowrap self-center font-brand font-semibold leading-[1.2] tracking-tight" style={{ fontSize: fontPx(18, scale) }}>Cytlex</span>
     </span>
   );
@@ -133,9 +141,8 @@ export default function Sidebar({ tutorialNavOnly = false }) {
     >
       <div className="relative flex shrink-0 items-center overflow-hidden border-b border-border/70" style={{ height: headerHeight, minHeight: headerHeight, maxHeight: headerHeight }}>
         {collapsed ? (
-          <div className="flex items-center" style={{ paddingLeft: logoOffset, gap: px(8, scale, 6) }}>
-            <CytlexLogoMark decorative reduceMotion={reduceMotion} style={{ width: logoSize, height: logoSize }} />
-            <span aria-hidden="true" className="whitespace-nowrap font-brand font-bold tracking-tight opacity-0" style={{ fontSize: fontPx(14, scale) }}>Cytlex</span>
+          <div className="sidebar-ribbon-brand flex shrink-0 items-center" style={{ paddingLeft: ribbonLogoOffset }}>
+            {renderLogoMark(ribbonLogoSize)}
           </div>
         ) : reduceMotion ? (
           <span role="img" aria-label="Cytlex" className="flex items-center" style={{ paddingLeft: ribbonLogoOffset }}>

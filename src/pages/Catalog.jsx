@@ -1,7 +1,8 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Search, Loader2, ChevronRight, ChevronLeft } from 'lucide-react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
+import { usePerformanceMode } from '../lib/usePerformanceMode.js';
 import { api } from '../lib/api.js';
 import { beginCatalogSearchBatch, browserImageUrl, finishCatalogSearchBatchSource, sourceErrorMessage } from '../lib/browserHttp.js';
 import { isLibraryManga, lib, libraryIdentityKey, libraryKey } from '../lib/library.js';
@@ -76,7 +77,7 @@ const sourceLangSubtitle = (manifest) => {
 
 function SourceSection({ r, coverSize, scale = 1, animate = false, active = true, onMangaSelect, returnTo = '', savedMangaKeys, hideSavedManga = false }) {
   const { t: tr } = useI18n();
-  const prefersReducedMotion = useReducedMotion();
+  const prefersReducedMotion = usePerformanceMode();
   const trackRef = useRef(null);
   const mainRef = useRef(null);
   const [trackWidth, setTrackWidth] = useState(0);
@@ -194,13 +195,13 @@ function SourceSection({ r, coverSize, scale = 1, animate = false, active = true
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {(visibleItems.length > 15 || (r.hasMore && canRight)) && (
-            <a
+            <Link
               className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'hover:bg-transparent hover:text-foreground')}
-              href={`#/resultados?s=${encodeURIComponent(r.id)}`}
+              to={`/resultados?s=${encodeURIComponent(r.id)}`}
               style={{ fontSize: fontPx(14, scale) }}
             >
               Ver todos <ChevronRight className="w-4 h-4 ml-1.5" />
-            </a>
+            </Link>
           )}
         </div>
       </div>
@@ -332,7 +333,7 @@ const Catalog = memo(function Catalog({ locationOverride, tutorialPreview = fals
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationError, setMigrationError] = useState('');
   const scale = useScale();
-  const prefersReducedMotion = useReducedMotion();
+  const prefersReducedMotion = usePerformanceMode();
   const isBrowserApp = typeof window !== 'undefined' && (!window.cytlex || !!migrationInline);
 
   useLayoutEffect(() => {

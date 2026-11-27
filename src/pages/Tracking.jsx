@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Link2, Loader2, AlertTriangle, LogOut, BookOpen } from 'lucide-react';
 import { session } from '../lib/session.js';
 import { anilistList, setScoreScale } from '../lib/anilist.js';
@@ -33,6 +34,7 @@ const SCORE_DENOMINATOR = {
 
 export default function Tracking() {
   const { language, t } = useI18n();
+  const navigate = useNavigate();
   const [auth, setAuth] = useState(null);
   const [viewer, setViewer] = useState(null);
   const [entries, setEntries] = useState(null);
@@ -99,7 +101,7 @@ export default function Tracking() {
           title={t('Conecta tu cuenta de AniList')}
           action={
             <Button
-              onClick={() => { window.location.hash = '#/ajustes'; }}
+              onClick={() => navigate('/ajustes')}
               style={{
                 height: px(40, scale, 33),
                 fontSize: fontPx(14, scale, 12),
@@ -146,7 +148,7 @@ export default function Tracking() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => { window.location.hash = '#/ajustes'; }}>
+          <Button variant="ghost" size="sm" onClick={() => navigate('/ajustes')}>
             {t('Ajustes')}
           </Button>
           <Button variant="secondary" size="sm" onClick={load} disabled={busy}>
@@ -251,13 +253,13 @@ export default function Tracking() {
               );
               const cls = 'flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-2.5 transition-colors';
               return local ? (
-                <a
+                <Link
                   key={e.mediaId}
-                  href={`#/manga?u=${encodeURIComponent(local.url)}&s=${encodeURIComponent(local.sourceId || 'leercapitulo')}&from=seguimiento`}
+                  to={`/manga?u=${encodeURIComponent(local.url)}&s=${encodeURIComponent(local.sourceId || 'leercapitulo')}&from=seguimiento`}
                   className={cn(cls, 'hover:bg-accent/50')}
                 >
                   {row}
-                </a>
+                </Link>
               ) : (
                 <div key={e.mediaId} className={cn(cls, 'opacity-70')}>
                   {row}

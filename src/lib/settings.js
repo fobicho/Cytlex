@@ -1,4 +1,5 @@
 import { THEME_IDS, MODE_IDS } from './themes.js';
+import { applyPerformanceMode } from './performanceMode.js';
 
 const KEY = 'cytlex:settings:v1';
 export const CONTENT_WARNING_RATINGS = ['SAFE', 'MIXED', 'NSFW'];
@@ -31,7 +32,8 @@ const defaults = {
   anilistCover: false,
   notifyBaseline: {},
   tutorialSeen: false,
-  donationSeen: false
+  donationSeen: false,
+  performanceMode: false
 };
 
 function normalize(s) {
@@ -54,6 +56,7 @@ function normalize(s) {
   if (!THEME_IDS.includes(theme)) theme = 'default';
   if (!MODE_IDS.includes(mode)) mode = 'system';
   if (!['system', 'es', 'en'].includes(rest.language)) rest.language = 'system';
+  rest.performanceMode = rest.performanceMode === true;
   return { ...rest, theme, mode };
 }
 
@@ -87,6 +90,7 @@ export const settings = {
     cache = read();
     document.documentElement.setAttribute('data-theme', cache.theme);
     document.documentElement.setAttribute('data-mode', resolveMode(cache.mode));
+    applyPerformanceMode(cache.performanceMode);
     window.cytlex?.saveTheme?.({ theme: cache.theme, mode: cache.mode, effectiveMode: resolveMode(cache.mode) });
     window.dispatchEvent(new CustomEvent('cytlex:settings', { detail: { ...cache } }));
     return { ...cache };
@@ -97,6 +101,7 @@ export const settings = {
     const applyDom = () => {
       if (patch.theme) document.documentElement.setAttribute('data-theme', cache.theme);
       if (patch.theme || patch.mode) document.documentElement.setAttribute('data-mode', resolveMode(cache.mode));
+      if (Object.hasOwn(patch, 'performanceMode')) applyPerformanceMode(cache.performanceMode);
     };
     applyDom();
     if ((patch.theme || patch.mode) && typeof window !== 'undefined' && window.cytlex?.saveTheme) {

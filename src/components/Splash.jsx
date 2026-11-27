@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { usePerformanceMode } from '../lib/usePerformanceMode.js';
 import { px, useScale } from '../lib/useScale.js';
 import CytlexLogoMark from './CytlexLogoMark.jsx';
 
@@ -9,7 +10,7 @@ const EXIT = 800;
 
 export default function Splash({ trigger = 0, onDone = null, onExitStart = null }) {
   const scale = useScale();
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePerformanceMode();
   const [ready, setReady] = useState(false);
   const [exiting, setExiting] = useState(false);
   const [gone, setGone] = useState(false);

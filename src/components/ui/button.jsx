@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { usePerformanceMode } from '../../lib/usePerformanceMode.js';
 import { cva } from 'class-variance-authority';
 import { cn } from '../../lib/utils.js';
 import { useI18n } from '../../lib/i18n.js';
@@ -41,7 +42,7 @@ function localizeChildren(children, t) {
 
 const Button = React.forwardRef(({ className, variant, size, children, ...props }, ref) => {
   const { t, isLanguagePreview } = useI18n();
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePerformanceMode();
   const languageLayoutMotion = useLanguageLayoutMotion();
   const animateLanguageLayout = isLanguagePreview || languageLayoutMotion;
   const localizedProps = {

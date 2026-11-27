@@ -17,8 +17,12 @@ const ACCOUNT_KEY = 'cytlex:cloud-sync-account:v1';
 const BACKUP_PENDING_KEY = 'cytlex:cloud-sync-backup-pending:v1';
 const TOMBSTONES_KEY = 'cytlex:cloud-sync-tombstones:v1';
 const DEFAULT_REPOSITORY = 'https://fobicho.github.io/Cytlex/index.json';
-const SYNCED_SETTINGS = ['theme', 'mode', 'language', 'readerMode', 'readerZoom', 'readerDoublePage', 'libraryView', 'coverSize', 'libraryShowUnread', 'hideSavedManga', 'chaptersPerRow', 'sidebarCollapsed', 'extIndexUrl', 'anilistSynopsisLang', 'anilistCover'];
-const SETTINGS_LABELS = { theme: 'Tema', mode: 'Modo', language: 'Idioma', readerMode: 'Modo de lectura', readerZoom: 'Zoom del lector', readerDoublePage: 'Página doble', libraryView: 'Vista de biblioteca', coverSize: 'Tamaño de portadas', libraryShowUnread: 'Mostrar capítulos sin leer', hideSavedManga: 'Ocultar mangas guardados', chaptersPerRow: 'Capítulos por fila', sidebarCollapsed: 'Barra lateral', extIndexUrl: 'Repositorio de extensiones', anilistSynopsisLang: 'Idioma de sinopsis', anilistCover: 'Portada de AniList' };
+const SYNCED_SETTINGS = ['theme', 'mode', 'language', 'readerMode', 'readerZoom', 'readerDoublePage', 'libraryView', 'coverSize', 'libraryShowUnread', 'hideSavedManga', 'chaptersPerRow', 'sidebarCollapsed', 'extIndexUrl', 'anilistSynopsisLang', 'anilistCover', 'performanceMode'];
+const SETTINGS_LABELS = { theme: 'Tema', mode: 'Modo', language: 'Idioma', readerMode: 'Modo de lectura', readerZoom: 'Zoom del lector', readerDoublePage: 'Página doble', libraryView: 'Vista de biblioteca', coverSize: 'Tamaño de portadas', libraryShowUnread: 'Mostrar capítulos sin leer', hideSavedManga: 'Ocultar mangas guardados', chaptersPerRow: 'Capítulos por fila', sidebarCollapsed: 'Barra lateral', extIndexUrl: 'Repositorio de extensiones', anilistSynopsisLang: 'Idioma de sinopsis', anilistCover: 'Portada de AniList', performanceMode: 'Modo rendimiento' };
+const FAVORITE_METADATA_FIELDS = [
+  'title', 'author', 'artist', 'cover', 'description', 'sinopsis', 'facts', 'type', 'genres', 'chapterTotal', 'sourceName', 'sourceIcon',
+  'updatedAt', 'catsUpdatedAt', 'savedAt', 'coverCached', 'coverLocal', 'coverRefreshPending'
+];
 const syncedSettings = (value) => value && typeof value === 'object' && !Array.isArray(value)
   ? Object.fromEntries(SYNCED_SETTINGS.filter((key) => Object.hasOwn(value, key)).map((key) => [key, value[key]]))
   : null;
@@ -122,6 +126,13 @@ function stableJson(value) {
   return JSON.stringify(sortKeys(value));
 }
 
+const meaningfulProgressEntry = (entry) => {
+  if (entry == null) return null;
+  if (typeof entry !== 'object' || Array.isArray(entry)) return entry;
+  const value = Object.fromEntries(Object.entries(entry).filter(([field]) => !['updatedAt', 'readAt'].includes(field)));
+  return Object.keys(value).length ? value : null;
+};
+
 const serializeSnapshot = (value) => stableJson(normalizeSnapshot(value));
 
 function serializeMeaningfulSnapshot(value) {
@@ -131,9 +142,12 @@ function serializeMeaningfulSnapshot(value) {
     : item;
   return stableJson({
     ...snapshot,
-    favorites: snapshot.favorites.map((item) => without(item, ['updatedAt', 'catsUpdatedAt', 'savedAt', 'coverCached', 'coverLocal', 'coverRefreshPending'])),
+    favorites: snapshot.favorites.map((item) => without(item, FAVORITE_METADATA_FIELDS)),
     categories: snapshot.categories.map((item) => without(item, ['updatedAt'])),
-    progress: Object.fromEntries(Object.entries(snapshot.progress).map(([key, item]) => [key, without(item, ['updatedAt', 'readAt'])])),
+    progress: Object.fromEntries(Object.entries(snapshot.progress).flatMap(([key, item]) => {
+      const value = meaningfulProgressEntry(item);
+      return value === null ? [] : [[key, value]];
+    })),
     extensions: snapshot.extensions.map((item) => without(item, ['installedAt']))
   });
 }
@@ -144,13 +158,20 @@ function summarizeSnapshotChanges(beforeValue, afterValue, { compareAccount = fa
   const before = normalizeSnapshot(beforeValue);
   const after = normalizeSnapshot(afterValue);
   const groups = [];
-  const compareRows = (label, previousRows, currentRows, keyFor, nameFor, ignoredFields = []) => {
+  const wasDeletedAfterSnapshot = (snapshot, kind, key, item, timestampFor) =>
+    Number(snapshot.tombstones[kind]?.[key]) > (Number(timestampFor(item)) || 0);
+  const oneSidedAction = (kind, key, item, side, timestampFor) => {
+    if (!compareAccount) return side === 'before' ? 'Eliminado' : 'Agregado';
+    if (side === 'before') return wasDeletedAfterSnapshot(after, kind, key, item, timestampFor) ? 'Eliminado' : 'Agregado';
+    return wasDeletedAfterSnapshot(before, kind, key, item, timestampFor) ? 'Eliminado' : 'Agregado';
+  };
+  const compareRows = (label, previousRows, currentRows, keyFor, nameFor, ignoredFields = [], kind, timestampFor = () => 0) => {
     const previous = new Map(previousRows.map((item) => [keyFor(item), item]));
     const current = new Map(currentRows.map((item) => [keyFor(item), item]));
     const changes = [];
     previous.forEach((item, key) => {
       const next = current.get(key);
-      if (!next) changes.push({ action: compareAccount ? 'Agregado' : 'Eliminado', name: nameFor(item) });
+      if (!next) changes.push({ action: oneSidedAction(kind, key, item, 'before', timestampFor), name: nameFor(item) });
       else {
         const stripMetadata = (value) => Object.fromEntries(Object.entries(value).filter(([field]) => !ignoredFields.includes(field)));
         if (stableJson(stripMetadata(item)) !== stableJson(stripMetadata(next))) {
@@ -161,15 +182,15 @@ function summarizeSnapshotChanges(beforeValue, afterValue, { compareAccount = fa
       }
     });
     current.forEach((item, key) => {
-      if (!previous.has(key)) changes.push({ action: compareAccount ? 'Eliminado' : 'Agregado', name: nameFor(item) });
+      if (!previous.has(key)) changes.push({ action: oneSidedAction(kind, key, item, 'after', timestampFor), name: nameFor(item) });
     });
     if (changes.length) groups.push({ label, count: changes.length, items: changes.slice(0, 6), more: Math.max(0, changes.length - 6) });
   };
 
   compareRows('Biblioteca', before.favorites, after.favorites, mangaKey, (manga) => manga.title || manga.url,
-    ['updatedAt', 'catsUpdatedAt', 'savedAt', 'coverCached', 'coverLocal', 'coverRefreshPending']);
-  compareRows('Categorías', before.categories, after.categories, (category) => category.id, (category) => category.name || category.id, ['updatedAt']);
-  compareRows('Extensiones', before.extensions, after.extensions, (extension) => extension.id, (extension) => extensions.manifest(extension.id).name || extension.id, ['installedAt']);
+    FAVORITE_METADATA_FIELDS, 'favorites', (manga) => manga.savedAt || 0);
+  compareRows('Categorías', before.categories, after.categories, (category) => category.id, (category) => category.name || category.id, ['updatedAt'], 'categories', (category) => category.updatedAt || 0);
+  compareRows('Extensiones', before.extensions, after.extensions, (extension) => extension.id, (extension) => extensions.manifest(extension.id).name || extension.id, ['installedAt'], 'extensions', (extension) => extension.installedAt || 0);
 
   if (before.settings && after.settings) {
     const changed = SYNCED_SETTINGS.filter((key) => stableJson(before.settings[key]) !== stableJson(after.settings[key]));
@@ -181,15 +202,26 @@ function summarizeSnapshotChanges(beforeValue, afterValue, { compareAccount = fa
   }
 
   const progressKeys = new Set([...Object.keys(before.progress), ...Object.keys(after.progress)]);
-  let progressChanges = 0;
+  const progressChanges = { Agregado: 0, Modificado: 0, Eliminado: 0 };
   progressKeys.forEach((key) => {
-    const previous = before.progress[key];
-    const current = after.progress[key];
+    const previous = meaningfulProgressEntry(before.progress[key]);
+    const current = meaningfulProgressEntry(after.progress[key]);
     if (stableJson(previous) === stableJson(current)) return;
-    const withoutDates = (entry) => entry && Object.fromEntries(Object.entries(entry).filter(([field]) => !['updatedAt', 'readAt'].includes(field)));
-    if (stableJson(withoutDates(previous)) !== stableJson(withoutDates(current))) progressChanges += 1;
+    if (previous === null) progressChanges[oneSidedAction('progress', key, after.progress[key], 'after', (entry) => entry?.updatedAt || entry?.readAt || 0)] += 1;
+    else if (current === null) progressChanges[oneSidedAction('progress', key, before.progress[key], 'before', (entry) => entry?.updatedAt || entry?.readAt || 0)] += 1;
+    else progressChanges.Modificado += 1;
   });
-  if (progressChanges) groups.push({ label: 'Progreso de lectura', count: progressChanges, items: [], more: 0 });
+  const progressItems = Object.entries(progressChanges)
+    .filter(([, count]) => count > 0)
+    .map(([action, count]) => ({ action, count }));
+  if (progressItems.length) {
+    groups.push({
+      label: 'Progreso de lectura',
+      count: progressItems.reduce((total, item) => total + item.count, 0),
+      items: progressItems,
+      more: 0
+    });
+  }
   return groups;
 }
 
@@ -436,9 +468,21 @@ async function confirmAdultSyncIfNeeded(snapshot) {
 async function applySnapshot(value, { syncExtensions = true, expectedRevision = localChangeRevision, expectedUser = activeUserId } = {}) {
   const snapshot = normalizeSnapshot(value);
   if (progress.hasPendingWrites()) throw new Error('Guarda primero el progreso pendiente en este dispositivo.');
-  const before = serializeSnapshot(localSnapshot());
+  const previousLocal = localSnapshot();
+  const before = serializeSnapshot(previousLocal);
+  const existingFavoriteKeys = new Set(previousLocal.favorites.filter((manga) => manga?.url).map(pendingLibraryDetailKey));
+  const previousDetailJob = readPendingLibraryDetails();
+  const previousPendingDetails = new Set(previousDetailJob?.pending || []);
+  const retryAllPendingDetails = Boolean(previousDetailJob && !Array.isArray(previousDetailJob.pending));
+  const favoritesToRestore = snapshot.favorites.filter((manga) =>
+    manga?.url && (
+      !existingFavoriteKeys.has(pendingLibraryDetailKey(manga))
+      || manga.coverRefreshPending
+      || retryAllPendingDetails
+      || previousPendingDetails.has(pendingLibraryDetailKey(manga))
+    ));
   if (syncExtensions) await confirmAdultSyncIfNeeded(snapshot);
-  updateState({ restoreProgress: snapshot.favorites.length ? { label: 'Preparando la restauración' } : null });
+  updateState({ restoreProgress: favoritesToRestore.length ? { label: 'Preparando la restauración' } : null });
   const prepared = syncExtensions ? await reconcileExtensions(snapshot) : null;
   if (activeUserId !== expectedUser || localChangeRevision !== expectedRevision || progress.hasPendingWrites()
     || serializeSnapshot(localSnapshot()) !== before) {
@@ -452,8 +496,8 @@ async function applySnapshot(value, { syncExtensions = true, expectedRevision = 
     ...(snapshot.settings ? [['cytlex:settings:v1', JSON.stringify({ ...settings.get(), ...snapshot.settings })]] : []),
     [tombstonesStorageKey(), JSON.stringify(snapshot.tombstones)],
     [ACCOUNT_KEY, expectedUser],
-    [CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY, snapshot.favorites.length
-      ? JSON.stringify({ id: restorationId, pending: [...new Set(snapshot.favorites.filter((manga) => manga?.url).map(pendingLibraryDetailKey))] })
+    [CLOUD_SYNC_DETAILS_BACKFILL_PENDING_KEY, favoritesToRestore.length
+      ? JSON.stringify({ id: restorationId, pending: [...new Set(favoritesToRestore.filter((manga) => manga?.url).map(pendingLibraryDetailKey))] })
       : null],
     ...(prepared ? [['cytlex:extensions:v1', JSON.stringify(prepared.records)]] : [])
   ];
@@ -481,7 +525,7 @@ async function applySnapshot(value, { syncExtensions = true, expectedRevision = 
     window.dispatchEvent(new Event('cytlex:source-config-changed'));
     lastLocalSnapshot = JSON.stringify(localSnapshot());
     updateState({ localChanges: [] });
-    void prepareSyncedLibrary(snapshot.favorites, restorationId);
+    void prepareSyncedLibrary(favoritesToRestore, restorationId);
     if (prepared?.installedIds.length) window.dispatchEvent(new CustomEvent(EXTENSION_INSTALLED_EVENT, { detail: { sourceIds: prepared.installedIds } }));
     return prepared?.warning || '';
   } finally {

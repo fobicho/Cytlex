@@ -18,7 +18,8 @@ import { appWindow } from './lib/appWindow.js';
 import { px, fontPx, useScale } from './lib/useScale.js';
 import { Search } from 'lucide-react';
 import { Input } from './components/ui/input.jsx';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
+import { usePerformanceMode } from './lib/usePerformanceMode.js';
 import { useI18n } from './lib/i18n.js';
 import { cloudSync } from './lib/cloudSync.js';
 import { progress } from './lib/progress.js';
@@ -120,7 +121,11 @@ export default function App({ tutorialMode = false }) {
   const [resetTick, setResetTick] = useState(0);
   const [retainedDetailLocations, setRetainedDetailLocations] = useState({});
   const [retainedExploreLocation, setRetainedExploreLocation] = useState(null);
-  const [hasVisitedLibrary, setHasVisitedLibrary] = useState(() => window.location.hash.includes('/biblioteca'));
+  const [hasVisitedLibrary, setHasVisitedLibrary] = useState(() => (
+    window.location.protocol === 'file:'
+      ? window.location.hash.includes('/biblioteca')
+      : window.location.pathname.includes('/biblioteca')
+  ));
   const [quickSearchOpen, setQuickSearchOpen] = useState(false);
   const [quickSearchQuery, setQuickSearchQuery] = useState('');
   const [quickSearchPoint, setQuickSearchPoint] = useState(() => quickSearchPosition(window.innerWidth / 2, window.innerHeight / 2, scale));
@@ -150,7 +155,7 @@ export default function App({ tutorialMode = false }) {
       }
     });
   }, [toast, dismiss]);
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePerformanceMode();
   const location = useLocation();
   const navigate = useNavigate();
   const previousLocation = useRef(location);

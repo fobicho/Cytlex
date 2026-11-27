@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { extensions, isExtensionAllowed } from '../lib/extensions.js';
@@ -414,6 +414,7 @@ function ReaderPanel({ id, src, displaySrc = '', forcePreload = false, preloadFa
 export default function Reader() {
   const { t } = useI18n();
   const loc = useLocation();
+  const navigate = useNavigate();
   const params = new URLSearchParams(loc.search);
   const chapterUrl = params.get('u') || '';
   const mangaUrl = params.get('m') || '';
@@ -431,11 +432,11 @@ export default function Reader() {
   const detailBackQS = detailBack.startsWith('/manga?')
     ? `&back=${encodeURIComponent(detailBack)}`
     : '';
-  const backHash = `#/manga?u=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}${detailBackQS}`;
+  const backPath = `/manga?u=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}${fromQS}${detailBackQS}`;
   const goBack = useCallback(() => {
     detailScroll.requestRestore();
-    window.location.hash = backHash;
-  }, [backHash]);
+    navigate(backPath);
+  }, [backPath, navigate]);
   const [ch, setCh] = useState(null);
   const [chUrl, setChUrl] = useState('');
   const [mangaDetail, setMangaDetail] = useState(() => {
@@ -1202,7 +1203,7 @@ export default function Reader() {
     };
   }, [menu]);
 
-  const go = (url) => `#/leer?u=${encodeURIComponent(url)}&m=${encodeURIComponent(currentMangaUrl)}&s=${encodeURIComponent(sourceId)}&t=${encodeURIComponent(mangaTitle)}${fromQS}${detailBackQS}`;
+  const go = (url) => `/leer?u=${encodeURIComponent(url)}&m=${encodeURIComponent(currentMangaUrl)}&s=${encodeURIComponent(sourceId)}&t=${encodeURIComponent(mangaTitle)}${fromQS}${detailBackQS}`;
 
   const openPanelMenu = (e, url, label) => {
     e.preventDefault();
@@ -1286,7 +1287,7 @@ export default function Reader() {
         return;
       }
     }
-    if (allowChapterChange && chapter?.url) window.location.hash = go(chapter.url);
+    if (allowChapterChange && chapter?.url) navigate(go(chapter.url));
   };
 
   useEffect(() => {
@@ -1314,7 +1315,7 @@ export default function Reader() {
         tone="prompt"
         title="Extensión desactivada"
         description={t('Activa «Mostrar extensiones +18» en Ajustes > Extensiones para volver a usarla.')}
-        action={<Button onClick={() => { window.location.hash = '#/ajustes'; }}>{t('Ir a Ajustes')}</Button>}
+        action={<Button onClick={() => navigate('/ajustes')}>{t('Ir a Ajustes')}</Button>}
       />
     );
   }
@@ -1412,7 +1413,7 @@ export default function Reader() {
               title={t('Capítulo anterior')}
               aria-label={t('Capítulo anterior')}
               disabled={!previousChapter?.url}
-              onClick={() => { if (previousChapter?.url) window.location.hash = go(previousChapter.url); }}
+              onClick={() => { if (previousChapter?.url) navigate(go(previousChapter.url)); }}
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
@@ -1422,7 +1423,7 @@ export default function Reader() {
               buttonClassName="rounded-none border-0 bg-transparent font-medium tabular-nums hover:bg-[color:var(--reader-control-active)] aria-expanded:bg-[color:var(--reader-control-active)] focus-visible:ring-inset"
               buttonStyle={{ ...selectorStyle, height: 'calc(var(--reader-control-height) - 2px)' }}
               value={selectedChapterUrl}
-              onChange={(url) => { if (url !== selectedChapterUrl) window.location.hash = go(url); }}
+              onChange={(url) => { if (url !== selectedChapterUrl) navigate(go(url)); }}
               ariaLabel="Capítulo"
               options={ascendingChapterOptions.map((o) => ({
                 value: o.url,
@@ -1438,7 +1439,7 @@ export default function Reader() {
               title={t('Capítulo siguiente')}
               aria-label={t('Capítulo siguiente')}
               disabled={!nextChapter?.url}
-              onClick={() => { if (nextChapter?.url) window.location.hash = go(nextChapter.url); }}
+              onClick={() => { if (nextChapter?.url) navigate(go(nextChapter.url)); }}
             >
               <ChevronRight className="h-4 w-4" />
             </Button>

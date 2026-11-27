@@ -40,7 +40,7 @@ function callbackUri() {
   if (typeof window === 'undefined' || !/^https?:$/.test(window.location.protocol)) {
     throw new Error('Configura VITE_ANILIST_REDIRECT_URI para conectar AniList en esta versión.');
   }
-  return new URL(window.location.pathname, window.location.origin).toString();
+  return new URL('/', window.location.origin).toString();
 }
 
 function randomState() {
@@ -68,7 +68,9 @@ export function consumeBrowserOAuthCallback() {
   }
   storage.removeItem(PENDING_KEY);
 
-  const returnHash = pending?.returnHash?.startsWith('#/') ? pending.returnHash : '#/ajustes';
+  const returnPath = pending?.returnPath?.startsWith('/')
+    ? pending.returnPath
+    : pending?.returnHash?.startsWith('#/') ? pending.returnHash.slice(1) : '/ajustes';
   const stateMatches = !!pending?.state && params.get('state') === pending.state;
   let error = '';
 
@@ -96,7 +98,7 @@ export function consumeBrowserOAuthCallback() {
   window.history.replaceState(
     window.history.state,
     '',
-    `${window.location.pathname}${window.location.search}${returnHash}`
+    returnPath
   );
   return true;
 }
@@ -150,7 +152,9 @@ export const session = {
     const redirectUri = callbackUri();
     storage.setItem(PENDING_KEY, JSON.stringify({
       state,
-      returnHash: window.location.hash || '#/ajustes',
+      returnPath: window.location.pathname === '/'
+        ? '/ajustes'
+        : `${window.location.pathname}${window.location.search}`,
       section
     }));
     viewerPromise = null;

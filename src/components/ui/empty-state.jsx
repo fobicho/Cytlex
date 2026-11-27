@@ -1,4 +1,5 @@
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { usePerformanceMode } from '../../lib/usePerformanceMode.js';
 import { cn } from '../../lib/utils.js';
 import { useScale, px, fontPx } from '../../lib/useScale.js';
 import { useI18n } from '../../lib/i18n.js';
@@ -23,7 +24,7 @@ export function EmptyState({
   className,
   animateFace = true
 }) {
-  const reduce = useReducedMotion();
+  const reduce = usePerformanceMode();
   const scale = useScale();
   const { t } = useI18n();
 
@@ -47,8 +48,8 @@ export function EmptyState({
             fontSize: fontPx(compact ? 30 : 48, scale, compact ? 22 : 32),
             marginBottom: px(compact ? 12 : 16, scale, compact ? 9 : 12)
           }}
-          animate={reduce || !animateFace ? undefined : GENTLE_FLOAT_MOTION}
-          transition={animateFace ? GENTLE_FLOAT_TRANSITION : undefined}
+          animate={reduce ? { y: 0, rotate: 0 } : animateFace ? GENTLE_FLOAT_MOTION : undefined}
+          transition={reduce ? { duration: 0 } : animateFace ? GENTLE_FLOAT_TRANSITION : undefined}
         >
           {face}
         </motion.div>

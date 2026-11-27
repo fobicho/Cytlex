@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { createPortal, flushSync } from 'react-dom';
-import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
+import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
+import { usePerformanceMode } from '../lib/usePerformanceMode.js';
 import { ArrowLeft, ArrowRight, Library, Compass, Settings as SettingsIcon, Check, CheckCheck, LoaderCircle } from 'lucide-react';
 import { THEMES, MODES } from '../lib/themes.js';
 import { resolveMode, settings } from '../lib/settings.js';
@@ -13,6 +14,7 @@ import { GENTLE_FLOAT_MOTION, GENTLE_FLOAT_TRANSITION } from './ui/empty-state.j
 import CytlexLogoMark from './CytlexLogoMark.jsx';
 import Settings from '../pages/Settings.jsx';
 import BackupProgress from './BackupProgress.jsx';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 const STEPS = [
   {
@@ -55,6 +57,8 @@ const STEP_CONTENT_VARIANTS = {
 
 export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp, onTutorialImportBusyChange, onTutorialImportProgressChange, tutorialImportBusy = false, tutorialImportProgress = null, enteringWithSplash = false, language = 'es', onLanguageChange }) {
   const { t } = useI18n();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [theme, setTheme] = useState(() => settings.get().theme);
   const [mode, setMode] = useState(() => settings.get().mode);
@@ -70,7 +74,7 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   const previousStep = useRef(step);
   const hasMounted = useRef(false);
   const scale = useScale();
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePerformanceMode();
   const stepDirection = step < previousStep.current ? -1 : 1;
   const motionDirection = reduceMotion ? 0 : stepDirection;
   const firstCardEntrance = enteringWithSplash && !hasMounted.current;
@@ -108,26 +112,21 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   useEffect(() => {
     if (step === 1) {
       const routes = {
-        biblioteca: '#/biblioteca',
-        explorar: '#/explorar?tab=mangas',
-        ajustes: `#/ajustes?tutorial=1&section=${SETTINGS_SECTION_IDS[0]}`
+        biblioteca: '/biblioteca',
+        explorar: '/explorar?tab=mangas',
+        ajustes: `/ajustes?tutorial=1&section=${SETTINGS_SECTION_IDS[0]}`
       };
-      window.location.hash = routes[walkthroughView];
+      navigate(routes[walkthroughView]);
     } else if (!exiting) {
       if (typeof onHideApp === 'function') onHideApp();
     }
-  }, [step, walkthroughView, exiting, onHideApp]);
+  }, [step, walkthroughView, exiting, onHideApp, navigate]);
 
   useEffect(() => {
-    const syncWalkthroughView = () => {
-      const path = window.location.hash.slice(1).split('?')[0];
-      if (path === '/biblioteca') setWalkthroughView('biblioteca');
-      else if (path === '/explorar') setWalkthroughView('explorar');
-      else if (path === '/ajustes') setWalkthroughView('ajustes');
-    };
-    window.addEventListener('hashchange', syncWalkthroughView);
-    return () => window.removeEventListener('hashchange', syncWalkthroughView);
-  }, []);
+    if (location.pathname === '/biblioteca') setWalkthroughView('biblioteca');
+    else if (location.pathname === '/explorar') setWalkthroughView('explorar');
+    else if (location.pathname === '/ajustes') setWalkthroughView('ajustes');
+  }, [location.pathname]);
 
   useEffect(() => {
     if (step !== 1 || walkthroughView === 'biblioteca') return;
@@ -136,14 +135,14 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
     const timer = window.setInterval(() => {
       if (walkthroughView === 'explorar') {
         tab = tab === 'mangas' ? 'extensiones' : 'mangas';
-        window.location.hash = `#/explorar?tab=${tab}`;
+        navigate(`/explorar?tab=${tab}`);
       } else {
         sectionIndex = (sectionIndex + 1) % SETTINGS_SECTION_IDS.length;
-        window.location.hash = `#/ajustes?tutorial=1&section=${SETTINGS_SECTION_IDS[sectionIndex]}`;
+        navigate(`/ajustes?tutorial=1&section=${SETTINGS_SECTION_IDS[sectionIndex]}`);
       }
     }, 2000);
     return () => window.clearInterval(timer);
-  }, [step, walkthroughView]);
+  }, [step, walkthroughView, navigate]);
 
   const applyTheme = useCallback((t, m) => {
     const run = () => {
@@ -162,10 +161,10 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
 
   const finish = useCallback(() => {
     settings.set({ tutorialSeen: true });
-    window.location.hash = '#/biblioteca';
+    navigate('/biblioteca');
     if (typeof onExitStart === 'function') onExitStart();
     setExiting(true);
-  }, [onExitStart]);
+  }, [onExitStart, navigate]);
 
   const next = () => {
     if (step < STEPS.length - 1) setStep((s) => s + 1);
@@ -242,8 +241,8 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
                     <span className="text-xl font-semibold tracking-tight font-display sm:text-2xl">{t('Bienvenido a')}</span>
                     <motion.div
                       className="flex items-center gap-1.5 sm:gap-2"
-                      animate={reduceMotion ? undefined : GENTLE_FLOAT_MOTION}
-                      transition={reduceMotion ? undefined : GENTLE_FLOAT_TRANSITION}
+                      animate={reduceMotion ? { y: 0, rotate: 0 } : GENTLE_FLOAT_MOTION}
+                      transition={reduceMotion ? { duration: 0 } : GENTLE_FLOAT_TRANSITION}
                     >
                       <CytlexLogoMark className="h-10 w-10" reduceMotion={reduceMotion} />
                       <h2 className="text-xl font-semibold tracking-tight font-brand sm:text-2xl">Cytlex</h2>

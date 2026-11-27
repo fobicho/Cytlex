@@ -16,7 +16,7 @@ export default function LanguageToggle({ value, onChange, className }) {
         <span
           aria-hidden="true"
           className={cn(
-            'pointer-events-none absolute inset-y-0.5 left-0.5 w-10 rounded-md bg-primary transition-transform duration-200 ease-out motion-reduce:transition-none',
+            'pointer-events-none absolute inset-y-0.5 left-0.5 w-10 rounded-md bg-primary transition-transform duration-200 ease-out',
             value === 'en' && 'translate-x-full'
           )}
         />

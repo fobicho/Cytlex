@@ -23,25 +23,6 @@ const STATUS_LABELS = {
   unconfigured: 'Falta configurar Supabase'
 };
 
-const FIELD_LABELS = {
-  title: 'título',
-  author: 'autor',
-  cover: 'portada',
-  description: 'descripción',
-  type: 'tipo',
-  genres: 'géneros',
-  chapterTotal: 'cantidad de capítulos',
-  chapterReadCount: 'capítulos leídos',
-  sourceId: 'fuente',
-  sourceName: 'nombre de la fuente',
-  sourceIcon: 'icono de la fuente',
-  cats: 'categorías',
-  version: 'versión',
-  page: 'página',
-  total: 'total de páginas',
-  read: 'estado de lectura'
-};
-
 function ChangeSummary({ groups, t, scale }) {
   if (!groups?.length) return null;
   return (
@@ -55,8 +36,12 @@ function ChangeSummary({ groups, t, scale }) {
             <ul className="ml-3 mt-1 min-w-0 space-y-1 text-muted-foreground">
               {group.items.map((item, index) => (
                 <li key={`${item.action}-${item.name}-${index}`}>
-                  {item.action ? `${t(item.action)}: ` : ''}{group.label === 'Ajustes' ? t(item.name) : item.name}
-                  {group.label !== 'Biblioteca' && item.fields?.length > 0 && <span className="text-muted-foreground"> · {item.fields.map((field) => t(FIELD_LABELS[field] || field)).join(', ')}</span>}
+                  {item.action ? `${t(item.action)}: ` : ''}
+                  {group.label === 'Ajustes'
+                    ? t(item.name)
+                    : group.label === 'Progreso de lectura'
+                      ? t(item.count === 1 ? '1 capítulo' : '{count} capítulos', { count: item.count })
+                      : item.name}
                 </li>
               ))}
               {group.more > 0 && <li>{t('+{count} más', { count: group.more })}</li>}

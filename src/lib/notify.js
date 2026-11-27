@@ -2,6 +2,7 @@ import { api } from './api.js';
 import { lib } from './library.js';
 import { settings } from './settings.js';
 import { chapterIndex } from './chapterIndex.js';
+import { beginImportRequestBatching } from './browserHttp.js';
 
 const key = (url, sourceId) => `${sourceId}|${url}`;
 const CHECK_BATCH_SIZE = 50;
@@ -27,13 +28,13 @@ export async function checkLibrary({ onProgress } = {}) {
   }
 
   running = true;
-  onProgress?.({ current: 0, total: favs.length });
-  const baseline = { ...(settings.get().notifyBaseline || {}) };
-  const found = [];
-  let cursor = 0;
-  let completed = 0;
-
+  const releaseBatching = beginImportRequestBatching();
   try {
+    onProgress?.({ current: 0, total: favs.length });
+    const baseline = { ...(settings.get().notifyBaseline || {}) };
+    const found = [];
+    let cursor = 0;
+    let completed = 0;
     // Keep update checks responsive while still combining requests queued together.
     await Promise.all(Array.from({ length: Math.min(CHECK_BATCH_SIZE, favs.length) }, async () => {
       while (cursor < favs.length) {
@@ -58,6 +59,7 @@ export async function checkLibrary({ onProgress } = {}) {
     settings.set({ notifyBaseline: baseline });
     return found;
   } finally {
+    releaseBatching();
     running = false;
   }
 }

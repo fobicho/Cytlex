@@ -764,14 +764,6 @@
   50% { transform: translateY(-3px); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .category-scroll-cue,
-  .category-scroll-hint {
-    animation: none;
-    transition: none;
-  }
-}
-
 .page-content-scroll::-webkit-scrollbar {
   width: 4px;
 }
@@ -1398,41 +1390,6 @@ img.manga-cover-corners {
 @keyframes cx-sidebar-glyph-cycle {
   to {
     transform: translate3d(-25%, 0, 0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sidebar-ribbon-brand-name {
-    animation: none;
-    background-position: 0 0;
-  }
-
-  .cx-update-pulse {
-    animation: none;
-    border-color: hsl(var(--primary));
-  }
-
-  .cx-chapter-pulse {
-    animation: none;
-    border-color: hsl(var(--primary));
-  }
-
-  .cx-subroute-update-pulse::after {
-    animation: none;
-    opacity: 1;
-    transform: none;
-  }
-
-  .cx-subroute-update-pulse-closing::after {
-    opacity: 0;
-  }
-
-  .sidebar-ribbon-track {
-    animation: none;
-  }
-
-  .sidebar-glyph-track {
-    animation: none;
   }
 }
 

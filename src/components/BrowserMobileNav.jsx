@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { usePerformanceMode } from '../lib/usePerformanceMode.js';
 import { BookOpen, Compass, Settings as SettingsIcon } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { useI18n } from '../lib/i18n.js';
@@ -81,7 +82,7 @@ export default function BrowserMobileNav({ tutorialNavOnly = false }) {
   const navigate = useNavigate();
   const active = activeSection(location);
   const activeIndex = items.findIndex(({ to }) => to.split('?')[0] === active);
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePerformanceMode();
   const previousActiveIndex = useRef(activeIndex);
   const [activeVisit, setActiveVisit] = useState(0);
 

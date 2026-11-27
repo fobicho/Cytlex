@@ -1,6 +1,6 @@
 import { MigrationSources } from '../components/MigrationSources.jsx';
 import { memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ChevronLeft, Play, Star, ChevronDown, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown, AlertTriangle, BookOpen, Check, CheckCheck, Puzzle, Link2, ArrowRightLeft, Crosshair, RefreshCw } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { isMangaCover, lib, mangaSourceUrl, storedCoverThumbnail } from '../lib/library.js';
@@ -22,6 +22,7 @@ import { EmptyState } from '../components/ui/empty-state.jsx';
 import { Dialog } from '../components/ui/dialog.jsx';
 import { Skeleton } from '../components/ui/skeleton.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
+import { useToast } from '../components/Toast.jsx';
 import AniListPanel from '../components/AniListPanel.jsx';
 import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
@@ -248,6 +249,7 @@ function backToFor(loc) {
 
 const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const { language, t } = useI18n();
+  const { toast } = useToast();
   const navigate = useNavigate();
   const loc = locationOverride;
   const mangaUrl = queryUrl(loc);
@@ -753,6 +755,14 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
       if (!Array.isArray(refreshed?.chapters) || !refreshed.chapters.length) {
         throw new Error('La fuente no devolvió capítulos.');
       }
+      const previousChapterUrls = new Set([
+        ...(d?.chapters || []).map((chapter) => chapter.url),
+        ...(chapterIndex.peek(mangaUrl, sourceId) || [])
+      ].filter(Boolean));
+      const newChapterCount = new Set(refreshed.chapters
+        .map((chapter) => chapter.url)
+        .filter((url) => url && !previousChapterUrls.has(url))).size;
+      const mangaName = refreshed.title || d?.title || previewTitle || savedManga?.title || t('este manga');
       writeActiveDetail(activeDetailKey, refreshed);
       if (d?.chapters?.length) reconcileChapterProgress(d.chapters, refreshed.chapters, sourceId, sourceId, mangaUrl);
       reconcileMihonProgress(mangaUrl, sourceId, refreshed.chapters);
@@ -771,6 +781,21 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         }, sourceId);
         api.persistLibraryDetail(mangaUrl, sourceId, refreshed);
         setCoverTick((tick) => tick + 1);
+      }
+      if (newChapterCount === 0) {
+        toast({
+          title: t('Todo está al día'),
+          description: t('No hay capítulos nuevos en {name}.', { name: mangaName }),
+          variant: 'info'
+        });
+      } else {
+        toast({
+          title: t('Capítulos nuevos encontrados'),
+          description: t(newChapterCount === 1
+            ? 'Se encontró 1 capítulo nuevo en {name}.'
+            : 'Se encontraron {count} capítulos nuevos en {name}.', { name: mangaName, count: newChapterCount }),
+          variant: 'success'
+        });
       }
     } catch (error) {
       if (/\bHTTP 404\b/.test(String(error?.message || error))
@@ -1007,7 +1032,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     chapterScrollFrame.current = null;
     const scrollContainer = element.closest('main') || document;
     element.scrollIntoView({
-      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      behavior: settings.get().performanceMode ? 'auto' : 'smooth',
       block: 'center'
     });
     let completed = false;
@@ -1103,7 +1128,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
           const cachedRow = chapterRows.current.get(c.url);
           if (cachedRow?.chapter === c && cachedRow.key === rowKey) return cachedRow.element;
           const element = (
-            <a
+            <Link
               key={c.url}
               ref={(element) => {
                 if (element) chapterRefs.current.set(c.url, element);
@@ -1116,7 +1141,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
               )}
               style={{ contentVisibility: 'auto', containIntrinsicBlockSize: `auto ${Math.round(64 * scale)}px`, minHeight: `${Math.round(52 * scale)}px` }}
               onClick={(e) => { e.currentTarget.blur(); saveDetailScroll(mangaUrl); }}
-              href={`#/leer?u=${encodeURIComponent(c.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&t=${encodeURIComponent(d?.title || previewTitle || savedManga?.title || '')}&from=${fromParam}${readerBackParam}`}
+              to={`/leer?u=${encodeURIComponent(c.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&t=${encodeURIComponent(d?.title || previewTitle || savedManga?.title || '')}&from=${fromParam}${readerBackParam}`}
             >
               <span className="flex-1 min-w-0">
                 <span
@@ -1188,7 +1213,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
                   </span>
                 )}
               </span>
-            </a>
+            </Link>
           );
           chapterRows.current.set(c.url, { chapter: c, key: rowKey, element });
           return element;
@@ -1248,7 +1273,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         tone="prompt"
         title={t('Extensión desactivada')}
         description={t('Activa «Mostrar extensiones +18» en Ajustes > Extensiones para volver a usarla.')}
-        action={<Button onClick={() => { window.location.hash = '#/ajustes'; }}>{t('Ir a Ajustes')}</Button>}
+        action={<Button onClick={() => navigate('/ajustes')}>{t('Ir a Ajustes')}</Button>}
       />
     );
   if (!sourceAvailable)
@@ -1258,7 +1283,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         tone="prompt"
         title="Fuente no instalada"
         action={
-          <Button onClick={() => { window.location.hash = '#/explorar?tab=extensiones'; }}>
+          <Button onClick={() => navigate('/explorar?tab=extensiones')}>
             {t('Ir a Extensiones')}
           </Button>
         }
@@ -1473,7 +1498,7 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             onClick={(e) => {
               e.currentTarget.blur();
               saveDetailScroll(mangaUrl);
-              window.location.hash = `#/leer?u=${encodeURIComponent(currentChapter.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&t=${encodeURIComponent(d?.title || previewTitle || savedManga?.title || '')}&from=${fromParam}${readerBackParam}`;
+              navigate(`/leer?u=${encodeURIComponent(currentChapter.url)}&m=${encodeURIComponent(mangaUrl)}&s=${encodeURIComponent(sourceId)}&t=${encodeURIComponent(d?.title || previewTitle || savedManga?.title || '')}&from=${fromParam}${readerBackParam}`);
             }}
             style={{
               height: px(40, scale, 33),

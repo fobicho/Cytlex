@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowUpDown, Filter, Loader2, Search, X } from 'lucide-react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
+import { usePerformanceMode } from '../lib/usePerformanceMode.js';
 import MangaCard from './MangaCard.jsx';
 import VirtualMangaGrid from './VirtualMangaGrid.jsx';
 import { SourceBadge } from './SourceBadge.jsx';
@@ -181,7 +182,7 @@ export default function SourcesCatalog({ sources, initialSourceId = '', active =
   const location = useLocation();
   const navigate = useNavigate();
   const scale = useScale();
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePerformanceMode();
   const [coverSize, setCoverSize] = useState(() => settings.get().coverSize);
   const [restore] = useState(() => sourceCatalogState.takeRestore());
   const [sourceId, setSourceId] = useState(() => initialSourceId || restore?.sourceId || '');

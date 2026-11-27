@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { api } from '../lib/api.js';
@@ -25,7 +26,7 @@ function prefetch(url, sourceId) {
 
 function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenUnavailable = false, unavailableLabel = 'Fuente no instalada', minimal = false, showAuthor = true, from = 'biblioteca', returnTo = '', onSelect, coverSize, scale: uiScale = 1, chapterCount, useLibraryCoverCache = false, bundledCoverOnly = false, savedInLibrary = false }) {
   const { language, t: translate } = useI18n();
-  const detailHash = `#/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}${returnTo ? `&back=${encodeURIComponent(returnTo)}` : ''}`;
+  const detailPath = `/manga?u=${encodeURIComponent(m.url)}&s=${encodeURIComponent(sourceId)}&from=${from}${returnTo ? `&back=${encodeURIComponent(returnTo)}` : ''}`;
   const sourceManifest = extensions.manifest(sourceId);
   const savedSourceName = String(m.sourceName || '');
   const manifestSourceName = String(sourceManifest.name || '');
@@ -155,8 +156,8 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
 
   return (
     <div className={cn(unavailable && 'opacity-60')}>
-      <a
-        href={detailHash}
+      <Link
+        to={detailPath}
         aria-label={m.title}
         title={m.title}
         className={linkCls}
@@ -250,18 +251,18 @@ function MangaCard({ m, sourceId = 'leercapitulo', unavailable = false, canOpenU
             </span>
           )}
         </div>
-      </a>
+      </Link>
       <div className="pt-2">
-        <a
+        <Link
           className={cn('block font-semibold leading-snug truncate', linkCls)}
           style={titleStyle}
-          href={detailHash}
+          to={detailPath}
           title={m.title}
           onClick={handleSelect}
           {...linkA11y}
         >
           {m.title}
-        </a>
+        </Link>
         {!minimal && showAuthor && (
           <div className="text-muted-foreground mt-0.5 truncate" style={subStyle}>
             {unavailable

@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
-import { useLocation } from 'react-router-dom';
+import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
+import { usePerformanceMode } from '../lib/usePerformanceMode.js';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Pencil, Check, Palette, Library as LibraryIcon, BookOpen, Puzzle, Tags, Trash2, Link2, RefreshCw, LogOut, Loader2, Database, Download, Upload, CircleHelp, Info, Settings as SettingsIcon, Monitor, Sun, Moon, Cloud, Columns3 } from 'lucide-react';
 import { CONTENT_WARNING_RATINGS, resolveMode, settings } from '../lib/settings.js';
 import { isMangaCover, isUnresolvedMihonSource, lib } from '../lib/library.js';
@@ -374,7 +375,7 @@ function Switch({ on, onChange, label, disabled = false, scale = 1 }) {
 
 function Row({ title, desc, right, first, last, className, stackOnMobile = false, scale = 1 }) {
   const { t, isLanguagePreview } = useI18n();
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePerformanceMode();
   const languageLayoutMotion = useLanguageLayoutMotion();
   const animateLanguageLayout = isLanguagePreview || languageLayoutMotion;
   const layoutTransition = animateLanguageLayout && !reduceMotion
@@ -451,7 +452,7 @@ function ConnectHint({ open, hintRef, scale, reduceMotion, className, message = 
 
 function Segmented({ value, options, onChange, scale = 1, stableLayout = false, ariaLabel, Icon }) {
   const { t } = useI18n();
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePerformanceMode();
   return (
     <div
       role="group"
@@ -470,7 +471,7 @@ function Segmented({ value, options, onChange, scale = 1, stableLayout = false, 
               aria-pressed={selected}
               onClick={() => onChange(val)}
               className={cn(
-                'relative z-10 inline-flex items-center justify-center rounded-lg px-1 py-0.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
+                'relative z-10 inline-flex items-center justify-center rounded-lg px-1 py-0.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 stableLayout && 'active:scale-100',
                 selected ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
               )}
@@ -515,7 +516,7 @@ function ModeToggle({ value, options, onChange }) {
         <span
           aria-hidden="true"
           className={cn(
-            'pointer-events-none absolute inset-y-0.5 left-0.5 w-16 rounded-md bg-primary transition-transform duration-200 ease-out motion-reduce:transition-none',
+            'pointer-events-none absolute inset-y-0.5 left-0.5 w-16 rounded-md bg-primary transition-transform duration-200 ease-out',
             value === 'light' && 'translate-x-full',
             value === 'dark' && 'translate-x-[200%]'
           )}
@@ -527,7 +528,7 @@ function ModeToggle({ value, options, onChange }) {
             aria-pressed={value === mode}
             onClick={() => onChange(mode)}
             className={cn(
-              'relative z-10 w-16 rounded-lg px-1 py-0.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
+              'relative z-10 w-16 rounded-lg px-1 py-0.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               value === mode ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
             )}
           >
@@ -577,6 +578,7 @@ let sessionSeccion = '';
 export default function Settings({ tutorialPreview = false, tutorialImportControls = null, onTutorialImportBusyChange = null, onTutorialImportProgressChange = null, onTutorialImportResult = null }) {
   const { language, t } = useI18n();
   const location = useLocation();
+  const navigate = useNavigate();
   const [s, setS] = useState(settings.get());
   const [languageLayoutMotion, setLanguageLayoutMotion] = useState(false);
   const languageLayoutTimerRef = useRef(null);
@@ -634,7 +636,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
   const sectionNavRef = useRef(null);
   const sectionScrollTimerRef = useRef(null);
   const scale = useScale();
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePerformanceMode();
   const isBrowserApp = typeof window !== 'undefined' && !window.cytlex;
   const tutorialImportRunning = Boolean(tutorialImportControls && (backupBusy || mihonBusy));
 
@@ -817,7 +819,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
   };
   const setAppearance = (patch) => {
     const run = () => flushSync(() => set(patch));
-    if (typeof document !== 'undefined' && typeof document.startViewTransition === 'function') {
+    if (!settings.get().performanceMode && !Object.hasOwn(patch, 'performanceMode') && typeof document !== 'undefined' && typeof document.startViewTransition === 'function') {
       document.startViewTransition(run);
     } else {
       run();
@@ -1538,6 +1540,12 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
             </div>
           }
         />
+        <Row
+          scale={scale}
+          title={t('Modo rendimiento')}
+          desc={t('Detiene las animaciones continuas sin bloquear los cambios de la interfaz.')}
+          right={<Switch on={s.performanceMode} onChange={(performanceMode) => setAppearance({ performanceMode })} label="Modo rendimiento" scale={scale} />}
+        />
         <div style={{ paddingTop: px(14, scale, 10) }}>
           <h3 className="mb-3 font-medium leading-tight md:mb-2" style={{ fontSize: fontPx(14, scale, 12) }}>
             {t('Tema')}
@@ -2134,7 +2142,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                       return;
                     }
                     setConnectHintFor(null);
-                    window.location.hash = '#/seguimiento';
+                    navigate('/seguimiento');
                   }}
                   style={{
                     height: px(36, scale, 30),
