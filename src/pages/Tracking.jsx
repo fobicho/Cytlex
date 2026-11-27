@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Link2, Loader2, AlertTriangle, LogOut, BookOpen } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Loader2, AlertTriangle, LogOut, BookOpen, ArrowLeft } from 'lucide-react';
 import { session } from '../lib/session.js';
 import { anilistList, setScoreScale } from '../lib/anilist.js';
 import { lib } from '../lib/library.js';
@@ -13,6 +13,7 @@ import { useScale, px, fontPx } from '../lib/useScale.js';
 import { settings } from '../lib/settings.js';
 import { useResponsiveCoverSize } from '../lib/useResponsiveCoverSize.js';
 import { useI18n } from '../lib/i18n.js';
+import ComickTracking from '../components/ComickTracking.jsx';
 
 const STATUS_ES = {
   CURRENT: 'Leyendo',
@@ -32,7 +33,20 @@ const SCORE_DENOMINATOR = {
   POINT_3: 3
 };
 
-export default function Tracking() {
+export default function Tracking({ embedded = false, provider: embeddedProvider, onProviderChange, onBack }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const provider = embedded ? embeddedProvider : new URLSearchParams(location.search).get('provider');
+  const changeProvider = (nextProvider) => {
+    if (embedded) onProviderChange?.(nextProvider);
+    else navigate(nextProvider === 'comick' ? '/seguimiento?provider=comick' : '/seguimiento');
+  };
+  return provider === 'comick'
+    ? <ComickTracking embedded={embedded} onProviderChange={changeProvider} onBack={onBack} />
+    : <AniListTracking embedded={embedded} onProviderChange={changeProvider} onBack={onBack} />;
+}
+
+function AniListTracking({ embedded = false, onProviderChange, onBack }) {
   const { language, t } = useI18n();
   const navigate = useNavigate();
   const [auth, setAuth] = useState(null);
@@ -44,6 +58,13 @@ export default function Tracking() {
   const coverScale = useResponsiveCoverSize(coverSize) / 160;
   const scale = useScale();
   const scoreDenominator = SCORE_DENOMINATOR[viewer?.scoreFormat] || 10;
+  const returnToSettings = () => embedded ? onBack?.() : navigate('/ajustes');
+  const providerNav = (
+    <div className="flex gap-2 mb-5" role="tablist" aria-label={t('Apps de seguimiento')}>
+      <Button size="sm" role="tab" aria-selected="true" onClick={() => onProviderChange?.('anilist')}>AniList</Button>
+      <Button variant="secondary" size="sm" role="tab" aria-selected="false" onClick={() => onProviderChange?.('comick')}>Comick</Button>
+    </div>
+  );
 
   useEffect(() => settings.subscribe((s) => setCoverSize(s.coverSize)), []);
 
@@ -94,31 +115,36 @@ export default function Tracking() {
 
   if (auth && !auth.connected) {
     return (
-      <div className="min-h-[60vh] grid place-items-center">
-        <EmptyState
-          face="（・_・）"
-          tone="prompt"
-          title={t('Conecta tu cuenta de AniList')}
-          action={
-            <Button
-              onClick={() => navigate('/ajustes')}
-              style={{
-                height: px(40, scale, 33),
-                fontSize: fontPx(14, scale, 12),
-                paddingLeft: px(16, scale, 12),
-                paddingRight: px(16, scale, 12)
-              }}
-            >
-              {t('Ir a Ajustes')}
-            </Button>
-          }
-        />
+      <div className="min-h-full flex flex-col">
+        {providerNav}
+        <div className="min-h-[55vh] flex-1 -translate-y-6 grid place-items-center">
+          <EmptyState
+            face="（・_・）"
+            tone="prompt"
+            title={t('Conecta tu cuenta de AniList')}
+            action={
+              <Button
+                onClick={returnToSettings}
+                style={{
+                  height: px(40, scale, 33),
+                  fontSize: fontPx(14, scale, 12),
+                  paddingLeft: px(16, scale, 12),
+                  paddingRight: px(16, scale, 12)
+                }}
+              >
+                {embedded && <ArrowLeft className="mr-2 h-4 w-4" />}
+                {t(embedded ? 'Volver' : 'Ir a Ajustes')}
+              </Button>
+            }
+          />
+        </div>
       </div>
     );
   }
 
   return (
     <div className="min-h-full flex flex-col">
+      {providerNav}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
           {viewer?.avatar?.medium ? (
@@ -140,24 +166,24 @@ export default function Tracking() {
             <h1 className="font-bold tracking-tight leading-tight" style={{ fontSize: fontPx(18, scale) }}>
               {language === 'en' ? 'Your AniList list' : 'Tu lista en AniList'}
             </h1>
-            {viewer?.name && (
-              <p className="text-muted-foreground" style={{ fontSize: fontPx(12, scale) }}>
-                {viewer.name}
-              </p>
-            )}
+            <p className="text-muted-foreground" style={{ fontSize: fontPx(12, scale) }}>
+              {viewer?.name || '—'}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => navigate('/ajustes')}>
-            {t('Ajustes')}
+          <Button variant="ghost" size="sm" onClick={returnToSettings}>
+            {embedded && <ArrowLeft className="mr-2 h-4 w-4" />}
+            {t(embedded ? 'Volver' : 'Ajustes')}
           </Button>
           <Button variant="secondary" size="sm" onClick={load} disabled={busy}>
             <Loader2 className="w-4 h-4 mr-2" />
             {t('Actualizar')}
           </Button>
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
+            className="border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive"
             onClick={async () => {
               await session.logout();
               setAuth({ connected: false });
@@ -213,9 +239,9 @@ export default function Tracking() {
 
       {grouped.map((g) => (
         <section key={g.status} className="mb-8">
-          <div className="flex items-center gap-2 mb-3">
-            <h2 className="text-sm font-semibold">{t(STATUS_ES[g.status] || g.status)}</h2>
-            <span className="text-xs text-muted-foreground">· {g.items.length}</span>
+          <div className="mb-3 flex items-center gap-2 border-b border-border/70 pb-2">
+            <h2 className="text-sm font-semibold tracking-tight">{t(STATUS_ES[g.status] || g.status)}</h2>
+            <Badge variant="outline">{g.items.length}</Badge>
           </div>
           <div className="flex flex-col gap-2">
             {g.items.map((e) => {
@@ -227,41 +253,44 @@ export default function Tracking() {
                       src={e.cover}
                       alt=""
                       referrerPolicy="no-referrer"
-                      className="manga-cover-corners object-cover rounded-sm bg-black shrink-0"
-                      style={{ width: px(40 * coverScale, scale, 27), height: px(56 * coverScale, scale, 38) }}
+                      className="manga-cover-corners shrink-0 rounded-md bg-black object-cover shadow-sm ring-1 ring-border/70"
+                      style={{ width: px(52 * coverScale, scale, 35), height: px(72 * coverScale, scale, 49) }}
                     />
                   ) : (
                     <div
-                      className="manga-cover-corners rounded-lg bg-secondary shrink-0"
-                      style={{ width: px(40 * coverScale, scale, 27), height: px(56 * coverScale, scale, 38) }}
-                    />
+                      className="manga-cover-corners grid shrink-0 place-items-center rounded-md bg-secondary text-muted-foreground"
+                      style={{ width: px(52 * coverScale, scale, 35), height: px(72 * coverScale, scale, 49) }}
+                    ><BookOpen className="h-5 w-5 opacity-40" /></div>
                   )}
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold truncate" style={{ fontSize: fontPx(15, scale) }}>
+                  <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
+                    <div className="truncate font-semibold leading-snug" style={{ fontSize: fontPx(15, scale) }}>
                       {e.title}
                     </div>
-                    <div className="text-muted-foreground" style={{ fontSize: fontPx(12, scale) }}>
-                      {e.progress} {e.progress === 1 ? t('capítulo') : t('capítulos')}
-                      {e.startedAt && ` · desde ${e.startedAt}`}
+                    <div className="truncate text-muted-foreground" style={{ fontSize: fontPx(12, scale) }}>
+                      {e.progress} {e.progress === 1 ? t('capítulo') : t('capítulos')}{e.startedAt && ` · desde ${e.startedAt}`}
                     </div>
                   </div>
                   {e.score != null && (
-                    <Badge variant="outline" className="shrink-0">{e.score}/{scoreDenominator}</Badge>
+                    <Badge variant="default" className="shrink-0">{e.score}/{scoreDenominator}</Badge>
                   )}
-                  {local && <BookOpen className="w-4 h-4 text-muted-foreground shrink-0" />}
+                  {local && (
+                    <Badge variant="outline" className="hidden shrink-0 items-center gap-1 sm:inline-flex">
+                      <BookOpen className="h-3 w-3" />{t('En biblioteca')}
+                    </Badge>
+                  )}
                 </>
               );
-              const cls = 'flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-2.5 transition-colors';
+              const cls = 'group flex min-w-0 items-center gap-4 rounded-xl border border-border bg-card/70 px-3 py-3 transition-colors sm:px-4 hover:border-primary/40 hover:bg-accent/40';
               return local ? (
                 <Link
                   key={e.mediaId}
                   to={`/manga?u=${encodeURIComponent(local.url)}&s=${encodeURIComponent(local.sourceId || 'leercapitulo')}&from=seguimiento`}
-                  className={cn(cls, 'hover:bg-accent/50')}
+                  className={cn(cls, 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2')}
                 >
                   {row}
                 </Link>
               ) : (
-                <div key={e.mediaId} className={cn(cls, 'opacity-70')}>
+                <div key={e.mediaId} className={cls}>
                   {row}
                 </div>
               );

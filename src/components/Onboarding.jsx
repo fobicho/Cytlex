@@ -110,6 +110,12 @@ export default function Onboarding({ onDone, onExitStart, onRevealApp, onHideApp
   }, [exiting, onDone]);
 
   useEffect(() => {
+    if (step === 0 && location.pathname !== '/') {
+      navigate('/', { replace: true });
+    }
+  }, [step, location.pathname, navigate]);
+
+  useEffect(() => {
     if (step === 1) {
       const routes = {
         biblioteca: '/biblioteca',

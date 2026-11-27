@@ -47,11 +47,26 @@ export const tracking = {
   link(mangaUrl, sourceId, anilistId, cover, coverLocal) {
     if (!mangaUrl || !anilistId) return;
     const data = read();
-    data[cap(mangaUrl, sourceId)] = {
+    const key = cap(mangaUrl, sourceId);
+    data[key] = {
+      ...(data[key] || {}),
       id: anilistId,
       linkedAt: Date.now(),
       ...(cover ? { cover } : {}),
       ...(coverLocal ? { coverLocal } : {})
+    };
+    write(data);
+    notify();
+  },
+
+  linkComick(mangaUrl, sourceId, comickId) {
+    if (!mangaUrl || !comickId) return;
+    const data = read();
+    const key = cap(mangaUrl, sourceId);
+    data[key] = {
+      ...(data[key] || {}),
+      comickId: String(comickId),
+      comickLinkedAt: Date.now()
     };
     write(data);
     notify();
@@ -80,10 +95,22 @@ export const tracking = {
     notify();
   },
 
-  unlink(mangaUrl, sourceId) {
+  unlink(mangaUrl, sourceId, provider) {
     if (!mangaUrl) return;
     const data = read();
-    delete data[cap(mangaUrl, sourceId)];
+    const key = cap(mangaUrl, sourceId);
+    const current = data[key];
+    if (!current) return;
+    if (provider === 'comick') {
+      delete current.comickId;
+      delete current.comickLinkedAt;
+    } else if (provider === 'anilist') {
+      delete current.id;
+      delete current.linkedAt;
+      delete current.cover;
+      delete current.coverLocal;
+    } else delete data[key];
+    if (!current.id && !current.comickId) delete data[key];
     write(data);
     notify();
   },
@@ -106,7 +133,7 @@ export const tracking = {
     }
   },
 
-  linkedCount() {
-    return Object.keys(read()).length;
+  linkedCount(provider = 'anilist') {
+    return Object.values(read()).filter((entry) => provider === 'comick' ? !!entry?.comickId : !!entry?.id).length;
   }
 };

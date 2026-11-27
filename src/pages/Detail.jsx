@@ -24,6 +24,7 @@ import { Skeleton } from '../components/ui/skeleton.jsx';
 import { Dropdown } from '../components/ui/dropdown.jsx';
 import { useToast } from '../components/Toast.jsx';
 import AniListPanel from '../components/AniListPanel.jsx';
+import ComickPanel from '../components/ComickPanel.jsx';
 import { settings } from '../lib/settings.js';
 import { tracking } from '../lib/tracking.js';
 import { browserImageUrl, sourceErrorMessage } from '../lib/browserHttp.js';
@@ -366,7 +367,9 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
   const chapterScrollCleanup = useRef(null);
   const chapterJumpContext = useRef(null);
   const [aniListOpen, setAniListOpen] = useState(false);
-  const [aniLinked, setAniLinked] = useState(() => !!tracking.get(mangaUrl, sourceId));
+  const [comickOpen, setComickOpen] = useState(false);
+  const [aniLinked, setAniLinked] = useState(() => !!tracking.get(mangaUrl, sourceId)?.id);
+  const [comickLinked, setComickLinked] = useState(() => !!tracking.get(mangaUrl, sourceId)?.comickId);
   const [anilistCover, setAnilistCover] = useState(() => !!settings.get().anilistCover);
 
   const scale = useScale();
@@ -510,7 +513,12 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     </div>
   );
 
-  useEffect(() => tracking.subscribe(() => { setAniLinked(!!tracking.get(mangaUrl, sourceId)); setCoverTick((t) => t + 1); }), []);
+  useEffect(() => tracking.subscribe(() => {
+    const linked = tracking.get(mangaUrl, sourceId);
+    setAniLinked(!!linked?.id);
+    setComickLinked(!!linked?.comickId);
+    setCoverTick((t) => t + 1);
+  }), [mangaUrl, sourceId]);
   useEffect(() => settings.subscribe((s) => setAnilistCover(!!s.anilistCover)), []);
   useEffect(() => settings.subscribe((s) => setShowAdultExtensions(!!s.showAdultExtensions)), []);
   useEffect(() => settings.subscribe((s) => setCoverSetting(s.coverSize)), []);
@@ -554,11 +562,6 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     });
     return () => cancelAnimationFrame(frame);
   }, [active, d, mangaUrl, renderedChapterCount, visibleChapterCount]);
-  useEffect(
-    () => tracking.subscribe(() => setAniLinked(!!tracking.get(mangaUrl, sourceId))),
-    [mangaUrl, sourceId]
-  );
-
   useEffect(() => {
     if (migrationSearchMode) return undefined;
     if (!mangaUrl) return undefined;
@@ -570,7 +573,8 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
     setAsc(chapterOrder.get(mangaUrl));
     const isFavorite = lib.isFav(mangaUrl, sourceId);
     setFav(isFavorite);
-    setAniLinked(!!tracking.get(mangaUrl, sourceId));
+    setAniLinked(!!tracking.get(mangaUrl, sourceId)?.id);
+    setComickLinked(!!tracking.get(mangaUrl, sourceId)?.comickId);
 
     let cached = api.peekDetail(mangaUrl, sourceId) || api.peekStaleDetail(mangaUrl, sourceId);
     setDetailState((current) => current.key === detailKey && current.data === cached
@@ -1720,7 +1724,27 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
             className={cn('mr-2 shrink-0', aniLinked && 'text-primary')}
             style={{ width: px(16, scale, 14), height: px(16, scale, 14) }}
           />
-          Seguimiento
+          AniList
+        </Button>
+        <Button
+          variant="secondary"
+          className="active:scale-100"
+          onClick={() => setComickOpen(true)}
+          title="Vincular con Comick"
+          style={{
+            height: px(40, scale, 33),
+            minHeight: px(40, scale, 33),
+            flexShrink: 0,
+            paddingLeft: px(16, scale, 13),
+            paddingRight: px(16, scale, 13),
+            fontSize: fontPx(14, scale, 12)
+          }}
+        >
+          <Link2
+            className={cn('mr-2 shrink-0', comickLinked && 'text-primary')}
+            style={{ width: px(16, scale, 14), height: px(16, scale, 14) }}
+          />
+          Comick
         </Button>
       </div>
 
@@ -1730,6 +1754,13 @@ const Detail = memo(function Detail({ locationOverride, active, activeRef }) {
         title={d.title}
         open={aniListOpen}
         onClose={() => setAniListOpen(false)}
+      />
+      <ComickPanel
+        mangaUrl={mangaUrl}
+        sourceId={sourceId}
+        title={d.title}
+        open={comickOpen}
+        onClose={() => setComickOpen(false)}
       />
 
       {err && (

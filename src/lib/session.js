@@ -5,6 +5,7 @@ const RETURN_SECTION_KEY = 'cytlex:anilist:return-section';
 const AUTH_ERROR_KEY = 'cytlex:anilist:auth-error';
 const AUTH_URL = 'https://anilist.co/api/v2/oauth/authorize';
 const CLIENT_ID = import.meta.env.VITE_ANILIST_CLIENT_ID || '52189';
+const LOCAL_CLIENT_ID = import.meta.env.VITE_ANILIST_LOCAL_CLIENT_ID?.trim();
 const DEFAULT_TOKEN_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
 let viewerPromise = null;
@@ -41,6 +42,16 @@ function callbackUri() {
     throw new Error('Configura VITE_ANILIST_REDIRECT_URI para conectar AniList en esta versión.');
   }
   return new URL('/', window.location.origin).toString();
+}
+
+function anilistClientId() {
+  if (window.location.hostname === 'localhost') {
+    if (!LOCAL_CLIENT_ID) {
+      throw new Error('Configura VITE_ANILIST_LOCAL_CLIENT_ID con el ID de una app AniList registrada para http://localhost:5174/.');
+    }
+    return LOCAL_CLIENT_ID;
+  }
+  return CLIENT_ID;
 }
 
 function randomState() {
@@ -147,6 +158,7 @@ export const session = {
       return await b.authLogin(redirectUri ? { redirectUri } : undefined);
     }
 
+    const clientId = anilistClientId();
     const storage = browserStorage();
     const state = randomState();
     const redirectUri = callbackUri();
@@ -160,7 +172,7 @@ export const session = {
     viewerPromise = null;
 
     const auth = new URL(AUTH_URL);
-    auth.searchParams.set('client_id', CLIENT_ID);
+    auth.searchParams.set('client_id', clientId);
     auth.searchParams.set('response_type', 'token');
     auth.searchParams.set('state', state);
     window.location.assign(auth.toString());

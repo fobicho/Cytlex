@@ -909,7 +909,7 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <p className="text-sm text-muted-foreground">{err}</p>
           <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={() => tracking.unlink(mangaUrl, sourceId)}>
+            <Button variant="secondary" size="sm" onClick={() => tracking.unlink(mangaUrl, sourceId, 'anilist')}>
               <Unlink className="w-4 h-4 mr-2" /> {t('Desvincular')}
             </Button>
             <Button size="sm" onClick={() => { anilist.clearCache(); setData(null); setErr(''); setLinkedId(linkedId); }}>
@@ -962,7 +962,7 @@ export default function AniListPanel({ mangaUrl, sourceId, title, open, onClose 
                 size="icon"
                 title={t('Desvincular')}
                 aria-label={t('Desvincular')}
-                onClick={() => { tracking.unlink(mangaUrl, sourceId); anilist.clearCache(); onClose(); }}
+                onClick={() => { tracking.unlink(mangaUrl, sourceId, 'anilist'); anilist.clearCache(); onClose(); }}
               >
                 <Unlink className="w-4 h-4" />
               </Button>

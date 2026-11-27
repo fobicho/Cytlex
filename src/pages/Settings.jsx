@@ -9,6 +9,7 @@ import { isMangaCover, isUnresolvedMihonSource, lib } from '../lib/library.js';
 import { api } from '../lib/api.js';
 import { anilist } from '../lib/anilist.js';
 import { consumeBrowserAuthError, consumeBrowserSettingsSection, session } from '../lib/session.js';
+import { consumeComickAuthError, comickSession } from '../lib/comickSession.js';
 import { tracking } from '../lib/tracking.js';
 import { progress } from '../lib/progress.js';
 import { MODES, THEMES } from '../lib/themes.js';
@@ -36,6 +37,7 @@ import SubrouteTabLabel from '../components/SubrouteTabLabel.jsx';
 import { attachHorizontalScrollFade } from '../lib/horizontalScrollFade.js';
 import CloudSyncPanel from '../components/CloudSyncPanel.jsx';
 import { cloudSync } from '../lib/cloudSync.js';
+import Tracking from './Tracking.jsx';
 
 let importedEnrichmentQueue = Promise.resolve();
 
@@ -422,6 +424,24 @@ function Row({ title, desc, right, first, last, className, stackOnMobile = false
   );
 }
 
+function TrackingProviderLogo({ provider }) {
+  if (provider === 'anilist') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 40 40" className="h-10 w-10 shrink-0">
+        <path d="M5 33 17 6h6l12 27h-7l-2.4-5.9H14.3L12 33H5Zm11.8-11.2h6.4L20 13.9l-3.2 7.9Z" fill="currentColor" />
+        <path d="M27.5 26.2H35V33h-7.5z" fill="#02A9FF" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" viewBox="0 0 40 40" className="h-10 w-10 shrink-0">
+      <path d="M28.5 11C25.8 8.2 22.1 6.5 18 6.5 10.7 6.5 5.5 12.6 5.5 20S10.7 33.5 18 33.5c4.1 0 7.8-1.7 10.5-4.5" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+      <path d="M25 15 32 11 25 7" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function ConnectHint({ open, hintRef, scale, reduceMotion, className, message = '¡Conecta tu cuenta primero!' }) {
   const { t } = useI18n();
   return (
@@ -584,7 +604,8 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
   const languageLayoutTimerRef = useRef(null);
   const languageLayoutFrameRef = useRef(null);
   const [section, setSection] = useState(() => {
-    const restoredSection = tutorialImportControls ? 'respaldo' : consumeBrowserSettingsSection() || sessionSeccion;
+    const requestedSection = new URLSearchParams(window.location.search).get('section');
+    const restoredSection = tutorialImportControls ? 'respaldo' : requestedSection || consumeBrowserSettingsSection() || sessionSeccion;
     return VISIBLE_SECTIONS.some(({ id }) => id === restoredSection) ? restoredSection : 'apariencia';
   });
   const [libraryUnreadTipOpen, setLibraryUnreadTipOpen] = useState(false);
@@ -599,6 +620,12 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
   const [authViewer, setAuthViewer] = useState(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [authErr, setAuthErr] = useState(() => consumeBrowserAuthError());
+  const [comickState, setComickState] = useState(() => comickSession.status());
+  const [comickProfile, setComickProfile] = useState(null);
+  const [comickBusy, setComickBusy] = useState(false);
+  const [comickErr, setComickErr] = useState(() => consumeComickAuthError());
+  const [trackingProvidersOpen, setTrackingProvidersOpen] = useState(false);
+  const [trackingListProvider, setTrackingListProvider] = useState(null);
   const [connectHintFor, setConnectHintFor] = useState(null);
   const connectHintRef = useRef(null);
   const { toast, dismiss } = useToast();
@@ -779,6 +806,31 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
     })();
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    const refreshComickState = async () => {
+      const st = comickSession.status();
+      if (!alive) return;
+      setComickState(st);
+      if (!st.connected) {
+        setComickProfile(null);
+        return;
+      }
+      try {
+        setComickProfile(await comickSession.profile());
+      } catch (error) {
+        if (alive) setComickErr(String(error?.message || error));
+      }
+    };
+    const unsubscribe = comickSession.subscribe(refreshComickState);
+    void refreshComickState();
+    return () => { alive = false; unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    if (authErr || comickErr) setTrackingProvidersOpen(true);
+  }, [authErr, comickErr]);
+
   const connect = async () => {
     setAuthBusy(true);
     setAuthErr('');
@@ -796,6 +848,18 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       setAuthErr(String(e?.message || e));
     } finally {
       if (!redirecting) setAuthBusy(false);
+    }
+  };
+
+  const connectComick = async () => {
+    setComickBusy(true);
+    setComickErr('');
+    try {
+      await comickSession.login('/ajustes?section=seguimiento');
+    } catch (error) {
+      setComickErr(String(error?.message || error));
+    } finally {
+      setComickBusy(false);
     }
   };
 
@@ -1999,68 +2063,134 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
       </div>
     );
   } else if (section === 'seguimiento') {
-    content = (
+    content = trackingListProvider ? (
+      <Tracking
+        embedded
+        provider={trackingListProvider}
+        onProviderChange={setTrackingListProvider}
+        onBack={() => setTrackingListProvider(null)}
+      />
+    ) : (
       <div>
         <Row
           scale={scale}
           first
-          title="Cuenta de AniList"
-          desc={
-            authState.connected
-              ? `Conectado${authViewer?.name ? ` como ${authViewer.name}` : ''}`
-              : authState.expired
-                ? 'Sesión caducada, vuelve a conectarte'
-                : 'Sin conectar'
-          }
-          right={
-            authState.connected ? (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={async () => {
-                  await session.logout();
-                  anilist.clearCache();
-                  setAuthState({ connected: false });
-                  setAuthViewer(null);
-                }}
-                style={{
-                  height: px(36, scale, 30),
-                  fontSize: fontPx(14, scale, 12),
-                  paddingLeft: px(12, scale, 9),
-                  paddingRight: px(12, scale, 9)
-                }}
-              >
-                <LogOut className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                {t('Desconectar')}
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                onClick={connect}
-                disabled={authBusy}
-                style={{
-                  height: px(36, scale, 30),
-                  fontSize: fontPx(14, scale, 12),
-                  paddingLeft: px(12, scale, 9),
-                  paddingRight: px(12, scale, 9)
-                }}
-              >
-                {authBusy ? (
-                  <Loader2 className="mr-2 animate-spin" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                ) : (
-                  <Link2 className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
-                )}
-                {t('Conectar')}
-              </Button>
-            )
-          }
+          title="Apps de seguimiento"
+          desc={(
+            <>
+              {t('AniList')}: {authState.connected ? `${t('Conectado')}${authViewer?.name ? ` · ${authViewer.name}` : ''}` : t(authState.expired ? 'Sesión caducada, vuelve a conectarte' : 'Sin conectar')}
+              {' · '}
+              {t('Comick')}: {comickState.connected ? `${t('Conectado')}${comickProfile?.username ? ` · ${comickProfile.username}` : ''}` : t('Sin conectar')}
+            </>
+          )}
+          right={(
+            <Button
+              size="sm"
+              onClick={() => setTrackingProvidersOpen(true)}
+              style={{ height: px(36, scale, 30), fontSize: fontPx(14, scale, 12), paddingLeft: px(12, scale, 9), paddingRight: px(12, scale, 9) }}
+            >
+              <Link2 className="mr-2" style={{ width: px(16, scale, 13), height: px(16, scale, 13) }} />
+              {t(authState.connected || comickState.connected ? 'Administrar servicios' : 'Conectar servicio')}
+            </Button>
+          )}
         />
 
-        {authErr && (
-          <p className="text-destructive py-4" style={{ fontSize: fontPx(14, scale, 12) }}>
-            {authErr}
-          </p>
-        )}
+        <Dialog
+          open={trackingProvidersOpen}
+          onClose={() => setTrackingProvidersOpen(false)}
+          title="Servicios de seguimiento"
+          description="Elige qué cuenta quieres conectar o administrar."
+          scale={scale}
+          className="max-w-xl"
+        >
+          <div className="grid gap-3">
+            <section className="rounded-xl border border-border bg-secondary/40 p-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <TrackingProviderLogo provider="anilist" />
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-semibold">AniList</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {authState.connected
+                      ? `${t('Conectado')}${authViewer?.name ? ` · ${authViewer.name}` : ''}`
+                      : t(authState.expired ? 'Sesión caducada, vuelve a conectarte' : 'Sin conectar')}
+                  </p>
+                </div>
+              </div>
+              {authErr && <p role="alert" className="mt-3 text-sm text-destructive">{authErr}</p>}
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                {authState.connected && (
+                  <Button variant="secondary" size="sm" onClick={() => { setTrackingProvidersOpen(false); setTrackingListProvider('anilist'); }}>
+                    {t('Ver mi lista')}
+                  </Button>
+                )}
+                {authState.connected ? (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={async () => {
+                      await session.logout();
+                      anilist.clearCache();
+                      setAuthState({ connected: false });
+                      setAuthViewer(null);
+                    }}
+                  >
+                    <LogOut className="mr-2 h-4 w-4" />{t('Desconectar')}
+                  </Button>
+                ) : (
+                  <Button size="sm" onClick={connect} disabled={authBusy}>
+                    {authBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Link2 className="mr-2 h-4 w-4" />}
+                    {t('Conectar')}
+                  </Button>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-border bg-secondary/40 p-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <TrackingProviderLogo provider="comick" />
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-semibold">Comick</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {comickState.connected
+                      ? `${t('Conectado')}${comickProfile?.username ? ` · ${comickProfile.username}` : ''} · ${t(comickState.canWrite ? 'Lectura y escritura permitidas' : 'Solo lectura; el progreso no se sincronizará')}`
+                      : t('Sin conectar')}
+                  </p>
+                </div>
+              </div>
+              {comickErr && <p role="alert" className="mt-3 text-sm text-destructive">{comickErr}</p>}
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                {comickState.connected && (
+                  <Button variant="secondary" size="sm" onClick={() => { setTrackingProvidersOpen(false); setTrackingListProvider('comick'); }}>
+                    {t('Ver mi lista')}
+                  </Button>
+                )}
+                {comickState.connected ? (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={async () => {
+                      await comickSession.logout();
+                      setComickState(comickSession.status());
+                      setComickProfile(null);
+                    }}
+                  >
+                    <LogOut className="mr-2 h-4 w-4" />{t('Desconectar')}
+                  </Button>
+                ) : (
+                  <Button size="sm" onClick={connectComick} disabled={comickBusy}>
+                    {comickBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Link2 className="mr-2 h-4 w-4" />}
+                    {t('Conectar')}
+                  </Button>
+                )}
+              </div>
+            </section>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button variant="secondary" size="sm" onClick={() => setTrackingProvidersOpen(false)}>
+              {t('Cerrar')}
+            </Button>
+          </div>
+        </Dialog>
 
         <Row
           scale={scale}
@@ -2095,7 +2225,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
           scale={scale}
           last
           stackOnMobile
-          title="Mangas vinculados"
+          title="Mangas vinculados con AniList"
           desc={
             linkedCount
               ? `${linkedCount} ${linkedCount === 1 ? 'manga vinculado' : 'mangas vinculados'}`
@@ -2142,7 +2272,7 @@ export default function Settings({ tutorialPreview = false, tutorialImportContro
                       return;
                     }
                     setConnectHintFor(null);
-                    navigate('/seguimiento');
+                    setTrackingListProvider('anilist');
                   }}
                   style={{
                     height: px(36, scale, 30),

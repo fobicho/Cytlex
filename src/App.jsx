@@ -381,7 +381,7 @@ export default function App({ tutorialMode = false }) {
                 </div>
               )}
               <Routes>
-                <Route path="/" element={<Navigate to="/biblioteca" replace />} />
+                <Route path="/" element={tutorialMode ? null : <Navigate to="/biblioteca" replace />} />
                 <Route path="/biblioteca" element={null} />
                 <Route path="/explorar" element={null} />
                 <Route path="/resultados" element={<Results />} />

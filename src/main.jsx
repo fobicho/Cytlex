@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MotionConfig, motion } from 'framer-motion';
-import { BrowserRouter, HashRouter } from 'react-router-dom';
+import { BrowserRouter, HashRouter, MemoryRouter } from 'react-router-dom';
 import App from './App.jsx';
 import Splash from './components/Splash.jsx';
 import Onboarding from './components/Onboarding.jsx';
@@ -11,6 +11,7 @@ import { migrateLegacyStorage } from './lib/migrate.js';
 import { resolveMode, settings } from './lib/settings.js';
 import { applyPerformanceMode } from './lib/performanceMode.js';
 import { consumeBrowserOAuthCallback } from './lib/session.js';
+import { consumeComickOAuthCallback } from './lib/comickSession.js';
 import { I18nProvider } from './lib/i18n.js';
 import './index.css';
 
@@ -35,9 +36,13 @@ if (Router === BrowserRouter) {
 }
 
 consumeBrowserOAuthCallback();
+const comickOAuthCallback = consumeComickOAuthCallback();
 migrateLegacyStorage();
 
 const boot = settings.get();
+if (Router === BrowserRouter && !boot.tutorialSeen && window.location.pathname !== '/') {
+  window.history.replaceState(window.history.state, '', '/');
+}
 document.documentElement.setAttribute('data-theme', boot.theme);
 document.documentElement.setAttribute('data-mode', resolveMode(boot.mode));
 applyPerformanceMode(boot.performanceMode);
@@ -52,6 +57,7 @@ function Root() {
   const [tutorialImportProgress, setTutorialImportProgress] = useState(null);
   const [appVisible, setAppVisible] = useState(false);
   const [appMounted, setAppMounted] = useState(false);
+  const ActiveRouter = showTutorial && Router === BrowserRouter ? MemoryRouter : Router;
   const revealApp = useCallback(() => {
     setAppMounted(true);
     setAppVisible(true);
@@ -72,7 +78,7 @@ function Root() {
   const handleTutorialExitStart = revealApp;
   return (
     <MotionConfig reducedMotion="never">
-      <Router>
+      <ActiveRouter>
         <I18nProvider languageOverride={showTutorial ? tutorialLanguage : null}>
           <ToastProvider>
             <motion.div
@@ -107,9 +113,11 @@ function Root() {
             )}
           </ToastProvider>
         </I18nProvider>
-      </Router>
+      </ActiveRouter>
     </MotionConfig>
   );
 }
 
-createRoot(document.getElementById('root')).render(<Root />);
+Promise.resolve(comickOAuthCallback)
+  .catch(() => {})
+  .finally(() => createRoot(document.getElementById('root')).render(<Root />));
